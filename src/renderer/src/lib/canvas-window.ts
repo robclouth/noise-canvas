@@ -83,6 +83,8 @@ export class CanvasWindow {
   private readonly cache: BlockSlotCache;
   private readonly read: BlockValueReader;
   private readonly loading = new Map<number, Promise<boolean>>();
+  // Blocks whose slots hold paint the canvas gave them, not the store's values.
+  private readonly painted = new Set<number>();
   private disposed = false;
 
   constructor(
@@ -149,14 +151,16 @@ export class CanvasWindow {
    * can be composed; false when a read failed or the window was disposed.
    */
   async acquire(view: BlockSpan): Promise<boolean> {
-    const results = await Promise.all(this.missing(view).map((block) => this.loadBlock(block)));
+    const wanted = new Set(this.blocksOf(view));
+    const results = await Promise.all(this.missing(view).map((block) => this.loadBlock(block, wanted)));
     if (this.disposed) return false;
     return results.every(Boolean) && this.ready(view);
   }
 
   /** Starts reading the view's missing blocks without waiting for them. */
   prefetch(view: BlockSpan): void {
-    for (const block of this.missing(view)) void this.loadBlock(block);
+    const wanted = new Set(this.blocksOf(view));
+    for (const block of this.missing(view)) void this.loadBlock(block, wanted);
   }
 
   /** Draws the blocks' committed texels into `target` where `view` places them. */
@@ -178,20 +182,29 @@ export class CanvasWindow {
   /** Folds the painted texels of the view's blocks back into their slots. */
   copyBack(view: CanvasView, blocks: number[], source: Texture): void {
     this.cache.copyBack(view, blocks, source);
+    for (const block of blocks) this.painted.add(block);
+  }
+
+  /** True while the block's slot still holds paint the canvas gave it. */
+  holdsPaint(block: number): boolean {
+    return this.painted.has(block);
   }
 
   /** Drops the given blocks (or every block) from their slots. */
   invalidate(blocks?: number[]): void {
     this.cache.invalidate(blocks);
+    if (!blocks) this.painted.clear();
+    else for (const block of blocks) this.painted.delete(block);
   }
 
   dispose(): void {
     this.disposed = true;
     this.loading.clear();
+    this.painted.clear();
     this.cache.dispose();
   }
 
-  private loadBlock(block: number): Promise<boolean> {
+  private loadBlock(block: number, wanted?: ReadonlySet<number>): Promise<boolean> {
     const pending = this.loading.get(block);
     if (pending) return pending;
     const list = blockPixelRanges(this.grid, block);
@@ -199,7 +212,9 @@ export class CanvasWindow {
     const load = this.read(ranges)
       .then((values) => {
         if (this.disposed || !values) return false;
-        this.cache.upload(block, values);
+        // Never at the cost of another block of the view being read for.
+        this.cache.upload(block, values, wanted);
+        this.painted.delete(block);
         return true;
       })
       .catch(() => false)

@@ -57,6 +57,11 @@ export function subtractPixelRanges(a: Uint32Array, b: Uint32Array): Uint32Array
   return toRanges(out);
 }
 
+/** The pixels both lists cover, as a sorted range list. */
+export function intersectPixelRanges(a: Uint32Array, b: Uint32Array): Uint32Array {
+  return subtractPixelRanges(a, subtractPixelRanges(a, b));
+}
+
 /** Copies the ranges' pixels (4 floats each) from `src` into `dest`. */
 export function scatterPixelRanges(dest: Float32Array, src: Float32Array, ranges: Uint32Array): void {
   const pixels = Math.min(dest.length, src.length) >> 2;

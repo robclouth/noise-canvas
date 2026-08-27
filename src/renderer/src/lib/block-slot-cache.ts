@@ -90,10 +90,10 @@ export class BlockSlotCache {
   }
 
   /** Claims a slot and fills it with the block's packed values, compact in block order. */
-  upload(block: number, values: Float32Array): void {
+  upload(block: number, values: Float32Array, pinned?: ReadonlySet<number>): void {
     const texels = blockTexels(this.grid, block);
     if (values.length !== texels * 4) throw new Error("the block values do not match its texels");
-    const slot = this.claim(block);
+    const slot = this.claim(block, pinned);
 
     const patchWidth = Math.min(ANALYSIS_MAX_TEXTURE_SIZE, texels);
     const patchHeight = Math.ceil(texels / patchWidth);

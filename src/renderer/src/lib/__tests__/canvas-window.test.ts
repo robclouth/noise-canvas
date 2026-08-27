@@ -7,6 +7,7 @@ import {
   RGFormat,
   Vector2,
   WebGLRenderer,
+  WebGLRenderTarget,
 } from "three";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -14,9 +15,16 @@ import type { SpectrogramData } from "../../store/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockPixelRanges, type BlockGrid } from "../block-grid";
-import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
+import { canvasViewOf, composeViewContent, fileRangesToView, viewRangesToFile, type CanvasView } from "../canvas-view";
 import { canvasWindowView, CanvasWindow, needsCanvasWindow, placeCanvasWindow } from "../canvas-window";
-import { gatherPixelRanges } from "../pixel-ranges";
+import { CarriedPaint, carryPaintOut, dropReturningPaint } from "../carried-paint";
+import {
+  composePixelRangeValues,
+  gatherPixelRanges,
+  intersectPixelRanges,
+  mergePixelRanges,
+  pixelRangeCount,
+} from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
 const SAMPLE_RATE = 8000;
@@ -299,6 +307,211 @@ describe("a canvas window that follows the brush", () => {
     // so a dab differs by float rounding and the walk compounds it over four.
     expect(maxMagnitude, `largest magnitude difference ${maxMagnitude}`).toBeLessThan(1e-4);
     expect(maxPhase, `largest phase difference ${maxPhase}`).toBeLessThan(1e-2);
+  });
+
+  /**
+   * The four-dab walk of the test above, with the paint of leaving blocks
+   * carried off the canvas. Returns everything the commit would read.
+   */
+  async function walkCarryingPaint(): Promise<{
+    carried: CarriedPaint;
+    window: CanvasWindow;
+    sub: StrokeRenderer;
+    view: CanvasView;
+    wholeData: Float32Array;
+  }> {
+    const state = createMockStateWithSteps([
+      {
+        name: "Walk",
+        overrides: {
+          transformShiftSemis: 3,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
+        },
+      },
+    ]);
+    const dabs = [0.15, 0.35, 0.55, 0.75];
+    const pitch = 0.35;
+    const fileDuration = data.numFrames / SAMPLE_RATE;
+
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "window", effects);
+    whole.initialize();
+    whole.setFBOData(data.packedData);
+    disposers.push(() => whole.dispose());
+    whole.beginStroke();
+    for (const x of dabs) {
+      whole.renderStroke(strokeParams(new Vector2(x, pitch), fileDuration), state, sourceFor(whole));
+    }
+    const wholeData = await whole.getFBOData();
+
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 4,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => window.dispose());
+
+    const beatFrames = (60 / 120) * SAMPLE_RATE;
+    const dabFrames = (x: number): { start: number; end: number } => {
+      const start = x * data.numFrames;
+      return { start, end: Math.min(data.numFrames, start + beatFrames) };
+    };
+
+    let view = window.plan(null, dabFrames(dabs[0]).start, dabFrames(dabs[0]).end);
+    expect(await window.acquire(view)).toBe(true);
+    const sub = new StrokeRenderer(gl, data, strokeTextures, "window", effects, view);
+    sub.initialize();
+    disposers.push(() => sub.dispose());
+    window.compose(view, window.blocksOf(view), sub.getTextures().packed);
+
+    const carried = new CarriedPaint();
+    sub.beginStroke();
+    for (const x of dabs) {
+      const frames = dabFrames(x);
+      const next = window.plan(view, frames.start, frames.end);
+      if (next !== view) {
+        expect(await window.acquire(next)).toBe(true);
+        carryPaintOut(sub, window, carried, next, data.numFrames);
+        sub.slideView(next, (target, blocks) => window.compose(next, blocks, target), { midStroke: true });
+        view = next;
+      }
+      const viewFrames = view.endFrame - view.startFrame;
+      const cursor = new Vector2((x * data.numFrames - view.startFrame) / viewFrames, pitch);
+      sub.renderStroke(strokeParams(cursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, view));
+    }
+    await carried.settled();
+    return { carried, window, sub, view, wholeData };
+  }
+
+  it("carries the paint of blocks leaving mid-stroke into the commit's read", async () => {
+    const { carried, sub, view, wholeData } = await walkCarryingPaint();
+    expect(carried.size).toBeGreaterThan(0);
+
+    // What the commit reads: the footprint the canvas still holds, plus the
+    // pixels carried off it, taken from the canvas and the carry in turn.
+    const heldViewRanges = sub.getDirtyPixelRanges()!;
+    const heldFileRanges = viewRangesToFile(view, heldViewRanges);
+    const footprint = mergePixelRanges(heldFileRanges, carried.ranges());
+    expect(pixelRangeCount(footprint)).toBeGreaterThan(pixelRangeCount(heldFileRanges));
+    const read = composePixelRangeValues(footprint, [
+      carried.snapshot(),
+      { ranges: heldFileRanges, values: await sub.readPixelRanges(heldViewRanges) },
+    ]);
+
+    // The whole-file stroke painted the same coefficients over that footprint.
+    const expected = gatherPixelRanges(wholeData, footprint);
+    let maxMagnitude = 0;
+    let maxPhase = 0;
+    for (let i = 0; i < expected.length; i++) {
+      const diff = Math.abs(read[i] - expected[i]);
+      if (i % 2 === 0) maxMagnitude = Math.max(maxMagnitude, diff);
+      else maxPhase = Math.max(maxPhase, diff);
+    }
+    expect(maxMagnitude, `largest magnitude difference ${maxMagnitude}`).toBeLessThan(1e-4);
+    expect(maxPhase, `largest phase difference ${maxPhase}`).toBeLessThan(1e-2);
+  });
+
+  it("brings the paint back when the window returns to a block it left", async () => {
+    const { carried, window, sub, view, wholeData } = await walkCarryingPaint();
+
+    const back = window.viewFor({ firstBlock: 0, lastBlock: 3 });
+    expect(window.ready(back)).toBe(true);
+    sub.slideView(back, (target, blocks) => window.compose(back, blocks, target), { midStroke: true });
+    expect(back.firstBlock).toBeLessThan(view.firstBlock);
+    const returned = await sub.getFBOData();
+
+    // The canvas speaks for those pixels again, so the carry lets them go.
+    const carriedBefore = carried.size;
+    dropReturningPaint(carried, window, back, view);
+    expect(carried.size).toBeLessThan(carriedBefore);
+    const stillCarried = carried.ranges();
+    for (let i = 0; i + 1 < stillCarried.length; i += 2) {
+      expect(
+        fileRangesToView(back, { numBands: data.numBands, metadata: data.metadata }, stillCarried.slice(i, i + 2)),
+      ).toBeNull();
+    }
+
+    // Block 0 left the window with paint on it, so the slots had to keep it.
+    const list = blockPixelRanges(grid, 0);
+    const fileRanges = list.ranges.slice(0, list.count * 2);
+    const viewRanges = fileRangesToView(back, { numBands: data.numBands, metadata: data.metadata }, fileRanges)!;
+    const read = gatherPixelRanges(returned, viewRanges);
+    const expected = gatherPixelRanges(wholeData, fileRanges);
+    let maxMagnitude = 0;
+    for (let i = 0; i < expected.length; i += 2) maxMagnitude = Math.max(maxMagnitude, Math.abs(read[i] - expected[i]));
+    expect(maxMagnitude, `largest magnitude difference ${maxMagnitude}`).toBeLessThan(1e-4);
+    let changed = 0;
+    const original = gatherPixelRanges(data.packedData, fileRanges);
+    for (let i = 0; i < expected.length; i++) if (expected[i] !== original[i]) changed++;
+    expect(changed, "the whole-file stroke must have painted block 0").toBeGreaterThan(0);
+  });
+
+  it("keeps carrying a block whose slot lost its paint to the store", async () => {
+    const { carried, window, view } = await walkCarryingPaint();
+    const back = window.viewFor({ firstBlock: 0, lastBlock: 3 });
+    // The slots forget block 0, so it comes back from the store without the
+    // paint and the carry has to keep speaking for it.
+    window.invalidate([0]);
+    expect(await window.acquire(back)).toBe(true);
+
+    const before = carried.ranges();
+    dropReturningPaint(carried, window, back, view);
+    const after = carried.ranges();
+    const list = blockPixelRanges(grid, 0);
+    const blockZero = list.ranges.slice(0, list.count * 2);
+    expect(pixelRangeCount(intersectPixelRanges(after, blockZero))).toBe(
+      pixelRangeCount(intersectPixelRanges(before, blockZero)),
+    );
+    // Blocks 1 and 2 kept theirs, so those pixels left the carry.
+    expect(pixelRangeCount(after)).toBeLessThan(pixelRangeCount(before));
+  });
+
+  it("fills a window whose blocks take every slot", async () => {
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 4,
+      maxBytes: 0,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => window.dispose());
+    const first = window.viewFor({ firstBlock: 0, lastBlock: 3 });
+    expect(await window.acquire(first)).toBe(true);
+
+    // Composing the other three leaves block 3 the least recently used of the
+    // four slots, and it is the one block the next window keeps — so its slot
+    // is what a careless read for that window would take.
+    const target = new WebGLRenderTarget(first.textureWidth, first.textureHeight, {
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+    disposers.push(() => target.dispose());
+    window.compose(first, [0, 1, 2], target);
+    expect(await window.acquire(window.viewFor({ firstBlock: 3, lastBlock: 6 }))).toBe(true);
+  });
+
+  it("stops calling a block painted once the store fills its slot again", async () => {
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 4,
+      maxBytes: 0,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => window.dispose());
+    const first = window.viewFor({ firstBlock: 0, lastBlock: 3 });
+    expect(await window.acquire(first)).toBe(true);
+    const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, first);
+    renderer.initialize();
+    disposers.push(() => renderer.dispose());
+    window.compose(first, window.blocksOf(first), renderer.getTextures().packed);
+
+    window.copyBack(first, [0], renderer.committedSource().texture);
+    expect(window.holdsPaint(0)).toBe(true);
+
+    // Four slots and three blocks entering: block 0 is the oldest, loses its
+    // slot, and comes back from the store without what the canvas gave it.
+    expect(await window.acquire(window.viewFor({ firstBlock: 3, lastBlock: 6 }))).toBe(true);
+    expect(await window.acquire(first)).toBe(true);
+    expect(window.holdsPaint(0)).toBe(false);
   });
 
   it("starts the canvas empty and takes each block as it lands", async () => {

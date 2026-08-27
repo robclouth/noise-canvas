@@ -217,6 +217,29 @@ export function viewOverlapTriples(current: CanvasView, next: CanvasView): Uint3
 }
 
 /**
+ * `current`'s own pixel ranges for the frames `next` does not hold, one or two
+ * pieces per band, ascending.
+ */
+export function viewRangesLeaving(current: CanvasView, next: CanvasView): Uint32Array {
+  const out: number[] = [];
+  for (let band = 0; band < current.layout.numBands; band++) {
+    const start = current.bandK0[band];
+    const length = current.layout.metadata[band * 4 + 1];
+    const base = current.layout.metadata[band * 4];
+    const nextStart = next.bandK0[band];
+    const from = Math.max(start, nextStart);
+    const to = Math.min(start + length, nextStart + next.layout.metadata[band * 4 + 1]);
+    if (to <= from) {
+      if (length > 0) out.push(base, length);
+      continue;
+    }
+    if (from > start) out.push(base, from - start);
+    if (to < start + length) out.push(base + (to - start), start + length - to);
+  }
+  return Uint32Array.from(out);
+}
+
+/**
  * File-absolute pixel ranges as the view's own pixel indices, split at band
  * edges. Null when any pixel falls outside the view, which would leave it
  * without a place in the view's textures.
