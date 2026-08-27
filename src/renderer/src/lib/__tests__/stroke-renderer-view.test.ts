@@ -180,7 +180,20 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
   function subViewRenderer(): StrokeRenderer {
     const renderer = new StrokeRenderer(gl, data, strokeTextures, "parity", effects, view);
     renderer.initialize();
-    disposers.push(() => renderer.dispose());
+    // Original reads are addressed through the canvas metadata, so a sub-view
+    // canvas takes a window of the original, as the app's canvas does.
+    const original = dataTexture(
+      composeViewContent(view, data.packedData),
+      view.textureWidth,
+      view.textureHeight,
+      RGBAFormat,
+      "RGBA32F",
+    );
+    renderer.setOriginalTexture(original);
+    disposers.push(() => {
+      renderer.dispose();
+      original.dispose();
+    });
     return renderer;
   }
 
@@ -547,6 +560,32 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-5);
     expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
   });
+
+  // A reversal turns phase by the whole file's duration, so every warp
+  // algorithm that applies that turn has to ask the file rather than the span
+  // the canvas holds. The scale sits a hair off an exact mirror: at exactly -1
+  // the read lands on bin edges, and the algorithms that difference adjacent
+  // stored phases floor a value whose last bit decides which pair they take.
+  it.each([0, 2, 3, NEUTRAL_ALGORITHM])(
+    "turns reversed phase under algorithm %i against the file, not the canvas",
+    async (algorithm) => {
+      const state = createMockStateWithSteps([
+        {
+          name: "Reversed",
+          overrides: {
+            algorithm,
+            transformScaleTime: -1.013,
+            effects: [{ id: "transform", effect: "transform", enabled: true, params: {} }],
+          },
+        },
+      ]);
+      const parity = await parityOf(state);
+      expect(parity.changed).toBeGreaterThan(0);
+      expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(2e-5);
+      // A turn taken against the canvas instead of the file is out by radians.
+      expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(0.1);
+    },
+  );
 
   /** A packed texture read back through a full-precision 1:1 pass. */
   function readPackedTexture(tex: Texture, width: number, height: number): Float32Array {

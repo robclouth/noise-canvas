@@ -187,6 +187,10 @@ float sourceAxisSec(float uvX) {
   return (sourceFileFrame(uvX) * (max(sourceFileFrameCount - 1.0, 1.0) / max(sourceFileFrameCount, 1.0)))
        / max(sourceSampleRate, 1e-6);
 }
+// The whole file's duration, on the same axis convention. The reversal phase
+// turn below is defined against the file, not against the span a canvas holds.
+float destFileAxisSec()   { return max(destFileFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6); }
+float sourceFileAxisSec() { return max(sourceFileFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6); }
 // The file texel a canvas UV names, as a UV of the file. Random draws are
 // seeded on it so one coefficient draws one value whatever span the canvas
 // holds; whole frames, because the UV a fragment arrives with lands a hair
@@ -563,7 +567,7 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
   // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
   if (scaleX < 0.0) {
     float destFreqHz = getDestMetadata(destUv).a;
-    float phaseShift = contentAdvance(0.0, destFreqHz, (destFrameCount - 1.0) / destSampleRate);
+    float phaseShift = contentAdvance(0.0, destFreqHz, destFileAxisSec());
     correctedL.y = -correctedL.y + phaseShift;
     correctedR.y = -correctedR.y + phaseShift;
   }
@@ -617,7 +621,7 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
   // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
   if (scaleX < 0.0) {
     float destFreqHz = getDestMetadata(destUv).a;
-    float phaseShift = contentAdvance(0.0, destFreqHz, (destFrameCount - 1.0) / destSampleRate);
+    float phaseShift = contentAdvance(0.0, destFreqHz, destFileAxisSec());
     correctedL.y = -correctedL.y + phaseShift;
     correctedR.y = -correctedR.y + phaseShift;
   }
@@ -665,7 +669,7 @@ vec4 getTransformedSampleNeutralish(vec2 sourceUv, vec2 destUv, float scaleX, fl
   float phaseCorrection = TWO_PI * sourceBandFreqHz * timeDiffSeconds * scaleX * freqRatio;
 
   if (scaleX < 0.0) {
-    float totalDuration = (sourceFrameCount - 1.0) / sourceSampleRate;
+    float totalDuration = sourceFileAxisSec();
     phaseCorrection += -TWO_PI * sourceBandFreqHz * totalDuration;
   }
 
