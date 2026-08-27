@@ -1,0 +1,113 @@
+# The canvas window
+
+**Off by default.** `CANVAS_WINDOW_BLOCKS` is `Infinity` unless
+`VITE_CANVAS_WINDOW_BLOCKS` is set at build time, so the shipped app keeps one
+canvas over the whole file, exactly as it always did. Everything below only
+happens for a file long enough to need a window.
+
+This page is the model. `block-memory-plan.md` is the work log — read that only
+when you want to know why something was done.
+
+## The problem
+
+The painting canvas is a pair of float32 render targets the size of the whole
+file. At ten minutes that is several gigabytes, and the file cannot open. The
+canvas has to stop growing with the file.
+
+## The model
+
+Four words, and everything else follows from them.
+
+- **File** — the whole analysed spectrogram, as packed texels. The unit
+  everything outside the renderer speaks in.
+- **Block** — a fixed span of the file, about two seconds, aligned to the
+  coarsest band's bin grid. The file is a row of blocks. Blocks are what the
+  disk store, the GPU slot cache and the undo footprints all count in.
+- **View** — a run of blocks, expressed as its own packed layout: its own band
+  offsets, its own metadata texture, its own frame count. A view looks exactly
+  like a small file, which is why no shader had to change.
+- **Canvas** — the render-target pair, laid out by one view. It holds that
+  view's texels and nothing else.
+
+So the canvas is a window of K blocks that follows the brush. `plan` decides
+where the window should sit, the slot cache pages the blocks in from disk, and
+`compose` draws them into the canvas.
+
+## Who owns what
+
+| File                      | Holds                                                                  |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `lib/canvas-view.ts`      | what a view is, and every conversion between file space and view space |
+| `lib/block-grid.ts`       | where the block edges fall                                             |
+| `lib/block-store.ts`      | the file's packed state as blocks on disk, current and as seeded       |
+| `lib/block-slot-cache.ts` | the blocks that are on the GPU, in fixed slots, under a byte budget    |
+| `lib/canvas-window.ts`    | placing the window, filling it, and what the canvas holds              |
+| `lib/packed-window.ts`    | the same window over the file's original, as one texture               |
+| `lib/carried-paint.ts`    | paint on blocks that left the window mid-stroke                        |
+| `lib/windowed-canvas.ts`  | **the boundary.** File coordinates in, view coordinates out            |
+| `lib/stroke-renderer.ts`  | painting, in view coordinates only                                     |
+
+## The one rule that keeps it findable
+
+> The stroke renderer speaks the canvas's space.
+> Everything above it speaks the file's.
+> `windowed-canvas.ts` is the only thing that converts.
+
+A packed pixel range, a UV and a frame count each mean one thing against the
+file and another against the canvas, and mixing them is silent — the paint
+lands in the wrong place, or a commit stores zeros. `canvas-space-boundary.test.ts`
+fails if a new file starts converting.
+
+The shader side has the same split and the compiler cannot help there.
+`effect-common.glsl` names it instead: `destFileSec` and `destFileUvX` are the
+file's clock, plain `destUv` is the canvas's. Anything absolute — an onset, a
+carrier phase, a modulator pattern, a random seed — takes the file's.
+
+## What must stay true
+
+Each of these has cost real damage. Break one and the app eats audio quietly.
+
+1. **A dab never lands on a block the canvas has no content for.** An empty
+   block is zeros, and painting blends out of the canvas, so the dab would
+   commit silence. `holdsFrames` gates it; the dab waits.
+2. **The canvas and the original move together.** The canvas slides only once
+   both windows have their blocks, because the shaders address the original
+   through the canvas view's metadata.
+3. **A slide keeps the overlap and composes what enters — so the overlap has
+   to be real.** If a fill was abandoned, those blocks are still empty; the
+   window tracks what the canvas holds and composes whatever it lacks.
+4. **Paint on a block that leaves mid-stroke is carried.** The slots take it so
+   a returning window shows it, the display takes it so it stays on screen, and
+   the carry holds it so the commit stores it.
+5. **Any whole-state move installs a fresh carry.** After a history hop, a
+   restore or phase turns, the old carry no longer speaks for the file. A
+   commit already reading the old one keeps the object it took.
+
+## How to check it still works
+
+The unit suite cannot see most of this: it compares two renderers, and both can
+be fed the same empty canvas. Drive the real app instead.
+
+```
+npm run test:run          # 1400+ unit tests, whole-file path
+npm run test:addon        # the native addon
+npm run window:check      # builds windowed, paints, and checks the picture
+```
+
+`window:check` is the one that catches the bugs the suite cannot: it opens a
+file with an eight-block window, paints, and fails if any column of the
+spectrogram went black or the committed footprint does not match the whole-file
+build. It also prints resident memory.
+
+## Where the memory goes now
+
+Per open file, windowed, at eight blocks:
+
+- canvas pair, sized to the window, not the file
+- block slots on the GPU: the window plus four spare
+- the original window: the same again, plus its composed texture
+- the display pyramid and tile ring, which are bounded by the viewport
+
+The file-sized pristine texture and inverse map are gone. A 60-second file at
+rest went from 791 MB to 573 MB, and the remaining cost no longer grows with
+length.
