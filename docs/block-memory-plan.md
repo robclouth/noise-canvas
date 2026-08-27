@@ -783,20 +783,53 @@ the destination's own:
   source texture set makes it optional rather than removing it; removing the
   uniform touches every test that builds a `SourceFileInfo`.
 
+Reverse is fixed and the gate is in. Reverse turned out to be worth fixing
+rather than gating; wrap could not be:
+
+- A reversal turns every band by 2πf·T, and T was read off the canvas. Through a
+  window the painted phase was out by up to 5.3 rad. `destFileAxisSec` and
+  `sourceFileAxisSec` ask the file's frame count instead, at the three sites
+  that apply the turn (Basic, Locked, Soft). A whole-file canvas divides the
+  same numbers as before. Pinned per warp algorithm in the view parity test.
+- The parity harness fed the sub-view renderer the whole file's pristine
+  texture while addressing it through the view's metadata, so every algorithm
+  that reads the original was compared against garbage. It now calls
+  `setOriginalTexture` with a composed window, as the app does.
+- `lib/whole-file-gate.ts` names what a brush asks for that a window cannot
+  serve: wrap in time (`fract` folds onto the far end of the CANVAS), a
+  full-length brush (it spans the canvas), and the effects that read past any
+  span — attract, convolve, evolve, sort, transmute. `dispatchStroke` refuses
+  the dab, the file view shows one message. Dormant while the canvas holds the
+  whole file, which is every file today.
+- Measured and left alone: the Locked warp at an exact -1 mirror differs by up
+  to 2π on 660 of ~4,000 painted texels. The mirror lands on bin edges and
+  Locked differences adjacent stored phases, so `floor` is decided by the last
+  bit of the coordinate. At -1.013 the window is bit-identical to the whole
+  file. It is a knife edge in the algorithm, not in the window.
+
 Left before the window can carry a real session:
 
-- Reverse and wrap work on the canvas axis, so under a window they reverse or
-  wrap the window. Both belong in the whole-file-effect gate.
+- A read that leaves the window clamps at its edge. A 2-beat Warp shift over a
+  4-block window paints magnitudes out by 0.95. The window is aimed at the
+  dab's own span only, so an effect's reach has to widen the aim (the declared
+  halo), and the gate has to refuse when dab + reach will not fit K blocks. A
+  brush wider than K blocks fails the same way and needs the same answer: 32
+  beats at 120 bpm is 16 s, which is an eight-block window at the 2 s default.
+  This is the next piece of work; it needs the budget, so it lands with S8.
 - The warp's noise-phase replacement still draws differently for about 0.8% of
   texels through a window (517 of 65,216 measured) even with the file-seeded
   draw. It is a random phase either way, so it is a difference in the noise,
-  not in the signal.
+  not in the signal. The Noisey warp seeds on the source TEXTURE's pixel
+  coordinates, so it draws a different phase through a window for the same
+  reason.
 - Not pinned by a test yet: the rigid transient tail at a file edge, the
-  cross-resolution carrier rebase (it needs two bands-per-octave settings), and
-  the warp's noise seed.
-- S8: the budget that sets K, admission, the whole-file-effect gate, image
-  export and snapshot off the whole canvas, and brush.ts's whole-canvas commit
-  fallback, which bails when the canvas cannot serve the whole file.
+  cross-resolution carrier rebase (it needs two bands-per-octave settings), the
+  warp's noise seed, and the two wirings that decide a window is needed
+  (`sourceNeedFor` and `strokeBlockers`) — both live in the React component and
+  `window:check` opens one file with a plain brush.
+- S8: the budget that sets K, admission, image export and snapshot off the
+  whole canvas, and brush.ts's whole-canvas commit fallback, which bails when
+  the canvas cannot serve the whole file.
 
 ---
 

@@ -44,6 +44,7 @@ where the window should sit, the slot cache pages the blocks in from disk, and
 | `lib/canvas-window.ts`    | placing the window, filling it, and what the canvas holds              |
 | `lib/packed-window.ts`    | the same window over the file's original, as one texture               |
 | `lib/source-window.ts`    | a window over another file, for a brush painting from it               |
+| `lib/whole-file-gate.ts`  | what a brush asks for that a window cannot serve                       |
 | `lib/carried-paint.ts`    | paint on blocks that left the window mid-stroke                        |
 | `lib/windowed-canvas.ts`  | **the boundary.** File coordinates in, view coordinates out            |
 | `lib/stroke-renderer.ts`  | painting, in view coordinates only                                     |
@@ -100,6 +101,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    (`sourceReadFrames` names them) and holds the dab until it lands. That
    window serves the other file's **committed** state, so it re-reads when that
    state moves — a stroke still under the other file's brush is not in it.
+8. **A phase turn taken over "the whole file" asks the file.** A reversal turns
+   every band by the file's duration. `destFileAxisSec` and `sourceFileAxisSec`
+   read the file's frame count; the canvas's own frame count is the span it
+   holds. A canvas over the whole file returns the value it always did.
+9. **A brush that reads the whole file does not paint on a window.** Wrapping in
+   time folds a read onto the far end of the canvas, a full-length brush spans
+   the canvas, and the effects in `WHOLE_FILE_EFFECTS` read past any span a
+   window holds. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab
+   and the file view says so once. The gate is off while the canvas holds the
+   whole file, which is every file today.
 
 ## How to check it still works
 

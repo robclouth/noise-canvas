@@ -7,6 +7,7 @@ import { blockGrid } from "@renderer/lib/block-grid";
 import { CANVAS_WINDOW_BLOCKS, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { sourceReadSpan } from "@renderer/lib/source-window";
 import { WindowedCanvas, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
+import { wholeFileNeeds } from "@renderer/lib/whole-file-gate";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -149,6 +150,11 @@ export interface FileRendererHandle {
   getCanvasView: () => CanvasView | null;
   /** Changes whenever the committed state moves, so another file's source window re-reads. */
   getStateRevision: () => number;
+  /**
+   * What the brush reads that a canvas holding a window of the file cannot
+   * serve, named as the user sees it. Empty when the stroke can paint.
+   */
+  strokeBlockers: (state: State) => string[];
   /** Restores the spectrogram to its original state. */
   restoreOriginal: () => void;
   /** Clears the stroke preview. */
@@ -972,6 +978,10 @@ const FileRendererInner = memo(
       const dabCursor = canvas ? canvas.dabCursor(cursorPos) : cursorPos;
       const dabDuration = canvas ? canvas.dabDuration(totalDuration) : totalDuration;
 
+      // A window of the file cannot serve a brush that reads all of it, and a
+      // dab that painted anyway would commit whatever the window's edge held.
+      if (strokeBlockers(state).length > 0) return false;
+
       // The active step names the file the brush samples from; null means this
       // file paints from itself.
       const activeStepRaw = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
@@ -1512,6 +1522,11 @@ const FileRendererInner = memo(
     /** True while the canvas holds every frame of the file. */
     const canvasCoversFile = (): boolean => canvasRef.current?.coversFile() ?? true;
 
+    const strokeBlockers = (state: State): string[] => {
+      const canvas = canvasRef.current;
+      return canvas && !canvas.wholeFile ? wholeFileNeeds(state) : [];
+    };
+
     const regionToFileUv = (region: UvRegion | null): UvRegion | null =>
       canvasRef.current ? canvasRef.current.regionToFileUv(region) : region;
 
@@ -1698,6 +1713,7 @@ const FileRendererInner = memo(
       getTextures,
       getCanvasView,
       getStateRevision,
+      strokeBlockers,
       restoreOriginal,
       clearPreview,
       reloadTextures,
