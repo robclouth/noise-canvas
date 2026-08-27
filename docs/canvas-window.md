@@ -69,7 +69,11 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
 
 1. **A dab never lands on a block the canvas has no content for.** An empty
    block is zeros, and painting blends out of the canvas, so the dab would
-   commit silence. `holdsFrames` gates it; the dab waits.
+   commit silence. `holdsFrames` gates it, `paintWhenHeld` holds the dab back
+   with the position it was given, and the fill that brings the block in runs
+   it. Held dabs run in the order they were given, so one the canvas could
+   take does not overtake one still waiting. `settle` drains what is left
+   before the commit reads the stroke.
 2. **The canvas and the original move together.** The canvas slides only once
    both windows have their blocks, because the shaders address the original
    through the canvas view's metadata.

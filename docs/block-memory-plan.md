@@ -717,6 +717,38 @@ S6's same-file half, S3's commit half, S7 and the original window are done:
   holds, composes whatever it still lacks, and a dab waits for a block the
   canvas has no content for.
 
+Step (3) is done. A dab the canvas cannot take is held rather than dropped:
+
+- `paintWhenHeld` takes the dab with the frames it lands on, and the fill that
+  brings the block in runs it — at the position it was given, not where the
+  brush has moved on to. Held dabs run in the order they were given, so a dab
+  the canvas could take does not overtake one still waiting. `settle` drains
+  what is left before the commit reads the stroke, bringing the window back to
+  a waiting dab if the brush has run elsewhere, and drops the paint after
+  eight fills so a read that never lands cannot stall a commit.
+- `holdsFrames` used to clip the asked-for span to the view before testing it,
+  so a dab entirely past the view's edge measured as empty and passed. It now
+  refuses any span the view does not contain, unless the span is wider than
+  the window and so can never fit in one.
+- The slot cache now holds two windows, not one. A slide claims the entering
+  window's slots, then folds the leaving window's paint back into its own
+  slots; a jump the width of the window makes those sets disjoint, so
+  `windowBlocks + 4` slots let the copy-back evict a block the slide was about
+  to compose. The app threw "the block has no slot" on every later fill, the
+  stroke committed nothing, and the retries ran resident memory to 1.5 GB.
+  `2 × windowBlocks + 4` costs about 48 MB more at eight blocks on a 60 s
+  file, and stays flat in file length. Pinned by a unit test that jumps a
+  five-block window over a twenty-block grid.
+- `window:check` could not see any of this. Its drag was shorter than the
+  window, so the window never slid. The drag now crosses the file and ends
+  with a dab back at the start, on a block the window has long left: that dab
+  has to wait for a read, and dropping it shortens the commit. Steps are
+  spaced 400 ms because the whole-file build cannot render a dab per frame on
+  a 60 s file, and a collapsed reference run compares nothing. The footprint
+  comparison allows one bin per band: the footprint's time edge rounds up
+  against the band's bin count, which the file rounds up again, so the two
+  runs can land a bin apart at an edge. The four-bin margin covers it.
+
 Left before the window can carry a real session:
 
 - A cross-file source reads through the source file's own canvas, so a source
@@ -724,9 +756,6 @@ Left before the window can carry a real session:
   its edges. The dest renderer needs its own window over the source (S6b).
 - Reverse and wrap work on the canvas axis, so under a window they reverse or
   wrap the window. Both belong in the whole-file-effect gate.
-- A dab that waits for its block is dropped, not replayed: a brush that
-  outruns the reads leaves a gap in the stroke rather than a trail. Step (3)
-  is what turns the wait into a replay.
 - The warp's noise-phase replacement still draws differently for about 0.8% of
   texels through a window (517 of 65,216 measured) even with the file-seeded
   draw. It is a random phase either way, so it is a difference in the noise,

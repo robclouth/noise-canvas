@@ -131,14 +131,25 @@ async function run(label, windowBlocks, wav) {
   };
 
   process.stdout.write("painting… ");
+  // A drag across most of the file, so the window has to slide several times.
+  // The frame loop paints the cursor's position once per frame, so the steps
+  // are spaced wider than the slowest build's dab and both paint the same set.
   const y = box.y + box.height * 0.45;
-  await page.mouse.move(box.x + box.width * 0.55, y);
+  const from = 0.08;
+  const to = 0.92;
+  const steps = 24;
+  await page.mouse.move(box.x + box.width * from, y);
   await page.waitForTimeout(3000);
   await page.mouse.down();
-  for (let step = 1; step <= 10; step++) {
-    await page.mouse.move(box.x + box.width * (0.55 + (0.15 * step) / 10), y);
-    await page.waitForTimeout(100);
+  for (let step = 1; step <= steps; step++) {
+    await page.mouse.move(box.x + box.width * (from + ((to - from) * step) / steps), y);
+    await page.waitForTimeout(400);
   }
+  // A last dab back at the start, on a block the window has long left behind.
+  // It has to wait for the read, so a window that drops a waiting dab commits
+  // a shorter stroke than the whole file does.
+  await page.mouse.move(box.x + box.width * 0.03, y);
+  await page.waitForTimeout(400);
   await page.mouse.up();
   await page.waitForTimeout(20000);
   // Off the spectrogram, so no brush overlay lands in the picture.
@@ -150,7 +161,7 @@ async function run(label, windowBlocks, wav) {
   const footprint = logs
     .map((line) => /addStroke footprint delta.*?ranges: (\d+), footprintPixels: (\d+)/.exec(line))
     .filter(Boolean)
-    .map((match) => `${match[1]} ranges / ${match[2]} pixels`)
+    .map((match) => ({ ranges: Number(match[1]), pixels: Number(match[2]) }))
     .pop();
 
   await app.close();
@@ -181,12 +192,27 @@ if (whole.columns.length !== windowed.columns.length) {
   if (holes > 0) failures.push(`${holes} columns of the picture went black under the window`);
 }
 
-if (whole.footprint && windowed.footprint && whole.footprint !== windowed.footprint) {
-  failures.push(`the commit differs: whole file ${whole.footprint}, windowed ${windowed.footprint}`);
+const describe = (footprint) => (footprint ? `${footprint.ranges} ranges / ${footprint.pixels} pixels` : "—");
+
+if (whole.footprint && windowed.footprint) {
+  if (whole.footprint.ranges !== windowed.footprint.ranges) {
+    failures.push(`the commit covers different bands: ${describe(whole.footprint)} vs ${describe(windowed.footprint)}`);
+  }
+  // The footprint's time edge rounds up to a whole bin against the band's own
+  // bin count, and a band's count over the file is itself rounded up, so the
+  // two runs can land a bin apart at an edge. The four-bin margin either side
+  // covers it; a wider gap is real paint the commit missed.
+  const slack = whole.footprint.ranges;
+  const gap = Math.abs(whole.footprint.pixels - windowed.footprint.pixels);
+  if (gap > slack) {
+    failures.push(
+      `the commit differs by ${gap} pixels: ${describe(whole.footprint)} vs ${describe(windowed.footprint)}`,
+    );
+  }
 }
 
-console.log(`\ncommitted   whole file: ${whole.footprint ?? "—"}`);
-console.log(`            windowed:   ${windowed.footprint ?? "—"}`);
+console.log(`\ncommitted   whole file: ${describe(whole.footprint)}`);
+console.log(`            windowed:   ${describe(windowed.footprint)}`);
 console.log(`resident    whole file: ${whole.residentMB} MB, windowed: ${windowed.residentMB} MB`);
 
 if (failures.length > 0) {
