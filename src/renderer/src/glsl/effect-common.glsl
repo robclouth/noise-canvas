@@ -16,7 +16,7 @@ uniform float     sourceMinFreq;
 uniform float     sourceBandsPerOctave;
 uniform float     sourceSampleRate;
 // Nearest-onset lookup for the source file: R = onset time (sec), G = strength
-// 0..1, sampled by unpacked source UV.x. See lib/onset-map.ts.
+// 0..1, sampled by unpacked FILE UV.x. See lib/onset-map.ts.
 uniform sampler2D sourceOnsetTex;
 
 uniform sampler2D destSpectrogramTex;
@@ -29,6 +29,14 @@ uniform int       destChannelCount;
 uniform float     destSampleRate;
 uniform float     destMinFreq;
 uniform float     destBandsPerOctave;
+
+// A canvas can hold one span of its file. Frame counts above lay out the span
+// and every packed read goes through them; these say where the span sits, for
+// the positions that are the file's rather than the canvas's.
+uniform float     sourceViewStartFrame;
+uniform float     sourceFileFrameCount;
+uniform float     destViewStartFrame;
+uniform float     destFileFrameCount;
 
 uniform sampler2D originalSpectrogramTex;
 
@@ -145,6 +153,47 @@ vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount
 }
 
 // getProcessingUvs is defined after modulation-common.glsl include (needs applyModulation)
+
+// The file frame a canvas UV names. Onset lookups, carrier phase anchors, the
+// modulator patterns and the noise seed all take file positions: a canvas
+// holding one span of the file must place them where the whole file would.
+float destFileFrame(float uvX) { return destViewStartFrame + uvX * destFrameCount; }
+float sourceFileFrame(float uvX) { return sourceViewStartFrame + uvX * sourceFrameCount; }
+float destFileSec(float uvX) { return destFileFrame(uvX) / max(destSampleRate, 1e-6); }
+float sourceFileSec(float uvX) { return sourceFileFrame(uvX) / max(sourceSampleRate, 1e-6); }
+// A canvas over the whole file returns its own UV untouched, so the reads it
+// feeds are bit-identical to the ones before views existed.
+float destFileUvX(float uvX) {
+  if (destViewStartFrame == 0.0 && destFileFrameCount == destFrameCount) return uvX;
+  return destFileFrame(uvX) / max(destFileFrameCount, 1.0);
+}
+float sourceFileUvX(float uvX) {
+  if (sourceViewStartFrame == 0.0 && sourceFileFrameCount == sourceFrameCount) return uvX;
+  return sourceFileFrame(uvX) / max(sourceFileFrameCount, 1.0);
+}
+// Seconds from the file's start on the axis convention the phase terms use,
+// where the FILE's UV 1.0 is its last frame rather than one frame past it.
+float destAxisSec(float uvX) {
+  if (destViewStartFrame == 0.0 && destFileFrameCount == destFrameCount) {
+    return uvX * max(destFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6);
+  }
+  return (destFileFrame(uvX) * (max(destFileFrameCount - 1.0, 1.0) / max(destFileFrameCount, 1.0)))
+       / max(destSampleRate, 1e-6);
+}
+float sourceAxisSec(float uvX) {
+  if (sourceViewStartFrame == 0.0 && sourceFileFrameCount == sourceFrameCount) {
+    return uvX * max(sourceFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6);
+  }
+  return (sourceFileFrame(uvX) * (max(sourceFileFrameCount - 1.0, 1.0) / max(sourceFileFrameCount, 1.0)))
+       / max(sourceSampleRate, 1e-6);
+}
+// The file texel a canvas UV names, as a UV of the file. Random draws are
+// seeded on it so one coefficient draws one value whatever span the canvas
+// holds; whole frames, because the UV a fragment arrives with lands a hair
+// either side of its frame.
+vec2 destTexelUv(vec2 destUv) {
+  return vec2(floor(destFileFrame(destUv.x) + 0.5) / max(destFileFrameCount, 1.0), destUv.y);
+}
 
 // ============================================================================
 // SPECTROGRAM SAMPLING (texelFetch where exact texels are addressed)
@@ -335,6 +384,7 @@ float getAudioLevelDb(vec2 uv) {
 // Sampling functions are now available; include modulation helpers so the
 // envelope follower can directly sample phase/panning from the spectrogram.
 #define HAS_SPECTROGRAM_SAMPLING
+#define MODULATOR_FILE_UV_X(x) destFileUvX(x)
 #include "modulation-common.glsl"
 
 // Forward freq-preserving map: dest UV.y → source UV.y such that the two UVs
@@ -685,8 +735,6 @@ float physicalTimeScale(float scaleX) {
 // it applied to the stored phase — 1 means the stored phase came through
 // untouched, anything else means it was rescaled.
 vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 magPhase, out float phaseGain) {
-  float T_src  = max(sourceFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6);
-  float T_dest = max(destFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6);
   float scaleXPhys = physicalTimeScale(scaleX);
 
   float signX = scaleXPhys < 0.0 ? -1.0 : 1.0;
@@ -718,8 +766,10 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   // Zero exactly when bandFrac snapped to zero.
   float mismatchHz = (idealFreqHz > 1e-3) ? destFreqHz * (srcFreqHz - idealFreqHz) / idealFreqHz : 0.0;
 
-  float tSrcSec  = sourceUv.x * T_src;
-  float tDestSec = destUv.x * T_dest;
+  // The carrier re-anchor below multiplies an absolute time, so both are the
+  // file's: a canvas holding one span of it must re-anchor by the same amount.
+  float tSrcSec  = sourceAxisSec(sourceUv.x);
+  float tDestSec = destAxisSec(destUv.x);
 
   // Two approaches, blended by how far |scaleXPhys| is from 1:
   //
@@ -897,8 +947,8 @@ void xresAnalyzeSource(vec2 sourceUv, float srcFreqHz, out float tonality, out f
 // content in time use this to decide where a re-anchor is worth applying.
 float onsetWeight(vec2 sourceUv) {
   float fSrc = max(getSourceMetadata(sourceUv).a, 1e-6);
-  float tSrcSec = sourceUv.x * sourceFrameCount / max(sourceSampleRate, 1e-6);
-  vec2 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5)).rg;
+  float tSrcSec = sourceFileSec(sourceUv.x);
+  vec2 onset = texture(sourceOnsetTex, vec2(sourceFileUvX(sourceUv.x), 0.5)).rg;
   float sigma = max(ONSET_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, ONSET_SIGMA_FLOOR);
   float dt = (tSrcSec - onset.x) / sigma;
   return onset.y * exp(-dt * dt);
@@ -920,8 +970,8 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity,
   float fSrc  = max(getSourceMetadata(sourceUv).a, 1e-6);
   float fDest = max(getDestMetadata(destUv).a, 1e-6);
 
-  float tSrcSec = sourceUv.x * sourceFrameCount / max(sourceSampleRate, 1e-6);
-  vec4 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5));
+  float tSrcSec = sourceFileSec(sourceUv.x);
+  vec4 onset = texture(sourceOnsetTex, vec2(sourceFileUvX(sourceUv.x), 0.5));
 
   // Lock window matched to the SOURCE band's Gabor support — the width of the
   // attack ridge in the transported data. A dest-support window would cohere
@@ -935,7 +985,7 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity,
   // 1/scaleX), so the lock lands where the transient lands after the move.
   float deltaSrcUv  = (onset.x - tSrcSec) * sourceSampleRate / max(sourceFrameCount, 1.0);
   float deltaDestUv = deltaSrcUv * scaleX / max(sourceTimeScale, 1e-6);
-  float tOnsetDestSec = (destUv.x + deltaDestUv) * destFrameCount / max(destSampleRate, 1e-6);
+  float tOnsetDestSec = destFileSec(destUv.x + deltaDestUv);
 
   anchor = -TWO_PI * fDest * tOnsetDestSec + parity * TWO_PI * fSrc * onset.x;
 
@@ -948,14 +998,14 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity,
   warpDeltaUvX = 0.0;
   float scaleXPhys = physicalTimeScale(scaleX);
   if (onset.y > 0.0 && abs(abs(scaleXPhys) - 1.0) > ONSET_RIGID_DEADZONE) {
-    float durSec = sourceFrameCount / max(sourceSampleRate, 1e-6);
+    float durSec = sourceFileFrameCount / max(sourceSampleRate, 1e-6);
     float prevT = onset.z < 0.0 ? 0.0 : onset.z;
     float nextT = onset.w < 0.0 ? durSec : onset.w;
     // Dest times of the segment boundaries, through the same x-affine as the
     // anchor above.
     float destPerSrc = (sourceSampleRate / max(sourceFrameCount, 1.0)) * (scaleX / max(sourceTimeScale, 1e-6))
                      * (destFrameCount / max(destSampleRate, 1e-6));
-    float tDestSec = destUv.x * destFrameCount / max(destSampleRate, 1e-6);
+    float tDestSec = destFileSec(destUv.x);
     float destPrev = tDestSec + (prevT - tSrcSec) * destPerSrc;
     float destNext = tDestSec + (nextT - tSrcSec) * destPerSrc;
     float segLen = max(nextT - prevT, 1e-6);
@@ -1044,7 +1094,7 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
     if (abs(bandFrac) < BAND_FRAC_DEADZONE) bandFrac = 0.0;
     float idealFreqHz = max(srcFreqHz * exp2(bandFrac / max(sourceBandsPerOctave, 1e-6)), 1e-6);
     float freqRatio = destFreqHz / idealFreqHz;
-    float tDestSec = destUv.x * (destFrameCount - 1.0) / max(destSampleRate, 1e-6);
+    float tDestSec = destAxisSec(destUv.x);
 
     if (bpoRatio > 1.0) {
       // Upsampling: ~bpoRatio dest bands read each source band. The tonal part
@@ -1127,7 +1177,7 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
   float replace = clamp((abs(phaseGain - 1.0) - NOISE_REPLACE_DEADZONE) * NOISE_REPLACE_RAMP, 0.0, 1.0);
   if (replace > 0.0) {
     float noise = replace * (1.0 - sourceTonality(wrappedSourceUv));
-    vec2 seed = destUv * vec2(destFrameCount, destBandCount);
+    vec2 seed = vec2(floor(destFileFrame(destUv.x) + 0.5), floor(destUv.y * destBandCount));
     float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
     float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
     baseL += noise * unwrapPhase(randL - baseL);

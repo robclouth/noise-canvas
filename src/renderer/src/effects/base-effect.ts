@@ -39,6 +39,8 @@ export type CommonUniforms = {
   sourceMinFreq: { value: number };
   sourceBandsPerOctave: { value: number };
   sourceOnsetTex: { value: Texture | null };
+  sourceViewStartFrame: { value: number };
+  sourceFileFrameCount: { value: number };
   destSpectrogramTex: { value: Texture | null };
   destInverseMapTex: { value: Texture | null };
   destMetadataTex: { value: Texture | null };
@@ -49,6 +51,8 @@ export type CommonUniforms = {
   destSampleRate: { value: number };
   destMinFreq: { value: number };
   destBandsPerOctave: { value: number };
+  destViewStartFrame: { value: number };
+  destFileFrameCount: { value: number };
   originalSpectrogramTex: { value: Texture | null };
   brushBottomLeftUv: { value: Vector2 };
   brushSizeUv: { value: Vector2 };
@@ -126,6 +130,8 @@ export function createDefaultUniforms(): CommonUniforms {
     sourceMinFreq: { value: 20.0 },
     sourceOnsetTex: { value: null },
     sourceBandsPerOctave: { value: 24.0 },
+    sourceViewStartFrame: { value: 0 },
+    sourceFileFrameCount: { value: 0 },
     destSpectrogramTex: { value: null },
     destInverseMapTex: { value: null },
     destMetadataTex: { value: null },
@@ -136,6 +142,8 @@ export function createDefaultUniforms(): CommonUniforms {
     destSampleRate: { value: 44100.0 },
     destMinFreq: { value: 20.0 },
     destBandsPerOctave: { value: 24.0 },
+    destViewStartFrame: { value: 0 },
+    destFileFrameCount: { value: 0 },
     originalSpectrogramTex: { value: null },
     brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
     brushSizeUv: { value: new Vector2(0.1, 0.1) },

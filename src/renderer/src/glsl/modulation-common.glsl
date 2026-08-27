@@ -105,6 +105,13 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
   }
 }
 
+// Pattern and sequencer positions belong to the file, so a canvas holding one
+// span of it still puts them where the whole file would. The modulator preview
+// has no canvas and its UV is the file's already.
+#ifndef MODULATOR_FILE_UV_X
+#define MODULATOR_FILE_UV_X(x) (x)
+#endif
+
 // Brush-space UV for phaseMode == 1: 0..1 across the brush footprint, following
 // the brush around the canvas edge when that axis wraps.
 vec2 brushSpaceUv(vec2 uv) {
@@ -148,7 +155,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   // Handle sequencer mode
   if (modulator.modulatorMode == 2) { // Sequencer mode
     // Apply phase mode: adjust UV based on canvas or brush space
-    vec2 adjustedUv = uv;
+    vec2 adjustedUv = vec2(MODULATOR_FILE_UV_X(uv.x), uv.y);
     if (modulator.modulatorPhaseMode == 1) { // Brush mode
       adjustedUv = brushSpaceUv(uv);
     }
@@ -182,7 +189,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
 
   // Pattern mode (mode 0) - continue with pattern generation
   // Apply phase mode: adjust UV based on canvas or brush space
-  vec2 adjustedUv = uv;
+  vec2 adjustedUv = vec2(MODULATOR_FILE_UV_X(uv.x), uv.y);
   if (modulator.modulatorPhaseMode == 1) { // Brush mode
     // Convert to brush-relative coordinates (bottom-left is origin)
     adjustedUv = brushSpaceUv(uv);

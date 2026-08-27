@@ -18,11 +18,13 @@ import {
 } from "three";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { SpectrogramData } from "../../store/types";
+import type { SpectrogramData, State } from "../../store/types";
 import { createDisplayTestMaterial } from "../../test/display-test-material";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockPixelRanges, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "../block-grid";
+import { NEUTRAL_ALGORITHM } from "../constants";
+import { bakeOnsetTexture } from "../onset-map";
 import { BlockSlotCache } from "../block-slot-cache";
 import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
 import { levelDecimation } from "../display-pyramid";
@@ -31,11 +33,18 @@ import { gatherPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
 async function loadEffects(): Promise<EffectsRegistry> {
-  const [{ transformEffect }, { passThroughEffect }] = await Promise.all([
+  const [{ transformEffect }, { passThroughEffect }, { dynamicsEffect }, { synthesizeEffect }] = await Promise.all([
     import("../../effects/transform-effect"),
     import("../../effects/passthrough-effect"),
+    import("../../effects/dynamics-effect"),
+    import("../../effects/synthesize-effect"),
   ]);
-  return { transform: transformEffect, passthrough: passThroughEffect };
+  return {
+    transform: transformEffect,
+    passthrough: passThroughEffect,
+    dynamics: dynamicsEffect,
+    synthesize: synthesizeEffect,
+  };
 }
 
 function dataTexture(
@@ -121,7 +130,12 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     gl.dispose();
   });
 
-  function strokeParams(cursor: Vector2, totalDuration: number, pressure = 1): StrokeParams {
+  function strokeParams(
+    cursor: Vector2,
+    totalDuration: number,
+    pressure = 1,
+    destOnsetTexture?: Texture,
+  ): StrokeParams {
     return {
       cursorPos: cursor,
       preview: false,
@@ -134,6 +148,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       pressure,
       tiltX: 0,
       tiltY: 0,
+      destOnsetTexture,
     };
   }
 
@@ -142,7 +157,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
    * with the canvas, so `span` is what tells the shaders which part of it the
    * canvas holds.
    */
-  function sourceFor(renderer: StrokeRenderer, span?: CanvasView): SourceFileInfo {
+  function sourceFor(renderer: StrokeRenderer, span?: CanvasView, onsetTexture?: Texture): SourceFileInfo {
     return {
       id: "parity",
       filePath: "/parity.wav",
@@ -150,6 +165,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       spectrogramData: data,
       textures: renderer.getTextures(),
       view: span,
+      onsetTexture,
     };
   }
 
@@ -256,6 +272,130 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     }
     expect(maxMagnitude, `largest magnitude difference ${maxMagnitude}`).toBeLessThan(1e-5);
     expect(maxPhase, `largest phase difference ${maxPhase}`).toBeLessThan(1e-3);
+  });
+
+  /**
+   * Paints the same dab on a whole-file canvas and on the sub-view canvas and
+   * returns the largest difference between them inside the view.
+   */
+  async function parityOf(
+    state: State,
+    onsetTexture?: Texture,
+  ): Promise<{ magnitude: number; phase: number; changed: number }> {
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+    whole.initialize();
+    whole.setFBOData(data.packedData);
+    disposers.push(() => whole.dispose());
+
+    const sub = subViewRenderer();
+    sub.setFBOData(composeViewContent(view, data.packedData));
+
+    whole.beginStroke();
+    whole.renderStroke(
+      strokeParams(fileCursor, data.numFrames / SAMPLE_RATE, 1, onsetTexture),
+      state,
+      sourceFor(whole, undefined, onsetTexture),
+    );
+    sub.beginStroke();
+    sub.renderStroke(
+      strokeParams(viewCursor, viewFrames / SAMPLE_RATE, 1, onsetTexture),
+      state,
+      sourceFor(sub, view, onsetTexture),
+    );
+
+    const inView = composeViewContent(view, await whole.getFBOData());
+    const subData = await sub.getFBOData();
+    const before = composeViewContent(view, data.packedData);
+    let magnitude = 0;
+    let phase = 0;
+    let changed = 0;
+    for (let i = 0; i < view.texels * 4; i++) {
+      if (inView[i] !== before[i]) changed++;
+      const diff = Math.abs(subData[i] - inView[i]);
+      if (i % 2 === 0) magnitude = Math.max(magnitude, diff);
+      else phase = Math.max(phase, diff);
+    }
+    return { magnitude, phase, changed };
+  }
+
+  it("re-anchors transient phase at the same onsets through a sub-view", async () => {
+    const onsets = [0.15, 0.42, 0.61, 0.88, 1.35, 1.7].map((timeSec) => ({ timeSec, strength: 1 }));
+    const onsetTexture = bakeOnsetTexture(onsets, data.numFrames / SAMPLE_RATE);
+    disposers.push(() => onsetTexture.dispose());
+
+    // Sharp warp reads the onset map to re-anchor transient phase, so it takes
+    // absolute file positions the view has to keep pointing at.
+    const state = createMockStateWithSteps([
+      {
+        name: "Onsets",
+        overrides: {
+          algorithm: NEUTRAL_ALGORITHM,
+          transformShiftBeats: 0.25,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftBeats: 0.25 } }],
+        },
+      },
+    ]);
+    const parity = await parityOf(state, onsetTexture);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-5);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
+
+  it("puts a modulator pattern at the same file positions through a sub-view", async () => {
+    // A rate that does not divide the view's offset into whole cycles, so a
+    // pattern anchored on the view rather than the file lands out of step.
+    const state = createMockStateWithSteps([
+      {
+        name: "Modulated",
+        overrides: {
+          effects: [
+            {
+              id: "dynamics",
+              effect: "dynamics",
+              enabled: true,
+              params: { dynamicsGainDb: 0, dynamicsGainDbMod1Amount: 100 },
+            },
+          ],
+          modulator1Mode: 0,
+          modulator1PatternShape: 0,
+          modulator1PatternRateBeats: 0.7,
+          modulator1PatternRateSemis: 0,
+          modulator1Strength: 100,
+          modulator1StereoSpread: 0,
+          modulator1PhaseMode: 0,
+          modulator1PhaseX: 0,
+          modulator1PhaseY: 0,
+        },
+      },
+    ]);
+    const parity = await parityOf(state);
+    expect(parity.changed).toBeGreaterThan(0);
+    // The gain comes from a pattern read at a UV rebuilt from the view, so a
+    // last-bit difference in position sweeps the gain a little either way.
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-3);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
+
+  it.each([
+    // Noise draws its value per texel, the impulse sets its phase against
+    // absolute time: one needs the file's texel, the other the file's clock.
+    { name: "noise", synthesizeBrushType: 0 },
+    { name: "impulse", synthesizeBrushType: 2 },
+  ])("synthesises the same $name through a sub-view", async ({ synthesizeBrushType }) => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Synthesised",
+        overrides: {
+          synthesizeBrushType,
+          effects: [{ id: "synthesize", effect: "synthesize", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    state.synthesizeBrushType = synthesizeBrushType;
+    const parity = await parityOf(state);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-5);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
   });
 
   it("paints over a canvas composed from block slots and folds the blocks back", async () => {

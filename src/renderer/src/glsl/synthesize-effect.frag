@@ -9,10 +9,11 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
 
   if (synthesizeType == 0) { // Noise
     // Use a small offset to de-correlate multiple random calls
-    vec2 seed1 = coords.dest;
-    vec2 seed2 = coords.dest + vec2(12.34, 56.78);
-    vec2 seed3 = coords.dest + vec2(43.21, 87.65);
-    vec2 seed4 = coords.dest + vec2(21.43, 65.87);
+    vec2 texel = destTexelUv(coords.dest);
+    vec2 seed1 = texel;
+    vec2 seed2 = texel + vec2(12.34, 56.78);
+    vec2 seed3 = texel + vec2(43.21, 87.65);
+    vec2 seed4 = texel + vec2(21.43, 65.87);
 
     // Left Channel
     float amplitudeL = random(seed1 + random(seed2));
@@ -38,7 +39,9 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
     // wraps the canvas anchors its wrapped half to the same impulse — one loop
     // earlier in absolute time, which the anchor UV below reflects.
     float distUv    = getEffectiveBrushOffset(coords.dest).x;
-    float anchorSec = (coords.dest.x - distUv) * destFrameCount / destSampleRate;
+    // The impulse's phase is set against absolute time, so the anchor is the
+    // file's: a canvas holding one span of it writes the same coefficients.
+    float anchorSec = destFileSec(coords.dest.x - distUv);
     float distSec   = distUv * destFrameCount / destSampleRate;
     float widthSec  = (destBandsPerOctave * 0.7) / fHz;
     float arg       = distSec / widthSec;
