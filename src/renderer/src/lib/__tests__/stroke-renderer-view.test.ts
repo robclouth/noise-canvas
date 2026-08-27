@@ -665,6 +665,27 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
   });
 
+  // A turn trades a distance in time for a distance in pitch, so it is taken on
+  // the file's time axis. Taken on the canvas's, a shorter canvas turns the
+  // sound by a different amount and the read lands somewhere else entirely.
+  it.each([5, 30, 90])("turns the sound by %i degrees on the file's axis", async (degrees) => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Turned",
+        overrides: {
+          transformRotation: degrees,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    state.transformRotation = degrees;
+    state.filepathsBpm = { "/parity.wav": 120 };
+    const parity = await parityOf(state);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-4);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
+
   /** A packed texture read back through a full-precision 1:1 pass. */
   function readPackedTexture(tex: Texture, width: number, height: number): Float32Array {
     const material = new RawShaderMaterial({

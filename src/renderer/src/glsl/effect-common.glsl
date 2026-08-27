@@ -191,6 +191,19 @@ float sourceAxisSec(float uvX) {
 // turn below is defined against the file, not against the span a canvas holds.
 float destFileAxisSec()   { return max(destFileFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6); }
 float sourceFileAxisSec() { return max(sourceFileFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6); }
+// A time-axis distance, converted between the canvas's UV and the file's. An
+// axis mix trades a distance in time for a distance in pitch, so it has to be
+// taken on the file's axis: a shorter canvas would otherwise turn the sound by
+// a different amount. A canvas over the whole file returns the distance
+// untouched.
+float destFileUvSpanX(float canvasSpanX) {
+  if (destFileFrameCount == destFrameCount) return canvasSpanX;
+  return canvasSpanX * destFrameCount / max(destFileFrameCount, 1.0);
+}
+float destCanvasUvSpanX(float fileSpanX) {
+  if (destFileFrameCount == destFrameCount) return fileSpanX;
+  return fileSpanX * destFileFrameCount / max(destFrameCount, 1.0);
+}
 // The file texel a canvas UV names, as a UV of the file. Random draws are
 // seeded on it so one coefficient draws one value whatever span the canvas
 // holds; whole frames, because the UV a fragment arrives with lands a hair
