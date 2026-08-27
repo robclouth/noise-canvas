@@ -801,6 +801,48 @@ export class StrokeRenderer {
   }
 
   /**
+   * The source-read offset in the UV the source textures lay out. The offset
+   * is defined over whole files — an anchor on the destination file's clock,
+   * against the two files' durations — and is then moved onto the span the
+   * source textures hold, so a window of either file reads the frames the
+   * whole file would. Whole-file spans on both sides return the file-space
+   * value untouched.
+   */
+  private sourceOffsetForViews(
+    sourceFile: SourceFileInfo,
+    lockedOffset: { beats: number; pitch: number } | null | undefined,
+    mode: string,
+    anchor: Vector2,
+    timeScale: number,
+    bandScale: number,
+    beatRatio: number,
+  ): Vector2 {
+    const sourceSpec = sourceFile.spectrogramData;
+    const sourceStart = sourceFile.view?.startFrame ?? 0;
+    const sourceFrames = sourceViewFrames(sourceFile);
+    const wholeSource = sourceStart === 0 && sourceFrames === sourceSpec.numFrames;
+    if (wholeSource && viewCoversFile(this.view, this.spectrogramData.numFrames)) {
+      return this.calculateSourceOffset(lockedOffset, mode, anchor, timeScale, bandScale);
+    }
+    // The anchor goes on the destination file's clock and the offset comes
+    // back as a fraction of the source file, so neither depends on the span
+    // its canvas happens to hold.
+    const sourceDuration = sourceSpec.numFrames / sourceSpec.sampleRate;
+    const anchorFileSec = (this.view.startFrame + anchor.x * this.viewFrameCount) / this.spectrogramData.sampleRate;
+    const fileOffset = this.calculateSourceOffset(
+      lockedOffset,
+      mode,
+      new Vector2(anchorFileSec, anchor.y),
+      beatRatio / sourceDuration,
+      bandScale,
+    );
+    // Where the destination span's first frame falls in the source, beat for beat.
+    const spanStartSec = (beatRatio * this.view.startFrame) / this.spectrogramData.sampleRate;
+    const readFrame = (spanStartSec + fileOffset.x * sourceDuration) * sourceSpec.sampleRate;
+    return new Vector2((readFrame - sourceStart) / sourceFrames, fileOffset.y);
+  }
+
+  /**
    * Build common uniforms for a specific step.
    */
   buildStepUniforms(
@@ -1040,12 +1082,14 @@ export class StrokeRenderer {
     const activeFootprint = this.resolveBrushFootprint(activeStepState, bpm, totalDuration, cursorPos.x);
     const activeAnchor = resolveBrushAnchor(cursorPos, activeFootprint.fullTime, activeFootprint.fullPitch);
 
-    const sourceOffsetUv = this.calculateSourceOffset(
+    const sourceOffsetUv = this.sourceOffsetForViews(
+      sourceFile,
       state.isStroking ? activeStep?.lockedOffset : null,
       activeStepState.sourcePositionMode as string,
       activeAnchor,
       timeScale,
       bandScale,
+      bpm / srcBpm,
     );
 
     const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;

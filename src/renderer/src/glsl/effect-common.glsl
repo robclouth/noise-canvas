@@ -457,8 +457,12 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
   float baseX = uvs.dest.x * sourceTimeScale + sourceOffsetX;
   float baseY = destToSourceBandUv(uvs.dest) + sourceOffsetY;
   vec2 baseUv = vec2(baseX, baseY);
-  uvs.sourceL = baseUv + vec2(modTimeOff.x, modPitchOff.x);
-  uvs.sourceR = baseUv + vec2(modTimeOff.y, modPitchOff.y);
+  // The time offset is a fraction of the source FILE's length, so a source
+  // texture holding one span of it covers that fraction in fewer of its own
+  // UV. The whole-file case divides a value by itself and scales by 1.0.
+  float sourceOffsetScale = sourceFileFrameCount / max(sourceFrameCount, 1.0);
+  uvs.sourceL = baseUv + vec2(modTimeOff.x * sourceOffsetScale, modPitchOff.x);
+  uvs.sourceR = baseUv + vec2(modTimeOff.y * sourceOffsetScale, modPitchOff.y);
   uvs.source  = uvs.sourceL;
   uvs.sameSourceUv = (modTimeOff.x == modTimeOff.y) && (modPitchOff.x == modPitchOff.y);
   return uvs;

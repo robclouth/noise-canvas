@@ -86,6 +86,13 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
 5. **Any whole-state move installs a fresh carry.** After a history hop, a
    restore or phase turns, the old carry no longer speaks for the file. A
    commit already reading the old one keeps the object it took.
+6. **The source read is a position in the source file, not in its canvas.** A
+   brush reads the source beat for beat against the two files' clocks.
+   `sourceOffsetForViews` puts the brush anchor on the destination file's clock
+   and divides the answer by the span the source textures hold; the shader
+   scales the source time offset the same way, because that control is a
+   fraction of the source file's whole length. Without both, a windowed canvas
+   reads from the start of whatever window it happens to show.
 
 ## How to check it still works
 

@@ -22,7 +22,14 @@ import type { SpectrogramData, State } from "../../store/types";
 import { createDisplayTestMaterial } from "../../test/display-test-material";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
-import { blockGrid, blockPixelRanges, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "../block-grid";
+import {
+  blockGrid,
+  blockOfFrame,
+  blockPixelRanges,
+  blockTexels,
+  PACKED_BYTES_PER_TEXEL,
+  type BlockGrid,
+} from "../block-grid";
 import { NEUTRAL_ALGORITHM } from "../constants";
 import { bakeOnsetTexture } from "../onset-map";
 import { BlockSlotCache } from "../block-slot-cache";
@@ -318,6 +325,148 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     }
     return { magnitude, phase, changed };
   }
+
+  /**
+   * Paints one dab from a second file, once with both canvases holding their
+   * whole files and once with both holding a window, and returns the largest
+   * difference between the two inside the destination's view. The source
+   * window spans `sourceSpanSec` of the source file.
+   */
+  async function crossFileParity(
+    sourcePositionMode: string,
+    sourceSpanSec: { start: number; end: number },
+    step: { lockedOffset?: { beats: number; pitch: number }; sourceTimeOffset?: number } = {},
+  ): Promise<{ magnitude: number; phase: number; changed: number }> {
+    const sourceData = createConstantQMockSpectrogramData({
+      durationSeconds: 3,
+      sampleRate: SAMPLE_RATE,
+      bandsPerOctave: 4,
+    });
+    const sourcePacked = sourceData.packedData;
+    for (let i = 0; i < sourcePacked.length / 4; i++) {
+      sourcePacked[i * 4] = 0.05 + 0.45 * (1 + Math.sin(i * 0.19));
+      sourcePacked[i * 4 + 1] = Math.sin(i * 0.53) * 3;
+      sourcePacked[i * 4 + 2] = 0.05 + 0.45 * (1 + Math.cos(i * 0.37));
+      sourcePacked[i * 4 + 3] = Math.cos(i * 0.61) * 3;
+    }
+    const sourceTextures: StrokeTextures = {
+      ...strokeTextures,
+      originalPackedDataTex: dataTexture(
+        sourcePacked,
+        sourceData.textureWidth,
+        sourceData.textureHeight,
+        RGBAFormat,
+        "RGBA32F",
+      ),
+      inverseMapTex: dataTexture(
+        sourceData.inverseMap!,
+        sourceData.textureWidth,
+        sourceData.textureHeight,
+        RGFormat,
+        "RG32F",
+      ),
+      metadataTex: dataTexture(sourceData.metadata, sourceData.numBands, 1, RGBAFormat, "RGBA32F"),
+    };
+    disposers.push(() => {
+      sourceTextures.originalPackedDataTex.dispose();
+      sourceTextures.inverseMapTex.dispose();
+      sourceTextures.metadataTex.dispose();
+    });
+    const sourceGrid = blockGrid(
+      { numBands: sourceData.numBands, metadata: sourceData.metadata },
+      sourceData.numFrames,
+      SAMPLE_RATE,
+      0.25,
+    );
+    const sourceView = canvasViewOf(
+      sourceGrid,
+      blockOfFrame(sourceGrid, sourceSpanSec.start * SAMPLE_RATE),
+      blockOfFrame(sourceGrid, sourceSpanSec.end * SAMPLE_RATE),
+    );
+    expect(sourceView.endFrame - sourceView.startFrame).toBeLessThan(sourceData.numFrames);
+
+    // A tempo of its own, so the beat map between the two files is not the
+    // identity and a source window placed by frames alone reads the wrong bins.
+    const state = createMockStateWithSteps([
+      {
+        name: "Cross",
+        overrides: {
+          sourcePositionMode,
+          ...step,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    state.filepathsBpm = { "/source.wav": 90 };
+    state.isStroking = step.lockedOffset !== undefined;
+
+    const sourceInfo = (renderer: StrokeRenderer, span?: CanvasView): SourceFileInfo => ({
+      id: "source",
+      filePath: "/source.wav",
+      displayName: "source.wav",
+      spectrogramData: sourceData,
+      textures: renderer.getTextures(),
+      view: span,
+    });
+
+    const wholeSource = new StrokeRenderer(gl, sourceData, sourceTextures, "source", effects);
+    wholeSource.initialize();
+    wholeSource.setFBOData(sourcePacked);
+    disposers.push(() => wholeSource.dispose());
+
+    const subSource = new StrokeRenderer(gl, sourceData, sourceTextures, "source", effects, sourceView);
+    subSource.initialize();
+    subSource.setFBOData(composeViewContent(sourceView, sourcePacked));
+    disposers.push(() => subSource.dispose());
+
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+    whole.initialize();
+    whole.setFBOData(data.packedData);
+    disposers.push(() => whole.dispose());
+
+    const sub = subViewRenderer();
+    sub.setFBOData(composeViewContent(view, data.packedData));
+
+    whole.beginStroke();
+    whole.renderStroke(strokeParams(fileCursor, data.numFrames / SAMPLE_RATE), state, sourceInfo(wholeSource));
+    sub.beginStroke();
+    sub.renderStroke(strokeParams(viewCursor, viewFrames / SAMPLE_RATE), state, sourceInfo(subSource, sourceView));
+
+    const inView = composeViewContent(view, await whole.getFBOData());
+    const subData = await sub.getFBOData();
+    const before = composeViewContent(view, data.packedData);
+    let magnitude = 0;
+    let phase = 0;
+    let changed = 0;
+    for (let i = 0; i < view.texels * 4; i++) {
+      if (inView[i] !== before[i]) changed++;
+      const diff = Math.abs(subData[i] - inView[i]);
+      if (i % 2 === 0) magnitude = Math.max(magnitude, diff);
+      else phase = Math.max(phase, diff);
+    }
+    return { magnitude, phase, changed };
+  }
+
+  it.each([
+    // Follow reads the source at the destination's own beat, so the window has
+    // to sit where that beat falls in the source file.
+    { mode: "follow", start: 0.75, end: 2.25, step: {} },
+    // Anchored holds the offset the stroke started with, in the source file's
+    // own UV, so the window has to read it as a position in the file.
+    { mode: "anchored", start: 0.5, end: 2, step: { lockedOffset: { beats: -0.05, pitch: 0 } } },
+    // Fixed reads from the brush anchor, and the source time offset is a
+    // fraction of the source file's whole length.
+    { mode: "fixed", start: 1, end: 2.25, step: { sourceTimeOffset: 40 } },
+  ])("reads the same source frames in $mode mode through windows on both files", async ({ mode, start, end, step }) => {
+    const parity = await crossFileParity(mode, { start, end }, step);
+    expect(parity.changed).toBeGreaterThan(0);
+    // Both paths reach the same source position by different routes: the
+    // whole-file path scales the file's UV once, the windowed path folds the
+    // file offset onto two windows. The last bits differ, and interpolated
+    // reads across the seeded random phase jumps amplify that.
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-4);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
 
   it("re-anchors transient phase at the same onsets through a sub-view", async () => {
     const onsets = [0.15, 0.42, 0.61, 0.88, 1.35, 1.7].map((timeSec) => ({ timeSec, strength: 1 }));
