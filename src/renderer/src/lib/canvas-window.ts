@@ -85,6 +85,10 @@ export class CanvasWindow {
   private readonly loading = new Map<number, Promise<boolean>>();
   // Blocks whose slots hold paint the canvas gave them, not the store's values.
   private readonly painted = new Set<number>();
+  // Blocks whose content the canvas holds. A fill the next window request
+  // abandons leaves its blocks out, so a slide onto them composes them rather
+  // than shifting an empty overlap into place.
+  private readonly onCanvas = new Set<number>();
   private disposed = false;
 
   constructor(
@@ -190,6 +194,35 @@ export class CanvasWindow {
     return this.painted.has(block);
   }
 
+  /** The view's blocks the canvas holds no content for, in order. */
+  canvasLacks(view: BlockSpan): number[] {
+    return this.blocksOf(view).filter((block) => !this.onCanvas.has(block));
+  }
+
+  /** Records that the canvas took these blocks' content. */
+  markOnCanvas(blocks: number[]): void {
+    for (const block of blocks) this.onCanvas.add(block);
+  }
+
+  /**
+   * Records what a slide from `previous` to `next` left on the canvas: a block
+   * the canvas already held and kept, or one that entered and was composed. A
+   * block of the overlap the canvas never held stays missing, so shifting the
+   * empty overlap into place does not pass for content.
+   */
+  markSlid(next: BlockSpan, previous: BlockSpan): void {
+    const kept = this.blocksOf(next).filter(
+      (block) => this.onCanvas.has(block) || block < previous.firstBlock || block > previous.lastBlock,
+    );
+    this.onCanvas.clear();
+    this.markOnCanvas(kept);
+  }
+
+  /** Forgets what the canvas holds, so every block of its view is composed again. */
+  clearCanvas(): void {
+    this.onCanvas.clear();
+  }
+
   /** Drops the given blocks (or every block) from their slots. */
   invalidate(blocks?: number[]): void {
     this.cache.invalidate(blocks);
@@ -201,6 +234,7 @@ export class CanvasWindow {
     this.disposed = true;
     this.loading.clear();
     this.painted.clear();
+    this.onCanvas.clear();
     this.cache.dispose();
   }
 

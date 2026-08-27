@@ -11,7 +11,7 @@ import {
   viewUvToFileUv,
   type CanvasView,
 } from "@renderer/lib/canvas-view";
-import { blockGrid, blocksForPixelRanges } from "@renderer/lib/block-grid";
+import { blockGrid, blockOfFrame, blocksForPixelRanges } from "@renderer/lib/block-grid";
 import { CANVAS_WINDOW_BLOCKS, CanvasWindow, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { CarriedPaint, carryPaintOut, dropReturningPaint } from "@renderer/lib/carried-paint";
 import { PackedWindow } from "@renderer/lib/packed-window";
@@ -921,6 +921,15 @@ const FileRendererInner = memo(
     };
     disposeCanvasWindowRef.current = disposeCanvasWindow;
 
+    /** True while the canvas holds every block of [startFrame, endFrame) its view covers. */
+    const canvasHoldsFrames = (window: CanvasWindow, startFrame: number, endFrame: number): boolean => {
+      const view = strokeRendererRef.current?.committedSource().view;
+      if (!view) return false;
+      const first = Math.max(view.firstBlock, blockOfFrame(window.grid, startFrame));
+      const last = Math.min(view.lastBlock, blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1)));
+      return window.canvasLacks({ firstBlock: first, lastBlock: last }).length === 0;
+    };
+
     /**
      * Keeps what the stroke painted on the blocks about to leave the canvas:
      * the block slots take the painted texels so a window coming back shows
@@ -952,9 +961,8 @@ const FileRendererInner = memo(
       if (!window || !renderer?.getIsInitialized()) return;
       const current = renderer.committedSource().view;
       const next = window.plan(current, startFrame, endFrame);
-      const cold = next === current ? window.missing(current) : window.missing(next);
       const originalHeld = original?.holds(next) ?? true;
-      if (next === current && cold.length === 0 && originalHeld) return;
+      if (next === current && window.canvasLacks(next).length === 0 && originalHeld) return;
       const pending = windowRequestRef.current;
       if (pending && pending.firstBlock === next.firstBlock && pending.lastBlock === next.lastBlock) return;
       windowRequestRef.current = next;
@@ -966,16 +974,22 @@ const FileRendererInner = memo(
         if (!filled || !originalFilled || !live?.getIsInitialized() || canvasWindowRef.current !== window) return;
         if (original) live.setOriginalTexture(original.texture);
         const held = live.committedSource().view;
-        if (held.firstBlock === next.firstBlock && held.lastBlock === next.lastBlock) {
-          // The canvas is already over these blocks and only lacks content for
-          // the cold ones, so nothing painted is drawn over.
-          if (cold.length > 0) live.fillCanvas((target) => window.compose(held, cold, target));
-        } else {
+        if (held.firstBlock !== next.firstBlock || held.lastBlock !== next.lastBlock) {
           if (strokeActiveRef.current) carryPaintOffCanvas(live, window, next);
           live.slideView(next, (target, blocks) => window.compose(next, blocks, target), {
             midStroke: strokeActiveRef.current,
           });
+          window.markSlid(next, held);
           if (strokeActiveRef.current) dropReturningPaint(carriedPaintRef.current, window, next, held);
+        }
+        // Whatever the canvas still lacks: the blocks a slide did not bring in,
+        // and the ones an abandoned fill left empty. Nothing painted is drawn
+        // over, because a dab never lands on a block the canvas lacks.
+        const view = live.committedSource().view;
+        const lacking = window.canvasLacks(view);
+        if (lacking.length > 0) {
+          live.fillCanvas((target) => window.compose(view, lacking, target));
+          window.markOnCanvas(lacking);
         }
         invalidateRef.current();
       });
@@ -1193,7 +1207,11 @@ const FileRendererInner = memo(
         const window = canvasWindowRef.current;
         if (window) {
           const view = strokeRenderer.committedSource().view;
-          strokeRenderer.initialize((target) => window.composeResident(view, target));
+          window.clearCanvas();
+          strokeRenderer.initialize((target) => {
+            const cold = new Set(window.composeResident(view, target));
+            window.markOnCanvas(window.blocksOf(view).filter((block) => !cold.has(block)));
+          });
           // The canvas holds one window, so the picture of the rest of the
           // file comes from the analysed state rather than from the canvas.
           if (packedSeedRef.current) strokeRenderer.seedDisplayFromPacked(packedSeedRef.current);
@@ -1397,6 +1415,10 @@ const FileRendererInner = memo(
         const start = cursorPos.x >= 0 ? cursorPos.x * numFrames : visible.start;
         const end = cursorPos.x >= 0 ? (cursorPos.x + brushSizeUv.x) * numFrames : visible.end;
         aimCanvasWindow(start, end);
+        // A dab blends out of the canvas, so one landing on a block the canvas
+        // has no content for would paint silence and commit it. The dab waits
+        // for the block, and the frame loop brings it back when it lands.
+        if (applyStroke.current && cursorPos.x >= 0 && !canvasHoldsFrames(canvasWindowRef.current, start, end)) return;
       }
 
       // Render brush stroke if requested
@@ -1602,10 +1624,14 @@ const FileRendererInner = memo(
       if (canvasCoversFile()) {
         renderer.setFBOData(data);
       } else {
-        renderer.setFBOData(composeViewContent(renderer.committedSource().view, data));
+        const view = renderer.committedSource().view;
+        renderer.setFBOData(composeViewContent(view, data));
         renderer.seedDisplayFromPacked(data);
         renderer.getDisplayTiles()?.dropTiles(fullFilePixelRanges());
-        canvasWindowRef.current?.invalidate();
+        const window = canvasWindowRef.current;
+        window?.invalidate();
+        // The whole view was written, so the canvas lacks none of it.
+        window?.markOnCanvas(window.blocksOf(view));
         carriedPaintRef.current = new CarriedPaint();
       }
       applyStroke.current = false;

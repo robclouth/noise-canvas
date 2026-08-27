@@ -514,6 +514,34 @@ describe("a canvas window that follows the brush", () => {
     expect(window.holdsPaint(0)).toBe(false);
   });
 
+  it("keeps naming the blocks an abandoned fill left off the canvas", async () => {
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 4,
+      maxBytes: 0,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => window.dispose());
+    const first = window.viewFor({ firstBlock: 0, lastBlock: 3 });
+    expect(window.canvasLacks(first)).toEqual([0, 1, 2, 3]);
+
+    // The canvas takes the first view, then a request for it is dropped before
+    // its blocks are composed — the canvas is still empty.
+    window.markOnCanvas(window.blocksOf(first));
+    expect(window.canvasLacks(first)).toEqual([]);
+    window.clearCanvas();
+
+    // Sliding two blocks along keeps the overlap, which holds nothing, and
+    // composes what enters. The canvas still lacks the overlap.
+    const next = window.viewFor({ firstBlock: 2, lastBlock: 5 });
+    window.markSlid(next, first);
+    expect(window.canvasLacks(next)).toEqual([2, 3]);
+
+    window.markOnCanvas(window.canvasLacks(next));
+    const back = window.viewFor({ firstBlock: 1, lastBlock: 4 });
+    window.markSlid(back, next);
+    expect(window.canvasLacks(back)).toEqual([]);
+  });
+
   it("starts the canvas empty and takes each block as it lands", async () => {
     const window = new CanvasWindow(gl, grid, {
       windowBlocks: 4,
