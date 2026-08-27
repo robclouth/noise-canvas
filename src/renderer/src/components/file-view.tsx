@@ -616,6 +616,10 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     state.setIsStroking(false);
     const finalRange = strokeTimeRangeRef.current;
 
+    // A dab waiting for the canvas to take its block must land before the
+    // commit reads the stroke.
+    await rendererRef.current?.settleStroke();
+
     // Use unified action with time range
     if (finalRange.min !== null && finalRange.max !== null) {
       await state.applyStrokeAtPosition(undefined, { min: finalRange.min, max: finalRange.max });

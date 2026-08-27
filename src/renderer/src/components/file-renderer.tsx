@@ -156,6 +156,8 @@ export interface FileRendererHandle {
   applyStroke: () => void;
   beginStroke: () => void;
   endStroke: () => void;
+  /** Resolves once every dab of the stroke has landed. Call it before committing. */
+  settleStroke: () => Promise<void>;
   /** Gets the dirty region (UV range modified since last clear). Returns null if no modifications. */
   getDirtyRegion: () => { startX: number; endX: number; startY: number; endY: number } | null;
   /** Clears the dirty region tracking (call after synthesis). */
@@ -1304,18 +1306,25 @@ const FileRendererInner = memo(
         const start = cursorPos.x >= 0 ? cursorPos.x * numFrames : visible.start;
         const end = cursorPos.x >= 0 ? (cursorPos.x + brushSizeUv.x) * numFrames : visible.end;
         canvas.aim(start, end);
-        // A dab blends out of the canvas, so one landing on a block the canvas
-        // has no content for would paint silence and commit it. The dab waits
-        // for the block, and the frame loop brings it back when it lands.
-        if (applyStroke.current && cursorPos.x >= 0 && !canvas.holdsFrames(start, end)) return;
       }
 
       // Render brush stroke if requested
       if (applyStroke.current && cursorPos.x >= 0) {
         const preview = strokePreview.current;
-        if (!dispatchStroke(state, cursorPos, preview)) return;
-
-        if (!preview) {
+        const dabStart = cursorPos.x * spectrogramData.numFrames;
+        const dabEnd = (cursorPos.x + brushSizeUv.x) * spectrogramData.numFrames;
+        if (preview) {
+          // A preview shows what a dab would do. One the canvas cannot take
+          // shows nothing rather than waiting for a position already stale.
+          if (!canvas.holdsFrames(dabStart, dabEnd)) return;
+          if (!dispatchStroke(state, cursorPos, true)) return;
+        } else {
+          // A dab blends out of the canvas, so one landing on a block the
+          // canvas has no content for would paint silence and commit it. The
+          // dab waits for its block and then paints where it was asked to.
+          const dabState = state;
+          const dabPos = cursorPos.clone();
+          if (!canvas.paintWhenHeld(dabStart, dabEnd, () => dispatchStroke(dabState, dabPos, false))) return;
           displayMode.current = "committed";
         }
 
@@ -1634,6 +1643,9 @@ const FileRendererInner = memo(
       releaseAnalysisData,
       beginStroke,
       endStroke,
+      settleStroke: async () => {
+        await canvasRef.current?.settle();
+      },
       applyStroke: () => {
         // The frame loop resolves the position from the cursor.
         applyStroke.current = true;

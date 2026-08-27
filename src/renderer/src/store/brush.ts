@@ -527,6 +527,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       // non-preview render before the synthesis/undo step.
       file.rendererRef.current.beginStroke();
       file.rendererRef.current.renderStroke(false);
+      await file.rendererRef.current.settleStroke();
       await applyStrokeAtPosition();
       file.rendererRef.current.endStroke();
     },

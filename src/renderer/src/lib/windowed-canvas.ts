@@ -12,12 +12,19 @@ import {
 } from "./canvas-view";
 import { CANVAS_WINDOW_BLOCKS, CanvasWindow, needsCanvasWindow, type BlockValueReader } from "./canvas-window";
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
+import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
 import { composePixelRangeValues, gatherPixelRanges, mergePixelRanges } from "./pixel-ranges";
 import type { StrokeRenderer } from "./stroke-renderer";
 
 /** A rectangle of the file in unpacked UV, as the dirty region is kept. */
 export type UvRegion = { startX: number; endX: number; startY: number; endY: number };
+
+/** Paint waiting for the canvas to hold the frames it lands on. */
+type HeldPaint = { startFrame: number; endFrame: number; paint: () => boolean };
+
+/** Fills `settle` waits through before it gives up on the paint still held. */
+const HELD_PAINT_FILLS = 8;
 
 /** What a windowed canvas needs from its owner. */
 export type WindowedCanvasDeps = {
@@ -49,6 +56,8 @@ export type WindowedCanvasDeps = {
  *
  * 1. A dab never lands on a block the canvas has no content for — `holdsFrames`
  *    says when it may. Painting over an empty block would commit silence.
+ *    `paintWhenHeld` holds such a dab back and runs it, in the order it was
+ *    given, once the canvas takes the block.
  * 2. The canvas and the original move together. The canvas slides only once
  *    both windows have their blocks.
  * 3. Paint on a block that leaves the window mid-stroke is carried, and the
@@ -62,6 +71,8 @@ export class WindowedCanvas {
   private readonly blocks: CanvasWindow | null;
   private readonly original: PackedWindow | null;
   private request: CanvasView | null = null;
+  private fill: Promise<void> | null = null;
+  private readonly held: HeldPaint[] = [];
   private carried = new CarriedPaint();
   private stroking = false;
 
@@ -146,7 +157,7 @@ export class WindowedCanvas {
     this.request = next;
     const original = this.original;
     const reads = Promise.all([window.acquire(next), original ? original.hold(next) : Promise.resolve(true)]);
-    void reads.then(([filled, originalFilled]) => {
+    const filling = reads.then(([filled, originalFilled]) => {
       if (this.request !== next) return;
       this.request = null;
       const live = this.deps.renderer();
@@ -168,23 +179,67 @@ export class WindowedCanvas {
         live.fillCanvas((target) => window.compose(view, lacking, target));
         window.markOnCanvas(lacking);
       }
+      this.releaseHeld();
       this.deps.onChanged();
     });
+    const tracked = filling.then(() => {
+      if (this.fill === tracked) this.fill = null;
+    });
+    this.fill = tracked;
   }
 
   /**
    * True while the canvas holds content for every block of [startFrame,
-   * endFrame) its view covers. A dab blends out of the canvas, so one landing
-   * on a block with no content would paint silence and commit it.
+   * endFrame). A dab blends out of the canvas, so one landing on a block with
+   * no content would paint silence and commit it. A span wider than the window
+   * can never fit inside one, so it asks only for the part the view covers.
    */
   holdsFrames(startFrame: number, endFrame: number): boolean {
     const window = this.blocks;
     if (!window) return true;
     const view = this.view();
     if (!view) return false;
-    const first = Math.max(view.firstBlock, blockOfFrame(window.grid, startFrame));
-    const last = Math.min(view.lastBlock, blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1)));
-    return window.canvasLacks({ firstBlock: first, lastBlock: last }).length === 0;
+    const first = blockOfFrame(window.grid, startFrame);
+    const last = blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1));
+    const fits = last - first + 1 <= window.windowBlocks;
+    if (fits && (first < view.firstBlock || last > view.lastBlock)) return false;
+    const clipped = {
+      firstBlock: Math.max(first, view.firstBlock),
+      lastBlock: Math.min(last, view.lastBlock),
+    };
+    return window.canvasLacks(clipped).length === 0;
+  }
+
+  /**
+   * Paints now when the canvas holds [startFrame, endFrame) and nothing is
+   * already waiting; otherwise holds `paint` until the canvas takes the blocks.
+   * Held paint runs in the order it was given, so a dab behind a waiting one
+   * waits with it. Returns false only when `paint` itself refused.
+   */
+  paintWhenHeld(startFrame: number, endFrame: number, paint: () => boolean): boolean {
+    if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame)) return paint();
+    this.held.push({ startFrame, endFrame, paint });
+    return true;
+  }
+
+  /**
+   * Resolves once nothing is held back, so a commit reads a finished stroke.
+   * Paint the canvas still cannot take after `HELD_PAINT_FILLS` fills is
+   * dropped, because a read that never lands must not stall the commit.
+   */
+  async settle(): Promise<void> {
+    this.releaseHeld();
+    for (let fills = 0; this.held.length > 0 && fills < HELD_PAINT_FILLS; fills++) {
+      const next = this.held[0];
+      this.aim(next.startFrame, next.endFrame);
+      const pending = this.fill;
+      if (!pending) break;
+      await pending;
+      this.releaseHeld();
+    }
+    if (this.held.length === 0) return;
+    diag.warn("gl", "held paint dropped", { dabs: this.held.length });
+    this.held.length = 0;
   }
 
   /** The brush origin in the canvas's own UV. */
@@ -203,6 +258,8 @@ export class WindowedCanvas {
 
   beginStroke(): void {
     this.stroking = true;
+    // Paint the last stroke never landed belongs to that stroke, not this one.
+    this.held.length = 0;
     // A fresh carry per stroke, so a commit still reading the last one keeps it.
     this.carried = new CarriedPaint();
     this.deps.renderer()?.beginStroke();
@@ -376,12 +433,23 @@ export class WindowedCanvas {
     this.blocks?.dispose();
     this.original?.dispose();
     this.request = null;
+    this.held.length = 0;
   }
 
   // ---------- inside ----------
 
   private view(): CanvasView | null {
     return this.deps.renderer()?.committedSource().view ?? null;
+  }
+
+  /** Runs the held paint the canvas can now take, oldest first. */
+  private releaseHeld(): void {
+    while (this.held.length > 0) {
+      const next = this.held[0];
+      if (!this.holdsFrames(next.startFrame, next.endFrame)) return;
+      this.held.shift();
+      next.paint();
+    }
   }
 
   private expectRenderer(): StrokeRenderer {
