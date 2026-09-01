@@ -835,6 +835,32 @@ sub-view parity harness before it was fixed:
 - Source tracking away from Follow, and a source time offset, put a same-file
   read anywhere in the file. Both are now named by `wholeFileNeeds`.
 
+S8 is done, and the window is on by default:
+
+- `canvasWindowBlocks(grid)` sizes the window against the GPU pool. A file
+  whose whole analysed state fits a third of the spectrogram budget keeps one
+  canvas over all of it and behaves exactly as it did; a longer one takes the
+  widest window of blocks that budget affords, floored at four blocks and
+  capped at sixteen. `VITE_CANVAS_WINDOW_BLOCKS` still pins the figure, and 0
+  now means "keep the whole file" — `window:check` sets it for its reference
+  run.
+- Admission stops depending on length. `spectrogramBytes` charges a windowed
+  file its window, its block slots and no CPU copies, and
+  `remainingCoefficientBudget` returns undefined — no limit but the analyser's
+  own texture cap — as soon as what is left can hold one more window. The
+  budget's per-texel rates are pinned against what `CanvasWindow` and
+  `PackedWindow` really claim.
+- A commit that needs the whole painted state takes it from the block store
+  with the stroke's own pixels written over it, in `brush.ts` and again in the
+  addon call's `readWhole`. Before this a stroke that rebuilt the whole file —
+  Re-analyse over older unprojected paint — committed nothing at all on a
+  windowed canvas.
+- The image export walks the file in strips, each served by its own window over
+  the committed state (`export-window.ts`), and the shader reads each strip's
+  columns as a UV range on that span. Pinned by rendering the same file both
+  ways: no channel differs by more than 2 of 255. The snapshot needed nothing —
+  it draws the display material, which the pyramid and the ring already serve.
+
 Left before the window can carry a real session:
 
 - The cross-file source window still widens by the dab's own span either side
@@ -853,9 +879,6 @@ Left before the window can carry a real session:
   warp's noise seed, and the three wirings in the React component that decide
   what a window has to hold (`sourceNeedFor`, `reachFrames` and
   `strokeRefusal`) — `window:check` opens one file with a plain brush.
-- S8: the budget that sets K, admission, image export and snapshot off the
-  whole canvas, and brush.ts's whole-canvas commit fallback, which bails when
-  the canvas cannot serve the whole file.
 
 ---
 

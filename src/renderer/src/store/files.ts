@@ -386,6 +386,9 @@ export function logFileFootprint(fileId: string, event: string, extra?: Record<s
     textureWidth: data.textureWidth,
     textureHeight: data.textureHeight,
     texels: data.textureWidth * data.textureHeight,
+    windowBlocks: canvasWindowBlocks(
+      blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate),
+    ),
     openFiles: Object.keys(openFiles).length,
     budgetPercent: Math.round((usedBudgetFraction(openFileTexelCounts()) ?? 0) * 100),
     ...extra,
