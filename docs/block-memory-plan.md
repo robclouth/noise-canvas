@@ -880,6 +880,51 @@ Left before the window can carry a real session:
   what a window has to hold (`sourceNeedFor`, `reachFrames` and
   `strokeRefusal`) — `window:check` opens one file with a plain brush.
 
+### Phase 3 exit measurements (2026-09-01)
+
+Taken on an Apple M4 Pro, 24 GB, which reports a 16 GB graphics budget — not
+the 8 GB Iris 655 the plan targets. Renderer private memory, fresh profile, one
+mono 44.1 kHz file at 36 bands per octave, through open, a drag, an undo, a
+redo and an image export. The four-block row is pinned with
+`VITE_CANVAS_WINDOW_BLOCKS`; it stands in for the window a small device's
+budget would pick.
+
+| 300 s file, 59.5M texels                   | idle | open | paint | undo | redo | export | budget |
+| ------------------------------------------ | ---- | ---- | ----- | ---- | ---- | ------ | ------ |
+| whole file on the canvas                   | 285  | 595  | 861   | 924  | 923  | 760 MB | 115 %  |
+| window the budget picks (16 blocks, ~32 s) | 286  | 624  | 772   | 680  | 696  | 613 MB | 21 %   |
+| window pinned to 4 blocks (~8 s)           | 286  | 557  | 605   | 567  | 572  | 557 MB | 12 %   |
+
+A 60 s file keeps the whole-file canvas on this machine and peaks at 477 MB
+against a 286 MB idle app.
+
+What the measurements say:
+
+- The canvas has stopped scaling with length. The whole-file canvas accounts
+  for 115 % of the graphics budget at five minutes and would not open on the
+  target device; a four-block window accounts for 12 % and peaks 319 MB over
+  the idle app.
+- What still scales is the audio, at about 0.66 MB a second, which is Phase 4's
+  scope: 60 s costs 148 MB over idle and 300 s costs 319 MB, and the difference
+  is the audio buffers almost exactly.
+- Undo and redo cost less than painting under a window, where on the whole-file
+  canvas they were the peak.
+
+**The ten-minute file does not open, and the graphics budget is not what stops
+it.** The analyser refuses it: "The maximum audio duration is 318 seconds."
+That is `MAX_TEXTURE_SIZE² = 8192 × 8192` packed coefficients at the worst-case
+density of 4.79 per sample — 318 s at 44.1 kHz, 292 s at 48 kHz — checked in
+`gaborator-addon.cpp` before any allocation. `remainingCoefficientBudget` now
+returns undefined for any length, so the cap is the only limit left.
+
+Nothing in the windowed path needs the packed state to be one texture: the
+canvas addresses a view, the display reads the pyramid and the ring, and the
+block store works in linear pixel ranges. The file-sized texture is not even
+built. Lifting the cap is therefore a separate piece of work, and a decision:
+raise `MAX_TEXTURE_SIZE` (the device here reports 16384, which would take the
+cap to about 21 minutes), or stop shaping the analysed state as a texture at
+all. **STOP-ASK.**
+
 ---
 
 ## Phase 4 — whole-file effects inside the budget (1–2 weeks)
