@@ -215,7 +215,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       // projection inside its window and as whole phase turns past it — so
       // only the footprint is read back, and the rest of the state stays in
       // the block store. A commit that rebuilds the whole file reads the
-      // whole canvas.
+      // whole canvas, or the store when the canvas holds a window of it.
       const historyManager = getHistoryManager(activeFileId);
       const currentIdBefore = historyManager.getCurrentId();
       const { textureWidth, textureHeight } = file.spectrogramData;
@@ -225,16 +225,29 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         footprintRanges != null &&
         footprintRanges.length > 0 &&
         pixelRangeCount(footprintRanges) < textureWidth * textureHeight * 0.5;
+      const painted = footprintRanges != null && footprintRanges.length > 0 ? footprintRanges : null;
       const readPromise = footprintOnly ? renderer.readPixelRanges(footprintRanges) : renderer.getFBOData();
+      // Both reads are issued before the queue so they see this stroke's end.
+      // A whole-state commit needs the stroke's own pixels separately, because
+      // a canvas holding a window cannot hand over the whole state.
+      const paintedPromise = !footprintOnly && painted ? renderer.readPixelRanges(painted) : null;
 
       await serializeFileTask(activeFileId, async () => {
-        const read = await readPromise;
-        if (!read) return;
+        let read = await readPromise;
+        const paintedValues = paintedPromise ? await paintedPromise : null;
         // A navigation's synthesis may still be landing — the commit measures
         // against the audio it installs — and may still be reading the packed
         // state this commit writes into.
         await historyManager.awaitPackedReaders();
         if (!openFiles[activeFileId]) return;
+        if (!read && !footprintOnly && historyManager.getCurrentId() === currentIdBefore) {
+          // The store holds the committed state the canvas cannot show, and
+          // the canvas holds what this stroke painted over it.
+          const stored = await historyManager.currentBlockState();
+          if (stored && paintedValues && painted) scatterCompactPixelRanges(stored, paintedValues, painted);
+          read = stored;
+        }
+        if (!read) return;
 
         // A patch an earlier commit could not upload, because this stroke was
         // already on the canvas when it landed. Its pixels live in the block
@@ -260,7 +273,10 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           // is the only whole picture left.
           baseFootprint = undefined;
           data = footprintOnly ? ((await renderer.getFBOData()) ?? null) : read;
-          if (!data) return;
+          if (!data) {
+            console.warn("history: the stroke has no whole picture to commit; the canvas holds a window");
+            return;
+          }
           // The canvas never took the stashed patch or its turns, so those
           // pixels are put back from the store.
           if (stash) {

@@ -21,7 +21,7 @@ import type {
 } from "../../../main/lib/types";
 import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
 import { commitViewOf, composeViewBuffer, scatterCommitPatch, type CommitView } from "../lib/commit-view";
-import { gatherPixelRanges } from "../lib/pixel-ranges";
+import { gatherPixelRanges, scatterCompactPixelRanges } from "../lib/pixel-ranges";
 import {
   computeOutputLevels,
   measureOutputLevels,
@@ -2258,7 +2258,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // all of it and the caller did not hand it over.
       const readWhole = async (): Promise<Float32Array> => {
         if (data) return data;
-        const whole = await file.rendererRef?.current?.getFBOData();
+        let whole = await file.rendererRef?.current?.getFBOData();
+        if (!whole) {
+          // A canvas holding a window cannot serve the whole state, so the
+          // store's committed pixels take the stroke's footprint over them.
+          whole = await getHistoryManager(fileId).currentBlockState();
+          if (whole && source.footprint) {
+            scatterCompactPixelRanges(whole, source.footprint.values, source.footprint.ranges);
+          }
+        }
         if (!whole) throw new Error("the commit could not read the canvas");
         data = whole;
         return whole;
