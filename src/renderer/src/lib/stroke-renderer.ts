@@ -40,6 +40,7 @@ import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { footprintAimToBlUv } from "./brush-anchor";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
+import { getQuantizeLutTexture } from "./quantize-lut";
 import { selectionBandRange, selectionFrameRange, selectionUvRect, type Selection } from "./selection";
 import { buildModulatorUniforms } from "./modulator-utils";
 import {
@@ -875,6 +876,7 @@ export class StrokeRenderer {
       wrapMode: { value: stepState.brushWrapMode },
       modulators: { value: modulatorUniforms },
       gainLut: { value: modulatorScaleLut || placeholderTexture },
+      quantizeLutTex: { value: getQuantizeLutTexture() },
       modulator1ImageTex: { value: modulator1Texture || placeholderTexture },
       modulator2ImageTex: { value: modulator2Texture || placeholderTexture },
       modulator3ImageTex: { value: modulator3Texture || placeholderTexture },
@@ -1539,6 +1541,7 @@ export class StrokeRenderer {
     uniforms.selectionMaskActive.value = selectionClip.maskActive;
     uniforms.selectionMaskTex.value = selectionClip.maskTexture || placeholderTexture;
     uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
+    uniforms.quantizeLutTex.value = getQuantizeLutTexture();
     uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
     uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
     uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;

@@ -40,7 +40,7 @@ export const RandomizeButton = ({ parameterKeys, storageKey, includeEffects }: R
 
     parameterKeys.forEach((key) => {
       const def = parameterDefs[key];
-      if (!def) return;
+      if (!def || def.excludeFromRandomization) return;
 
       const currentValue = getParameterValue(state, key);
 

@@ -5,8 +5,10 @@ import type { ParameterKey } from "../../store/types";
 import { normalizeParameterValue } from "../../store/utils";
 import { createMockStateWithSteps, TestBrushStep } from "../../test/mock-state";
 import {
+  formatModulationReach,
   hasDynamicSources,
   macroTargets,
+  modulationReach,
   resolvedStaticValue,
   scopedStateView,
   totalModulationWeight,
@@ -111,5 +113,110 @@ describe("modulation weight", () => {
     expect(totalModulationWeight(view, "brushPan")).toBe(0);
     expect(hasDynamicSources(view, "brushIntensity")).toBe(true);
     expect(hasDynamicSources(view, "brushPan")).toBe(false);
+  });
+});
+
+/** The reach a control shows: `weight` wide in knob position, with the base value at its own position inside it. */
+function reachOf(state: ReturnType<typeof twoSteps>, key: ParameterKey) {
+  const view = scopedStateView(state, 0);
+  return modulationReach(view, key, totalModulationWeight(view, key));
+}
+
+describe("modulationReach", () => {
+  it("is null while nothing modulates the parameter", () => {
+    expect(reachOf(twoSteps({ brushIntensity: 50 } as Partial<TestBrushStep>), "brushIntensity")).toBeNull();
+  });
+
+  it("spans the weight in knob position, around the base value's own position", () => {
+    const state = twoSteps({ brushIntensity: 50, brushIntensityModMacro1Amount: 50 } as Partial<TestBrushStep>);
+    const reach = reachOf(state, "brushIntensity")!;
+    const span =
+      normalizeParameterValue("brushIntensity", reach.upper) - normalizeParameterValue("brushIntensity", reach.lower);
+    expect(span).toBeCloseTo(0.5, 9);
+    expect(reach.lower).toBeCloseTo(25, 9);
+    expect(reach.upper).toBeCloseTo(75, 9);
+    expect(formatModulationReach("brushIntensity", reach)).toBe("25–75%");
+  });
+
+  it("spans the weight on a log slider too, measured in knob position", () => {
+    const state = twoSteps({
+      effects: [
+        {
+          id: "fx-t",
+          effect: "transform",
+          enabled: true,
+          params: { transformScaleTime: 1, transformScaleTimeModMacro1Amount: 40 },
+        },
+      ],
+    } as Partial<TestBrushStep>);
+    const view = scopedStateView(state, 0, "fx-t");
+    const reach = modulationReach(view, "transformScaleTime", totalModulationWeight(view, "transformScaleTime"))!;
+    const span =
+      normalizeParameterValue("transformScaleTime", reach.upper) -
+      normalizeParameterValue("transformScaleTime", reach.lower);
+    expect(span).toBeCloseTo(0.4, 9);
+  });
+
+  it("reaches one way only from the bottom of the slider", () => {
+    const state = twoSteps({ brushIntensity: 0, brushIntensityModMacro1Amount: 40 } as Partial<TestBrushStep>);
+    const reach = reachOf(state, "brushIntensity")!;
+    expect(reach.lower).toBeCloseTo(0, 9);
+    expect(reach.upper).toBeCloseTo(40, 9);
+  });
+
+  it("names the marks it lands on, and folds a symmetric reach to ±", () => {
+    const state = twoSteps({
+      transformShiftSemis: 0,
+      transformShiftSemisModMacro1Amount: 50,
+    } as Partial<TestBrushStep>);
+    const reach = reachOf(state, "transformShiftSemis")!;
+    expect(reach.lower).toBeCloseTo(-48, 9);
+    expect(formatModulationReach("transformShiftSemis", reach)).toBe("±48");
+  });
+
+  it("leaves the dash bare when only the lower end is negative", () => {
+    const state = twoSteps({
+      transformShiftSemis: 24,
+      transformShiftSemisModMacro1Amount: 50,
+    } as Partial<TestBrushStep>);
+    const reach = reachOf(state, "transformShiftSemis")!;
+    expect(formatModulationReach("transformShiftSemis", reach)).toBe("-36–60");
+  });
+
+  it("spaces the dash off a negative upper end, which would read as one glyph", () => {
+    const state = twoSteps({
+      transformShiftSemis: -60,
+      transformShiftSemisModMacro1Amount: 10,
+    } as Partial<TestBrushStep>);
+    const reach = reachOf(state, "transformShiftSemis")!;
+    expect(formatModulationReach("transformShiftSemis", reach)).toBe("-64 – -44");
+  });
+
+  it("snaps both ends to the valid values while Quantise is on", () => {
+    const overrides = {
+      transformShiftSemis: 0,
+      transformShiftSemisModMacro1Amount: 10,
+    } as Partial<TestBrushStep>;
+    const free = reachOf(twoSteps(overrides), "transformShiftSemis")!;
+    expect(free.lower).toBeCloseTo(-9.6, 9);
+    expect(free.upper).toBeCloseTo(9.6, 9);
+
+    const snapped = reachOf(
+      twoSteps({ ...overrides, transformShiftSemisModQuantize: true } as Partial<TestBrushStep>),
+      "transformShiftSemis",
+    )!;
+    expect(snapped.lower).toBe(-10);
+    expect(snapped.upper).toBe(10);
+    expect(formatModulationReach("transformShiftSemis", snapped)).toBe("±10");
+  });
+
+  it("collapses to one value when an amount is too small to leave the mark", () => {
+    const state = twoSteps({
+      transformShiftSemis: 0,
+      transformShiftSemisModMacro1Amount: 0.05,
+      transformShiftSemisModQuantize: true,
+    } as Partial<TestBrushStep>);
+    const reach = reachOf(state, "transformShiftSemis")!;
+    expect(formatModulationReach("transformShiftSemis", reach)).toBe("0");
   });
 });

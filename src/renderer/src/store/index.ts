@@ -6,6 +6,7 @@ import { sanitizeEffectParams, sanitizeStepParams } from "@renderer/lib/preset-s
 import {
   BrushStep,
   getParameterDef,
+  getQuantizeParamKey,
   isEffectParameter,
   isStepParameter,
   isStorableOptionValue,
@@ -473,6 +474,9 @@ export function getModulationParamKeys(paramKey: ParameterKey): ParameterKey[] {
       keys.push(`${paramKey}ModMacro${i}Amount` as ParameterKey);
     }
   }
+
+  const quantizeKey = getQuantizeParamKey(paramKey);
+  if (quantizeKey) keys.push(quantizeKey);
 
   return keys;
 }

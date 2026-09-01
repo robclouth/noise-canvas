@@ -70,7 +70,7 @@ export function randomizeSectionParameters(
   for (const key of parameterKeys) {
     if (excluded.includes(key as string)) continue;
     const def = parameterDefs[key];
-    if (!def) continue;
+    if (!def || def.excludeFromRandomization) continue;
 
     for (const target of sectionWriteTargets(getState(), key, effectId)) {
       const state = getState();

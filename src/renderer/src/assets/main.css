@@ -17,6 +17,7 @@
   --ui-effect-pad-y: 6px;
   --ui-header-pad: 8px;
   --ui-header-font: 13px;
+  --ui-font-2xs: 10px;
   --ui-font-xs: 11px;
   --ui-font-sm: 11px;
   --ui-font-md: 16px;
@@ -46,6 +47,7 @@
   --ui-effect-pad-y: 3px;
   --ui-header-pad: 4px;
   --ui-header-font: 11px;
+  --ui-font-2xs: 9px;
   --ui-font-xs: 10px;
   --ui-font-sm: 10px;
   --ui-font-md: 15px;

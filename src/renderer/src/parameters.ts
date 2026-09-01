@@ -43,6 +43,8 @@ export interface ParameterBase {
   descriptionBy?: { param: ParameterKey; descriptions: Record<number, string> };
   includeInStep?: boolean;
   effectType?: EffectType;
+  /** Keeps the dice and section randomisation from ever touching this parameter. */
+  excludeFromRandomization?: boolean;
 }
 
 export interface NumberParameter extends ParameterBase {
@@ -1895,10 +1897,31 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         };
       }
     }
+
+    // Generate the modulation quantise toggle. Modulator-own parameters resolve
+    // through the nested path, which has no quantise support, so they get none.
+    if (!contextualOnly && !/^modulator\d/.test(key)) {
+      finalParameterDefs[`${key}ModQuantize` as ParameterKey] = {
+        kind: "boolean",
+        name: `${def.name} Quantise`,
+        label: "Quantise",
+        description: `Locks ${def.name} modulation to the control's own values.`,
+        default: false,
+        includeInStep: true,
+        effectType: def.effectType,
+        excludeFromRandomization: true,
+      };
+    }
   }
 }
 
 export const parameterDefs = finalParameterDefs;
+
+/** The quantise-toggle key for `key`, or null where its modulation cannot be quantised. */
+export const getQuantizeParamKey = (key: ParameterKey): ParameterKey | null => {
+  const quantizeKey = `${key}ModQuantize` as ParameterKey;
+  return finalParameterDefs[quantizeKey] ? quantizeKey : null;
+};
 
 export const getParameterDef = (key: ParameterKey): ParameterDef => {
   const parameterDef = parameterDefs[key];

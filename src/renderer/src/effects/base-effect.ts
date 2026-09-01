@@ -100,6 +100,7 @@ export type CommonUniforms = {
   inSwappedDomain?: { value: boolean };
   magnitudeLimit: { value: number };
   gainLut: { value: Texture | null };
+  quantizeLutTex: { value: Texture | null };
   modulator1ImageTex: { value: Texture | null };
   modulator2ImageTex: { value: Texture | null };
   modulator3ImageTex: { value: Texture | null };
@@ -184,6 +185,7 @@ export function createDefaultUniforms(): CommonUniforms {
     inSwappedDomain: { value: false },
     modulators: { value: [] },
     gainLut: { value: null },
+    quantizeLutTex: { value: null },
     modulator1ImageTex: { value: null },
     modulator2ImageTex: { value: null },
     modulator3ImageTex: { value: null },

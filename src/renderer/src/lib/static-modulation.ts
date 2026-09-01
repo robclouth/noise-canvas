@@ -5,7 +5,8 @@ import {
 } from "@renderer/store/modulators";
 import { ParameterKey, State } from "@renderer/store/types";
 import { normalizeParameterValue } from "@renderer/store/utils";
-import { getNumberParameterDef } from "@renderer/parameters";
+import { getNumberParameterDef, getQuantizeParamKey } from "@renderer/parameters";
+import { getQuantizeListRange } from "./quantize-lut";
 import { ParameterScaleKind, ParameterUniform } from "@renderer/types";
 import { Vector2 } from "three";
 import { CONTEXTUAL_MOD_SOURCES, NUM_MACROS } from "./constants";
@@ -155,7 +156,46 @@ export function defaultParameterUniform(value: number, minValue: number, maxValu
     staticWeight: 0,
     scaleKind: ParameterScaleKind.Linear,
     logEnds: new Vector2(0, 0),
+    quantizeOffset: 0,
+    quantizeCount: 0,
+    quantizeStep: 0,
   };
+}
+
+/**
+ * Writes `target`'s quantise fields: a LUT range for a marked slider, a value-space
+ * step otherwise. Off unless the toggle is on and a source actually reaches the
+ * parameter. A `range` remap in other units falls back to the step, rescaled.
+ */
+function writeQuantize(target: ParameterUniform, state: State, key: ParameterKey, range?: ShaderRange): void {
+  target.quantizeOffset = 0;
+  target.quantizeCount = 0;
+  target.quantizeStep = 0;
+
+  const quantizeKey = getQuantizeParamKey(key);
+  if (!quantizeKey || state[quantizeKey] !== true) return;
+  const modulated = target.staticWeight !== 0 || target.modulationAmounts.some((amount) => amount !== 0);
+  if (!modulated) return;
+
+  const def = getNumberParameterDef(key);
+  // A log slider ignores `range` and stays in its own units (see writeParameterUniform).
+  const isLog = target.scaleKind !== ParameterScaleKind.Linear;
+  const sameUnits = isLog || !range || (range.min === def.min && range.max === def.max);
+
+  if (sameUnits) {
+    const listRange = getQuantizeListRange(key);
+    if (listRange) {
+      target.quantizeOffset = listRange.offset;
+      target.quantizeCount = listRange.count;
+      return;
+    }
+  }
+
+  const step = def.step ?? 0;
+  if (step <= 0) return;
+  const defSpan = def.max - def.min;
+  const shaderSpan = !sameUnits && range ? range.max - range.min : defSpan;
+  target.quantizeStep = defSpan > 0 ? step * (shaderSpan / defSpan) : step;
 }
 
 /**
@@ -198,6 +238,7 @@ export function writeParameterUniform(
   target.staticWeight = staticWeight;
   target.scaleKind = scale.scaleKind;
   target.logEnds = scale.logEnds;
+  writeQuantize(target, state, key, range);
 }
 
 /** The uniform for a modulatable parameter; see `writeParameterUniform`. */

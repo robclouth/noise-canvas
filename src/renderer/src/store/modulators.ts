@@ -1,6 +1,7 @@
 import {
   getNumberParameterDef,
   getOptionsParameterDef,
+  getQuantizeParamKey,
   getStringParameterDef,
   parameterDefs,
 } from "@renderer/parameters";
@@ -58,6 +59,11 @@ export type MacroModAmountParameters = {
   [K in ModulatableParameterKey as `${K}ModMacro${Range<1, 5>}Amount`]: number;
 };
 
+// Per-parameter modulation quantise toggles. Modulator-own parameters have none.
+export type QuantizeModParameters = {
+  [K in Exclude<ModulatableParameterKey, `modulator${Range<1, 4>}Strength`> as `${K}ModQuantize`]: boolean;
+};
+
 export type ModulatorParameters = {
   [K in Range<1, 4> as `modulator${K}Mode`]: number;
 } & {
@@ -106,7 +112,8 @@ export interface ModulatorsState
   extends ModulatorParameters,
     ModulatorAmountParameters,
     ContextualModAmountParameters,
-    MacroModAmountParameters {}
+    MacroModAmountParameters,
+    QuantizeModParameters {}
 
 function createModulatorParams(): ModulatorsState {
   const params: ModulatorsState = {
@@ -165,10 +172,13 @@ function createModulatorParams(): ModulatorsState {
         const macroAmountEntries = contextualOnly
           ? {}
           : getMacroAmountParamKeys(key as ParameterKey).reduce((obj, k) => ({ ...obj, [k]: 0 }), {});
+        const quantizeKey = getQuantizeParamKey(key as ParameterKey);
+        const quantizeEntries = quantizeKey ? { [quantizeKey]: false } : {};
         return {
           ...acc,
           ...modAmountEntries,
           ...macroAmountEntries,
+          ...quantizeEntries,
         };
       } else return acc;
     }, {} as ModulatorsState),

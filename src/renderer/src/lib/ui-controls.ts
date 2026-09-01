@@ -350,6 +350,11 @@ export const UI_CONTROLS = {
     description: "Shares one value for this parameter across every step.",
     manualSection: "linking-parameters-across-steps",
   },
+  "param-quantise": {
+    label: "Quantise",
+    description: "Snaps this parameter's modulation to the control's own values.",
+    manualSection: "parameter-controls",
+  },
 
   // Modulators
   "modulator-shape": {

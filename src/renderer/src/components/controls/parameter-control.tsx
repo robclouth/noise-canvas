@@ -1,12 +1,15 @@
-import type { ParameterKey } from "@/store/types";
+import type { ParameterKey, State } from "@/store/types";
 import { useEffectId } from "@renderer/contexts/effect-context";
 import { getParameterDef, isEffectParameter } from "@renderer/parameters";
 import { getEffectParameterValue, getMacroValueIndex, getParameterValue, useStore } from "@renderer/store";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import {
+  formatModulationReach,
   formatParameterValue,
   hasDynamicSources,
   macroTargets,
+  modulationReach,
+  REACH_BUDGET,
   resolvedStaticValue,
   scopedStateView,
   totalModulationWeight,
@@ -20,6 +23,12 @@ import { NumboxControl } from "./numbox-control";
 import { ParamMenu } from "./param-menu";
 import { SelectControl } from "./select-control";
 import { SwitchControl } from "./switch-control";
+
+/** The text for a parameter's modulation reach, or undefined when nothing modulates it. */
+function reachLabelFor(view: State, key: ParameterKey, weight: number): string | undefined {
+  const reach = modulationReach(view, key, weight);
+  return reach ? formatModulationReach(key, reach, REACH_BUDGET) : undefined;
+}
 
 export type ParameterControlProps = {
   paramKey: ParameterKey;
@@ -50,7 +59,7 @@ export const ParameterControl = memo(function ParameterControl({
   const macroIndex = getMacroValueIndex(paramKey);
 
   // Combine selectors into a single subscription with shallow comparison
-  const { isModulated, parameterValue, setParameter, display, dimmed, targetSummary } = useStore(
+  const { isModulated, parameterValue, setParameter, display, dimmed, targetSummary, reachLabel } = useStore(
     useShallow((state) => {
       const value = useEffectScope
         ? getEffectParameterValue(state, effectId, paramKey)
@@ -68,8 +77,9 @@ export const ParameterControl = memo(function ParameterControl({
         });
         const only = targets.length === 1 ? targets[0] : null;
         const knobView = scopedStateView(state, state.activeStepIndex);
+        const knobWeight = totalModulationWeight(knobView, paramKey);
         return {
-          isModulated: totalModulationWeight(knobView, paramKey) > 0,
+          isModulated: knobWeight > 0,
           parameterValue: value,
           setParameter: state.setParameter,
           display: only?.resolved ?? undefined,
@@ -80,6 +90,7 @@ export const ParameterControl = memo(function ParameterControl({
                   .map((target) => (target.resolved ? `${target.name} ${target.resolved}` : target.name))
                   .join(" · ")
               : undefined,
+          reachLabel: reachLabelFor(knobView, paramKey, knobWeight),
         };
       }
 
@@ -91,6 +102,7 @@ export const ParameterControl = memo(function ParameterControl({
           display: undefined,
           dimmed: false,
           targetSummary: undefined,
+          reachLabel: undefined,
         };
       }
 
@@ -110,6 +122,7 @@ export const ParameterControl = memo(function ParameterControl({
         display: resolved,
         dimmed: fullyModulated,
         targetSummary: undefined,
+        reachLabel: reachLabelFor(view, paramKey, weight),
       };
     }),
   );
@@ -168,6 +181,7 @@ export const ParameterControl = memo(function ParameterControl({
         leftValue={parameter.leftValue}
         rightValue={parameter.rightValue}
         displayValue={display}
+        reachLabel={reachLabel}
         dimmed={dimmed}
         fromNormalized={(value) => denormalizeParameterValue(paramKey, value)}
         toNormalized={(value) => normalizeParameterValue(paramKey, value)}

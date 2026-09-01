@@ -506,16 +506,51 @@ bool isParameterModulated(Parameter p) {
   return false;
 }
 
+// One row of valid values per quantised parameter, shared by every Parameter.
+uniform sampler2D quantizeLutTex;
+
+// Nearest entry of a parameter's valid-value list.
+float snapToQuantizeList(float v, int offset, int count) {
+  float best = texelFetch(quantizeLutTex, ivec2(offset, 0), 0).x;
+  float bestDist = abs(v - best);
+  for (int i = 1; i < count; i++) {
+    float cand = texelFetch(quantizeLutTex, ivec2(offset + i, 0), 0).x;
+    float dist = abs(v - cand);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = cand;
+    }
+  }
+  return best;
+}
+
+// Snaps a modulated value to the parameter's valid values. The CPU zeroes both
+// quantise fields when the toggle is off or nothing modulates the parameter, so
+// an exact hand-set value always passes through untouched.
+vec2 applyParameterQuantize(Parameter p, vec2 v) {
+  if (p.quantizeCount > 0) {
+    return vec2(
+      snapToQuantizeList(v.x, p.quantizeOffset, p.quantizeCount),
+      snapToQuantizeList(v.y, p.quantizeOffset, p.quantizeCount));
+  }
+  if (p.quantizeStep > 0.0) {
+    vec2 snapped = p.minValue + round((v - p.minValue) / p.quantizeStep) * p.quantizeStep;
+    return clamp(snapped, min(p.minValue, p.maxValue), max(p.minValue, p.maxValue));
+  }
+  return v;
+}
+
 // A parameter's modulated (L, R) value in its own units, from precomputed
 // modulator outputs. A log slider is swept in knob position and mapped back;
 // unmodulated, the exact value passes through.
 vec2 resolveParameter(Parameter p, vec2 mods[NUM_MODULATORS]) {
   if (p.scaleKind == 0) {
-    return applyModulationCached(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, mods);
+    vec2 v = applyModulationCached(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, mods);
+    return applyParameterQuantize(p, v);
   }
   if (!isParameterModulated(p)) return vec2(p.value);
   vec2 pos = applyModulationCached(p.position, 0.0, 1.0, p.modulationAmounts, p.staticSum, p.staticWeight, mods);
-  return fromKnobPosition(pos, p.scaleKind, p.logEnds);
+  return applyParameterQuantize(p, fromKnobPosition(pos, p.scaleKind, p.logEnds));
 }
 
 float resolveParameterMono(Parameter p, vec2 mods[NUM_MODULATORS]) {
@@ -525,11 +560,12 @@ float resolveParameterMono(Parameter p, vec2 mods[NUM_MODULATORS]) {
 // As resolveParameter, evaluating the modulators at uv.
 vec2 resolveParameterAt(Parameter p, vec2 uv, int depth, float audioLevelDb) {
   if (p.scaleKind == 0) {
-    return applyModulation(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, uv, depth, audioLevelDb);
+    vec2 v = applyModulation(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, uv, depth, audioLevelDb);
+    return applyParameterQuantize(p, v);
   }
   if (!isParameterModulated(p)) return vec2(p.value);
   vec2 pos = applyModulation(p.position, 0.0, 1.0, p.modulationAmounts, p.staticSum, p.staticWeight, uv, depth, audioLevelDb);
-  return fromKnobPosition(pos, p.scaleKind, p.logEnds);
+  return applyParameterQuantize(p, fromKnobPosition(pos, p.scaleKind, p.logEnds));
 }
 
 float resolveParameterMonoAt(Parameter p, vec2 uv, int depth, float audioLevelDb) {

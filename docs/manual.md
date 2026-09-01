@@ -709,7 +709,7 @@ Drag on the time legend to set a loop region and the fill covers only that span.
 - **Right-click** a value to pick from its list of preset values. A small chevron marks the values that have one.
 - **Click** a value to type a number in.
 - **Double-click the label** to reset a parameter to its default. This also clears every modulation amount on it.
-- **Click the label** to open the parameter menu: modulation amounts, reset, exclusion from randomisation, step linking, and a **book icon** that opens this manual at the section explaining that parameter.
+- **Click the label** to open the parameter menu: modulation amounts, a **Quantise** switch that locks modulation to the control's preset values, reset, exclusion from randomisation, step linking, and a **book icon** that opens this manual at the section explaining that parameter.
 
 ### Section Presets
 
