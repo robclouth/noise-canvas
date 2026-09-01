@@ -5,6 +5,7 @@ import { diag } from "@renderer/lib/diag-log";
 import { viewCoversFile, type CanvasView } from "@renderer/lib/canvas-view";
 import { blockGrid } from "@renderer/lib/block-grid";
 import { CANVAS_WINDOW_BLOCKS, needsCanvasWindow } from "@renderer/lib/canvas-window";
+import { ExportSourceWindow, exportBlockGrid } from "@renderer/lib/export-window";
 import { sourceReadSpan } from "@renderer/lib/source-window";
 import { WindowedCanvas, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
 import { strokeReach, type ReachContext } from "@renderer/lib/effect-reach";
@@ -861,7 +862,9 @@ const FileRendererInner = memo(
 
     /**
      * Renders the committed spectrogram as a still image for export. Reads the
-     * same FBO the view samples, so what is painted is what gets exported.
+     * same FBO the view samples, so what is painted is what gets exported. A
+     * canvas holding a window reads the file a span at a time from the block
+     * store instead, so the image covers all of it.
      */
     const renderExportImage = async (
       options: ImageExportOptions,
@@ -871,17 +874,29 @@ const FileRendererInner = memo(
       const gl = glRef.current;
       const strokeRenderer = strokeRendererRef.current;
       if (!gl || !strokeRenderer || !strokeRenderer.getIsInitialized()) return null;
-      return renderExportImageToCanvas(
-        gl,
-        {
-          texture: strokeRenderer.getDisplayTexture(),
-          metadataTexture: strokeRenderer.getTextures().metadata,
-          spectrogramData,
-        },
-        options,
-        posterInfo,
-        onProgress,
-      );
+      const windowed = canvasRef.current && !canvasRef.current.wholeFile;
+      const window = windowed
+        ? new ExportSourceWindow(gl, exportBlockGrid(spectrogramData), {
+            windowBlocks: CANVAS_WINDOW_BLOCKS,
+            read: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
+          })
+        : null;
+      try {
+        return await renderExportImageToCanvas(
+          gl,
+          {
+            texture: window ? null : strokeRenderer.getDisplayTexture(),
+            metadataTexture: window ? null : strokeRenderer.getTextures().metadata,
+            spectrogramData,
+            window,
+          },
+          options,
+          posterInfo,
+          onProgress,
+        );
+      } finally {
+        window?.dispose();
+      }
     };
 
     /** The frames the file's view shows at its current zoom and offset. */

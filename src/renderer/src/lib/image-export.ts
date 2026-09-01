@@ -48,12 +48,32 @@ export const DEFAULT_EXPORT_OPTIONS: ImageExportOptions = {
   poster: false,
 };
 
-export interface ImageExportSource {
-  /** The committed spectrogram to draw, as an FBO texture. */
+/** A span of a file's packed state on the GPU, laid out as a source of its own. */
+export interface ExportSpan {
   texture: Texture;
-  /** Per-band packing offsets, lengths, and time strides. */
   metadataTexture: Texture;
+  startFrame: number;
+  endFrame: number;
+}
+
+/**
+ * Serves spans of a file's committed state to an export whose canvas holds
+ * only a window of it. `hold` resolves null when a span cannot be read.
+ */
+export interface ExportWindow {
+  /** Frames one span holds at most. */
+  spanFrames: number;
+  hold: (startFrame: number, endFrame: number) => Promise<ExportSpan | null>;
+}
+
+export interface ImageExportSource {
+  /** The committed spectrogram to draw, as an FBO texture. Null with a window. */
+  texture: Texture | null;
+  /** Per-band packing offsets, lengths, and time strides. Null with a window. */
+  metadataTexture: Texture | null;
   spectrogramData: SpectrogramData;
+  /** Where the spans come from when the canvas cannot hold the whole file. */
+  window?: ExportWindow | null;
 }
 
 export interface DbRange {
@@ -148,7 +168,7 @@ function getExportMaterial(): RawShaderMaterial {
       timeTaps: { value: 8 },
       tileUvMin: { value: new Vector2(0, 0) },
       tileUvSize: { value: new Vector2(1, 1) },
-      imageSize: { value: new Vector2(1, 1) },
+      sourceSpanPixels: { value: 1.0 },
       tileOriginPx: { value: new Vector2(0, 0) },
       probeMode: { value: false },
       probeMinDb: { value: PROBE_MIN_DB },
@@ -165,6 +185,7 @@ function getExportMaterial(): RawShaderMaterial {
 function applySourceUniforms(material: RawShaderMaterial, source: ImageExportSource, colormap: ColormapId): void {
   const { spectrogramData: data } = source;
   const uniforms = material.uniforms;
+  // A window rebinds these per span; without one the whole file stays bound.
   uniforms.sourceSpectrogramTex.value = source.texture;
   uniforms.sourceMetadataTex.value = source.metadataTexture;
   uniforms.sourceFrameCount.value = data.numFrames;
@@ -181,6 +202,91 @@ function applySourceUniforms(material: RawShaderMaterial, source: ImageExportSou
   uniforms.colormapTex.value = getColormapTexture(colormap) ?? getColormapTexture("mono");
 }
 
+/** The image columns one source span serves, and the frames it has to hold. */
+interface ExportStrip {
+  x0: number;
+  x1: number;
+  startFrame: number;
+  endFrame: number;
+}
+
+/**
+ * The image cut into runs of columns, each narrow enough for one span of the
+ * source to serve. Without a window the whole image is one strip.
+ */
+function exportStrips(source: ImageExportSource, columns: number): ExportStrip[] {
+  const { numFrames } = source.spectrogramData;
+  const window = source.window;
+  if (!window || window.spanFrames >= numFrames) {
+    return [{ x0: 0, x1: columns, startFrame: 0, endFrame: numFrames }];
+  }
+  // A column of margin each side, so the footprint average at a strip's edge
+  // still reads frames the span holds.
+  const framesPerColumn = numFrames / columns;
+  const width = Math.max(1, Math.floor(window.spanFrames / framesPerColumn) - 2);
+  const strips: ExportStrip[] = [];
+  for (let x0 = 0; x0 < columns; x0 += width) {
+    const x1 = Math.min(columns, x0 + width);
+    strips.push({
+      x0,
+      x1,
+      startFrame: Math.max(0, (x0 - 1) * framesPerColumn),
+      endFrame: Math.min(numFrames, (x1 + 1) * framesPerColumn),
+    });
+  }
+  return strips;
+}
+
+/** The frames a bound source lays out. */
+interface BoundSpan {
+  startFrame: number;
+  frames: number;
+}
+
+/**
+ * Binds the span that serves `strip`. `spanPixels` is the image width the
+ * per-pixel time footprint is measured against, which stays the final image's
+ * even while the probe renders smaller. Resolves null when the read failed.
+ */
+async function holdStrip(
+  material: RawShaderMaterial,
+  source: ImageExportSource,
+  strip: ExportStrip,
+  spanPixels: number,
+): Promise<BoundSpan | null> {
+  const { numFrames } = source.spectrogramData;
+  if (!source.window) {
+    material.uniforms.sourceSpanPixels.value = spanPixels;
+    return { startFrame: 0, frames: numFrames };
+  }
+  const span = await source.window.hold(strip.startFrame, strip.endFrame);
+  // A span short of the strip would draw clamped values as if they were the
+  // file's, so the export stops instead.
+  if (!span || span.startFrame > strip.startFrame || span.endFrame < strip.endFrame) return null;
+  const frames = span.endFrame - span.startFrame;
+  material.uniforms.sourceSpectrogramTex.value = span.texture;
+  material.uniforms.sourceMetadataTex.value = span.metadataTexture;
+  material.uniforms.sourceFrameCount.value = frames;
+  material.uniforms.sourceSpanPixels.value = (spanPixels * frames) / numFrames;
+  return { startFrame: span.startFrame, frames };
+}
+
+/** Image columns [x0, x0 + count) as a UV range on the bound span. */
+function spanUvX(
+  source: ImageExportSource,
+  span: BoundSpan,
+  x0: number,
+  count: number,
+  columns: number,
+): { min: number; size: number } {
+  const { numFrames } = source.spectrogramData;
+  const framesPerColumn = numFrames / columns;
+  return {
+    min: (x0 * framesPerColumn - span.startFrame) / span.frames,
+    size: (count * framesPerColumn) / span.frames,
+  };
+}
+
 /** Serialises GPU work so two renders cannot interleave on the shared material. */
 let pending: Promise<unknown> = Promise.resolve();
 
@@ -193,49 +299,55 @@ function serialize<T>(work: () => Promise<T>): Promise<T> {
 async function renderTiles(
   gl: WebGLRenderer,
   material: RawShaderMaterial,
+  source: ImageExportSource,
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   onProgress?: (fraction: number) => void,
 ): Promise<void> {
-  const tilesX = Math.ceil(width / TILE_SIZE);
+  const strips = exportStrips(source, width);
   const tilesY = Math.ceil(height / TILE_SIZE);
-  const totalTiles = tilesX * tilesY;
+  let totalTiles = 0;
+  for (const strip of strips) totalTiles += Math.ceil((strip.x1 - strip.x0) / TILE_SIZE) * tilesY;
   let target: WebGLRenderTarget | null = null;
   let done = 0;
 
   try {
-    // Tiles are laid out bottom-up to match GL's pixel origin; the readback is
-    // flipped into the canvas's top-down rows as each tile lands.
-    for (let ty = 0; ty < tilesY; ty++) {
-      const y0 = ty * TILE_SIZE;
-      const tileH = Math.min(TILE_SIZE, height - y0);
-      for (let tx = 0; tx < tilesX; tx++) {
-        const x0 = tx * TILE_SIZE;
-        const tileW = Math.min(TILE_SIZE, width - x0);
+    for (const strip of strips) {
+      const span = await holdStrip(material, source, strip, width);
+      if (!span) throw new Error("The export could not read the file");
+      // Tiles are laid out bottom-up to match GL's pixel origin; the readback
+      // is flipped into the canvas's top-down rows as each tile lands.
+      for (let ty = 0; ty < tilesY; ty++) {
+        const y0 = ty * TILE_SIZE;
+        const tileH = Math.min(TILE_SIZE, height - y0);
+        for (let x0 = strip.x0; x0 < strip.x1; x0 += TILE_SIZE) {
+          const tileW = Math.min(TILE_SIZE, strip.x1 - x0);
 
-        if (!target) {
-          target = createByteTarget(tileW, tileH);
-        } else if (target.width !== tileW || target.height !== tileH) {
-          target.setSize(tileW, tileH);
+          if (!target) {
+            target = createByteTarget(tileW, tileH);
+          } else if (target.width !== tileW || target.height !== tileH) {
+            target.setSize(tileW, tileH);
+          }
+
+          const uvX = spanUvX(source, span, x0, tileW, width);
+          (material.uniforms.tileUvMin.value as Vector2).set(uvX.min, y0 / height);
+          (material.uniforms.tileUvSize.value as Vector2).set(uvX.size, tileH / height);
+          (material.uniforms.tileOriginPx.value as Vector2).set(x0, y0);
+
+          const pixels = await renderMaterialToBytes(gl, material, target);
+
+          const image = ctx.createImageData(tileW, tileH);
+          const rowBytes = tileW * 4;
+          for (let row = 0; row < tileH; row++) {
+            const src = (tileH - 1 - row) * rowBytes;
+            image.data.set(pixels.subarray(src, src + rowBytes), row * rowBytes);
+          }
+          ctx.putImageData(image, x0, height - y0 - tileH);
+
+          done++;
+          onProgress?.(done / totalTiles);
         }
-
-        (material.uniforms.tileUvMin.value as Vector2).set(x0 / width, y0 / height);
-        (material.uniforms.tileUvSize.value as Vector2).set(tileW / width, tileH / height);
-        (material.uniforms.tileOriginPx.value as Vector2).set(x0, y0);
-
-        const pixels = await renderMaterialToBytes(gl, material, target);
-
-        const image = ctx.createImageData(tileW, tileH);
-        const rowBytes = tileW * 4;
-        for (let row = 0; row < tileH; row++) {
-          const src = (tileH - 1 - row) * rowBytes;
-          image.data.set(pixels.subarray(src, src + rowBytes), row * rowBytes);
-        }
-        ctx.putImageData(image, x0, height - y0 - tileH);
-
-        done++;
-        onProgress?.(done / totalTiles);
       }
     }
   } finally {
@@ -258,14 +370,13 @@ export function renderSpectrogramPlot(
   return serialize(async () => {
     const material = getExportMaterial();
     applySourceUniforms(material, source, colormap);
-    (material.uniforms.imageSize.value as Vector2).set(width, height);
     material.uniforms.timeTaps.value = computeTimeTaps(
       source.spectrogramData.numFrames,
       width,
       source.spectrogramData.synthesisMetadata.bandStepLog2s,
     );
 
-    const range = await measureRange(gl, material, width, height);
+    const range = await measureRange(gl, material, source, width, height);
     material.uniforms.minDb.value = range.minDb;
     material.uniforms.maxDb.value = range.maxDb;
 
@@ -275,7 +386,7 @@ export function renderSpectrogramPlot(
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Could not create a 2D context for the exported image");
 
-    await renderTiles(gl, material, ctx, width, height, onProgress);
+    await renderTiles(gl, material, source, ctx, width, height, onProgress);
     return canvas;
   });
 }
@@ -288,6 +399,7 @@ export function renderSpectrogramPlot(
 async function measureRange(
   gl: WebGLRenderer,
   material: RawShaderMaterial,
+  source: ImageExportSource,
   width: number,
   height: number,
 ): Promise<DbRange> {
@@ -295,18 +407,37 @@ async function measureRange(
   const probeW = Math.max(2, Math.round(width * scale));
   const probeH = Math.max(2, Math.round(height * scale));
 
-  const target = createByteTarget(probeW, probeH);
+  const strips = exportStrips(source, probeW);
+  const chunks: Uint8Array[] = [];
+  let target: WebGLRenderTarget | null = null;
   try {
     material.uniforms.probeMode.value = true;
-    (material.uniforms.tileUvMin.value as Vector2).set(0, 0);
-    (material.uniforms.tileUvSize.value as Vector2).set(1, 1);
-    (material.uniforms.tileOriginPx.value as Vector2).set(0, 0);
-    const pixels = await renderMaterialToBytes(gl, material, target);
-    return computeAutoRange(pixels);
+    for (const strip of strips) {
+      const span = await holdStrip(material, source, strip, width);
+      if (!span) throw new Error("The export could not read the file");
+      const stripW = strip.x1 - strip.x0;
+      if (!target) target = createByteTarget(stripW, probeH);
+      else if (target.width !== stripW || target.height !== probeH) target.setSize(stripW, probeH);
+      const uvX = spanUvX(source, span, strip.x0, stripW, probeW);
+      (material.uniforms.tileUvMin.value as Vector2).set(uvX.min, 0);
+      (material.uniforms.tileUvSize.value as Vector2).set(uvX.size, 1);
+      (material.uniforms.tileOriginPx.value as Vector2).set(strip.x0, 0);
+      chunks.push(await renderMaterialToBytes(gl, material, target));
+    }
   } finally {
     material.uniforms.probeMode.value = false;
-    target.dispose();
+    target?.dispose();
   }
+  // The range comes from a histogram, so the strips need no reassembly.
+  let length = 0;
+  for (const chunk of chunks) length += chunk.length;
+  const probe = new Uint8Array(length);
+  let at = 0;
+  for (const chunk of chunks) {
+    probe.set(chunk, at);
+    at += chunk.length;
+  }
+  return computeAutoRange(probe);
 }
 
 /**

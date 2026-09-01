@@ -16,13 +16,16 @@ uniform sampler2D colormapTex;
 // Samples taken across each output pixel's time footprint.
 uniform int timeTaps;
 
-// The sub-rectangle of the full image this draw covers, in image UV. Rendering
-// proceeds in tiles so no single draw call runs long enough to trip a GPU
-// watchdog, and so the render target stays small.
+// The sub-rectangle of the full image this draw covers. The Y axis is image
+// UV; the X axis is the UV of whatever span the source lays out, which is the
+// whole file unless the export reads it a window at a time. Rendering proceeds
+// in tiles so no single draw call runs long enough to trip a GPU watchdog, and
+// so the render target stays small.
 uniform vec2 tileUvMin;
 uniform vec2 tileUvSize;
-// Full image size in pixels, and this tile's origin within it.
-uniform vec2 imageSize;
+// Image pixels spanning what the source lays out, and this tile's origin in
+// the image.
+uniform float sourceSpanPixels;
 uniform vec2 tileOriginPx;
 
 // When set, output the normalised level over [probeMinDb, probeMaxDb] instead of
@@ -91,7 +94,7 @@ void main() {
   float base = floor(bandIndexF);
   float bandFrac = bandIndexF - base;
 
-  float halfWidthUv = 0.5 / max(imageSize.x, 1.0);
+  float halfWidthUv = 0.5 / max(sourceSpanPixels, 1.0);
   vec2 m0 = sampleRowFootprint(base - 1.0, uv.x, halfWidthUv);
   vec2 m1 = sampleRowFootprint(base, uv.x, halfWidthUv);
   vec2 m2 = sampleRowFootprint(base + 1.0, uv.x, halfWidthUv);
