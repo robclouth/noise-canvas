@@ -8,7 +8,14 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
 import { diag } from "../lib/diag-log";
-import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budget";
+import {
+  canvasWindowBlocks,
+  remainingCoefficientBudget,
+  usedBudgetFraction,
+  type OpenFileTexels,
+} from "../lib/gpu-budget";
+import { blockGrid, blockTexels } from "../lib/block-grid";
+import { needsCanvasWindow } from "../lib/canvas-window";
 import { toChannelCount } from "../lib/channel-mix";
 import { insertSilence, type InsertSilenceValues } from "../lib/insert-silence";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
@@ -345,12 +352,22 @@ function stripExtensionForLabel(name: string): string {
 }
 
 /** Texel counts of the open files' packed textures, skipping `excludeFileId`. */
-function openFileTexelCounts(excludeFileId?: string): number[] {
-  const counts: number[] = [];
+/** What each open file holds, for the graphics budget. */
+export function openFileTexelCounts(excludeFileId?: string): OpenFileTexels[] {
+  const counts: OpenFileTexels[] = [];
   for (const [id, file] of Object.entries(openFiles)) {
     if (id === excludeFileId) continue;
     const data = file.spectrogramData;
-    if (data) counts.push(data.textureWidth * data.textureHeight);
+    if (!data) continue;
+    const texels = data.textureWidth * data.textureHeight;
+    const grid = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate);
+    const blocks = canvasWindowBlocks(grid);
+    if (needsCanvasWindow(grid, blocks)) {
+      const block = blockTexels(grid, 0);
+      counts.push({ file: texels, canvas: blocks * block, block });
+    } else {
+      counts.push({ file: texels, canvas: texels, block: 0 });
+    }
   }
   return counts;
 }

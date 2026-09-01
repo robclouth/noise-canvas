@@ -1,20 +1,11 @@
 import { Box, Group, Text } from "@mantine/core";
 import { usedBudgetFraction } from "@renderer/lib/gpu-budget";
 import { helpProps } from "@renderer/lib/ui-controls";
-import { openFiles } from "@renderer/store/files";
+import { openFileTexelCounts } from "@renderer/store/files";
 import { useEffect, useState } from "react";
 import { Tooltip } from "../tooltip";
 
 const POLL_MS = 2000;
-
-function openFileTexelCounts(): number[] {
-  const counts: number[] = [];
-  for (const file of Object.values(openFiles)) {
-    const data = file.spectrogramData;
-    if (data) counts.push(data.textureWidth * data.textureHeight);
-  }
-  return counts;
-}
 
 /** Share of the graphics memory budget the open files hold. */
 export function MemoryReadout() {

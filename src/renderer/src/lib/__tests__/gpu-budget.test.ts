@@ -10,6 +10,7 @@ import {
   GPU_BYTES_PER_TEXEL_SCRATCH,
   historyCacheBytes,
   remainingCoefficientBudget,
+  type OpenFileTexels,
   spectrogramBytes,
   usedBudgetFraction,
 } from "../gpu-budget";
@@ -117,12 +118,15 @@ describe("GPU budget rates", () => {
     // The pool is shared, so a second open file of the same size adds its own
     // resident textures but no second scratch set.
     const texels = 1000;
-    const one = spectrogramBytes([texels], false);
-    const two = spectrogramBytes([texels, texels], false);
+    const one = spectrogramBytes([whole(texels)], false);
+    const two = spectrogramBytes([whole(texels), whole(texels)], false);
     expect(one).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels + displayBytes(texels));
     expect(two - one).toBe(GPU_BYTES_PER_TEXEL_FILE * texels + displayBytes(texels));
   });
 });
+
+/** An open file whose canvas holds all of it. */
+const whole = (texels: number): OpenFileTexels => ({ file: texels, canvas: texels, block: 0 });
 
 /** What one open file's display pyramid takes out of the budget. */
 const pyramidBytes = (texels: number): number => displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
@@ -154,8 +158,8 @@ describe("history cache overhead", () => {
 
   it("charges the caches once, however many files are open", () => {
     const texels = 1000;
-    const one = spectrogramBytes([texels], true);
-    const two = spectrogramBytes([texels, texels], true);
+    const one = spectrogramBytes([whole(texels)], true);
+    const two = spectrogramBytes([whole(texels), whole(texels)], true);
     expect(one).toBe(
       (GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels +
         displayBytes(texels) +
@@ -170,28 +174,58 @@ describe("history cache overhead", () => {
 
   it("leaves the caches uncharged when the GPU has its own memory", () => {
     const texels = 1000;
-    expect(spectrogramBytes([texels], false)).toBe(
+    expect(spectrogramBytes([whole(texels)], false)).toBe(
       (GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels + displayBytes(texels),
     );
   });
 
-  it("takes the caches out of the budget a new file is measured against", () => {
+  it("stops limiting the length once a window will serve the new file", () => {
+    expect(remainingCoefficientBudget([])).toBeUndefined();
+  });
+
+  it("takes the caches out of the budget a new file too big for a window is measured against", () => {
+    // Enough open that what is left cannot hold a window.
+    const open = 5_600_000;
+    const files = [whole(open), whole(open), whole(open)];
+    const perTexel = GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE;
     const budget =
       GPU_MEMORY * GPU_BUDGET_SHARE -
       overhead() -
+      files.length * (perTexel * open + displayBytes(open)) -
       DISPLAY_PYRAMID_MAX_TEXELS * DISPLAY_PYRAMID_BYTES_PER_TEXEL -
       displayTilesBytes();
-    const perTexel = GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE;
-    // With nothing open the new file grows the scratch pool with it.
-    expect(remainingCoefficientBudget([])).toBe(Math.floor(budget / (perTexel + GPU_BYTES_PER_TEXEL_SCRATCH)));
+    expect(budget).toBeLessThan(canvasWindowBudgetBytes());
+    // The open files already pay for a scratch pool this large.
+    expect(remainingCoefficientBudget(files)).toBe(
+      Math.floor((budget - GPU_BYTES_PER_TEXEL_SCRATCH * open) / perTexel),
+    );
+  });
+
+  it("charges a windowed file its window, not its length", () => {
+    const block = 100_000;
+    const canvas = 8 * block;
+    const capped = DISPLAY_PYRAMID_MAX_TEXELS * 2;
+    expect(spectrogramBytes([{ file: capped * 100, canvas, block }], true)).toBe(
+      spectrogramBytes([{ file: capped, canvas, block }], true),
+    );
+  });
+
+  it("charges a windowed file for its block slots instead of the CPU copies", () => {
+    const block = 100_000;
+    const canvas = 8 * block;
+    const windowed = spectrogramBytes([{ file: canvas, canvas, block }], true);
+    // Three windows of slots plus the spare each window keeps, at 16 bytes a
+    // texel, in place of the packed and inverse-map arrays.
+    const slots = 16 * (3 * canvas + 8 * block);
+    expect(windowed - spectrogramBytes([whole(canvas)], true)).toBe(slots - CPU_BYTES_PER_TEXEL_FILE * canvas);
   });
 
   it("charges each open file's display pyramid", () => {
     const texels = 1000;
-    const withDisplay = spectrogramBytes([texels], true);
+    const withDisplay = spectrogramBytes([whole(texels)], true);
     const withoutDisplay = withDisplay - displayBytes(texels);
     expect(pyramidBytes(texels)).toBeGreaterThan(0);
-    expect(spectrogramBytes([texels, texels], true) - withDisplay).toBe(
+    expect(spectrogramBytes([whole(texels), whole(texels)], true) - withDisplay).toBe(
       (GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE) * texels + displayBytes(texels),
     );
     expect(withoutDisplay).toBeLessThan(withDisplay);
@@ -212,7 +246,9 @@ describe("history cache overhead", () => {
 
   it("reports the open files' share of the budget, caches included", () => {
     const texels = 1000;
-    expect(usedBudgetFraction([texels])).toBe(spectrogramBytes([texels], true) / (GPU_MEMORY * GPU_BUDGET_SHARE));
+    expect(usedBudgetFraction([whole(texels)])).toBe(
+      spectrogramBytes([whole(texels)], true) / (GPU_MEMORY * GPU_BUDGET_SHARE),
+    );
   });
 });
 

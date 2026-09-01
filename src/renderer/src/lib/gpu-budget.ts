@@ -32,11 +32,6 @@ export const CANVAS_WINDOW_SPARE_BLOCKS = 4;
 const CANVAS_WINDOW_SLOT_WINDOWS = 3;
 /** Spare slots the canvas window and the original window keep between them. */
 const CANVAS_WINDOW_SPARE_SLOTS = 2 * CANVAS_WINDOW_SPARE_BLOCKS;
-// GPU bytes per texel of a canvas window: the ping-pong pair (2 × RGBA32F =
-// 32), the view's inverse map (RG32F = 8) and the window over the original
-// (RGBA32F = 16). The same rate a whole-file canvas pays, over the window
-// instead of the file.
-export const GPU_BYTES_PER_TEXEL_WINDOW = 56;
 /** Share of the spectrogram budget one file's painting canvas may hold. */
 const CANVAS_WINDOW_SHARE = 0.35;
 // Blocks a window holds at least. Under this the brush outruns the canvas on
@@ -55,9 +50,16 @@ const envWindowBlocks = Number(import.meta.env.VITE_CANVAS_WINDOW_BLOCKS);
  */
 export function canvasWindowBytes(blocks: number, texelsPerBlock: number): number {
   const window = blocks * texelsPerBlock;
+  // A window pays the whole-file rate over the window instead of the file —
+  // the ping-pong pair, an inverse map and the original — plus the slots.
   const perTexel =
-    GPU_BYTES_PER_TEXEL_WINDOW + GPU_BYTES_PER_TEXEL_SCRATCH + PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SLOT_WINDOWS;
-  return perTexel * window + PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SPARE_SLOTS * texelsPerBlock;
+    GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH + PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SLOT_WINDOWS;
+  return perTexel * window + windowSlotSpareBytes(texelsPerBlock);
+}
+
+/** Bytes the slots the two windows keep beyond the windows themselves hold. */
+function windowSlotSpareBytes(texelsPerBlock: number): number {
+  return PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SPARE_SLOTS * texelsPerBlock;
 }
 
 /** GPU bytes one file's painting canvas may hold. Zero when the host names no GPU figure. */
@@ -93,7 +95,7 @@ export function canvasWindowBlocks(grid: BlockGrid): number {
   const wholeRate =
     GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH + (info.unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
   if (wholeRate * fileTexels(grid) <= budget) return Infinity;
-  const spare = PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SPARE_SLOTS * texelsPerBlock;
+  const spare = windowSlotSpareBytes(texelsPerBlock);
   const blocks = Math.floor((budget - spare) / (canvasWindowBytes(1, texelsPerBlock) - spare));
   if (blocks >= grid.blockCount) return Infinity;
   return Math.min(CANVAS_WINDOW_MAX_BLOCKS, grid.blockCount, Math.max(CANVAS_WINDOW_MIN_BLOCKS, blocks));
@@ -124,22 +126,43 @@ export function historyCacheBytes(): number {
   return cachedHistoryBytes;
 }
 
+/** What one open file holds, in packed texels. */
+export interface OpenFileTexels {
+  /** Texels the file's analysed state has. */
+  file: number;
+  /** Texels the canvas lays out: the file's own, or a window's. */
+  canvas: number;
+  /** Texels one block holds, or zero while the canvas holds the whole file. */
+  block: number;
+}
+
+/** Display textures one open file holds. Both are bounded, whatever its length. */
+function displayBytes(fileTexels: number): number {
+  return displayPyramidBudgetTexels(fileTexels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL + displayTilesBytes();
+}
+
+/**
+ * What one open file holds beyond its display textures and the shared scratch:
+ * the canvas and the textures behind it, the block slots when it paints
+ * through a window, and the CPU copies when it does not.
+ */
+function fileResidentBytes(file: OpenFileTexels, unified: boolean): number {
+  const bytes = GPU_BYTES_PER_TEXEL_FILE * file.canvas;
+  if (file.block <= 0) return bytes + (unified ? CPU_BYTES_PER_TEXEL_FILE * file.file : 0);
+  return bytes + PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SLOT_WINDOWS * file.canvas + windowSlotSpareBytes(file.block);
+}
+
 /** Bytes the open files hold, by the same rates the budget is spent at. */
-export function spectrogramBytes(openTexelCounts: number[], unified: boolean): number {
-  let sum = 0;
-  let largest = 0;
-  for (const texels of openTexelCounts) {
-    sum += texels;
-    largest = Math.max(largest, texels);
+export function spectrogramBytes(open: OpenFileTexels[], unified: boolean): number {
+  let bytes = 0;
+  let scratch = 0;
+  for (const file of open) {
+    bytes += fileResidentBytes(file, unified) + displayBytes(file.file);
+    scratch = Math.max(scratch, GPU_BYTES_PER_TEXEL_SCRATCH * file.canvas);
   }
-  const perTexel = GPU_BYTES_PER_TEXEL_FILE + (unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
   // No open file, no history manager, so nothing holds the caches yet.
-  const overhead = unified && openTexelCounts.length > 0 ? historyCacheBytes() : 0;
-  let displays = 0;
-  for (const texels of openTexelCounts) {
-    displays += displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL + displayTilesBytes();
-  }
-  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest + overhead + displays;
+  const overhead = unified && open.length > 0 ? historyCacheBytes() : 0;
+  return bytes + scratch + overhead;
 }
 
 /**
@@ -147,40 +170,43 @@ export function spectrogramBytes(openTexelCounts: number[], unified: boolean): n
  * the menu bar reports. Undefined when the host names no GPU memory figure,
  * which leaves no budget to measure against.
  */
-export function usedBudgetFraction(openTexelCounts: number[]): number | undefined {
+export function usedBudgetFraction(open: OpenFileTexels[]): number | undefined {
   const info = gpuMemoryInfo();
   if (info.bytes <= 0) return undefined;
   const budget = info.bytes * GPU_BUDGET_SHARE;
-  return spectrogramBytes(openTexelCounts, info.unified) / budget;
+  return spectrogramBytes(open, info.unified) / budget;
 }
 
 /**
- * Largest packed coefficient count one more analysis may produce, given the
- * texel counts of the files already open. Undefined when the host reports no
- * GPU memory figure, leaving only the analyzer's texture-dimension cap.
+ * Largest packed coefficient count one more analysis may produce, given what
+ * the files already open hold. Undefined when the budget does not limit the
+ * length at all — because the host names no GPU memory figure, or because the
+ * new file will paint through a window, which costs the same however long it
+ * is. Either way only the analyser's own texture cap is left.
  */
-export function remainingCoefficientBudget(openTexelCounts: number[]): number | undefined {
+export function remainingCoefficientBudget(open: OpenFileTexels[]): number | undefined {
   const info = gpuMemoryInfo();
   if (info.bytes <= 0) return undefined;
 
   const perTexel = GPU_BYTES_PER_TEXEL_FILE + (info.unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
   let budget = info.bytes * GPU_BUDGET_SHARE - (info.unified ? historyCacheBytes() : 0);
 
-  let sum = 0;
   let largest = 0;
-  for (const texels of openTexelCounts) {
-    sum += texels;
-    largest = Math.max(largest, texels);
-    budget -= displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL + displayTilesBytes();
+  for (const file of open) {
+    largest = Math.max(largest, file.canvas);
+    budget -= fileResidentBytes(file, info.unified) + displayBytes(file.file);
   }
   // The display textures of the file about to open, charged at their cap:
   // both are bounded, so a longer file does not take more of the budget.
   budget -= DISPLAY_PYRAMID_MAX_TEXELS * DISPLAY_PYRAMID_BYTES_PER_TEXEL + displayTilesBytes();
 
-  // A new file within the current pool size pays only the per-file rate; a
-  // larger one also grows the scratch pool with it.
-  const withinPool = (budget - perTexel * sum - GPU_BYTES_PER_TEXEL_SCRATCH * largest) / perTexel;
-  const growsPool = (budget - perTexel * sum) / (perTexel + GPU_BYTES_PER_TEXEL_SCRATCH);
+  const window = canvasWindowBudgetBytes();
+  if (window > 0 && budget - GPU_BYTES_PER_TEXEL_SCRATCH * largest >= window) return undefined;
+
+  // The new file has to fit whole. Within the scratch the open files already
+  // pay for, or growing the pool with it.
+  const withinPool = (budget - GPU_BYTES_PER_TEXEL_SCRATCH * largest) / perTexel;
+  const growsPool = budget / (perTexel + GPU_BYTES_PER_TEXEL_SCRATCH);
   const allowed = growsPool > largest ? growsPool : Math.max(0, withinPool);
   return Math.floor(allowed);
 }

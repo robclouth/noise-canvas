@@ -177,6 +177,7 @@ function openTestFile(filePath = "/audio/a.wav") {
       sampleRate: 48000,
       bandsPerOctave: 12,
       minFreq: 20,
+      metadata: new Float32Array(numBands * 4),
       synthesisMetadata: {
         bandOffsets: new Uint32Array(numBands),
         bandStepLog2s: new Int32Array(numBands),
