@@ -4,7 +4,8 @@ import { useTransientStore } from "@renderer/store/transient";
 import { diag } from "@renderer/lib/diag-log";
 import { viewCoversFile, type CanvasView } from "@renderer/lib/canvas-view";
 import { blockGrid } from "@renderer/lib/block-grid";
-import { CANVAS_WINDOW_BLOCKS, needsCanvasWindow } from "@renderer/lib/canvas-window";
+import { needsCanvasWindow } from "@renderer/lib/canvas-window";
+import { canvasWindowBlocks } from "@renderer/lib/gpu-budget";
 import { ExportSourceWindow, exportBlockGrid } from "@renderer/lib/export-window";
 import { sourceReadSpan } from "@renderer/lib/source-window";
 import { WindowedCanvas, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
@@ -493,10 +494,8 @@ const FileRendererInner = memo(
       // and its inverse map from the block store and the view, so nothing
       // samples the file-sized pair. At ten minutes they are the largest thing
       // this file puts on the graphics device, so they are never built.
-      const windowed = needsCanvasWindow(
-        blockGrid({ numBands, metadata }, spectrogramData.numFrames, spectrogramData.sampleRate),
-        CANVAS_WINDOW_BLOCKS,
-      );
+      const grid = blockGrid({ numBands, metadata }, spectrogramData.numFrames, spectrogramData.sampleRate);
+      const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
       const texWidth = windowed ? 1 : textureWidth;
       const texHeight = windowed ? 1 : textureHeight;
       let packedData = windowed ? new Float32Array(4) : packedSeedRef.current;
@@ -874,10 +873,11 @@ const FileRendererInner = memo(
       const gl = glRef.current;
       const strokeRenderer = strokeRendererRef.current;
       if (!gl || !strokeRenderer || !strokeRenderer.getIsInitialized()) return null;
+      const exportGrid = exportBlockGrid(spectrogramData);
       const windowed = canvasRef.current && !canvasRef.current.wholeFile;
       const window = windowed
-        ? new ExportSourceWindow(gl, exportBlockGrid(spectrogramData), {
-            windowBlocks: CANVAS_WINDOW_BLOCKS,
+        ? new ExportSourceWindow(gl, exportGrid, {
+            windowBlocks: canvasWindowBlocks(exportGrid),
             read: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
           })
         : null;

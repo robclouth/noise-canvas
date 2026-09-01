@@ -88,8 +88,9 @@ async function columnBrightness(app, page, rect) {
 async function run(label, windowBlocks, wav) {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  if (windowBlocks) env.VITE_CANVAS_WINDOW_BLOCKS = String(windowBlocks);
-  else delete env.VITE_CANVAS_WINDOW_BLOCKS;
+  // 0 pins the whole file on the canvas; without it the budget would pick a
+  // window for the reference run too, and the two runs would compare nothing.
+  env.VITE_CANVAS_WINDOW_BLOCKS = String(windowBlocks || 0);
 
   process.stdout.write(`${label}: building… `);
   execFileSync("npx", ["electron-vite", "build"], { cwd: root, env, stdio: "pipe" });

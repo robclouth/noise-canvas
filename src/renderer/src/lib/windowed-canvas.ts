@@ -10,7 +10,8 @@ import {
   viewUvToFileUv,
   type CanvasView,
 } from "./canvas-view";
-import { CANVAS_WINDOW_BLOCKS, CanvasWindow, needsCanvasWindow, type BlockValueReader } from "./canvas-window";
+import { CanvasWindow, needsCanvasWindow, type BlockValueReader } from "./canvas-window";
+import { canvasWindowBlocks } from "./gpu-budget";
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
 import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
@@ -94,9 +95,9 @@ export class WindowedCanvas {
     this.deps = deps;
     this.numFrames = deps.spectrogram.numFrames;
     const { numBands, metadata, sampleRate, numFrames } = deps.spectrogram;
-    const windowBlocks = deps.windowBlocks ?? CANVAS_WINDOW_BLOCKS;
-    this.windowBlocks = windowBlocks;
     const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
+    const windowBlocks = deps.windowBlocks ?? canvasWindowBlocks(grid);
+    this.windowBlocks = windowBlocks;
     if (needsCanvasWindow(grid, windowBlocks)) {
       this.blocks = new CanvasWindow(deps.gl, grid, { windowBlocks, read: deps.readCurrent });
       this.original = new PackedWindow(deps.gl, grid, { windowBlocks, read: deps.readRoot });

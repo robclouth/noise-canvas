@@ -2,21 +2,10 @@ import type { Texture, WebGLRenderer, WebGLRenderTarget } from "three";
 import { blockOfFrame, blockPixelRanges, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "./block-grid";
 import { BlockSlotCache } from "./block-slot-cache";
 import { canvasViewOf, type CanvasView } from "./canvas-view";
-
-const envWindowBlocks = Number(import.meta.env.VITE_CANVAS_WINDOW_BLOCKS);
-
-/**
- * Blocks the painting canvas holds at once. `Infinity` keeps the whole file on
- * the canvas, which is the shape every path outside the block window expects.
- */
-export const CANVAS_WINDOW_BLOCKS: number =
-  Number.isFinite(envWindowBlocks) && envWindowBlocks >= 1 ? Math.floor(envWindowBlocks) : Infinity;
+import { CANVAS_WINDOW_SPARE_BLOCKS } from "./gpu-budget";
 
 /** Blocks the canvas keeps past the brush before the window moves. */
 export const CANVAS_WINDOW_MARGIN_BLOCKS = 1;
-
-/** Slots kept beyond the window, so a window the brush comes back to is still resident. */
-export const CANVAS_WINDOW_SPARE_BLOCKS = 4;
 
 /** A run of blocks, both ends included. */
 export type BlockSpan = { firstBlock: number; lastBlock: number };

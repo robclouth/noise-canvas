@@ -11,7 +11,8 @@ import {
 import type { SpectrogramData } from "../store/types";
 import { blockGrid, blockOfFrame, type BlockGrid } from "./block-grid";
 import type { CanvasView } from "./canvas-view";
-import { CANVAS_WINDOW_BLOCKS, needsCanvasWindow, type BlockValueReader } from "./canvas-window";
+import { needsCanvasWindow, type BlockValueReader } from "./canvas-window";
+import { canvasWindowBlocks } from "./gpu-budget";
 import { PackedWindow } from "./packed-window";
 
 /** What a source window needs to read another file's blocks. */
@@ -76,20 +77,21 @@ export class SourceWindow {
   private fill: Promise<void> | null = null;
   private disposed = false;
 
-  constructor(gl: WebGLRenderer, fileId: string, blocks: SourceFileBlocks, windowBlocks = CANVAS_WINDOW_BLOCKS) {
+  constructor(gl: WebGLRenderer, fileId: string, blocks: SourceFileBlocks, windowBlocks?: number) {
     const { numBands, metadata, numFrames, sampleRate } = blocks.spectrogram;
     this.gl = gl;
     this.fileId = fileId;
     this.blocks = blocks;
     this.grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
-    this.windowBlocks = Math.min(windowBlocks, this.grid.blockCount);
+    this.windowBlocks = Math.min(windowBlocks ?? canvasWindowBlocks(this.grid), this.grid.blockCount);
     this.current = new PackedWindow(gl, this.grid, { windowBlocks: this.windowBlocks, read: blocks.readCurrent });
   }
 
   /** True when a window over the file serves less than all of it. */
-  static isNeeded(spectrogram: SpectrogramData, windowBlocks = CANVAS_WINDOW_BLOCKS): boolean {
+  static isNeeded(spectrogram: SpectrogramData, windowBlocks?: number): boolean {
     const { numBands, metadata, numFrames, sampleRate } = spectrogram;
-    return needsCanvasWindow(blockGrid({ numBands, metadata }, numFrames, sampleRate), windowBlocks);
+    const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
+    return needsCanvasWindow(grid, windowBlocks ?? canvasWindowBlocks(grid));
   }
 
   /** The span the textures lay out, or null while they lay out nothing. */

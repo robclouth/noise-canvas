@@ -1,7 +1,10 @@
-import { FloatType, HalfFloatType, RedFormat, RGFormat, RGBAFormat, UnsignedByteType } from "three";
+import { FloatType, HalfFloatType, RedFormat, RGFormat, RGBAFormat, UnsignedByteType, WebGLRenderer } from "three";
 import type { WebGLRenderTarget } from "three";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  canvasWindowBlocks,
+  canvasWindowBudgetBytes,
+  canvasWindowBytes,
   CPU_BYTES_PER_TEXEL_FILE,
   GPU_BYTES_PER_TEXEL_FILE,
   GPU_BYTES_PER_TEXEL_SCRATCH,
@@ -10,6 +13,9 @@ import {
   spectrogramBytes,
   usedBudgetFraction,
 } from "../gpu-budget";
+import { blockGrid, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "../block-grid";
+import { CanvasWindow } from "../canvas-window";
+import { PackedWindow } from "../packed-window";
 import {
   DISPLAY_PYRAMID_BYTES_PER_TEXEL,
   DISPLAY_PYRAMID_MAX_TEXELS,
@@ -207,5 +213,79 @@ describe("history cache overhead", () => {
   it("reports the open files' share of the budget, caches included", () => {
     const texels = 1000;
     expect(usedBudgetFraction([texels])).toBe(spectrogramBytes([texels], true) / (GPU_MEMORY * GPU_BUDGET_SHARE));
+  });
+});
+
+describe("the window the budget sets", () => {
+  const GPU_MEMORY = 4 * 1024 ** 3;
+  const SAMPLE_RATE = 48000;
+
+  beforeAll(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.nodeOs = { homedir: () => "/home", totalmem: () => 8 * 1024 ** 3 };
+    w.audioAnalysis = { getGpuMemoryInfo: () => ({ bytes: GPU_MEMORY, unified: true }) };
+  });
+
+  /**
+   * A dyadic band layout of the density a real analysis produces: about four
+   * packed texels for every input sample.
+   */
+  function gridOf(seconds: number, blockSeconds = 2): BlockGrid {
+    const numBands = 20;
+    const numFrames = Math.round(seconds * SAMPLE_RATE);
+    const metadata = new Float32Array(numBands * 4);
+    let offset = 0;
+    for (let band = 0; band < numBands; band++) {
+      const step = Math.min(9, Math.floor(band / 2));
+      const length = Math.ceil(numFrames / 2 ** step);
+      metadata[band * 4] = offset;
+      metadata[band * 4 + 1] = length;
+      metadata[band * 4 + 2] = step;
+      metadata[band * 4 + 3] = 20 * 2 ** (band / 4);
+      offset += length;
+    }
+    return blockGrid({ numBands, metadata }, numFrames, SAMPLE_RATE, blockSeconds);
+  }
+
+  it("keeps the whole file on the canvas while it fits the budget", () => {
+    // Longer than the smallest window, so only the budget can decide it.
+    const grid = gridOf(22);
+    expect(grid.blockCount).toBeGreaterThan(4);
+    expect(canvasWindowBlocks(grid)).toBe(Infinity);
+  });
+
+  it.each([2, 3])("gives a file too long for the budget the widest window that fits (%s s blocks)", (blockSeconds) => {
+    const grid = gridOf(600, blockSeconds);
+    const blocks = canvasWindowBlocks(grid);
+    const texels = blockTexels(grid, 0);
+    expect(blocks).toBeLessThan(grid.blockCount);
+    expect(canvasWindowBytes(blocks, texels)).toBeLessThanOrEqual(canvasWindowBudgetBytes());
+    expect(canvasWindowBytes(blocks + 1, texels)).toBeGreaterThan(canvasWindowBudgetBytes());
+  });
+
+  it("gives a longer file the same window", () => {
+    expect(canvasWindowBlocks(gridOf(1200))).toBe(canvasWindowBlocks(gridOf(600)));
+  });
+
+  it("charges a window for the slots the two block windows really claim", () => {
+    const gl = new WebGLRenderer();
+    // Many more blocks than the two windows claim slots for, so nothing clamps.
+    const grid = gridOf(20, 0.25);
+    const blocks = 3;
+    const texels = blockTexels(grid, 0);
+    const read = async (): Promise<Float32Array | null> => null;
+    const canvas = new CanvasWindow(gl, grid, { windowBlocks: blocks, read });
+    const original = new PackedWindow(gl, grid, { windowBlocks: blocks, read });
+    try {
+      // Everything the charge holds that is not a slot: the canvas pair, the
+      // view's inverse map, the original's composed texture and the scratch.
+      const perTexel = 2 * 16 + 8 + 16 + GPU_BYTES_PER_TEXEL_SCRATCH;
+      const slotBytes = canvasWindowBytes(blocks, texels) - perTexel * blocks * texels;
+      expect(slotBytes / (PACKED_BYTES_PER_TEXEL * texels)).toBe(canvas.slotCount + original.slotCount);
+    } finally {
+      canvas.dispose();
+      original.dispose();
+      gl.dispose();
+    }
   });
 });

@@ -1,9 +1,10 @@
 # The canvas window
 
-**Off by default.** `CANVAS_WINDOW_BLOCKS` is `Infinity` unless
-`VITE_CANVAS_WINDOW_BLOCKS` is set at build time, so the shipped app keeps one
-canvas over the whole file, exactly as it always did. Everything below only
-happens for a file long enough to need a window.
+**The budget decides.** `canvasWindowBlocks` sizes the window against the GPU
+pool. A file whose whole state fits keeps one canvas over all of it, exactly as
+it always did; a longer one paints through a window of K blocks. A build pins K
+with `VITE_CANVAS_WINDOW_BLOCKS`, where 0 keeps the whole file on the canvas.
+Everything below only happens for a file long enough to need a window.
 
 This page is the model. `block-memory-plan.md` is the work log — read that only
 when you want to know why something was done.
@@ -45,6 +46,7 @@ where the window should sit, the slot cache pages the blocks in from disk, and
 | `lib/packed-window.ts`    | the same window over the file's original, as one texture               |
 | `lib/source-window.ts`    | a window over another file, for a brush painting from it               |
 | `lib/effect-reach.ts`     | how far past the brush each effect reads                               |
+| `lib/export-window.ts`    | spans of the committed state for an image export                       |
 | `lib/whole-file-gate.ts`  | what a brush asks for that a window cannot serve                       |
 | `lib/carried-paint.ts`    | paint on blocks that left the window mid-stroke                        |
 | `lib/windowed-canvas.ts`  | **the boundary.** File coordinates in, view coordinates out            |
@@ -112,7 +114,7 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    file, and the effects in `WHOLE_FILE_EFFECTS` read past any span a window
    holds. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab and the
    file view says so once. The gate is off while the canvas holds the whole
-   file, which is every file today.
+   file.
 10. **The canvas holds what an effect reads, not only what the dab covers.** A
     blur smear, a repeat gap and a warp's turn, stretch or shift all read past
     the brush when the edge mode is Bleed or Invert; the other edge modes fold
@@ -125,6 +127,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     (`sourceLayout`), a warp's shift is a destination-UV one
     (`destinationLayout`), and a turn mixes the two axes, so it converts to the
     file's own time axis first (`destFileUvSpanX`).
+12. **A reader that needs the whole file takes it a span at a time.** The
+    commit composes the whole painted state from the block store with the
+    stroke's own pixels over it; the image export walks the file in strips,
+    each served by its own window. Neither asks the canvas for a state it
+    cannot hold, and a span that falls short of what it serves stops the
+    reader rather than drawing clamped values.
 
 ## How to check it still works
 
@@ -144,7 +152,7 @@ build. It also prints resident memory.
 
 ## Where the memory goes now
 
-Per open file, windowed, at eight blocks:
+Per open file, windowed, at K blocks:
 
 - canvas pair, sized to the window, not the file
 - block slots on the GPU: two windows plus four spare, because a slide holds

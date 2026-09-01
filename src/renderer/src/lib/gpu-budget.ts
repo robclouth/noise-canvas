@@ -1,3 +1,4 @@
+import { blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "./block-grid";
 import {
   DISPLAY_PYRAMID_BYTES_PER_TEXEL,
   DISPLAY_PYRAMID_MAX_TEXELS,
@@ -25,12 +26,88 @@ export const CPU_BYTES_PER_TEXEL_FILE = 24;
 // the compositor, other apps, and everything else the app allocates.
 const GPU_BUDGET_SHARE = 0.5;
 
+/** Slots a block window keeps beyond the window itself, so a window the brush comes back to is still resident. */
+export const CANVAS_WINDOW_SPARE_BLOCKS = 4;
+/** Block windows a windowed canvas keeps slots for: two for the canvas, one for the original. */
+const CANVAS_WINDOW_SLOT_WINDOWS = 3;
+/** Spare slots the canvas window and the original window keep between them. */
+const CANVAS_WINDOW_SPARE_SLOTS = 2 * CANVAS_WINDOW_SPARE_BLOCKS;
+// GPU bytes per texel of a canvas window: the ping-pong pair (2 × RGBA32F =
+// 32), the view's inverse map (RG32F = 8) and the window over the original
+// (RGBA32F = 16). The same rate a whole-file canvas pays, over the window
+// instead of the file.
+export const GPU_BYTES_PER_TEXEL_WINDOW = 56;
+/** Share of the spectrogram budget one file's painting canvas may hold. */
+const CANVAS_WINDOW_SHARE = 0.35;
+// Blocks a window holds at least. Under this the brush outruns the canvas on
+// every phrase, so the floor wins over the budget on a device too small for
+// it: the alternative is a window nobody can paint on.
+const CANVAS_WINDOW_MIN_BLOCKS = 4;
+/** Blocks a window holds at most; past this the slides it saves cost more than they are worth. */
+const CANVAS_WINDOW_MAX_BLOCKS = 16;
+
+const envWindowBlocks = Number(import.meta.env.VITE_CANVAS_WINDOW_BLOCKS);
+
+/**
+ * GPU bytes a file's canvas costs as a window of `blocks` blocks, each holding
+ * `blockTexels` packed texels: the canvas, the window over the original, the
+ * stroke scratch, and the block slots behind both windows.
+ */
+export function canvasWindowBytes(blocks: number, texelsPerBlock: number): number {
+  const window = blocks * texelsPerBlock;
+  const perTexel =
+    GPU_BYTES_PER_TEXEL_WINDOW + GPU_BYTES_PER_TEXEL_SCRATCH + PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SLOT_WINDOWS;
+  return perTexel * window + PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SPARE_SLOTS * texelsPerBlock;
+}
+
+/** GPU bytes one file's painting canvas may hold. Zero when the host names no GPU figure. */
+export function canvasWindowBudgetBytes(): number {
+  const info = gpuMemoryInfo();
+  return info.bytes > 0 ? info.bytes * GPU_BUDGET_SHARE * CANVAS_WINDOW_SHARE : 0;
+}
+
+/** Packed texels a file's whole analysed state holds, padding excluded. */
+function fileTexels(grid: BlockGrid): number {
+  const { metadata, numBands } = grid.layout;
+  let texels = 0;
+  for (let band = 0; band < numBands; band++) texels += metadata[band * 4 + 1];
+  return texels;
+}
+
+/**
+ * Blocks the painting canvas holds for a file cut on `grid`, or `Infinity`
+ * when the whole file fits the budget — which is every file short enough that
+ * a window would save nothing. A build pins the figure with
+ * `VITE_CANVAS_WINDOW_BLOCKS`, where 0 keeps the whole file on the canvas.
+ */
+export function canvasWindowBlocks(grid: BlockGrid): number {
+  if (Number.isFinite(envWindowBlocks)) return envWindowBlocks >= 1 ? Math.floor(envWindowBlocks) : Infinity;
+  const texelsPerBlock = blockTexels(grid, 0);
+  if (texelsPerBlock <= 0) return Infinity;
+  const info = gpuMemoryInfo();
+  const budget = canvasWindowBudgetBytes();
+  // Nothing to size a window against, so the smallest usable one it is.
+  if (budget <= 0) return CANVAS_WINDOW_MIN_BLOCKS;
+  // The whole file on the canvas needs no block slots, so a file that fits
+  // keeps it, and behaves exactly as it did before windows existed.
+  const wholeRate =
+    GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH + (info.unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
+  if (wholeRate * fileTexels(grid) <= budget) return Infinity;
+  const spare = PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SPARE_SLOTS * texelsPerBlock;
+  const blocks = Math.floor((budget - spare) / (canvasWindowBytes(1, texelsPerBlock) - spare));
+  if (blocks >= grid.blockCount) return Infinity;
+  return Math.min(CANVAS_WINDOW_MAX_BLOCKS, grid.blockCount, Math.max(CANVAS_WINDOW_MIN_BLOCKS, blocks));
+}
+
 let cachedInfo: { bytes: number; unified: boolean } | null = null;
 let cachedHistoryBytes: number | null = null;
 
-/** The GPU's memory figure, queried once per session. */
+/** The GPU's memory figure, queried once per session. Zero bytes when the host names none. */
 export function gpuMemoryInfo(): { bytes: number; unified: boolean } {
-  if (!cachedInfo) cachedInfo = host.analysis.getGpuMemoryInfo();
+  if (cachedInfo) return cachedInfo;
+  const analysis = host.analysis;
+  if (!analysis || typeof analysis.getGpuMemoryInfo !== "function") return { bytes: 0, unified: false };
+  cachedInfo = analysis.getGpuMemoryInfo();
   return cachedInfo;
 }
 
