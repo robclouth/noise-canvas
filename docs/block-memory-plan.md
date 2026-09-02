@@ -1005,11 +1005,50 @@ Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
   vector becomes the JS array's storage through an external `ArrayBuffer` with
   a finaliser, rather than a memcpy into a fresh one.
 - **3.5.5 — a window is compulsory above one texture.** DONE.
-- **3.5.6 — MEASURE at 600 s** and record it here.
-- **3.5.7 — analyse in spans and forget.** Only if 3.5.6 says the peak is still
-  over the target. Gaborator supports incremental analysis with
-  `forget_before`, so the analyser can emit a block at a time and keep neither
-  the coefficient tree nor the output whole.
+- **3.5.6 — MEASURE at 600 s.** DONE; see below.
+- **3.5.8 — the band layout stops being a texture row.** The 600 s run threw
+  "the block lies outside the view": `BandLayout.metadata` is the Float32Array
+  the metadata texture is built from, and float32 counts integers exactly only
+  to 2^24. At 119M coefficients the band offsets round to multiples of 8, so
+  the CPU range arithmetic picks the wrong band. The exact figures are already
+  in the payload as `bandOffsets`/`bandLengths`/`bandStepLog2s`; the CPU layout
+  must read those and the texture stay a separate, converted payload.
+- **3.5.7 — analyse in spans and forget.** Gaborator supports incremental
+  analysis with `analyze(signal, t0, t1, coefs)` and `forget_before`, and
+  `analysis_support()` names the margin a span needs. Three terms make the
+  peak, and streaming removes all three: the coefficient run (16 B a texel),
+  its copy into JavaScript (another 16), and the analyser's own tree (8 a
+  channel). The renderer would drive it: a layout call first, then a span at a
+  time into a reused buffer, each span's blocks encoded into the store and
+  dropped. The per-band unwrap carries one phase and one bin index between
+  spans.
+
+### Phase 3.5 measurements (2026-09-02)
+
+Same machine as the Phase 3 exit: Apple M4 Pro, 24 GB, a 16 GB graphics budget.
+Mono 44.1 kHz, 36 bands per octave, the window the budget picks (16 blocks).
+Renderer private MB; `peak` is the largest reading while the file opens, polled
+every 400 ms, so it catches the analysis.
+
+| file  | texels | idle | open (peak) | paint | undo | redo | export | budget |
+| ----- | ------ | ---- | ----------- | ----- | ---- | ---- | ------ | ------ |
+| 300 s | 59.5M  | 291  | 584 (1879)  | 773   | 787  | 696  | 600 MB | 21 %   |
+| 600 s | 119.0M | 285  | 691 (3441)  | 995   | 1100 | 1105 | 822 MB | 21 %   |
+
+**The ten-minute file opens, paints, undoes, redoes and exports.** The old
+analyser refused it outright. The graphics budget charges it the same 21 % as
+the five-minute file, because both paint through a 16-block window.
+
+What the measurement says:
+
+- The settled cost still rises with length — 691 MB against 584 MB at open —
+  and the rise is the audio buffer (~0.66 MB a second, Phase 4's scope) plus
+  the history caches painting fills.
+- **The peak is now the analysis, not the canvas.** 3441 MB for ten minutes,
+  against 691 MB settled. It is the three terms 3.5.7 removes: the coefficient
+  run, its copy into JavaScript, and the analyser's own tree. On the 8 GB Iris
+  target the RAM cap (`analysisPeakTexels`) refuses the file before it tries.
+- Painting on the ten-minute file threw once — see 3.5.8.
 
 Status: in progress.
 
