@@ -252,6 +252,9 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
  * phase must go through this, or the stored sequence stops being unwrapped and
  * the transform reads the wrong instantaneous frequency.
  */
+/** A magnitude as the level the onset whitening compares it against. */
+static inline float onsetBandLevel(float magnitude);
+
 static inline float unwrapForward(float phase, float prevUnwrapped)
 {
     const float twoPi = 2.0f * (float)M_PI;
@@ -731,6 +734,416 @@ Napi::Value AnalyzeAsync(const Napi::CallbackInfo &info)
     return worker->GetPromise();
 }
 
+/**
+ * One file's analysis, driven a span of frames at a time. The band layout
+ * follows from the sample rate, the resolution and the frame count alone, so it
+ * is known before any audio is read and each call returns the coefficients of
+ * the frames it names on their own. The run of the whole file is never held.
+ *
+ * Spans must be asked for in order and must join: the analyser carries its
+ * coefficient tree, its unwrapped phase and its running totals across them.
+ */
+class AnalysisStream : public Napi::ObjectWrap<AnalysisStream>
+{
+public:
+    static void Init(Napi::Env env, Napi::Object exports)
+    {
+        exports.Set("AnalysisStream", DefineClass(env, "AnalysisStream",
+                                                  {
+                                                      InstanceMethod("layout", &AnalysisStream::Layout),
+                                                      InstanceMethod("span", &AnalysisStream::Span),
+                                                      InstanceMethod("summary", &AnalysisStream::Summary),
+                                                  }));
+    }
+
+    AnalysisStream(const Napi::CallbackInfo &info)
+        : Napi::ObjectWrap<AnalysisStream>(info)
+    {
+        Napi::Env env = info.Env();
+        if (info.Length() < 4 || !info[0].IsArray() || !info[1].IsNumber() || !info[2].IsNumber() ||
+            !info[3].IsObject())
+        {
+            Napi::TypeError::New(env, "Expected: channelArrays (Array of Float32Arrays), channels (Number), sampleRate (Number), params (Object)")
+                .ThrowAsJavaScriptException();
+            return;
+        }
+
+        Napi::Array planarInput = info[0].As<Napi::Array>();
+        channels = info[1].As<Napi::Number>().Int32Value();
+        sampleRate = info[2].As<Napi::Number>().DoubleValue();
+        Napi::Object paramsJs = info[3].As<Napi::Object>();
+
+        if (channels <= 0 || channels > 2)
+        {
+            Napi::TypeError::New(env, "Number of channels must be 1 or 2.").ThrowAsJavaScriptException();
+            return;
+        }
+        if (!paramsJs.Has("bandsPerOctave") || !paramsJs.Get("bandsPerOctave").IsNumber() ||
+            !paramsJs.Has("minFreq") || !paramsJs.Get("minFreq").IsNumber())
+        {
+            Napi::TypeError::New(env, "params.bandsPerOctave and params.minFreq are required numbers")
+                .ThrowAsJavaScriptException();
+            return;
+        }
+        const int bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
+        const double fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
+        size_t maxCoefficientBudget = SIZE_MAX;
+        if (paramsJs.Has("maxCoefficients") && paramsJs.Get("maxCoefficients").IsNumber())
+        {
+            double v = paramsJs.Get("maxCoefficients").As<Napi::Number>().DoubleValue();
+            if (v > 0)
+                maxCoefficientBudget = (size_t)v;
+        }
+
+        size_t length = 0;
+        audioRefs.reserve(channels);
+        audio.reserve(channels);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            Napi::Float32Array channelData = planarInput.Get((uint32_t)ch).As<Napi::Float32Array>();
+            audioRefs.push_back(Napi::Reference<Napi::Float32Array>::New(channelData, 1));
+            audio.push_back(channelData.Data());
+            const size_t channelLength = channelData.ElementLength();
+            if (ch == 0 || channelLength < length)
+                length = channelLength;
+        }
+        numFrames = (int64_t)length;
+
+        gaborator::log_fq_scale scale(bandsPerOctave, fminHz / sampleRate);
+        gaborator::parameters params(scale, OVERLAP);
+        params.phase = gaborator::coef_phase::global;
+        analyzer.reset(new gaborator::analyzer<float>(params));
+
+        bandBegin = analyzer->bandpass_bands_begin();
+        numBands = analyzer->bandpass_bands_end() - bandBegin;
+        if (numBands <= 0)
+        {
+            Napi::Error::New(env, "Gaborator analysis resulted in no bands.").ThrowAsJavaScriptException();
+            return;
+        }
+
+        bandOffsets.resize(numBands);
+        bandStepLog2s.resize(numBands);
+        bandLengths.resize(numBands);
+        bandFreqsHz.resize(numBands);
+        size_t total = 0;
+        for (int i = 0; i < numBands; ++i)
+        {
+            const int gbno = bandBegin + i;
+            const int stepLog2 = analyzer->band_step_log2(gbno);
+            const size_t len = (numFrames > 0) ? (size_t)(((numFrames - 1) >> stepLog2) + 1) : 0;
+            bandOffsets[i] = (uint32_t)total;
+            bandStepLog2s[i] = stepLog2;
+            bandLengths[i] = (uint32_t)len;
+            bandFreqsHz[i] = (float)(analyzer->bandpass_band_ff(gbno) * sampleRate);
+            total += len;
+        }
+
+        const size_t maxCoefficients = std::min(MAX_PACKED_COEFFICIENTS, maxCoefficientBudget);
+        const double worstCase = (double)numFrames * MAX_COEFFICIENT_DENSITY;
+        if (worstCase > (double)maxCoefficients || total > maxCoefficients)
+        {
+            const double maxSeconds = (double)maxCoefficients / MAX_COEFFICIENT_DENSITY / sampleRate;
+            std::stringstream ss;
+            ss << "The maximum audio duration is " << std::fixed << std::setprecision(0) << maxSeconds
+               << " seconds.";
+            Napi::Error::New(env, ss.str()).ThrowAsJavaScriptException();
+            return;
+        }
+        texels = total;
+
+        metadata.resize((size_t)numBands * 4);
+        for (int i = 0; i < numBands; ++i)
+        {
+            metadata[i * 4 + 0] = (float)bandOffsets[i];
+            metadata[i * 4 + 1] = (float)bandLengths[i];
+            metadata[i * 4 + 2] = (float)bandStepLog2s[i];
+            metadata[i * 4 + 3] = bandFreqsHz[i];
+        }
+
+        support = (int64_t)std::ceil(analyzer->analysis_support()) + 1;
+        coefs.reserve(channels);
+        for (int ch = 0; ch < channels; ++ch)
+            coefs.emplace_back(new gaborator::coefs<float>(*analyzer));
+        analysedTo.assign(channels, 0);
+        previousPhase.assign((size_t)channels * numBands, 0.0f);
+        phaseStarted.assign((size_t)channels * numBands, 0);
+        bandMaxMag.assign(numBands, 0.0f);
+        spanK0.resize(numBands);
+        spanCount.resize(numBands);
+        spanOffset.resize(numBands);
+    }
+
+    /** The band layout and the size of the whole run, known before any audio is read. */
+    Napi::Value Layout(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+        Napi::Object out = Napi::Object::New(env);
+        out.Set("texels", Napi::Number::New(env, (double)texels));
+        out.Set("numFrames", Napi::Number::New(env, (double)numFrames));
+        out.Set("numBands", Napi::Number::New(env, numBands));
+        out.Set("numChannels", Napi::Number::New(env, channels));
+        out.Set("sampleRate", Napi::Number::New(env, sampleRate));
+        out.Set("metadata", copyOut<Napi::Float32Array>(env, metadata));
+        out.Set("bandOffsets", copyOut<Napi::Uint32Array>(env, bandOffsets));
+        out.Set("bandLengths", copyOut<Napi::Uint32Array>(env, bandLengths));
+        out.Set("bandStepLog2s", copyOut<Napi::Int32Array>(env, bandStepLog2s));
+        out.Set("bandFreqsHz", copyOut<Napi::Float32Array>(env, bandFreqsHz));
+        return out;
+    }
+
+    /**
+     * The coefficients of [startFrame, endFrame): each band's run back to back
+     * in band order, with the bands the span does not reach left out.
+     */
+    Napi::Value Span(const Napi::CallbackInfo &info);
+
+    /** What the whole run carries so far: its energy, and each band's loudest moment. */
+    Napi::Value Summary(const Napi::CallbackInfo &info)
+    {
+        Napi::Env env = info.Env();
+        Napi::Object out = Napi::Object::New(env);
+        out.Set("magnitudeEnergy", Napi::Number::New(env, magnitudeEnergy));
+        Napi::Float32Array bandMax = Napi::Float32Array::New(env, (size_t)numBands);
+        for (int b = 0; b < numBands; ++b)
+            bandMax[b] = onsetBandLevel(bandMaxMag[(size_t)b]);
+        out.Set("onsetBandMax", bandMax);
+        return out;
+    }
+
+    /** Lays out [startFrame, endFrame) in the span buffer and returns the texels it holds. */
+    size_t planSpan(int64_t startFrame, int64_t endFrame)
+    {
+        size_t at = 0;
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int step = bandStepLog2s[(size_t)b];
+            const int64_t len = (int64_t)bandLengths[(size_t)b];
+            const int64_t k0 = startFrame >> step;
+            const int64_t kEnd = std::min(len, (endFrame + ((int64_t)1 << step) - 1) >> step);
+            const int64_t count = (k0 >= len) ? 0 : std::max<int64_t>(0, kEnd - k0);
+            spanK0[(size_t)b] = k0;
+            spanCount[(size_t)b] = count;
+            spanOffset[(size_t)b] = at;
+            at += (size_t)count;
+        }
+        return at;
+    }
+
+    /** Analyses [startFrame, endFrame) into `out`, on the worker thread. */
+    void fillSpan(int64_t startFrame, int64_t endFrame, float *out, size_t outTexels, std::string &error);
+
+    bool inFlight = false;
+
+private:
+    template <typename ArrayType, typename T>
+    static ArrayType copyOut(Napi::Env env, const std::vector<T> &from)
+    {
+        ArrayType out = ArrayType::New(env, from.size());
+        if (!from.empty())
+            memcpy(out.Data(), from.data(), from.size() * sizeof(T));
+        return out;
+    }
+
+    std::vector<Napi::Reference<Napi::Float32Array>> audioRefs;
+    std::vector<const float *> audio;
+    int channels = 0;
+    double sampleRate = 0.0;
+    int64_t numFrames = 0;
+
+    std::unique_ptr<gaborator::analyzer<float>> analyzer;
+    std::vector<std::unique_ptr<gaborator::coefs<float>>> coefs;
+    int bandBegin = 0;
+    int numBands = 0;
+    int64_t support = 0;
+
+    size_t texels = 0;
+    std::vector<float> metadata;
+    std::vector<uint32_t> bandOffsets;
+    std::vector<int32_t> bandStepLog2s;
+    std::vector<uint32_t> bandLengths;
+    std::vector<float> bandFreqsHz;
+
+    // Carried from one span to the next.
+    int64_t nextFrame = 0;
+    std::vector<int64_t> analysedTo;
+    std::vector<float> previousPhase;
+    std::vector<uint8_t> phaseStarted;
+    std::vector<float> bandMaxMag;
+    double magnitudeEnergy = 0.0;
+
+    // Where each band's run sits in the span being filled.
+    std::vector<int64_t> spanK0;
+    std::vector<int64_t> spanCount;
+    std::vector<size_t> spanOffset;
+};
+
+void AnalysisStream::fillSpan(int64_t startFrame, int64_t endFrame, float *out, size_t outTexels,
+                              std::string &error)
+{
+    if (startFrame != nextFrame)
+    {
+        error = "Analysis spans must be asked for in order and must join.";
+        return;
+    }
+    std::fill(out, out + outTexels * 4, 0.0f);
+
+    // A filter reaches this far either side, so a coefficient before
+    // `t1 - support` cannot change once the samples up to t1 are in.
+    const int64_t need = std::min(endFrame + support, numFrames);
+    const int64_t feed = std::max<int64_t>(1, (int64_t)(sampleRate * ANALYSIS_SPAN_SECONDS));
+    for (int ch = 0; ch < channels; ++ch)
+    {
+        while (analysedTo[(size_t)ch] < need)
+        {
+            const int64_t t0 = analysedTo[(size_t)ch];
+            const int64_t t1 = std::min(t0 + feed, need);
+            // The pointer names the sample at t0, not the file's first.
+            analyzer->analyze(audio[(size_t)ch] + t0, t0, t1, *coefs[(size_t)ch]);
+            analysedTo[(size_t)ch] = t1;
+        }
+
+        auto write = [&](int b, int64_t t, std::complex<float> &coef)
+        {
+            const int band = b - bandBegin;
+            if (band < 0 || band >= numBands)
+                return;
+            const int64_t rel = (t >> bandStepLog2s[(size_t)band]) - spanK0[(size_t)band];
+            if (rel < 0 || rel >= spanCount[(size_t)band])
+                return;
+            const size_t at = (spanOffset[(size_t)band] + (size_t)rel) * 4;
+            const float magnitude = std::abs(coef);
+            magnitudeEnergy += (double)magnitude * (double)magnitude;
+            out[at + ch * 2 + 0] = magnitude;
+            out[at + ch * 2 + 1] = std::arg(coef);
+        };
+        gaborator::process(write, bandBegin, analyzer->bandpass_bands_end(), startFrame, endFrame,
+                           *coefs[(size_t)ch]);
+        gaborator::forget_before(*analyzer, *coefs[(size_t)ch], endFrame - support);
+
+        // Each band's phase carries on from where the span before it left off,
+        // so the stored sequence accumulates over the file rather than folding
+        // back into (-pi, pi] at every seam.
+        for (int band = 0; band < numBands; ++band)
+        {
+            const int64_t count = spanCount[(size_t)band];
+            if (count <= 0)
+                continue;
+            const size_t carry = (size_t)ch * numBands + band;
+            float previous = previousPhase[carry];
+            bool started = phaseStarted[carry] != 0;
+            for (int64_t rel = 0; rel < count; ++rel)
+            {
+                const size_t at = (spanOffset[(size_t)band] + (size_t)rel) * 4 + ch * 2 + 1;
+                const float unwrapped = started ? unwrapForward(out[at], previous) : out[at];
+                out[at] = unwrapped;
+                previous = unwrapped;
+                started = true;
+            }
+            previousPhase[carry] = previous;
+            phaseStarted[carry] = 1;
+        }
+    }
+
+    // Each band's loudest moment, on the channel-averaged magnitude the onset
+    // pass whitens against.
+    const float channelScale = 1.0f / (float)channels;
+    for (int band = 0; band < numBands; ++band)
+    {
+        const int64_t count = spanCount[(size_t)band];
+        float largest = bandMaxMag[(size_t)band];
+        for (int64_t rel = 0; rel < count; ++rel)
+        {
+            const size_t at = (spanOffset[(size_t)band] + (size_t)rel) * 4;
+            float mag = 0.0f;
+            for (int ch = 0; ch < channels; ++ch)
+                mag += out[at + ch * 2];
+            largest = std::max(largest, mag * channelScale);
+        }
+        bandMaxMag[(size_t)band] = largest;
+    }
+
+    nextFrame = endFrame;
+}
+
+class AnalysisSpanWorker : public Napi::AsyncWorker
+{
+public:
+    AnalysisSpanWorker(Napi::Env env, AnalysisStream *stream, const Napi::Object &streamJs, int64_t startFrame,
+                       int64_t endFrame, Napi::Float32Array out, size_t outTexels)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)),
+          streamRef(Napi::Reference<Napi::Object>::New(streamJs, 1)),
+          outRef(Napi::Reference<Napi::Float32Array>::New(out, 1)), stream(stream), startFrame(startFrame),
+          endFrame(endFrame), data(out.Data()), outTexels(outTexels)
+    {
+    }
+
+    void Execute() override
+    {
+        std::string error;
+        stream->fillSpan(startFrame, endFrame, data, outTexels, error);
+        if (!error.empty())
+            SetError(error);
+    }
+
+    void OnOK() override
+    {
+        stream->inFlight = false;
+        Napi::Env env = Env();
+        Napi::HandleScope scope(env);
+        deferred.Resolve(outRef.Value());
+    }
+
+    void OnError(const Napi::Error &e) override
+    {
+        stream->inFlight = false;
+        deferred.Reject(e.Value());
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    Napi::Reference<Napi::Object> streamRef;
+    Napi::Reference<Napi::Float32Array> outRef;
+    AnalysisStream *stream;
+    int64_t startFrame;
+    int64_t endFrame;
+    float *data;
+    size_t outTexels;
+};
+
+Napi::Value AnalysisStream::Span(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsNumber())
+    {
+        Napi::TypeError::New(env, "Expected: startFrame (Number), endFrame (Number)").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    if (inFlight)
+    {
+        Napi::Error::New(env, "An analysis span is already running.").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    const int64_t startFrame = info[0].As<Napi::Number>().Int64Value();
+    const int64_t endFrame = std::min(info[1].As<Napi::Number>().Int64Value(), numFrames);
+    if (startFrame < 0 || endFrame <= startFrame)
+    {
+        Napi::RangeError::New(env, "An analysis span must cover at least one frame of the file.")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    const size_t outTexels = planSpan(startFrame, endFrame);
+    Napi::Float32Array out = Napi::Float32Array::New(env, outTexels * 4);
+    inFlight = true;
+    AnalysisSpanWorker *worker =
+        new AnalysisSpanWorker(env, this, info.This().As<Napi::Object>(), startFrame, endFrame, out, outTexels);
+    worker->Queue();
+    return worker->GetPromise();
+}
+
 // ─── Onset detection ─────────────────────────────────────────────────────────
 
 // Onsets are detected straight from packed constant-Q coefficients. The
@@ -776,6 +1189,7 @@ struct DetectedOnset
 static constexpr double ONSET_BIN_SEC = 0.0005;
 // Magnitude compression applied before whitening: log1p(gamma * mag).
 static constexpr float ONSET_LOG_GAMMA = 20.0f;
+static inline float onsetBandLevel(float magnitude) { return std::log1p(ONSET_LOG_GAMMA * magnitude); }
 // Decay time constant of the per-band running peak used for whitening.
 static constexpr double ONSET_WHITEN_TAU_SEC = 2.0;
 static constexpr float ONSET_WHITEN_FLOOR = 1e-4f;
@@ -5196,6 +5610,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("historyApplyDeltasWindowed", Napi::Function::New(env, HistoryApplyDeltasWindowedAsync));
     exports.Set("historyInverseMap", Napi::Function::New(env, HistoryInverseMapAsync));
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
+    AnalysisStream::Init(env, exports);
     exports.Set("getGpuMemoryInfo", Napi::Function::New(env, GetGpuMemoryInfo));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("commitStroke", Napi::Function::New(env, CommitStrokeAsync));
