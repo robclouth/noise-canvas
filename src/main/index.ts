@@ -17,7 +17,9 @@ import { checkForUpdates, initUpdater } from "./lib/updater";
 // macOS: ANGLE's Metal backend stalls each canvas present on a CoreAnimation
 // backpressure fence once a frame does any extra GPU work (e.g. a modulator
 // precompute pass), which halves the framerate while painting. The OpenGL
-// backend presents without that fence.
+// backend presents without that fence — but Chromium has deprecated it on Mac,
+// and on macOS 12 it can fail to composite at all, leaving a solid
+// backgroundColor window. Metal is the safe floor there.
 //
 // Windows: the default D3D11 backend compiles the effect shaders through the
 // HLSL compiler, which costs ~50s for the set, and its program binaries are not
@@ -27,7 +29,8 @@ import { checkForUpdates, initUpdater } from "./lib/updater";
 const angleBackend = process.env.NOISE_CANVAS_ANGLE;
 let angleSwitch: string | undefined;
 if (process.platform === "darwin") {
-  angleSwitch = angleBackend || "gl";
+  const macMajor = Number(process.getSystemVersion().split(".")[0]);
+  angleSwitch = angleBackend || (macMajor >= 13 ? "gl" : "metal");
 } else if (process.platform === "win32") {
   angleSwitch = angleBackend || "vulkan";
 }
