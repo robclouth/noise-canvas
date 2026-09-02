@@ -34,6 +34,20 @@ const READS_PAST_BRUSH: ReadonlySet<number> = new Set([1, 5]);
 // size of the brush instead of dividing by a value close to zero.
 const NO_SCALE_BELOW = 1e-5;
 
+// The Transmute route that moves a band along time. Every other route writes
+// the bin it read.
+const TRANSMUTE_TO_TIME = 2;
+
+// Attract maps whose pull follows a field the shader reads off a spectrogram:
+// Source, and the three modulators. Scale and Grid pull toward a lattice the
+// shader works out, and read nothing.
+const ATTRACT_MAP_SOURCE = 0;
+const ATTRACT_MAP_FIRST_MODULATOR = 3;
+
+// The field lattice rounds the kernel up to its next tap, and a tap is a
+// quarter of the smoothing, so the read passes the smoothing by a little.
+const ATTRACT_KERNEL_TAPS = 2;
+
 type ValueRange = { lo: number; hi: number };
 
 /** The range a parameter's value can take once every source that drives it moves it. */
@@ -144,6 +158,29 @@ function transformReach(effect: State, ctx: ReachContext, brushSeconds: number, 
   };
 }
 
+/**
+ * Transmute's time route moves each band by up to its amount, in beats, and
+ * reads where it lands. The move is centred, so it goes both ways.
+ */
+function transmuteReach(effect: State, ctx: ReachContext): TimeReach {
+  if (Number(effect.transmuteTo) !== TRANSMUTE_TO_TIME) return NO_REACH;
+  const span = widest(stateRange(effect, "transmuteAmount")) * (60 / ctx.bpm);
+  return { before: span, after: span };
+}
+
+/**
+ * Attract's time pass gathers only bins the brush covers. What leaves the
+ * brush is the field it reads to decide where they land, and the kernel holds
+ * that to the smoothing either side.
+ */
+function attractReach(effect: State, ctx: ReachContext): TimeReach {
+  const map = Number(effect.attractMap);
+  if (map !== ATTRACT_MAP_SOURCE && map < ATTRACT_MAP_FIRST_MODULATOR) return NO_REACH;
+  if (widest(stateRange(effect, "attractAmountX")) === 0) return NO_REACH;
+  const span = ATTRACT_KERNEL_TAPS * widest(stateRange(effect, "attractSmoothX")) * (60 / ctx.bpm);
+  return { before: span, after: span };
+}
+
 /** The brush's own span on each axis, in file seconds and in pitch UV. */
 function brushSpan(step: State, ctx: ReachContext): { seconds: number; pitchUv: number } {
   const footprint = resolveBrushFootprint({
@@ -178,6 +215,8 @@ export function brushReaches(state: State, ctx: ReachContext): StepReach[] {
       if (item.effect === "blur") reach = blurReach(effect, ctx);
       else if (item.effect === "clone") reach = cloneReach(effect, ctx);
       else if (item.effect === "transform") reach = transformReach(effect, ctx, span.seconds, span.pitchUv);
+      else if (item.effect === "transmute") reach = transmuteReach(effect, ctx);
+      else if (item.effect === "attract") reach = attractReach(effect, ctx);
       if (reach.before <= 0 && reach.after <= 0) continue;
       out.push({ effect: item.effect, step: index, brushSeconds: span.seconds, reach });
     }

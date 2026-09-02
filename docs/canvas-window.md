@@ -123,8 +123,10 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
 10. **The canvas holds what an effect reads, not only what the dab covers.** A
     blur smear, a repeat gap and a warp's turn, stretch or shift all read past
     the brush when the edge mode is Bleed or Invert; the other edge modes fold
-    the read back inside the brush and reach nothing. `effect-reach.ts` says how
-    far, in seconds of the file, and the aim and the dab's own wait widen by it.
+    the read back inside the brush and reach nothing. A transmute that moves a
+    band along time reads where it lands, and an attract reads the field it
+    places bands against. `effect-reach.ts` says how far, in seconds of the
+    file, and the aim and the dab's own wait widen by it.
     A brush whose dab plus reach is wider than a whole window can never be
     served, so `overReachNeeds` names it and the dab is refused.
 11. **An offset added to a source UV converts against the span the source

@@ -1241,13 +1241,30 @@ What that means for each:
 
 So three of the five come off the gate with a reach entry rather than a
 streaming rewrite, and convolve comes off it whenever an impulse response is
-picked. **Next: move sort, transmute and attract out of `WHOLE_FILE_EFFECTS`
-into `effect-reach.ts`, and gate convolve on the response being Self rather
-than on the effect being present.** Evolve is the STOP-ASK — putting its
-offsets on the file's clock changes what existing brushes do on long files, and
-Rob picks whether that or the gate is the right answer.
+picked.
 
-Status: 4.1 done — every gated effect measured, nothing un-gated yet.
+### 4.2 — sort, transmute and attract come off the gate (2026-09-02)
+
+`WHOLE_FILE_EFFECTS` is now `convolve` and `evolve` alone. Sort declares
+nothing, because it reads nothing. Transmute declares its Amount in beats on
+the To = Time route, and attract twice its Smooth Time — twice, because the
+field lattice rounds the kernel up to its next tap. A brush that asks for more
+than a window holds is refused by reach now, with "reaches too far", instead of
+by name with "reads the whole file".
+
+One bug came out of it: transmute converted its beats against the **file's**
+duration, where the step it builds is added to a source UV and must convert
+against the span the source textures hold (`docs/canvas-window.md`, rule 11).
+It was wrong through a window, and wrong across two files of different lengths.
+
+**Next: convolve.** With a response picked it reads that other file, which a
+source window already serves, and reads the painted file only as far as IR Size
+× Rate × the band's stride; so the gate should ask whether the response is Self
+rather than whether the effect is present. Evolve stays the STOP-ASK — putting
+its offsets on the file's clock changes what existing brushes do on long files,
+and Rob picks whether that or the gate is the right answer.
+
+Status: 4.1 done, 4.2 done for three of the five effects.
 
 ---
 

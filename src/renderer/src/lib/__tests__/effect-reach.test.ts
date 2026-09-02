@@ -146,6 +146,58 @@ describe("warp reach", () => {
   });
 });
 
+describe("transmute reach", () => {
+  it("moves a band the amount it is given, in beats, both ways", () => {
+    expect(reachOf(withEffect("transmute", { transmuteTo: 2, transmuteAmount: 3 }))).toEqual({
+      before: 1.5,
+      after: 1.5,
+    });
+  });
+
+  it("reads the bin it writes on every other route", () => {
+    for (const transmuteTo of [0, 1, 3, 4]) {
+      expect(reachOf(withEffect("transmute", { transmuteTo, transmuteAmount: 8 }))).toEqual({ before: 0, after: 0 });
+    }
+  });
+
+  it("takes the amount's sign off, since the drive pushes both ways", () => {
+    expect(reachOf(withEffect("transmute", { transmuteTo: 2, transmuteAmount: -3 }))).toEqual({
+      before: 1.5,
+      after: 1.5,
+    });
+  });
+});
+
+describe("attract reach", () => {
+  it("reads the field a couple of smoothings past the brush", () => {
+    expect(reachOf(withEffect("attract", { attractMap: 0, attractAmountX: 50, attractSmoothX: 2 }))).toEqual({
+      before: 2,
+      after: 2,
+    });
+  });
+
+  it("reads nothing with no time pull", () => {
+    expect(reachOf(withEffect("attract", { attractMap: 0, attractAmountX: 0, attractSmoothX: 4 }))).toEqual({
+      before: 0,
+      after: 0,
+    });
+  });
+
+  it.each([1, 2])("reads no field on map %i, which pulls toward a lattice", (attractMap) => {
+    expect(reachOf(withEffect("attract", { attractMap, attractAmountX: 100, attractSmoothX: 4 }))).toEqual({
+      before: 0,
+      after: 0,
+    });
+  });
+
+  it("reads a modulator's field like the source's", () => {
+    expect(reachOf(withEffect("attract", { attractMap: 3, attractAmountX: 100, attractSmoothX: 1 }))).toEqual({
+      before: 1,
+      after: 1,
+    });
+  });
+});
+
 describe("the brush's reach as a whole", () => {
   it("finds nothing in effects that read only the texel they write", () => {
     expect(reachOf(withEffect("dynamics"), withEffect("synthesize"))).toEqual({ before: 0, after: 0 });

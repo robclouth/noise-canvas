@@ -39,16 +39,18 @@ describe("wholeFileNeeds", () => {
     expect(needsOf({ brushSizeTime: BRUSH_SIZE_TIME_FULL - 1 })).toEqual([]);
   });
 
-  it.each(["attract", "convolve", "evolve", "sort", "transmute"])("names %s by its label", (effect) => {
+  it.each(["convolve", "evolve"])("names %s by its label", (effect) => {
     expect(needsOf(withEffect(effect))).toHaveLength(1);
   });
 
-  it.each(["blur", "clone", "dynamics", "transform"])("leaves %s alone", (effect) => {
+  // These read a span around the brush that their own settings bound, which
+  // `effect-reach.ts` declares and the canvas holds.
+  it.each(["attract", "blur", "clone", "dynamics", "sort", "transform", "transmute"])("leaves %s alone", (effect) => {
     expect(needsOf(withEffect(effect))).toEqual([]);
   });
 
   it("ignores an effect that is switched off", () => {
-    expect(needsOf(withEffect("sort", false))).toEqual([]);
+    expect(needsOf(withEffect("evolve", false))).toEqual([]);
   });
 
   it("reads every step of the brush, not only the active one", () => {
@@ -56,7 +58,7 @@ describe("wholeFileNeeds", () => {
   });
 
   it("names each thing once, however many steps ask for it", () => {
-    expect(needsOf(withEffect("sort"), withEffect("sort"))).toEqual(["Sort"]);
+    expect(needsOf(withEffect("evolve"), withEffect("evolve"))).toEqual(["Evolve"]);
   });
 
   it.each(["fixed", "anchored"])("names %s source tracking, which reads the canvas from anywhere", (mode) => {
