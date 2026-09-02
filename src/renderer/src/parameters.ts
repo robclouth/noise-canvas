@@ -168,7 +168,10 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     label: "Steps",
     description: "Locks the output to this many even levels, so it jumps between them instead of gliding.",
     default: 0,
-    min: 2,
+    // With no marks to drag through, the control walks the slider position, and
+    // the Off sentinel owns position 0 along with `min`. The lowest value it can
+    // settle on is one step above that, so a min of 1 puts the floor on 2.
+    min: 1,
     max: 64,
     step: 1,
     leftValue: { value: 0, label: "Off" },
