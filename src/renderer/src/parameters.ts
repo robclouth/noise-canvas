@@ -614,10 +614,11 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "options",
     name: "Source Data Mode",
     label: "Read From",
-    description: "Reads the source file's edited state, or its original unedited analysis.",
+    description: "Picks how far back this step reads.",
     default: "current" as const,
     options: [
       { value: "current", label: "Current" },
+      { value: "start", label: "Start" },
       { value: "original", label: "Original" },
     ],
     includeInStep: true,

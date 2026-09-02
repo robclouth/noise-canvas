@@ -268,7 +268,7 @@ By default a brush reads from the file it is painting on. The **Source** section
 - **Source** – hold **Shift**, or click the Source control to arm it, then click any open file's canvas to pick a source file and position. A brush-sized rectangle previews where you are sampling from.
 - **Tracking** – how the source position is used. See the table below.
 - **Time ↔ / Pitch ↕** – the source position, as a percentage of the source file. Disabled in Follow mode, and both are modulatable.
-- **Read From** – **Current** paints from the source file's edited state, **Original** paints from its unedited analysis.
+- **Read From** – which state of the source to paint from. See the table below.
 
 | Tracking     | What it does                                        |
 | ------------ | --------------------------------------------------- |
@@ -276,11 +276,18 @@ By default a brush reads from the file it is painting on. The **Source** section
 | **Fixed**    | Always samples that exact position.                 |
 | **Anchored** | Keeps a fixed offset from where the stroke started. |
 
+| Read From    | What it paints from                           |
+| ------------ | --------------------------------------------- |
+| **Current**  | The source file's edited state, as it stands. |
+| **Start**    | The canvas as it was when the stroke began.   |
+| **Original** | The source file's unedited analysis.          |
+
 Source and destination do not have to match. They can differ in tempo, length and analysis resolution, and positions are mapped so that frequencies line up.
 
 **Hints**
 
 - Set **Read From** to **Original** and painting becomes a local undo: the region you paint comes back and nothing else moves. This is all the Restore brush is.
+- Give a later step **Start** and Blend Mode **Add** to lay the untouched audio back over whatever the steps before it did.
 
 ### Envelope
 

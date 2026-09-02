@@ -293,6 +293,35 @@ describe("per-step source independence", () => {
     }
   });
 
+  it("reads the stroke-start canvas when a step is set to Start", async () => {
+    // Step 0 erases the canvas. A step reading Start adds the pre-stroke audio
+    // back over the erasure; one reading Current adds only the erased result.
+    const mid: number[] = [];
+    for (const readFrom of ["start", "current"]) {
+      const destSpec = flat(destFrames, 0.5);
+      const destRenderer = makeRenderer(destSpec, `dest-start-${readFrom}`);
+      destRenderer.renderStroke(
+        params(0),
+        stateWithSteps(
+          [
+            {
+              sourceFile: null,
+              accumulate: false,
+              effects: [{ id: "erase", effect: "dynamics", enabled: true, params: { dynamicsGainDb: -80 } }],
+            },
+            { sourceFile: null, accumulate: false, sourceDataMode: readFrom, blendMode: 1, effects: [] },
+          ],
+          0,
+        ),
+        sourceFileFor(destRenderer, destSpec, `dest-start-${readFrom}`, destPath),
+      );
+      mid.push(magByFrame(await destRenderer.getFBOData(), destFrames, numBands)[8]);
+    }
+
+    expect(mid[0]).toBeGreaterThan(0.3);
+    expect(mid[1]).toBeLessThan(0.05);
+  });
+
   it("blurs the canvas, then multiplies a source over it, whichever step is selected", async () => {
     // Blur the target in one step, then cross-synthesise a second file over the
     // result in the next: the shape that first showed the preview moving with

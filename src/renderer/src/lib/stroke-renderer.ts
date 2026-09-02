@@ -1136,7 +1136,12 @@ export class StrokeRenderer {
       if (stepState.sourceDataMode === "original") {
         stepInputFbo = { texture: stepSource.textures.original };
       } else if (readsNamedFile) {
+        // A named file is not painted mid-stroke, so its packed state is its
+        // stroke-start state; Start and Current read the same texture here.
         stepInputFbo = stepSource.textures.packed;
+      } else if (stepState.sourceDataMode === "start") {
+        stepInputFbo = scratch.strokeStartFbo;
+        readsSourceFile = false;
       } else {
         stepInputFbo = stepIndex === 0 ? selfInputFbo : chainFbo;
         readsSourceFile = false;
