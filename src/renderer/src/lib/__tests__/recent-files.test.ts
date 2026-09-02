@@ -19,6 +19,8 @@ vi.mock("../modals", () => ({
   openContextModal: vi.fn(),
   openNewFilePrompt: vi.fn(),
   openInsertSilencePrompt: vi.fn(),
+  openSetLengthPrompt: vi.fn(),
+  openGroupFilesPrompt: vi.fn(),
   openReanalyzePrompt: vi.fn(),
 }));
 

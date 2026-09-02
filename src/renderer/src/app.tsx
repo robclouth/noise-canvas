@@ -400,6 +400,16 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubHalveActiveFileLength);
 
+    const unsubGroupFiles = ipcOn("group-files", () => {
+      void useStore.getState().promptGroupFiles();
+    });
+    unsubscribers.push(unsubGroupFiles);
+
+    const unsubSetFileLength = ipcOn("set-file-length", () => {
+      void useStore.getState().setActiveFileLength();
+    });
+    unsubscribers.push(unsubSetFileLength);
+
     const unsubInsertSilence = ipcOn("insert-silence", () => {
       void useStore.getState().insertSilenceIntoActiveFile();
     });

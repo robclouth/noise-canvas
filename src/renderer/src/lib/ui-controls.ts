@@ -148,21 +148,26 @@ export const UI_CONTROLS = {
     manualSection: "navigating-the-canvas",
   },
 
-  // Stem groups
-  "stem-sync-view": {
+  // File groups
+  "group-sync-view": {
     label: "Link views",
-    description: "Ties zoom and scroll together across the parts of a split.",
-    manualSection: "stem-groups",
+    description: "Ties zoom and scroll together across the files in the group.",
+    manualSection: "grouping-files",
   },
-  "stem-merge": {
-    label: "Merge parts",
-    description: "Combines every part of a split into one new file, leaving the parts open.",
-    manualSection: "stem-groups",
+  "group-merge": {
+    label: "Merge",
+    description: "Sums every file in the group into one new file, leaving them open.",
+    manualSection: "grouping-files",
   },
-  "stem-close": {
-    label: "Close split",
-    description: "Closes every part of a split at once.",
-    manualSection: "stem-groups",
+  "group-ungroup": {
+    label: "Ungroup",
+    description: "Drops the bracket, leaving every file open on its own.",
+    manualSection: "grouping-files",
+  },
+  "group-close": {
+    label: "Close group",
+    description: "Closes every file in the group at once.",
+    manualSection: "grouping-files",
   },
 
   // History

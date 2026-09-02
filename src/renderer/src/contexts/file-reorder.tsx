@@ -30,12 +30,18 @@ export function useFileReorder(): FileReorderValue | null {
 const SCROLL_EDGE_PX = 90;
 const SCROLL_SPEED_PX = 22;
 
-/** Measures the lanes on screen, in stack order, skipping the dragged one. */
-function measureLanes(laneIds: string[]): LaneBounds[] {
+/**
+ * Measures the lanes on screen, in stack order, skipping the dragged one. A
+ * lane with no height is hidden behind a fullscreen file, so it has no place a
+ * drop could land on.
+ */
+function measureLanes(laneIds: string[], fileGroupOfFile: Record<string, string>): LaneBounds[] {
   const lanes: LaneBounds[] = [];
   for (const fileId of laneIds) {
     const rect = document.querySelector(laneSelector(fileId))?.getBoundingClientRect();
-    if (rect) lanes.push({ fileId, top: rect.top, bottom: rect.bottom });
+    if (rect && rect.height > 0) {
+      lanes.push({ fileId, top: rect.top, bottom: rect.bottom, groupId: fileGroupOfFile[fileId] ?? null });
+    }
   }
   return lanes;
 }
@@ -128,9 +134,13 @@ export function FileReorderProvider({
       const container = containerRef.current;
       if (!container) return;
       ghost?.follow(pointerYRef.current - startYRef.current);
-      const { minimizedFileIds, openFileIds } = useStore.getState();
+      const { minimizedFileIds, openFileIds, fileGroupOfFile } = useStore.getState();
       const laneIds = openFileIds.filter((id) => id !== draggingFileId && !minimizedFileIds.includes(id));
-      const target = resolveFileDrop(pointerYRef.current, measureLanes(laneIds), container.getBoundingClientRect().top);
+      const target = resolveFileDrop(
+        pointerYRef.current,
+        measureLanes(laneIds, fileGroupOfFile),
+        container.getBoundingClientRect().top,
+      );
       targetRef.current = target;
       onTargetChange(target);
     };
@@ -156,7 +166,7 @@ export function FileReorderProvider({
     const end = (commit: boolean): void => {
       ghost?.remove();
       const target = targetRef.current;
-      if (commit && target) useStore.getState().moveFileBefore(draggingFileId, target.beforeFileId);
+      if (commit && target) useStore.getState().dropFile(draggingFileId, target.beforeFileId, target.groupId);
       targetRef.current = null;
       setDraggingFileId(null);
       onTargetChange(null);

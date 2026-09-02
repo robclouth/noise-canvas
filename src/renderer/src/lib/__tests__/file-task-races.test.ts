@@ -17,6 +17,7 @@ const gate = vi.hoisted(() => ({
   snapshotLabels: [] as string[],
   storedOnsets: [] as { nodeId: string; packed: Float32Array }[],
   silenceValues: null as { length: number; unit: "beats" | "seconds" } | null,
+  setLengthValues: null as { length: number; unit: "beats" | "seconds" } | null,
   analysisResult: () => {
     const bands = 4;
     return {
@@ -54,6 +55,11 @@ vi.mock("../modals", () => ({
     if (gate.silenceValues) opts.onConfirm(gate.silenceValues);
     else opts.onClose?.();
   }),
+  openSetLengthPrompt: vi.fn((opts: { onConfirm: (values: unknown) => void; onClose?: () => void }) => {
+    if (gate.setLengthValues) opts.onConfirm(gate.setLengthValues);
+    else opts.onClose?.();
+  }),
+  openGroupFilesPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
@@ -154,9 +160,9 @@ function makeStore(overrides: Partial<State> = {}) {
     brushes: [],
     filesDirty: {},
     stopAudio: vi.fn(),
-    removeFileFromStemGroup: vi.fn(),
-    stemGroups: {},
-    stemGroupOfFile: {},
+    removeFileFromGroup: vi.fn(),
+    fileGroups: {},
+    fileGroupOfFile: {},
     ...overrides,
   } as unknown as State;
 
@@ -480,6 +486,7 @@ describe("rebuilding a file from its audio", () => {
     gate.storedOnsets = [];
     gate.snapshotLabels = [];
     gate.silenceValues = null;
+    gate.setLengthValues = null;
   });
 
   /** Hands the queued synthesis `samples` and waits for the rebuild to finish. */
@@ -534,6 +541,48 @@ describe("rebuilding a file from its audio", () => {
     expect(Array.from(gate.analysed[0])).toEqual([1, 2, 0, 0, 0, 3, 4]);
     expect(gate.snapshotLabels).toEqual(["Insert silence"]);
     expect(Array.from(gate.storedOnsets[0].packed)).toEqual([3, 0.25, 1]);
+  });
+
+  it("cuts the file at the length it is set to", async () => {
+    gate.setLengthValues = { length: 2 / 48000, unit: "seconds" };
+    const { files } = makeStore();
+    openTestFile();
+
+    await runRebuild(files.setActiveFileLength(), [1, 2, 3, 4]);
+
+    expect(Array.from(gate.analysed[0])).toEqual([1, 2]);
+    expect(gate.snapshotLabels).toEqual(["Set length"]);
+  });
+
+  it("pads the file with silence to reach a longer length", async () => {
+    gate.setLengthValues = { length: 7 / 48000, unit: "seconds" };
+    const { files } = makeStore();
+    openTestFile();
+
+    await runRebuild(files.setActiveFileLength(), [1, 2, 3, 4]);
+
+    expect(Array.from(gate.analysed[0])).toEqual([1, 2, 3, 4, 0, 0, 0]);
+  });
+
+  it("reads a set length in beats against the file's BPM", async () => {
+    gate.setLengthValues = { length: 1, unit: "beats" };
+    // 240 BPM is a quarter-second beat, so one beat is 12000 samples at 48 kHz.
+    const { files } = makeStore({ filepathsBpm: { "/audio/a.wav": 240 } } as unknown as Partial<State>);
+    openTestFile("/audio/a.wav");
+
+    await runRebuild(files.setActiveFileLength(), [1, 2]);
+
+    expect(gate.analysed[0]).toHaveLength(12000);
+    expect(Array.from(gate.analysed[0].subarray(0, 3))).toEqual([1, 2, 0]);
+  });
+
+  it("does not rebuild when the set-length dialog is dismissed", async () => {
+    const { files } = makeStore();
+    openTestFile();
+
+    await files.setActiveFileLength();
+
+    expect(gate.analysed).toHaveLength(0);
   });
 
   it("takes the length in beats from the file's BPM", async () => {

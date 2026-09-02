@@ -17,6 +17,7 @@ import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import type { PersistStorage, StorageValue } from "zustand/middleware";
 import { host } from "@renderer/lib/host";
+import { gatherFileGroups } from "@renderer/lib/file-reorder";
 import { APP_PERSISTED_KEYS, createAppSlice } from "./app";
 import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
@@ -32,7 +33,7 @@ import { createPalettesSlice, makeDefaultPalette, PALETTES_PERSISTED_KEYS } from
 import { DEFAULT_PALETTE_ID } from "./palette-id";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import { createSectionPresetsSlice } from "./section-presets";
-import { createStemGroupsSlice, STEM_GROUPS_PERSISTED_KEYS } from "./stem-groups";
+import { createFileGroupsSlice, FILE_GROUPS_PERSISTED_KEYS } from "./file-groups";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
 import { seedLinkedEffectParam, seedLinkedStepParam, writeEffectParam } from "./effect-param-linking";
 import type { ParameterKey, State } from "./types";
@@ -56,7 +57,7 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...PALETTES_PERSISTED_KEYS,
   ...STEPS_PERSISTED_KEYS,
   ...LINK_PERSISTED_KEYS,
-  ...STEM_GROUPS_PERSISTED_KEYS,
+  ...FILE_GROUPS_PERSISTED_KEYS,
   ...APP_PERSISTED_KEYS,
   "randomizationAmounts",
   "excludedFromRandomization",
@@ -165,9 +166,9 @@ function persistProjection(state: State): Record<string, unknown> {
     }
   }
 
-  // Stem groups follow their members: drop any member that isn't coming back,
+  // Groups follow their members: drop any member that isn't coming back,
   // and drop the group itself once fewer than two members remain.
-  const groups = picked.stemGroups as Record<string, { memberIds: string[] }> | undefined;
+  const groups = picked.fileGroups as Record<string, { memberIds: string[] }> | undefined;
   if (groups && typeof groups === "object") {
     const keptGroups: Record<string, unknown> = {};
     const keptOfFile: Record<string, string> = {};
@@ -177,8 +178,8 @@ function persistProjection(state: State): Record<string, unknown> {
       keptGroups[groupId] = { ...group, memberIds };
       for (const id of memberIds) keptOfFile[id] = groupId;
     }
-    picked.stemGroups = keptGroups;
-    picked.stemGroupOfFile = keptOfFile;
+    picked.fileGroups = keptGroups;
+    picked.fileGroupOfFile = keptOfFile;
   }
 
   return picked;
@@ -199,7 +200,7 @@ export const useStore = create<State>()(
         ...createSectionPresetsSlice(set, get),
         ...createStepsSlice(set, get),
         ...createLinkSlice(set, get),
-        ...createStemGroupsSlice(set, get),
+        ...createFileGroupsSlice(set, get),
         ...createFillSlice(set, get),
         ...createSelectionAuditionSlice(set, get),
         ...createSelectionClipboardSlice(set, get),
@@ -325,6 +326,14 @@ export const useStore = create<State>()(
             if (key in stored && !isStorableOptionValue(key, stored[key])) delete stored[key];
           }
 
+          // Groups were keyed as stems before they could hold any file.
+          if (stored.stemGroups && !stored.fileGroups) {
+            stored.fileGroups = stored.stemGroups;
+            stored.fileGroupOfFile = stored.stemGroupOfFile;
+          }
+          delete stored.stemGroups;
+          delete stored.stemGroupOfFile;
+
           const merged = deepMerge(currentState, stored) as State;
 
           if (host.env.isExtension) {
@@ -386,6 +395,12 @@ export const useStore = create<State>()(
             ...(merged.filesLoading ?? {}),
             ...Object.fromEntries(Object.keys(persistedPaths).map((id) => [id, "Loading..."])),
           };
+
+          // A group draws one bracket over one run of lanes, so a stored order
+          // that leaves a group straddling another file closes back up.
+          if (Array.isArray(merged.openFileIds)) {
+            merged.openFileIds = gatherFileGroups(merged.openFileIds, merged.fileGroupOfFile ?? {});
+          }
 
           return merged;
         },

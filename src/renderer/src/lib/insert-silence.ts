@@ -1,6 +1,3 @@
-/** What the Insert Silence dialog collects. */
-export type InsertSilenceValues = { length: number; unit: "beats" | "seconds" };
-
 /** The sample index an insert splits `length` samples at, clamped inside it. */
 export function silenceCutSample(length: number, cutSample: number): number {
   return Math.min(length, Math.max(0, Math.round(cutSample)));

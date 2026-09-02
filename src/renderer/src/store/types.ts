@@ -16,7 +16,7 @@ import type { LinkState } from "./link";
 import type { PalettesState } from "./palettes";
 import type { PresetsState } from "./presets";
 import type { SectionPresetsState } from "./section-presets";
-import type { StemGroupsState } from "./stem-groups";
+import type { FileGroupsState } from "./file-groups";
 import type { StepsState } from "./steps";
 
 export type BrushColor = {
@@ -134,7 +134,7 @@ export type State = BrushState &
   StepsState &
   LinkState &
   FillState &
-  StemGroupsState &
+  FileGroupsState &
   SelectionAuditionState &
   SelectionClipboardState &
   SelectionRippleState & {
