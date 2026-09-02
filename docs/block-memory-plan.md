@@ -1043,8 +1043,8 @@ every 400 ms, so it catches the analysis.
 
 | file  | texels | idle | open (peak) | paint | undo | redo | export | budget |
 | ----- | ------ | ---- | ----------- | ----- | ---- | ---- | ------ | ------ |
-| 300 s | 59.5M  | 291  | 584 (1879)  | 773   | 787  | 696  | 600 MB | 21 %   |
-| 600 s | 119.0M | 285  | 704 (3453)  | 993   | 1078 | 1085 | 880 MB | 21 %   |
+| 300 s | 59.5M  | 285  | 628 (1601)  | 800   | 700  | 808  | 617 MB | 21 %   |
+| 600 s | 119.0M | 285  | 590 (2783)  | 980   | 1069 | 1075 | 907 MB | 21 %   |
 
 **The ten-minute file opens, paints, undoes, redoes and exports.** The old
 analyser refused it outright. The graphics budget charges it the same 21 % as
@@ -1055,12 +1055,17 @@ What the measurement says:
 - The settled cost still rises with length — 691 MB against 584 MB at open —
   and the rise is the audio buffer (~0.66 MB a second, Phase 4's scope) plus
   the history caches painting fills.
-- **The peak is now the analysis, not the canvas.** 3441 MB for ten minutes,
-  against 691 MB settled. It is the three terms 3.5.7 removes: the coefficient
-  run, its copy into JavaScript, and the analyser's own tree. On the 8 GB Iris
-  target the RAM cap (`analysisPeakTexels`) refuses the file before it tries.
-- The ten-minute row is the run after 3.5.8; before it, painting threw "the
-  block lies outside the view" on the first stroke.
+- **The peak is the analysis, not the canvas.** 2783 MB for ten minutes against
+  590 MB settled, after 3.5.7 removed the copy into JavaScript and bounded the
+  analyser's tree — it was 3453 MB before. What is left is the coefficient run
+  itself: 1.9 GB at ten minutes, 16 bytes a coefficient, exactly the gap
+  between the peak and the settled figure. Only a renderer that drives the
+  spans and seeds the block store as they arrive removes it.
+- On the 8 GB Iris target the RAM cap (`analysisPeakTexels`, 20 bytes a
+  coefficient over a quarter of memory) allows about eight minutes, so a
+  ten-minute file is refused there rather than tried.
+- The rows are the run after 3.5.7 and 3.5.8. Before 3.5.8, painting the
+  ten-minute file threw "the block lies outside the view" on the first stroke.
 
 Status: in progress.
 

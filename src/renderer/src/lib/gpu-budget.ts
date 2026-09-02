@@ -23,9 +23,11 @@ export const GPU_BYTES_PER_TEXEL_SCRATCH = 74;
 // CPU-side copies (packedData 16, inverseMap 8); they compete with the
 // textures only on unified-memory GPUs.
 export const CPU_BYTES_PER_TEXEL_FILE = 24;
-// RAM one packed coefficient costs while the analysis runs: the coefficient run
-// the analyser fills (16) and its own coefficient tree beside it (8 a channel).
-const ANALYSIS_BYTES_PER_TEXEL = 32;
+// RAM one packed coefficient costs while the analysis runs. The run the
+// analyser fills is 16 bytes a coefficient and the tree beside it holds one
+// span, which is a flat few tens of megabytes; a ten-minute file measured 16
+// bytes a coefficient over the settled figure, and this leaves a quarter over.
+const ANALYSIS_BYTES_PER_TEXEL = 20;
 // Share of the machine's memory one analysis may hold at its peak.
 const ANALYSIS_MEMORY_SHARE = 0.25;
 // Fraction of the GPU pool the spectrogram data may claim; the rest stays for
