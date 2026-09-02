@@ -187,6 +187,21 @@ describe("history cache overhead", () => {
     expect(analysisPeakTexels()).toBeGreaterThan(gpuLimit);
   });
 
+  it("takes the flat cost of the chunked passes off before it counts coefficients", () => {
+    const w = window as unknown as Record<string, unknown>;
+    const at = (gib: number): number => {
+      w.nodeOs = { homedir: () => "/home", totalmem: () => gib * 1024 ** 3 };
+      return analysisPeakTexels();
+    };
+    // Twice the memory allows more than twice the coefficients, because the
+    // passes hold the same chunk however long the file is.
+    const small = at(8);
+    expect(at(16)).toBeGreaterThan(2 * small);
+    // A machine whose share does not cover that chunk allows nothing.
+    expect(at(1)).toBe(0);
+    at(TOTAL_MEMORY / 1024 ** 3);
+  });
+
   it("takes the caches out of the budget a new file too big for a window is measured against", () => {
     // Enough open that what is left cannot hold a window.
     const open = 5_600_000;

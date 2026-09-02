@@ -23,11 +23,16 @@ export const GPU_BYTES_PER_TEXEL_SCRATCH = 74;
 // CPU-side copies (packedData 16, inverseMap 8); they compete with the
 // textures only on unified-memory GPUs.
 export const CPU_BYTES_PER_TEXEL_FILE = 24;
-// RAM one packed coefficient costs while the analysis runs. The run the
-// analyser fills is 16 bytes a coefficient and the tree beside it holds one
-// span, which is a flat few tens of megabytes; a ten-minute file measured 16
-// bytes a coefficient over the settled figure, and this leaves a quarter over.
-const ANALYSIS_BYTES_PER_TEXEL = 20;
+// RAM one packed coefficient costs at the peak of an open, over the flat cost
+// below. Every pass that reads the file now takes it a chunk at a time, so what
+// is left growing with length is the audio: the decoded samples the analysis
+// reads and the buffer the file plays from. Five- and ten-minute opens measured
+// 2.3 bytes a coefficient between them, and this leaves well over double.
+const ANALYSIS_BYTES_PER_TEXEL = 6;
+// RAM those passes hold whatever the file's length: the chunk each reads, the
+// blocks that stay decoded, and the canvas window. The same two opens put it at
+// 441 MB on a 24 GB machine, where the caches are at their widest.
+const ANALYSIS_FIXED_BYTES = 512 * 1024 * 1024;
 // Share of the machine's memory one analysis may hold at its peak.
 const ANALYSIS_MEMORY_SHARE = 0.25;
 // Fraction of the GPU pool the spectrogram data may claim; the rest stays for
@@ -127,9 +132,10 @@ export function gpuMemoryInfo(): { bytes: number; unified: boolean } {
   return cachedInfo;
 }
 
-/** Packed coefficients one analysis may hold in RAM while it runs. */
+/** Packed coefficients a file may hold, from the RAM opening one costs at its peak. */
 export function analysisPeakTexels(): number {
-  return Math.floor((host.os.totalmem() * ANALYSIS_MEMORY_SHARE) / ANALYSIS_BYTES_PER_TEXEL);
+  const share = host.os.totalmem() * ANALYSIS_MEMORY_SHARE - ANALYSIS_FIXED_BYTES;
+  return Math.max(0, Math.floor(share / ANALYSIS_BYTES_PER_TEXEL));
 }
 
 /**
