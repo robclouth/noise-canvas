@@ -1033,7 +1033,7 @@ every 400 ms, so it catches the analysis.
 | file  | texels | idle | open (peak) | paint | undo | redo | export | budget |
 | ----- | ------ | ---- | ----------- | ----- | ---- | ---- | ------ | ------ |
 | 300 s | 59.5M  | 291  | 584 (1879)  | 773   | 787  | 696  | 600 MB | 21 %   |
-| 600 s | 119.0M | 285  | 691 (3441)  | 995   | 1100 | 1105 | 822 MB | 21 %   |
+| 600 s | 119.0M | 285  | 704 (3453)  | 993   | 1078 | 1085 | 880 MB | 21 %   |
 
 **The ten-minute file opens, paints, undoes, redoes and exports.** The old
 analyser refused it outright. The graphics budget charges it the same 21 % as
@@ -1048,7 +1048,8 @@ What the measurement says:
   against 691 MB settled. It is the three terms 3.5.7 removes: the coefficient
   run, its copy into JavaScript, and the analyser's own tree. On the 8 GB Iris
   target the RAM cap (`analysisPeakTexels`) refuses the file before it tries.
-- Painting on the ten-minute file threw once — see 3.5.8.
+- The ten-minute row is the run after 3.5.8; before it, painting threw "the
+  block lies outside the view" on the first stroke.
 
 Status: in progress.
 
