@@ -5,6 +5,7 @@ import {
   displayPyramidBudgetTexels,
 } from "./display-pyramid";
 import { displayTilesBytes } from "./display-tiles";
+import { MAX_PACKED_TEXTURE_TEXELS } from "./constants";
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { host } from "./host";
 
@@ -86,11 +87,17 @@ function fileTexels(grid: BlockGrid): number {
  * when the whole file fits the budget — which is every file short enough that
  * a window would save nothing. A build pins the figure with
  * `VITE_CANVAS_WINDOW_BLOCKS`, where 0 keeps the whole file on the canvas.
+ *
+ * A file with more coefficients than one texture holds never keeps the whole
+ * file, whatever the budget or the build says: the canvas is a texture pair,
+ * and neither the budget nor a pinned figure can make one larger.
  */
 export function canvasWindowBlocks(grid: BlockGrid): number {
-  if (Number.isFinite(envWindowBlocks)) return envWindowBlocks >= 1 ? Math.floor(envWindowBlocks) : Infinity;
   const texelsPerBlock = blockTexels(grid, 0);
   if (texelsPerBlock <= 0) return Infinity;
+  const mustWindow = fileTexels(grid) > MAX_PACKED_TEXTURE_TEXELS;
+  if (Number.isFinite(envWindowBlocks) && envWindowBlocks >= 1) return Math.floor(envWindowBlocks);
+  if (Number.isFinite(envWindowBlocks) && !mustWindow) return Infinity;
   const info = gpuMemoryInfo();
   const budget = canvasWindowBudgetBytes();
   // Nothing to size a window against, so the smallest usable one it is.
@@ -99,10 +106,10 @@ export function canvasWindowBlocks(grid: BlockGrid): number {
   // keeps it, and behaves exactly as it did before windows existed.
   const wholeRate =
     GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH + (info.unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
-  if (wholeRate * fileTexels(grid) <= budget) return Infinity;
+  if (!mustWindow && wholeRate * fileTexels(grid) <= budget) return Infinity;
   const spare = windowSlotSpareBytes(texelsPerBlock);
   const blocks = Math.floor((budget - spare) / (canvasWindowBytes(1, texelsPerBlock) - spare));
-  if (blocks >= grid.blockCount) return Infinity;
+  if (!mustWindow && blocks >= grid.blockCount) return Infinity;
   return Math.min(CANVAS_WINDOW_MAX_BLOCKS, grid.blockCount, Math.max(CANVAS_WINDOW_MIN_BLOCKS, blocks));
 }
 

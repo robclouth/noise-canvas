@@ -136,6 +136,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     cannot hold, and a span that falls short of what it serves stops the
     reader rather than drawing clamped values.
 
+13. **A file with more coefficients than one texture always paints through a
+    window.** The canvas is a texture pair, so neither the graphics budget nor
+    a pinned `VITE_CANVAS_WINDOW_BLOCKS` may keep the whole file past
+    `MAX_PACKED_TEXTURE_TEXELS`; `canvasWindowBlocks` returns a finite figure
+    there whatever else says.
+
 ## How to check it still works
 
 The unit suite cannot see most of this: it compares two renderers, and both can

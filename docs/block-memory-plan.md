@@ -1004,7 +1004,7 @@ Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
 - **3.5.4 — hand the coefficients over without copying them.** The worker's
   vector becomes the JS array's storage through an external `ArrayBuffer` with
   a finaliser, rather than a memcpy into a fresh one.
-- **3.5.5 — a window is compulsory above one texture.**
+- **3.5.5 — a window is compulsory above one texture.** DONE.
 - **3.5.6 — MEASURE at 600 s** and record it here.
 - **3.5.7 — analyse in spans and forget.** Only if 3.5.6 says the peak is still
   over the target. Gaborator supports incremental analysis with
