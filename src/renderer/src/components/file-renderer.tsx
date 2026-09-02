@@ -1280,9 +1280,11 @@ const FileRendererInner = memo(
           // stroke's — leaving the next delta encoded against the wrong base.
           const nodeId = await serializeFileTask(fileId, async () => {
             const hadExisting = await historyManager.initialize();
-            if (hadExisting || !packed) return null;
+            if (hadExisting) return null;
+            // A windowed file has no run of its own: the analysis wrote its
+            // state straight into the store the root snapshot points at.
             const id = await historyManager.addRootSnapshot({
-              data: packed,
+              data: packed ?? null,
               kind: "root",
               label: "Opened",
               spectrogram: spectrogramData,

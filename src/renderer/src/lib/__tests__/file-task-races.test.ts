@@ -189,6 +189,7 @@ function openTestFile(filePath = "/audio/a.wav") {
     rendererRef: {
       current: {
         getFBOData: async () => new Float32Array(64),
+        getCanvasView: () => null,
         getDirtyRegion: () => null,
         clearDirtyRegion: vi.fn(),
         reloadTextures: vi.fn(),

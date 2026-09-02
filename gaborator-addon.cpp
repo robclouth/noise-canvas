@@ -320,6 +320,50 @@ static void fillCoefsFromPacked(const PackedCoefs &src, int channel, int bandBeg
 }
 
 /**
+ * The per-band ranges a packed buffer holding [viewStart, viewEnd) lays out:
+ * each band's coefficients for that span, back to back in band order. Fails
+ * when the span's edges do not sit on every band's grid, or when the buffer is
+ * not exactly the size those ranges need. `what` names the caller in the error.
+ */
+static bool derivePackedView(const char *what, int numBands, const uint32_t *bandLengths,
+                             const int32_t *bandStepLog2s, int64_t numFrames, int64_t viewStart, int64_t viewEnd,
+                             size_t packedLen, std::vector<uint32_t> &offsets, std::vector<uint32_t> &lens,
+                             std::vector<int64_t> &k0s, std::string &error)
+{
+    if (viewStart < 0 || viewEnd <= viewStart || viewEnd > numFrames)
+    {
+        error = std::string(what) + ": the view falls outside the file";
+        return false;
+    }
+    offsets.resize((size_t)numBands);
+    lens.resize((size_t)numBands);
+    k0s.resize((size_t)numBands);
+    size_t at = 0;
+    for (int b = 0; b < numBands; ++b)
+    {
+        const int32_t step = bandStepLog2s[(size_t)b];
+        const int64_t len = (int64_t)bandLengths[(size_t)b];
+        const int64_t k0 = viewStart >> step;
+        if ((k0 << step) != viewStart || (viewEnd < numFrames && ((viewEnd >> step) << step) != viewEnd))
+        {
+            error = std::string(what) + ": the view's edges do not sit on every band's grid";
+            return false;
+        }
+        const int64_t kEnd = viewEnd >= numFrames ? len : std::min<int64_t>(len, viewEnd >> step);
+        k0s[(size_t)b] = k0;
+        lens[(size_t)b] = (uint32_t)std::max<int64_t>(0, kEnd - std::min(k0, kEnd));
+        offsets[(size_t)b] = (uint32_t)at;
+        at += (size_t)lens[(size_t)b];
+    }
+    if (at * 4 != packedLen)
+    {
+        error = std::string(what) + ": the view buffer does not match the view's span";
+        return false;
+    }
+    return true;
+}
+
+/**
  * Crossfades a block synthesized over [synthStart, synthEnd) into `dest`, which
  * already holds `existing`. 10 ms ramps at each seam, skipped where the seam is
  * a file boundary — there is no surrounding audio to fade against there, and
@@ -2056,6 +2100,11 @@ public:
         Napi::Int32Array bandStepLog2sJs = analysisObj.Get("bandStepLog2s").As<Napi::Int32Array>();
         bandStepLog2s.assign(bandStepLog2sJs.Data(), bandStepLog2sJs.Data() + bandStepLog2sJs.ElementLength());
 
+        if (analysisObj.Has("viewStartFrame") && analysisObj.Get("viewStartFrame").IsNumber())
+            viewStart = analysisObj.Get("viewStartFrame").As<Napi::Number>().Int64Value();
+        if (analysisObj.Has("viewEndFrame") && analysisObj.Get("viewEndFrame").IsNumber())
+            viewEnd = analysisObj.Get("viewEndFrame").As<Napi::Number>().Int64Value();
+
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
         fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
         // Onsets are re-derived from the packed data this pass already walks, so
@@ -2114,13 +2163,31 @@ public:
             SetError("synthesize: band tables are shorter than numBands");
             return false;
         }
-        for (int b = 0; b < numBands; ++b)
+        if (windowed())
         {
-            const size_t end = (size_t)bandOffsets[b] + (size_t)bandLengths[b];
-            if (end * 4 > inputDataLen)
+            std::string error;
+            if (!derivePackedView("synthesize", numBands, bandLengths.data(), bandStepLog2s.data(), numFrames,
+                                  viewStart, viewEnd, inputDataLen, viewOffsets, viewLens, viewK0, error))
             {
-                SetError("synthesize: band layout runs past the end of the packed buffer");
+                SetError(error);
                 return false;
+            }
+            if (requestedStartFrame < 0 || requestedEndFrame <= requestedStartFrame || existingAudio.empty())
+            {
+                SetError("synthesize: a windowed pass needs a frame range and existing audio");
+                return false;
+            }
+        }
+        else
+        {
+            for (int b = 0; b < numBands; ++b)
+            {
+                const size_t end = (size_t)bandOffsets[b] + (size_t)bandLengths[b];
+                if (end * 4 > inputDataLen)
+                {
+                    SetError("synthesize: band layout runs past the end of the packed buffer");
+                    return false;
+                }
             }
         }
         if (!existingAudio.empty())
@@ -2230,9 +2297,20 @@ public:
             DEBUG_LOG << "[C++] Partial fill range: " << fillStart << " to " << fillEnd << " (vs full: 0 to " << numFrames << ")" << std::endl << std::flush;
         }
 
+        // A windowed pass only holds its own span, so everything the fill reads
+        // has to fall inside it.
+        if (windowed() && (fillStart < viewStart || (fillEnd > viewEnd && viewEnd < (int64_t)numFrames)))
+        {
+            SetError("synthesize: the view does not cover the synthesis reach");
+            return;
+        }
+
         // Fill and synthesize
         std::vector<std::vector<float>> synthesizedBuffers(channels);
-        const PackedCoefs packedView{inputData, inputDataLen, bandOffsets.data(), bandLengths.data(),
+        const PackedCoefs packedView =
+            windowed() ? PackedCoefs{inputData,  inputDataLen, viewOffsets.data(), viewLens.data(),
+                                     bandStepLog2s.data(), numBands, viewK0.data()}
+                       : PackedCoefs{inputData,  inputDataLen, bandOffsets.data(), bandLengths.data(),
                                      bandStepLog2s.data(), numBands};
 
         for (int ch = 0; ch < channels; ++ch)
@@ -2329,6 +2407,12 @@ public:
             layout.bandOffsets = bandOffsets.data();
             layout.bandLengths = bandLengths.data();
             layout.bandStepLog2s = bandStepLog2s.data();
+            if (windowed())
+            {
+                layout.viewOffsets = viewOffsets.data();
+                layout.viewLens = viewLens.data();
+                layout.viewK0 = viewK0.data();
+            }
             // A stroke changes one span of the file, so only that span's onsets
             // are worth finding again; the caller splices them into the ones it
             // already has. Without a region — the first pass over a file — the
@@ -2406,6 +2490,14 @@ private:
     int bandsPerOctave;
     double fminHz;
     bool detectOnsets = false;
+    // Set when the packed buffer holds one span of the file rather than all of
+    // it; the band tables still describe the whole file.
+    int64_t viewStart = -1;
+    int64_t viewEnd = -1;
+    std::vector<uint32_t> viewOffsets;
+    std::vector<uint32_t> viewLens;
+    std::vector<int64_t> viewK0;
+    bool windowed() const { return viewStart >= 0 && viewEnd > viewStart; }
     OnsetRegion onsetRegion{0.0, 0.0, 0.0, nullptr, 0};
     bool hasOnsetRegion = false;
     std::vector<float> onsetBandMaxIn;
@@ -2919,30 +3011,11 @@ private:
                 SetError("commitStroke: a windowed commit needs a regional onset reference");
                 return false;
             }
-            viewOffsets.resize((size_t)numBands);
-            viewLens.resize((size_t)numBands);
-            viewK0.resize((size_t)numBands);
-            size_t at = 0;
-            for (int b = 0; b < numBands; ++b)
+            std::string error;
+            if (!derivePackedView("commitStroke", numBands, bandLengths.data(), bandStepLog2s.data(), numFrames,
+                                  viewStart, viewEnd, packedLen, viewOffsets, viewLens, viewK0, error))
             {
-                const int32_t step = bandStepLog2s[(size_t)b];
-                const int64_t len = (int64_t)bandLengths[(size_t)b];
-                const int64_t k0 = viewStart >> step;
-                if ((k0 << step) != viewStart ||
-                    (viewEnd < numFrames && ((viewEnd >> step) << step) != viewEnd))
-                {
-                    SetError("commitStroke: the view's edges do not sit on every band's grid");
-                    return false;
-                }
-                const int64_t kEnd = viewEnd >= numFrames ? len : std::min<int64_t>(len, viewEnd >> step);
-                viewK0[(size_t)b] = k0;
-                viewLens[(size_t)b] = (uint32_t)std::max<int64_t>(0, kEnd - std::min(k0, kEnd));
-                viewOffsets[(size_t)b] = (uint32_t)at;
-                at += (size_t)viewLens[(size_t)b];
-            }
-            if (at * 4 != packedLen)
-            {
-                SetError("commitStroke: the view buffer does not match the view's span");
+                SetError(error);
                 return false;
             }
         }

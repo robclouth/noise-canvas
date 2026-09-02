@@ -713,7 +713,7 @@ export class HistoryManager {
   /**
    * Seed the manager with a full snapshot. Creates the root node and writes it.
    */
-  async addRootSnapshot(opts: AddSnapshotOpts): Promise<string> {
+  async addRootSnapshot(opts: Omit<AddSnapshotOpts, "data"> & { data: Float32Array | null }): Promise<string> {
     await this.initialize();
     if (this.manifest) {
       // Already initialised — treat as no-op.
@@ -747,7 +747,8 @@ export class HistoryManager {
       { numBands: s.numBands, metadata: s.metadata },
       { numFrames: s.numFrames, sampleRate: s.sampleRate, texelCount: s.texels },
     );
-    await store.seed(opts.data);
+    if (opts.data) await store.seed(opts.data);
+    else if (!store.isSeeded) throw new Error("HistoryManager: the root state was never written");
     await this.writeManifest();
     this.lastLoadedAnchorId = id;
     this.notifyStateChange();

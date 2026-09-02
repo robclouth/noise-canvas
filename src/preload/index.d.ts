@@ -1,5 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { IpcRenderer } from "electron";
+import type { AnalysisStream } from "../main/lib/audio-analysis";
+import type { OnsetDetection } from "../main/lib/onset-scan";
 import {
   AnalysisParams,
   CommitStroke,
@@ -70,6 +72,23 @@ declare global {
         codec: string;
         channels: number;
       }>;
+      /**
+       * A file's analysis, driven a span of frames at a time so the run of the
+       * whole file is never held. Absent in a host that can only answer a whole
+       * analysis, where the caller falls back to `analyze`.
+       */
+      openAnalysisStream?: (filePath: string, params: AnalysisParams) => Promise<AnalysisStream>;
+      /**
+       * Onsets found a chunk at a time, reading each chunk through `read`.
+       * With a region, only that span is read and reported on.
+       */
+      scanFileOnsets?: (
+        read: (ranges: Uint32Array) => Promise<Float32Array>,
+        analysisMetadata: PackedLayout,
+        sampleRate: number,
+        bandMax: Float32Array,
+        region?: { startSec: number; endSec: number; odfReference: number },
+      ) => Promise<OnsetDetection>;
       synthesize: (
         processedData: Float32Array,
         analysisMetadata: {

@@ -71,6 +71,7 @@ export class BlockStore {
   private readonly maxResidentBytes: number;
   private flushing: Promise<void> = Promise.resolve();
   private disposed = false;
+  private seeded = false;
 
   constructor(grid: BlockGrid, backend: BlockBackend, options: BlockStoreOptions = {}) {
     this.grid = grid;
@@ -81,6 +82,11 @@ export class BlockStore {
     this.maxResidentBytes = options.maxResidentBytes ?? DEFAULT_RESIDENT_BYTES;
     this.clean = new ByteBudgetCache<Float32Array>(this.maxResidentBytes, (block) => block.byteLength);
     this.ranges = new Array<Uint32Array | undefined>(grid.blockCount);
+  }
+
+  /** True once every block has been written, so the store speaks for the file. */
+  get isSeeded(): boolean {
+    return this.seeded;
   }
 
   /** Bytes the decoded blocks hold, clean and dirty together. */
@@ -111,6 +117,15 @@ export class BlockStore {
    * replaces whatever the store held.
    */
   async seed(packed: Float32Array): Promise<void> {
+    await this.seedFrom((index) => Promise.resolve(gatherPixelRanges(packed, this.blockRanges(index))));
+  }
+
+  /**
+   * Writes the store's blocks out one at a time, taking each from `source`
+   * rather than cutting it from a run of the whole file. It replaces whatever
+   * the store held.
+   */
+  async seedFrom(source: (index: number) => Promise<Float32Array>): Promise<void> {
     if (this.disposed) throw new Error("block store is disposed");
     // An in-flight flush finishes first, so none of its writes can land over
     // the reseeded blocks.
@@ -120,10 +135,11 @@ export class BlockStore {
     this.clean.clear();
     await this.overlay?.clear();
     for (let index = 0; index < this.grid.blockCount; index++) {
-      const block = gatherPixelRanges(packed, this.blockRanges(index));
+      const block = this.checked(index, await source(index));
       await this.backend.write(index, await this.codec.encode(block));
       this.clean.set(String(index), block);
     }
+    this.seeded = true;
   }
 
   /**

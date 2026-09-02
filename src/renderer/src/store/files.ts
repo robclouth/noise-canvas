@@ -14,8 +14,11 @@ import {
   usedBudgetFraction,
   type OpenFileTexels,
 } from "../lib/gpu-budget";
-import { blockGrid, blockTexels } from "../lib/block-grid";
+import { blockGrid, blockTexels, frameRangeOfBlock } from "../lib/block-grid";
+import { openBlockStore } from "../lib/block-stores";
 import { needsCanvasWindow } from "../lib/canvas-window";
+import { viewCoversFile } from "../lib/canvas-view";
+import { synthesiseInChunks, type SynthesiseView } from "../../../main/lib/synthesis-chunks";
 import { toChannelCount } from "../lib/channel-mix";
 import { insertSilence, type InsertSilenceValues } from "../lib/insert-silence";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
@@ -416,6 +419,145 @@ async function wholeFileInverseMap(
   );
 }
 
+/** Rebuilds the whole file's audio from the store, a chunk of coefficients at a time. */
+function synthesiseFromSpans(
+  read: (ranges: Uint32Array) => Promise<Float32Array | null>,
+  layout: PackedLayout,
+  sampleRate: number,
+  params: AnalysisParams,
+) {
+  const pass: SynthesiseView = (packed, meta, existingAudio, startFrame, endFrame) =>
+    host.analysis.synthesize(
+      packed,
+      meta,
+      sampleRate,
+      params,
+      false,
+      existingAudio,
+      startFrame,
+      endFrame,
+      0,
+      layout.numBands,
+    );
+  return synthesiseInChunks(pass, spanReader(read), layout, sampleRate);
+}
+
+/** A range reader that refuses rather than answering with a gap. */
+function spanReader(read: (ranges: Uint32Array) => Promise<Float32Array | null>) {
+  return async (ranges: Uint32Array): Promise<Float32Array> => {
+    const values = await read(ranges);
+    if (!values) throw new Error("the store could not serve the painted state");
+    return values;
+  };
+}
+
+/**
+ * The onsets a chunked synthesis owes, read from the store rather than from a
+ * run of the file. Null when the pass has no reference to judge a span by, so
+ * the caller keeps the onsets it has.
+ */
+async function scanOnsetsFromSpans(
+  read: (ranges: Uint32Array) => Promise<Float32Array | null>,
+  layout: PackedLayout,
+  sampleRate: number,
+  file: OpenFile,
+  params: AnalysisParams,
+): Promise<{ onsets: PackedOnsets; onsetOdfMax: number; onsetBandMax: Float32Array } | null> {
+  const scan = host.analysis.scanFileOnsets;
+  const reference = file.onsetReference;
+  if (!scan || !reference) return null;
+  const region =
+    params.onsetStartSec !== undefined && params.onsetEndSec !== undefined
+      ? { startSec: params.onsetStartSec, endSec: params.onsetEndSec, odfReference: reference.odfMax }
+      : undefined;
+  const found = await scan(spanReader(read), layout, sampleRate, reference.bandMax, region);
+  return { onsets: found.onsets, onsetOdfMax: found.odfMax, onsetBandMax: found.bandMax };
+}
+
+/** What an analysis leaves behind, however it was run. */
+type AnalysedFile = {
+  spectrogramData: SpectrogramData;
+  onsets: PackedOnsets;
+  onsetReference: { odfMax: number; bandMax: Float32Array };
+};
+
+/**
+ * Analyses a file a block at a time, writing each block into the file's store
+ * as it lands, so the coefficients of the whole file are never held. A file
+ * the canvas can hold whole keeps its run all the same: everything downstream
+ * of a short file still works on one, and a short file's run is cheap.
+ */
+async function analyseIntoBlocks(
+  fileId: string,
+  filePath: string,
+  params: AnalysisParams,
+  openStream: NonNullable<typeof host.analysis.openAnalysisStream>,
+): Promise<AnalysedFile> {
+  const stream = await openStream(filePath, params);
+  const shape = stream.layout;
+  const layout = bandLayoutOf(
+    shape.numBands,
+    shape.bandOffsets,
+    shape.bandLengths,
+    shape.bandStepLog2s,
+    shape.bandFreqsHz,
+  );
+  const size = packedSizeOf(shape.bandLengths);
+  const grid = blockGrid(layout, shape.numFrames, shape.sampleRate);
+  const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
+  const store = await openBlockStore(fileId, layout, {
+    numFrames: shape.numFrames,
+    sampleRate: shape.sampleRate,
+    texelCount: size.texels,
+  });
+
+  const whole = windowed ? null : new Float32Array(size.texels * 4);
+  await store.seedFrom(async (index) => {
+    const { start, end } = frameRangeOfBlock(grid, index);
+    const block = await stream.span(start, end);
+    if (whole) scatterCompactPixelRanges(whole, block, store.blockRanges(index));
+    return block;
+  });
+  const summary = stream.summary();
+
+  const packedLayout: PackedLayout = {
+    numFrames: shape.numFrames,
+    numChannels: shape.numChannels,
+    numBands: shape.numBands,
+    bandOffsets: shape.bandOffsets,
+    bandStepLog2s: shape.bandStepLog2s,
+    bandLengths: shape.bandLengths,
+  };
+  const scan = host.analysis.scanFileOnsets;
+  const detected =
+    whole || !scan
+      ? await host.analysis.detectOnsets(whole ?? (await store.readAll()), packedLayout, shape.sampleRate)
+      : await scan((ranges) => store.readRanges(ranges), packedLayout, shape.sampleRate, summary.onsetBandMax);
+
+  return {
+    spectrogramData: {
+      packedData: whole ?? undefined,
+      inverseMap: await wholeFileInverseMap(layout, shape.numFrames, shape.sampleRate, packedLayout, size.texels),
+      metadata: layout.metadata,
+      ...size,
+      numFrames: shape.numFrames,
+      numBands: shape.numBands,
+      numChannels: shape.numChannels,
+      sampleRate: shape.sampleRate,
+      minFreq: params.minFreq,
+      bandsPerOctave: params.bandsPerOctave,
+      magnitudeEnergy: summary.magnitudeEnergy,
+      synthesisMetadata: {
+        bandOffsets: shape.bandOffsets,
+        bandStepLog2s: shape.bandStepLog2s,
+        bandLengths: shape.bandLengths,
+      },
+    },
+    onsets: detected.onsets,
+    onsetReference: { odfMax: detected.odfMax, bandMax: detected.bandMax },
+  };
+}
+
 /**
  * A fresh analysis as the state the renderer paints on. The analysis returns
  * coefficients alone, so the inverse map is built here.
@@ -490,13 +632,24 @@ async function loadRealFileViaGaborator(
   const diskPath = isBundledPath(filePath) ? resolveBundledPath(filePath) : filePath;
   const otherTexelCounts = openFileTexelCounts(fileId);
   const analysisStart = performance.now();
-  let result: Awaited<ReturnType<typeof host.analysis.analyze>>;
+  const params: AnalysisParams = {
+    bandsPerOctave,
+    minFreq,
+    maxCoefficients: remainingCoefficientBudget(otherTexelCounts),
+  };
+  const openStream = host.analysis.openAnalysisStream;
+  let analysed: AnalysedFile;
   try {
-    result = await host.analysis.analyze(diskPath, {
-      bandsPerOctave,
-      minFreq,
-      maxCoefficients: remainingCoefficientBudget(otherTexelCounts),
-    });
+    if (openStream) {
+      analysed = await analyseIntoBlocks(fileId, diskPath, params, openStream);
+    } else {
+      const result = await host.analysis.analyze(diskPath, params);
+      analysed = {
+        spectrogramData: await spectrogramFromAnalysis(result, { minFreq, bandsPerOctave }),
+        onsets: result.onsets,
+        onsetReference: { odfMax: result.onsetOdfMax ?? 0, bandMax: result.onsetBandMax ?? new Float32Array() },
+      };
+    }
   } catch (error) {
     diag.error("file", "analysis failed", { name: host.path.basename(filePath), bandsPerOctave, error });
     if (error instanceof Error && error.message.includes("maximum audio duration") && otherTexelCounts.length > 0) {
@@ -505,15 +658,11 @@ async function loadRealFileViaGaborator(
     throw error;
   }
   const analysisMs = performance.now() - analysisStart;
-  const spectrogramData = await spectrogramFromAnalysis(result, { minFreq, bandsPerOctave });
   diag.timing("file", "analysis", analysisMs, { name: host.path.basename(filePath), bandsPerOctave });
   return updateOpenFile(fileId, {
-    spectrogramData,
-    onsets: result.onsets,
-    onsetReference:
-      result.onsetOdfMax !== undefined && result.onsetBandMax
-        ? { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax }
-        : undefined,
+    spectrogramData: analysed.spectrogramData,
+    onsets: analysed.onsets,
+    onsetReference: analysed.onsetReference.bandMax.length > 0 ? analysed.onsetReference : undefined,
   });
 }
 
@@ -1958,47 +2107,48 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const originalAnalysis = file.spectrogramData;
       const renderer = file.rendererRef.current;
 
-      // Use prefetched FBO data if provided, otherwise fetch it
-      let fboData: Float32Array;
-      if (prefetchedFboData) {
-        console.log("[timing] using prefetched FBO data");
-        fboData = prefetchedFboData;
-      } else {
+      const packedLayout: PackedLayout = {
+        numFrames: originalAnalysis.numFrames,
+        numChannels: originalAnalysis.numChannels,
+        numBands: originalAnalysis.numBands,
+        bandOffsets: originalAnalysis.synthesisMetadata.bandOffsets,
+        bandStepLog2s: originalAnalysis.synthesisMetadata.bandStepLog2s,
+        bandLengths: originalAnalysis.synthesisMetadata.bandLengths,
+      };
+
+      // A file whose canvas holds one window has no run of the whole of it, so
+      // the audio is rebuilt a chunk at a time out of the store. Reading one
+      // array out instead would hold the file's coefficients twice over. Only a
+      // host that runs its analysis in spans reads a view of the packed state;
+      // the rest answer whole passes and take the run.
+      const canvasView = renderer.getCanvasView();
+      const readSpans =
+        !prefetchedFboData &&
+        host.analysis.openAnalysisStream &&
+        canvasView &&
+        !viewCoversFile(canvasView, originalAnalysis.numFrames)
+          ? (ranges: Uint32Array) => getHistoryManager(fileId).currentRanges(ranges)
+          : null;
+
+      let processedDataArray = prefetchedFboData ?? new Float32Array(0);
+      if (!prefetchedFboData && !readSpans) {
         const fboStart = performance.now();
         const whole = await readCurrentPackedData(file);
         if (!whole) throw new Error("the synthesis could not read the painted state");
-        fboData = whole;
+        processedDataArray = whole;
         diag.timing("timing", "getFBOData for synthesis", performance.now() - fboStart);
       }
-
-      const payload = {
-        processedData: fboData.buffer,
-        analysisMetadata: {
-          numFrames: originalAnalysis.numFrames,
-          numChannels: originalAnalysis.numChannels,
-          numBands: originalAnalysis.numBands,
-          bandOffsets: originalAnalysis.synthesisMetadata.bandOffsets,
-          bandStepLog2s: originalAnalysis.synthesisMetadata.bandStepLog2s,
-          bandLengths: originalAnalysis.synthesisMetadata.bandLengths,
-        },
-      };
 
       const analysisParams: AnalysisParams = {
         bandsPerOctave: originalAnalysis.bandsPerOctave,
         minFreq: originalAnalysis.minFreq,
       };
 
-      const processedDataArray = new Float32Array(
-        payload.processedData,
-        0,
-        payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
-      );
-
       // Check for dirty region to enable partial synthesis optimization
       const dirtyRegion = renderer.getDirtyRegion();
 
       const existingBuffer = file.audioBuffer;
-      const canDoPartialSynthesis = dirtyRegion && existingBuffer;
+      const canDoPartialSynthesis = dirtyRegion && existingBuffer && !readSpans;
       console.log("[timing] canDoPartialSynthesis:", canDoPartialSynthesis);
 
       let startFrame: number | undefined;
@@ -2060,30 +2210,52 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       let synthesisResult;
       const cppSynthStart = performance.now();
       try {
-        // The native call references the packed buffer and existing audio in
-        // place rather than copying them, so the synchronous part before the
-        // promise is returned is near-zero; the FFT runs off-thread. Timing the
-        // gap before the await isolates any remaining main-thread marshaling.
-        const synthPromise = host.analysis.synthesize(
-          processedDataArray,
-          payload.analysisMetadata,
-          originalAnalysis.sampleRate,
-          analysisParams,
-          false,
-          existingAudio,
-          startFrame,
-          endFrame,
-          startBand,
-          endBand,
-        );
-        diag.timing("timing", "synthesize marshaling on main thread", performance.now() - cppSynthStart);
-        synthesisResult = await synthPromise;
+        if (readSpans) {
+          synthesisResult = await synthesiseFromSpans(
+            readSpans,
+            packedLayout,
+            originalAnalysis.sampleRate,
+            analysisParams,
+          );
+          if (analysisParams.detectOnsets) {
+            const found = await scanOnsetsFromSpans(
+              readSpans,
+              packedLayout,
+              originalAnalysis.sampleRate,
+              file,
+              analysisParams,
+            );
+            if (found) synthesisResult = { ...synthesisResult, ...found };
+          }
+        } else {
+          // The native call references the packed buffer and existing audio in
+          // place rather than copying them, so the synchronous part before the
+          // promise is returned is near-zero; the FFT runs off-thread. Timing the
+          // gap before the await isolates any remaining main-thread marshaling.
+          const synthPromise = host.analysis.synthesize(
+            processedDataArray,
+            packedLayout,
+            originalAnalysis.sampleRate,
+            analysisParams,
+            false,
+            existingAudio,
+            startFrame,
+            endFrame,
+            startBand,
+            endBand,
+          );
+          diag.timing("timing", "synthesize marshaling on main thread", performance.now() - cppSynthStart);
+          synthesisResult = await synthPromise;
+        }
       } catch (synthError) {
         console.error("[timing] Synthesis failed:", synthError);
         throw synthError;
       }
       const isPartial = startFrame !== undefined;
-      diag.timing("timing", "C++ synthesis", performance.now() - cppSynthStart, { partial: isPartial });
+      diag.timing("timing", "C++ synthesis", performance.now() - cppSynthStart, {
+        partial: isPartial,
+        chunked: Boolean(readSpans),
+      });
 
       if (!synthesisResult || !synthesisResult.channels) {
         console.error("[timing] Invalid synthesis result:", synthesisResult);

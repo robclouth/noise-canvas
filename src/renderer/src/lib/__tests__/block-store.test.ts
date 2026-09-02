@@ -89,6 +89,29 @@ describe("BlockStore", () => {
     expect(firstDifference(all, packed)).toBe(-1);
   });
 
+  it("takes its blocks one at a time, and knows when it holds the file", async () => {
+    const grid = makeGrid();
+    const backend = memoryBackend();
+    const store = new BlockStore(grid, backend, { codec: rawCodec, texelCount: data.texels });
+    expect(store.isSeeded).toBe(false);
+
+    const asked: number[] = [];
+    await store.seedFrom(async (index) => {
+      asked.push(index);
+      return gatherPixelRanges(packed, store.blockRanges(index));
+    });
+
+    expect(asked).toEqual([...Array(grid.blockCount).keys()]);
+    expect(store.isSeeded).toBe(true);
+    expect(firstDifference(await store.readAll(), packed)).toBe(-1);
+  });
+
+  it("refuses a block cut for another grid", async () => {
+    const grid = makeGrid();
+    const store = new BlockStore(grid, memoryBackend(), { codec: rawCodec, texelCount: data.texels });
+    await expect(store.seedFrom(async () => new Float32Array(8))).rejects.toThrow(/expected/);
+  });
+
   it("writes one file per block", async () => {
     const { grid, backend } = await seeded();
     expect(backend.blocks.size).toBe(grid.blockCount);

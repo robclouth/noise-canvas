@@ -20,6 +20,7 @@ import type {
 } from "./types";
 import { getModelPath } from "./ai-separation";
 import { loadNativeAddon } from "./native-addon";
+import { scanOnsetChunk, scanOnsets, type OnsetDetection } from "./onset-scan";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
 export type { FourStemName, TwoStemName } from "./ai-separation";
 
@@ -285,9 +286,8 @@ function analysisOnsets(analysisResult: GaboratorAnalysisResult, sampleRate: num
   );
 }
 
-export async function analyze(filePath: string, params: AnalysisParams) {
-  const gab = init();
-
+/** Planar channels from a file on disk, and what the container said about it. */
+async function decodePlanar(filePath: string) {
   const { sampleRate, channels, format, codec } = await probeAudioFile(filePath);
 
   // Gate on the file extension, not ffmpeg's container name: containers report
@@ -323,6 +323,87 @@ export async function analyze(filePath: string, params: AnalysisParams) {
   }
   const deinterleaveTime = performance.now() - deinterleaveStart;
   console.log(`[analyze] JS de-interleave time: ${deinterleaveTime.toFixed(2)}ms`);
+
+  return { channelArrays, channels, sampleRate, numFrames, format, codec };
+}
+
+/** The band layout and the size of a run, worked out before any audio is read. */
+export type AnalysisStreamLayout = {
+  texels: number;
+  numFrames: number;
+  numBands: number;
+  numChannels: number;
+  sampleRate: number;
+  metadata: Float32Array;
+  bandOffsets: Uint32Array;
+  bandLengths: Uint32Array;
+  bandStepLog2s: Int32Array;
+  bandFreqsHz: Float32Array;
+};
+
+/**
+ * A file's analysis, driven a span of frames at a time. Spans must be asked
+ * for in order and must join; each returns the coefficients of its own frames,
+ * laid out as the block of the packed state that covers them.
+ */
+export type AnalysisStream = {
+  layout: AnalysisStreamLayout;
+  format: string;
+  codec: string;
+  span: (startFrame: number, endFrame: number) => Promise<Float32Array>;
+  /** The energy of the run, and each band's loudest moment over it. */
+  summary: () => { magnitudeEnergy: number; onsetBandMax: Float32Array };
+};
+
+/** Decodes a file and opens its analysis as a stream of spans. */
+export async function openAnalysisStream(filePath: string, params: AnalysisParams): Promise<AnalysisStream> {
+  const gab = init();
+  const { channelArrays, channels, sampleRate, format, codec } = await decodePlanar(filePath);
+  const stream = new gab.AnalysisStream(channelArrays, channels, sampleRate, params);
+  return {
+    layout: stream.layout(),
+    format,
+    codec,
+    span: (startFrame: number, endFrame: number) => stream.span(startFrame, endFrame),
+    summary: () => stream.summary(),
+  };
+}
+
+/**
+ * Onsets found a chunk at a time from `read`, so no pass holds more than one
+ * chunk's coefficients. `bandMax` is each band's loudest moment over the whole
+ * file, which the analysis carries; a pass seeing one chunk cannot find it.
+ *
+ * With a region, only that span is read and reported on, against the gate a
+ * pass over the whole file arrived at. Without one, the whole file is scanned
+ * and the gate comes out of the scan.
+ */
+export function scanFileOnsets(
+  read: (ranges: Uint32Array) => Promise<Float32Array>,
+  analysisMetadata: PackedLayout,
+  sampleRate: number,
+  bandMax: Float32Array,
+  region?: { startSec: number; endSec: number; odfReference: number },
+): Promise<OnsetDetection> {
+  const gab = init();
+  const detect = (packed: Float32Array, meta: PackedLayout, rate: number, options: unknown) =>
+    gab.detectOnsets(packed, meta, rate, options);
+  if (!region) return scanOnsets(detect, read, analysisMetadata, sampleRate, bandMax);
+  return scanOnsetChunk(
+    detect,
+    read,
+    analysisMetadata,
+    sampleRate,
+    bandMax,
+    region.odfReference,
+    Math.max(0, Math.floor(region.startSec * sampleRate)),
+    Math.min(analysisMetadata.numFrames, Math.ceil(region.endSec * sampleRate)),
+  );
+}
+
+export async function analyze(filePath: string, params: AnalysisParams) {
+  const gab = init();
+  const { channelArrays, channels, sampleRate, format, codec } = await decodePlanar(filePath);
 
   const analyzeStart = performance.now();
   const analysisResult: GaboratorAnalysisResult = await gab.analyze(channelArrays, channels, sampleRate, params);

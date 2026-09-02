@@ -1,7 +1,7 @@
 import { Vector2, type WebGLRenderer } from "three";
 import type { SpectrogramData } from "../store/types";
 import type { BandLayout } from "./band-layout";
-import { blockGrid, blockOfFrame, blocksForPixelRanges } from "./block-grid";
+import { blockGrid, blockOfFrame, blockPixelRanges, blocksForPixelRanges, type BlockGrid } from "./block-grid";
 import {
   clipRangesToView,
   composeViewContent,
@@ -82,6 +82,7 @@ export type WindowedCanvasDeps = {
 export class WindowedCanvas {
   private readonly deps: WindowedCanvasDeps;
   private readonly numFrames: number;
+  private readonly grid: BlockGrid;
   private readonly blocks: CanvasWindow | null;
   private readonly original: PackedWindow | null;
   private readonly source: SourceWindowSlot;
@@ -99,6 +100,7 @@ export class WindowedCanvas {
     this.numFrames = deps.spectrogram.numFrames;
     const { numBands, metadata, sampleRate, numFrames } = deps.spectrogram;
     const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
+    this.grid = grid;
     const windowBlocks = deps.windowBlocks ?? canvasWindowBlocks(grid);
     if (needsCanvasWindow(grid, windowBlocks)) {
       this.blocks = new CanvasWindow(deps.gl, grid, { windowBlocks, read: deps.readCurrent });
@@ -165,7 +167,25 @@ export class WindowedCanvas {
     // The canvas holds one window, so the picture of the rest of the file
     // comes from the analysed state rather than from the canvas.
     if (seed) renderer.seedDisplayFromPacked(seed);
+    else void this.drawDisplayFromStore();
     this.aim(view.startFrame, view.endFrame);
+  }
+
+  /**
+   * Draws the file's picture into the display a block at a time, for a file
+   * whose owner holds no run of it to seed from. The picture fills in as the
+   * blocks are read.
+   */
+  private async drawDisplayFromStore(): Promise<void> {
+    for (let index = 0; index < this.grid.blockCount; index++) {
+      const list = blockPixelRanges(this.grid, index);
+      const ranges = list.ranges.slice(0, list.count * 2);
+      const values = await this.deps.readRoot(ranges);
+      const renderer = this.deps.renderer();
+      if (!values || !renderer?.getIsInitialized()) return;
+      renderer.patchDisplayFromCompact(values, ranges);
+      this.deps.onChanged();
+    }
   }
 
   /**

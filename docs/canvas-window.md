@@ -58,6 +58,15 @@ dab.
 | `lib/windowed-canvas.ts`  | **the boundary.** File coordinates in, view coordinates out            |
 | `lib/stroke-renderer.ts`  | painting, in view coordinates only                                     |
 
+The passes that read the file outside the renderer live beside the addon they
+drive, because the extension host runs them too:
+
+| File                           | Holds                                             |
+| ------------------------------ | ------------------------------------------------- |
+| `main/lib/packed-view.ts`      | the per-band ranges one span of the file lays out |
+| `main/lib/onset-scan.ts`       | onsets, a chunk of the file at a time             |
+| `main/lib/synthesis-chunks.ts` | the audio, a chunk of the file at a time          |
+
 ## The one rule that keeps it findable
 
 > The stroke renderer speaks the canvas's space.
@@ -150,6 +159,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     cannot hold, and a span that falls short of what it serves stops the
     reader rather than drawing clamped values.
 
+    Opening a file is the same rule. `AnalysisStream` works the band layout out
+    before it reads any audio, so the analysis hands back one block of
+    coefficients at a time and the store is seeded as they land; the display
+    then draws the file from those blocks. `scanOnsets` and `synthesiseInChunks`
+    read the store back a chunk at a time, each through a view. Both need what
+    only the whole file can give — every band's loudest moment, and the loudest
+    moment of the detection function — so the analysis carries the first and a
+    round of its own finds the second. A host that answers whole passes only
+    keeps the whole-run path.
+
 13. **The band layout is doubles, and the metadata texture is a conversion of
     it.** A float counts integers exactly only to 2^24, and a ten-minute file
     has 119M coefficients, so offsets held as floats round to multiples of
@@ -196,3 +215,7 @@ Per open file, windowed, at K blocks:
 The file-sized pristine texture and inverse map are gone. A 60-second file at
 rest went from 791 MB to 573 MB, and the remaining cost no longer grows with
 length.
+
+Nothing in RAM now holds the run of a whole file. A ten-minute file opens at a
+peak of about a gigabyte, where it took 2.8 GB when the analysis returned its
+coefficients in one array.

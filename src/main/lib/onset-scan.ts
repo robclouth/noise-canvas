@@ -19,7 +19,7 @@ export type DetectRegional = (
   },
 ) => Promise<OnsetDetection>;
 
-/** Seconds of the file one pass reports on. */
+/** The span of the file one pass reports on, when it is not the caller's own. */
 export const ONSET_CHUNK_SECONDS = 45;
 
 // What a pass reads outside the span it reports on: the whitening's warm-up and
@@ -38,12 +38,39 @@ function chunkSpans(numFrames: number, chunkFrames: number): Array<[number, numb
 }
 
 /**
+ * The onsets of one span of a file, reading only that span's coefficients
+ * through `read`. `bandMax` is each band's loudest moment over the whole file
+ * and `odfReference` the file's own gate: a pass seeing one span can find
+ * neither, and would judge the span by what it holds alone.
+ */
+export async function scanOnsetChunk(
+  detect: DetectRegional,
+  read: (ranges: Uint32Array) => Promise<Float32Array>,
+  layout: PackedLayout,
+  sampleRate: number,
+  bandMax: Float32Array,
+  odfReference: number,
+  startFrame: number,
+  endFrame: number,
+  gateOnly = false,
+): Promise<OnsetDetection> {
+  const span = alignToBandGrid(layout, startFrame - LEAD_SEC * sampleRate, endFrame + TRAIL_SEC * sampleRate);
+  const view = packedViewOf(layout, span.startFrame, span.endFrame);
+  const lens = new Uint32Array(layout.numBands);
+  for (let b = 0; b < layout.numBands; b++) lens[b] = view.ranges[b * 2 + 1];
+  return await detect(await read(view.ranges), layout, sampleRate, {
+    startSec: startFrame / sampleRate,
+    endSec: endFrame / sampleRate,
+    odfReference,
+    bandMax,
+    gateOnly,
+    view: { offsets: view.bandOffsets, lens, k0: Float64Array.from(view.bandK0) },
+  });
+}
+
+/**
  * The file's onsets, found a chunk at a time so no pass holds more than its own
- * span of coefficients. `read` gathers the packed pixels of a range list.
- *
- * `bandMax` is each band's loudest moment over the whole file, which the
- * analysis carries: a pass that sees only one chunk cannot find it, and would
- * whiten that chunk against its own level instead of the file's.
+ * span of coefficients.
  *
  * Two rounds, because the silence gate is a share of the loudest moment of the
  * detection function anywhere in the file. The first round only reports that
@@ -58,33 +85,18 @@ export async function scanOnsets(
   chunkSeconds = ONSET_CHUNK_SECONDS,
 ): Promise<OnsetDetection> {
   const spans = chunkSpans(layout.numFrames, Math.max(1, Math.round(chunkSeconds * sampleRate)));
-
-  const runChunk = async (startFrame: number, endFrame: number, odfReference: number, gateOnly: boolean) => {
-    const read0 = startFrame - LEAD_SEC * sampleRate;
-    const read1 = endFrame + TRAIL_SEC * sampleRate;
-    const span = alignToBandGrid(layout, read0, read1);
-    const view = packedViewOf(layout, span.startFrame, span.endFrame);
-    const lens = new Uint32Array(layout.numBands);
-    for (let b = 0; b < layout.numBands; b++) lens[b] = view.ranges[b * 2 + 1];
-    return await detect(await read(view.ranges), layout, sampleRate, {
-      startSec: startFrame / sampleRate,
-      endSec: endFrame / sampleRate,
-      odfReference,
-      bandMax,
-      gateOnly,
-      view: { offsets: view.bandOffsets, lens, k0: Float64Array.from(view.bandK0) },
-    });
-  };
+  const chunk = (start: number, end: number, gate: number, gateOnly: boolean) =>
+    scanOnsetChunk(detect, read, layout, sampleRate, bandMax, gate, start, end, gateOnly);
 
   let gate = 0;
   for (const [startFrame, endFrame] of spans) {
-    gate = Math.max(gate, (await runChunk(startFrame, endFrame, 0, true)).odfMax);
+    gate = Math.max(gate, (await chunk(startFrame, endFrame, 0, true)).odfMax);
   }
 
   const parts: Float32Array[] = [];
   let total = 0;
   for (const [startFrame, endFrame] of spans) {
-    const part = (await runChunk(startFrame, endFrame, gate, false)).onsets;
+    const part = (await chunk(startFrame, endFrame, gate, false)).onsets;
     parts.push(part);
     total += part.length;
   }
