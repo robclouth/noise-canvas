@@ -1013,15 +1013,26 @@ Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
   the CPU range arithmetic picks the wrong band. The exact figures are already
   in the payload as `bandOffsets`/`bandLengths`/`bandStepLog2s`; the CPU layout
   must read those and the texture stay a separate, converted payload.
-- **3.5.7 — analyse in spans and forget.** Gaborator supports incremental
-  analysis with `analyze(signal, t0, t1, coefs)` and `forget_before`, and
-  `analysis_support()` names the margin a span needs. Three terms make the
-  peak, and streaming removes all three: the coefficient run (16 B a texel),
-  its copy into JavaScript (another 16), and the analyser's own tree (8 a
-  channel). The renderer would drive it: a layout call first, then a span at a
-  time into a reused buffer, each span's blocks encoded into the store and
-  dropped. The per-band unwrap carries one phase and one bin index between
-  spans.
+- **3.5.7 — analyse in spans and forget.** DONE for two of the three terms.
+  - The worker's constructor works out the band layout — it follows from the
+    sample rate, the resolution and the frame count alone — checks the budget
+    and claims the result array on the JavaScript thread. Execute fills it in
+    place, so the copy at the end is gone (−16 B a texel at the peak).
+  - Execute adds `ANALYSIS_SPAN_SECONDS` of audio at a time, writes out the
+    coefficients no later sample can change (`t1 - analysis_support()`), and
+    calls `forget_before`. The tree holds a span, not the file (−8 B a texel a
+    channel). `spanSeconds` in the analysis params sets the span; a smaller one
+    holds less and costs a little more work at the margins.
+  - The phase unwrap moved out of the walk into a pass of its own over the
+    finished array. A chain that ran during the walk broke at every seam.
+  - Two traps, both pinned by `analysis-spans.test.ts`: gaborator's signal
+    pointer names the sample at `t0`, not the file's first; and an unwrapped
+    phase carries the arbitrariness of every near-silent bin before it, so
+    equivalence is judged on magnitudes and on the phase STEP between bins that
+    carry signal.
+  - **What is left:** the coefficient run itself (16 B a texel), which needs
+    the renderer to drive the spans and seed the block store as they arrive.
+    That reshapes the open path, so it is its own piece of work.
 
 ### Phase 3.5 measurements (2026-09-02)
 

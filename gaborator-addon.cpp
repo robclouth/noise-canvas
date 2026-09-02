@@ -7,6 +7,7 @@
 #include <cmath>
 #include <algorithm>
 #include <deque>
+#include <memory>
 #include <string>   // For std::string
 #include <sstream>  // For std::stringstream
 #include <iomanip>  // For std::fixed, std::setprecision
@@ -37,6 +38,11 @@
 // array holds at most 2^32-1 elements, so past this the result cannot be handed
 // over whatever memory the machine has. The caller's budget is the real limit.
 #define MAX_PACKED_COEFFICIENTS ((size_t)0xFFFFFFFFu / 4)
+// Seconds of audio one analysis pass adds before its settled coefficients are
+// written out and dropped. Long enough that the filter support either side is
+// a small share of the work, short enough that the coefficient tree stays a
+// fraction of the file.
+#define ANALYSIS_SPAN_SECONDS 20.0
 
 // Debug logging to file, compiled in by Debug builds only (see binding.gyp).
 #ifdef GABORATOR_DEBUG_LOG
@@ -420,15 +426,28 @@ public:
             if (v > 0)
                 maxCoefficientBudget = (size_t)v;
         }
+        if (paramsJs.Has("spanSeconds") && paramsJs.Get("spanSeconds").IsNumber())
+        {
+            double v = paramsJs.Get("spanSeconds").As<Napi::Number>().DoubleValue();
+            if (v > 0)
+                spanSeconds = v;
+        }
+        prepare(env);
     }
 
-    ~AnalyzeWorker() {}
-
-    void Execute()
+    /**
+     * Works out the band layout and claims the result array, on the JavaScript
+     * thread and before any audio is read. The layout follows from the sample
+     * rate, the resolution and the frame count alone, so the result can be the
+     * caller's own array and the worker fills it in place: at ten minutes a
+     * copy at the end would be another two gigabytes. A failure here is held
+     * and raised from Execute, so the caller still sees a rejected promise.
+     */
+    void prepare(Napi::Env env)
     {
         if (channels <= 0)
         {
-            SetError("Number of channels must be positive.");
+            failure = "Number of channels must be positive.";
             return;
         }
 
@@ -436,13 +455,13 @@ public:
         gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
         gaborator::parameters params(scale, OVERLAP);
         params.phase = gaborator::coef_phase::global;
-        gaborator::analyzer<float> analyzer(params);
+        analyzer.reset(new gaborator::analyzer<float>(params));
 
-        int bandBegin = analyzer.bandpass_bands_begin();
-        numBands = analyzer.bandpass_bands_end() - bandBegin;
+        bandBegin = analyzer->bandpass_bands_begin();
+        numBands = analyzer->bandpass_bands_end() - bandBegin;
         if (numBands < 0)
         {
-            SetError("Gaborator analysis resulted in a negative number of bands.");
+            failure = "Gaborator analysis resulted in a negative number of bands.";
             return;
         }
 
@@ -451,12 +470,11 @@ public:
         bandLengths.resize(numBands);
         bandFreqsHz.resize(numBands);
         size_t totalComplexCoefficients = 0;
-
         for (int i = 0; i < numBands; ++i)
         {
             int gbno = bandBegin + i;
-            int stepLog2 = analyzer.band_step_log2(gbno);
-            double centerFreq = analyzer.bandpass_band_ff(gbno) * sampleRate;
+            int stepLog2 = analyzer->band_step_log2(gbno);
+            double centerFreq = analyzer->bandpass_band_ff(gbno) * sampleRate;
             size_t len = (numFrames > 0) ? ((numFrames - 1) >> stepLog2) + 1 : 0;
             bandOffsets[i] = static_cast<uint32_t>(totalComplexCoefficients);
             bandStepLog2s[i] = stepLog2;
@@ -470,50 +488,53 @@ public:
         // allocation so an oversized file fails with a clear message instead
         // of exhausting memory.
         size_t maxCoefficients = std::min(MAX_PACKED_COEFFICIENTS, maxCoefficientBudget);
-
         double worstCaseCoefficients = (double)numFrames * MAX_COEFFICIENT_DENSITY;
         if (worstCaseCoefficients > (double)maxCoefficients || totalComplexCoefficients > maxCoefficients)
         {
             double maxSeconds = (double)maxCoefficients / MAX_COEFFICIENT_DENSITY / sampleRate;
-
             std::stringstream ss;
             ss << "The maximum audio duration is " << std::fixed << std::setprecision(0) << maxSeconds << " seconds.";
-            SetError(ss.str().c_str());
+            failure = ss.str();
             return;
         }
 
         texels = totalComplexCoefficients;
+        Napi::Float32Array claimed = Napi::Float32Array::New(env, texels * 4);
+        dataRef = Napi::Reference<Napi::Float32Array>::New(claimed, 1);
+        data = claimed.Data();
+        std::fill(data, data + texels * 4, 0.0f);
 
-        size_t floatsPerPixel = 4;
-        data.assign(texels * floatsPerPixel, 0.0f);
-
-        size_t floatsPerMetaPixel = 4;
-        size_t metadataFloatCount = (size_t)numBands * floatsPerMetaPixel;
-        metadata.resize(metadataFloatCount);
-
+        metadata.resize((size_t)numBands * 4);
         for (int i = 0; i < numBands; ++i)
         {
-            metadata[i * floatsPerMetaPixel + 0] = static_cast<float>(bandOffsets[i]);
-            metadata[i * floatsPerMetaPixel + 1] = static_cast<float>(bandLengths[i]);
-            metadata[i * floatsPerMetaPixel + 2] = static_cast<float>(bandStepLog2s[i]);
-            metadata[i * floatsPerMetaPixel + 3] = bandFreqsHz[i];
+            metadata[i * 4 + 0] = static_cast<float>(bandOffsets[i]);
+            metadata[i * 4 + 1] = static_cast<float>(bandLengths[i]);
+            metadata[i * 4 + 2] = static_cast<float>(bandStepLog2s[i]);
+            metadata[i * 4 + 3] = bandFreqsHz[i];
+        }
+    }
+
+    ~AnalyzeWorker() {}
+
+    void Execute()
+    {
+        if (!failure.empty())
+        {
+            SetError(failure);
+            return;
         }
 
-        std::vector<gaborator::coefs<float>> allCoefs;
-        allCoefs.reserve(channels);
+        const size_t floatsPerPixel = 4;
+        const int64_t frames = static_cast<int64_t>(numFrames);
+        // A filter reaches this far either side, so a coefficient before
+        // `t1 - support` cannot change once the samples up to t1 are in.
+        const int64_t support = static_cast<int64_t>(std::ceil(analyzer->analysis_support())) + 1;
+        const int64_t spanFrames = std::max<int64_t>(1, static_cast<int64_t>(sampleRate * spanSeconds));
 
         for (int ch = 0; ch < channels; ++ch)
         {
-            // Unwrapping reads the bin before the one being written, and the
-            // walk visits a band's bins in ascending order, so one phase and
-            // one bin index per band stand in for the whole history. A bin
-            // whose predecessor the walk did not visit unwraps against zero.
-            // Declared per channel, because a channel starts with no history.
-            std::vector<float> lastPhase(numBands, 0.0f);
-            std::vector<int64_t> lastBin(numBands, -1);
-            allCoefs.emplace_back(analyzer);
-            analyzer.analyze(audioChannels[ch], 0, static_cast<int64_t>(numFrames), allCoefs.back());
-            gaborator::process(
+            gaborator::coefs<float> coefs(*analyzer);
+            auto write =
                 [&](int b, int64_t t, std::complex<float> &coef)
                 {
                     int bandIdx = b - bandBegin;
@@ -535,19 +556,60 @@ public:
                     // the renderer can derive a single IR-normalization scalar.
                     magnitudeEnergy += (double)magnitude * (double)magnitude;
 
-                    // Unwrap phase: accumulate phase changes
-                    float unwrappedPhase = phase;
-                    if (tInBand > 0)
-                        unwrappedPhase =
-                            unwrapForward(phase, lastBin[bandIdx] == tInBand - 1 ? lastPhase[bandIdx] : 0.0f);
-                    lastPhase[bandIdx] = unwrappedPhase;
-                    lastBin[bandIdx] = tInBand;
-
+                    // The principal phase, unwrapped along each band once
+                    // every span has been written.
                     size_t writeOffset = baseOffset * floatsPerPixel;
                     data[writeOffset + ch * 2 + 0] = magnitude;
-                    data[writeOffset + ch * 2 + 1] = unwrappedPhase;
-                },
-                bandBegin, analyzer.bandpass_bands_end(), 0, numFrames, allCoefs[ch]);
+                    data[writeOffset + ch * 2 + 1] = phase;
+                };
+
+            // A span at a time: analyse it, write out what no later sample can
+            // change, then drop those coefficients. The tree holds a span and
+            // its margins rather than the file.
+            int64_t written = 0;
+            for (int64_t t0 = 0; t0 < frames; t0 += spanFrames)
+            {
+                const int64_t t1 = std::min(t0 + spanFrames, frames);
+                // The pointer names the sample at t0, not the file's first.
+                analyzer->analyze(audioChannels[ch] + t0, t0, t1, coefs);
+                const int64_t settled = (t1 >= frames) ? frames : t1 - support;
+                if (settled > written)
+                {
+                    gaborator::process(write, bandBegin, analyzer->bandpass_bands_end(), written, settled, coefs);
+                    written = settled;
+                    gaborator::forget_before(*analyzer, coefs, written - support);
+                }
+            }
+        }
+
+        unwrapAlongBands();
+    }
+
+    /**
+     * Puts every band's phase on the branch nearest its own previous bin, so
+     * the stored value accumulates over the file rather than folding back into
+     * (-pi, pi]. A pass of its own, because the analysis writes a span at a
+     * time and a chain that ran during the walk would break at every seam. A
+     * bin the walk never reached holds a zero magnitude, so its phase carries
+     * nothing either way.
+     */
+    void unwrapAlongBands()
+    {
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            for (int band = 0; band < numBands; ++band)
+            {
+                const size_t base = bandOffsets[band];
+                const uint32_t length = bandLengths[band];
+                float previous = 0.0f;
+                for (uint32_t k = 0; k < length; ++k)
+                {
+                    const size_t at = (base + k) * 4 + ch * 2 + 1;
+                    const float unwrapped = (k == 0) ? data[at] : unwrapForward(data[at], previous);
+                    data[at] = unwrapped;
+                    previous = unwrapped;
+                }
+            }
         }
     }
 
@@ -557,9 +619,7 @@ public:
         Napi::HandleScope scope(env);
         Napi::Object resultJs = Napi::Object::New(env);
 
-        Napi::Float32Array dataJs = Napi::Float32Array::New(env, data.size());
-        memcpy(dataJs.Data(), data.data(), data.size() * sizeof(float));
-        resultJs.Set("data", dataJs);
+        resultJs.Set("data", dataRef.Value());
 
         Napi::Float32Array metadataJs = Napi::Float32Array::New(env, metadata.size());
         memcpy(metadataJs.Data(), metadata.data(), metadata.size() * sizeof(float));
@@ -609,9 +669,20 @@ private:
     // Caller-supplied coefficient budget from the shared GPU-memory pool;
     // SIZE_MAX means no budget was passed and only the texture cap applies.
     size_t maxCoefficientBudget = SIZE_MAX;
+    // Seconds of audio one pass adds before its settled coefficients are
+    // written out and dropped. A shorter span holds less at once and costs a
+    // little more work at the margins.
+    double spanSeconds = ANALYSIS_SPAN_SECONDS;
 
-    // Results
-    std::vector<float> data;
+    // The layout, worked out before the audio pass.
+    std::unique_ptr<gaborator::analyzer<float>> analyzer;
+    int bandBegin = 0;
+    // What prepare() refused, raised from Execute so the promise rejects.
+    std::string failure;
+
+    // Results. `data` points into `dataRef`'s array, which the worker fills.
+    Napi::Reference<Napi::Float32Array> dataRef;
+    float *data = nullptr;
     std::vector<float> metadata;
     size_t texels = 0;
     size_t numFrames;
