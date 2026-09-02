@@ -20,6 +20,8 @@ function withEffect(effect: string, enabled = true): Partial<TestBrushStep> {
   return { effects: [{ id: `mock-${effect}`, effect, enabled, params: {} }] };
 }
 
+const RESPONSE = { path: "/response.wav", name: "response.wav" };
+
 describe("wholeFileNeeds", () => {
   it("finds nothing in a brush that reads only around itself", () => {
     expect(needsOf({})).toEqual([]);
@@ -39,8 +41,13 @@ describe("wholeFileNeeds", () => {
     expect(needsOf({ brushSizeTime: BRUSH_SIZE_TIME_FULL - 1 })).toEqual([]);
   });
 
-  it("names convolve by its label", () => {
-    expect(needsOf(withEffect("convolve"))).toHaveLength(1);
+  it("names a convolve with no response file of its own", () => {
+    expect(needsOf(withEffect("convolve"))).toEqual(["Convolve with no IR"]);
+  });
+
+  it("leaves a convolve alone once a response file is named", () => {
+    const step = { effects: [{ id: "ir", effect: "convolve", enabled: true, params: { convolveIrFile: RESPONSE } }] };
+    expect(needsOf(step)).toEqual([]);
   });
 
   // These read a span around the brush that their own settings bound, which
@@ -57,11 +64,11 @@ describe("wholeFileNeeds", () => {
   });
 
   it("reads every step of the brush, not only the active one", () => {
-    expect(needsOf({}, withEffect("convolve"))).toEqual(["Convolve"]);
+    expect(needsOf({}, withEffect("convolve"))).toEqual(["Convolve with no IR"]);
   });
 
   it("names each thing once, however many steps ask for it", () => {
-    expect(needsOf(withEffect("convolve"), withEffect("convolve"))).toEqual(["Convolve"]);
+    expect(needsOf(withEffect("convolve"), withEffect("convolve"))).toEqual(["Convolve with no IR"]);
   });
 
   it.each(["fixed", "anchored"])("names %s source tracking, which reads the canvas from anywhere", (mode) => {

@@ -214,6 +214,40 @@ describe("evolve reach", () => {
   });
 });
 
+describe("convolve reach", () => {
+  const RESPONSE = { path: "/response.wav", name: "response.wav" };
+  const withResponse = (params: Record<string, unknown>): Partial<TestBrushStep> => ({
+    effects: [{ id: "mock-convolve", effect: "convolve", enabled: true, params }],
+  });
+  const CTX_WITH_RESPONSE: ReachContext = { ...CTX, otherFileSeconds: () => 3 };
+
+  it("reads the response's own length back, scaled by the rate", () => {
+    const state = createMockStateWithSteps([
+      { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrRate: 2 }) },
+    ]);
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 6, after: 6 });
+  });
+
+  it("reads nothing when no response file is named", () => {
+    const state = createMockStateWithSteps([{ name: "Step", overrides: withResponse({ convolveIrRate: 2 }) }]);
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 0, after: 0 });
+  });
+
+  it("reads nothing when the response file cannot be found", () => {
+    const state = createMockStateWithSteps([
+      { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrRate: 2 }) },
+    ]);
+    expect(strokeReach(state, { ...CTX, otherFileSeconds: () => null })).toEqual({ before: 0, after: 0 });
+  });
+
+  it("takes the rate's sign off, since the taps run either way", () => {
+    const state = createMockStateWithSteps([
+      { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrRate: -2 }) },
+    ]);
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 6, after: 6 });
+  });
+});
+
 describe("the brush's reach as a whole", () => {
   it("finds nothing in effects that read only the texel they write", () => {
     expect(reachOf(withEffect("dynamics"), withEffect("synthesize"))).toEqual({ before: 0, after: 0 });

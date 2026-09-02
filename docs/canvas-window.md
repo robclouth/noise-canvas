@@ -49,7 +49,7 @@ dab.
 | `lib/block-slot-cache.ts` | the blocks that are on the GPU, in fixed slots, under a byte budget    |
 | `lib/canvas-window.ts`    | placing the window, filling it, and what the canvas holds              |
 | `lib/packed-window.ts`    | the same window over the file's original, as one texture               |
-| `lib/source-window.ts`    | a window over another file, for a brush painting from it               |
+| `lib/source-window.ts`    | a window over another file, for a brush painting or filtering from it  |
 | `lib/effect-reach.ts`     | how far past the brush each effect reads                               |
 | `lib/export-window.ts`    | spans of the committed state for an image export                       |
 | `lib/whole-file-gate.ts`  | what a brush asks for that a window cannot serve                       |
@@ -103,12 +103,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    scales the source time offset the same way, because that control is a
    fraction of the source file's whole length. Without both, a windowed canvas
    reads from the start of whatever window it happens to show.
-7. **A brush painting from another windowed file reads it through a window of
-   its own.** The other file's canvas sits wherever its own brush left it, so
-   the destination places a `SourceWindow` by the frames the dab asks for
+7. **A brush reading another windowed file reads it through a window of its
+   own.** The other file's canvas sits wherever its own brush left it, so the
+   destination places a `SourceWindow` by the frames the dab asks for
    (`sourceReadFrames` names them) and holds the dab until it lands. That
    window serves the other file's **committed** state, so it re-reads when that
-   state moves — a stroke still under the other file's brush is not in it.
+   state moves — a stroke still under the other file's brush is not in it. The
+   canvas keeps one window per role: the file a step paints from, and the file
+   a convolve step takes its impulse response from. IR Start is a fraction of
+   the response file, so it lands against the file before it is measured
+   against the window.
 8. **A phase turn taken over "the whole file" asks the file.** A reversal turns
    every band by the file's duration. `destFileAxisSec` and `sourceFileAxisSec`
    read the file's frame count; the canvas's own frame count is the span it
@@ -116,10 +120,10 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
 9. **A brush that reads the whole file does not paint on a window.** Wrapping in
    time folds a read onto the far end of the canvas, a full-length brush spans
    the canvas, source tracking away from Follow puts the read anywhere in the
-   file, and the effects in `WHOLE_FILE_EFFECTS` read past any span a window
-   holds. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab and the
-   file view says so once. The gate is off while the canvas holds the whole
-   file.
+   file, and a convolve with no response file named filters through the canvas
+   itself, read from its first frame. `wholeFileNeeds` names them,
+   `dispatchStroke` refuses the dab and the file view says so once. The gate is
+   off while the canvas holds the whole file.
 10. **The canvas holds what an effect reads, not only what the dab covers.** A
     blur smear, a repeat gap and a warp's turn, stretch or shift all read past
     the brush when the edge mode is Bleed or Invert; the other edge modes fold

@@ -2,6 +2,7 @@ import { defaultParameterUniform } from "@renderer/lib/static-modulation";
 import { OpenFile, State } from "@renderer/store/types";
 import { ModulatorParameterUniform, ParameterUniform } from "@renderer/types";
 import type { ModContext } from "@renderer/lib/static-modulation";
+import type { ImpulseFileInfo } from "@renderer/lib/stroke-renderer";
 import * as THREE from "three";
 import { Texture, Vector2 } from "three";
 
@@ -239,6 +240,8 @@ export type UpdateEffectUniformsProps = {
   file: OpenFile;
   state?: State;
   modContext: ModContext;
+  /** The impulse response a convolve step reads, through a window of its own. */
+  impulse?: ImpulseFileInfo | null;
 };
 
 export abstract class BaseEffect {

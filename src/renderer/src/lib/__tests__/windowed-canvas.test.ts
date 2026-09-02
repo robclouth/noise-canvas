@@ -49,6 +49,9 @@ async function until(check: () => boolean, what: string): Promise<void> {
   throw new Error(`timed out waiting for ${what}`);
 }
 
+// A dab that reads no other file: no source window, no impulse window.
+const NO_OTHER_FILES = { source: null, impulse: null };
+
 describe("a canvas that holds a window of the file", () => {
   let gl: WebGLRenderer;
   let effects: EffectsRegistry;
@@ -236,7 +239,7 @@ describe("a canvas that holds a window of the file", () => {
     const far = dabFrames(0.9);
     rig.canvas.aim(far.start, far.end);
     let painted = false;
-    rig.canvas.paintWhenHeld(far.start, far.end, null, () => {
+    rig.canvas.paintWhenHeld(far.start, far.end, NO_OTHER_FILES, () => {
       painted = true;
       return rig.dab(0.9);
     });
@@ -258,14 +261,14 @@ describe("a canvas that holds a window of the file", () => {
     const order: number[] = [];
     const far = dabFrames(0.9);
     rig.canvas.aim(far.start, far.end);
-    rig.canvas.paintWhenHeld(far.start, far.end, null, () => {
+    rig.canvas.paintWhenHeld(far.start, far.end, NO_OTHER_FILES, () => {
       order.push(1);
       return rig.dab(0.9);
     });
     // The canvas still holds the start of the file, but a dab there must not
     // overtake the one already waiting.
     const near = dabFrames(0.01);
-    rig.canvas.paintWhenHeld(near.start, near.end, null, () => {
+    rig.canvas.paintWhenHeld(near.start, near.end, NO_OTHER_FILES, () => {
       order.push(2);
       return true;
     });
@@ -283,7 +286,7 @@ describe("a canvas that holds a window of the file", () => {
 
     const far = dabFrames(0.9);
     let paintedAt: number | null = null;
-    rig.canvas.paintWhenHeld(far.start, far.end, null, () => {
+    rig.canvas.paintWhenHeld(far.start, far.end, NO_OTHER_FILES, () => {
       paintedAt = 0.9;
       return rig.dab(0.9);
     });
@@ -321,7 +324,7 @@ describe("a canvas that holds a window of the file", () => {
 
     let painted = false;
     const far = dabFrames(0.9);
-    canvas.paintWhenHeld(far.start, far.end, null, () => {
+    canvas.paintWhenHeld(far.start, far.end, NO_OTHER_FILES, () => {
       painted = true;
       return true;
     });
@@ -335,7 +338,7 @@ describe("a canvas that holds a window of the file", () => {
     let painted = false;
     const near = dabFrames(0.01);
     expect(
-      rig.canvas.paintWhenHeld(near.start, near.end, null, () => {
+      rig.canvas.paintWhenHeld(near.start, near.end, NO_OTHER_FILES, () => {
         painted = true;
         return true;
       }),

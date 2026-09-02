@@ -17,17 +17,19 @@ import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "
 import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
 import { composePixelRangeValues, gatherPixelRanges, mergePixelRanges } from "./pixel-ranges";
-import { SourceWindow, type SourceFileBlocks, type SourceWindowTextures } from "./source-window";
+import { SourceWindowSlot, type SourceFileBlocks, type SourceNeed, type SourceWindowTextures } from "./source-window";
 import type { StrokeRenderer } from "./stroke-renderer";
 
 /** A rectangle of the file in unpacked UV, as the dirty region is kept. */
 export type UvRegion = { startX: number; endX: number; startY: number; endY: number };
 
-/** The file and frames a dab reads through a window the destination owns. */
-export type SourceNeed = { fileId: string; startFrame: number; endFrame: number; wantOriginal: boolean };
+export type { SourceNeed } from "./source-window";
+
+/** The other files a dab reads, each through a window this canvas owns. */
+export type OtherFileNeeds = { source: SourceNeed | null; impulse: SourceNeed | null };
 
 /** Paint waiting for the canvas to hold the frames it lands on. */
-type HeldPaint = { startFrame: number; endFrame: number; source: SourceNeed | null; paint: () => boolean };
+type HeldPaint = { startFrame: number; endFrame: number; needs: OtherFileNeeds; paint: () => boolean };
 
 /** Fills `settle` waits through before it gives up on the paint still held. */
 const HELD_PAINT_FILLS = 8;
@@ -82,9 +84,8 @@ export class WindowedCanvas {
   private readonly numFrames: number;
   private readonly blocks: CanvasWindow | null;
   private readonly original: PackedWindow | null;
-  private readonly windowBlocks: number;
-  private source: SourceWindow | null = null;
-  private sourceRevision = 0;
+  private readonly source: SourceWindowSlot;
+  private readonly impulse: SourceWindowSlot;
   private request: CanvasView | null = null;
   private fill: Promise<void> | null = null;
   private readonly held: HeldPaint[] = [];
@@ -98,7 +99,6 @@ export class WindowedCanvas {
     const { numBands, metadata, sampleRate, numFrames } = deps.spectrogram;
     const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
     const windowBlocks = deps.windowBlocks ?? canvasWindowBlocks(grid);
-    this.windowBlocks = windowBlocks;
     if (needsCanvasWindow(grid, windowBlocks)) {
       this.blocks = new CanvasWindow(deps.gl, grid, { windowBlocks, read: deps.readCurrent });
       this.original = new PackedWindow(deps.gl, grid, { windowBlocks, read: deps.readRoot });
@@ -106,6 +106,8 @@ export class WindowedCanvas {
       this.blocks = null;
       this.original = null;
     }
+    this.source = new SourceWindowSlot(deps.gl, windowBlocks);
+    this.impulse = new SourceWindowSlot(deps.gl, windowBlocks);
   }
 
   /** True when this file is short enough for the canvas to hold all of it. */
@@ -252,9 +254,9 @@ export class WindowedCanvas {
    * Held paint runs in the order it was given, so a dab behind a waiting one
    * waits with it. Returns false only when `paint` itself refused.
    */
-  paintWhenHeld(startFrame: number, endFrame: number, source: SourceNeed | null, paint: () => boolean): boolean {
-    if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame) && this.sourceHolds(source)) return paint();
-    this.held.push({ startFrame, endFrame, source, paint });
+  paintWhenHeld(startFrame: number, endFrame: number, needs: OtherFileNeeds, paint: () => boolean): boolean {
+    if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame) && this.othersHold(needs)) return paint();
+    this.held.push({ startFrame, endFrame, needs, paint });
     return true;
   }
 
@@ -266,22 +268,17 @@ export class WindowedCanvas {
    */
   aimSource(need: SourceNeed): SourceWindowTextures | null {
     const blocks = this.deps.sourceBlocks(need.fileId);
-    if (!blocks) return null;
-    if (this.source && this.source.fileId !== need.fileId) {
-      this.source.dispose();
-      this.source = null;
-    }
-    if (!this.source) {
-      this.source = new SourceWindow(this.deps.gl, need.fileId, blocks, this.windowBlocks);
-      this.sourceRevision = blocks.revision();
-    }
-    const revision = blocks.revision();
-    if (revision !== this.sourceRevision) {
-      this.sourceRevision = revision;
-      this.source.invalidate();
-    }
-    this.source.aim(need.startFrame, need.endFrame, need.wantOriginal);
-    return this.sourceHolds(need) ? this.source.textures() : null;
+    return blocks ? this.source.aim(need, blocks) : null;
+  }
+
+  /**
+   * The same, for the file a convolve step takes its impulse response from.
+   * It is its own window, because a step can paint from one file and filter
+   * through another.
+   */
+  aimImpulse(need: SourceNeed): SourceWindowTextures | null {
+    const blocks = this.deps.sourceBlocks(need.fileId);
+    return blocks ? this.impulse.aim(need, blocks) : null;
   }
 
   /**
@@ -294,8 +291,11 @@ export class WindowedCanvas {
     for (let fills = 0; this.held.length > 0 && fills < HELD_PAINT_FILLS; fills++) {
       const next = this.held[0];
       this.aim(next.startFrame, next.endFrame);
-      if (next.source) this.aimSource(next.source);
-      const reads = [this.fill, this.source?.settled() ?? null].filter((read): read is Promise<void> => read !== null);
+      if (next.needs.source) this.aimSource(next.needs.source);
+      if (next.needs.impulse) this.aimImpulse(next.needs.impulse);
+      const reads = [this.fill, this.source.settled(), this.impulse.settled()].filter(
+        (read): read is Promise<void> => read !== null,
+      );
       if (reads.length === 0) break;
       await Promise.all(reads);
       this.releaseHeld();
@@ -513,8 +513,8 @@ export class WindowedCanvas {
   dispose(): void {
     this.blocks?.dispose();
     this.original?.dispose();
-    this.source?.dispose();
-    this.source = null;
+    this.source.dispose();
+    this.impulse.dispose();
     this.request = null;
     this.held.length = 0;
   }
@@ -529,18 +529,15 @@ export class WindowedCanvas {
   private releaseHeld(): void {
     while (this.held.length > 0) {
       const next = this.held[0];
-      if (!this.holdsFrames(next.startFrame, next.endFrame) || !this.sourceHolds(next.source)) return;
+      if (!this.holdsFrames(next.startFrame, next.endFrame) || !this.othersHold(next.needs)) return;
       this.held.shift();
       next.paint();
     }
   }
 
-  /** True while the source window holds what the dab asked of it. */
-  private sourceHolds(need: SourceNeed | null): boolean {
-    if (!need) return true;
-    const source = this.source;
-    if (source?.fileId !== need.fileId) return false;
-    return source.holdsFrames(need.startFrame, need.endFrame, need.wantOriginal);
+  /** True while both other-file windows hold what the dab asked of them. */
+  private othersHold(needs: OtherFileNeeds): boolean {
+    return this.source.holds(needs.source) && this.impulse.holds(needs.impulse);
   }
 
   private expectRenderer(): StrokeRenderer {

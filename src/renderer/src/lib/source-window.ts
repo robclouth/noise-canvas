@@ -27,6 +27,9 @@ export type SourceFileBlocks = {
   revision: () => number;
 };
 
+/** The file and frames a dab reads through a window the destination owns. */
+export type SourceNeed = { fileId: string; startFrame: number; endFrame: number; wantOriginal: boolean };
+
 /** The textures a brush samples a source window through. */
 export type SourceWindowTextures = {
   packed: WebGLRenderTarget;
@@ -204,5 +207,68 @@ export class SourceWindow {
     metadata.generateMipmaps = false;
     metadata.needsUpdate = true;
     this.metadataTex = metadata;
+  }
+}
+
+/**
+ * One window over another file, kept pointed at whichever file the brush names
+ * for it. A canvas keeps one of these per role: the file a step paints from,
+ * and the file a convolve step takes its impulse response from.
+ */
+export class SourceWindowSlot {
+  private readonly gl: WebGLRenderer;
+  private readonly windowBlocks: number;
+  private window: SourceWindow | null = null;
+  private revision = 0;
+
+  constructor(gl: WebGLRenderer, windowBlocks: number) {
+    this.gl = gl;
+    this.windowBlocks = windowBlocks;
+  }
+
+  /**
+   * Points the window at the frames the need asks for, building it on first
+   * use and re-reading it once that file's committed state moves. Returns the
+   * textures to sample through, or null while the window cannot serve them.
+   */
+  aim(need: SourceNeed, blocks: SourceFileBlocks): SourceWindowTextures | null {
+    if (this.window && this.window.fileId !== need.fileId) {
+      this.window.dispose();
+      this.window = null;
+    }
+    if (!this.window) {
+      this.window = new SourceWindow(this.gl, need.fileId, blocks, this.windowBlocks);
+      this.revision = blocks.revision();
+    }
+    const revision = blocks.revision();
+    if (revision !== this.revision) {
+      this.revision = revision;
+      this.window.invalidate();
+    }
+    this.window.aim(need.startFrame, need.endFrame, need.wantOriginal);
+    return this.holds(need) ? this.window.textures() : null;
+  }
+
+  /** True while the window holds what the need asks of it. */
+  holds(need: SourceNeed | null): boolean {
+    if (!need) return true;
+    const window = this.window;
+    if (window?.fileId !== need.fileId) return false;
+    return window.holdsFrames(need.startFrame, need.endFrame, need.wantOriginal);
+  }
+
+  /** Resolves once the reads in flight have landed, or null when none are. */
+  settled(): Promise<void> | null {
+    return this.window?.settled() ?? null;
+  }
+
+  /** Bytes the window's slots and composed textures hold. */
+  get allocatedBytes(): number {
+    return this.window?.allocatedBytes ?? 0;
+  }
+
+  dispose(): void {
+    this.window?.dispose();
+    this.window = null;
   }
 }

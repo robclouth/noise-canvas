@@ -1281,12 +1281,32 @@ stays inside what it declares, and doubling Scale doubles it.
 
 `WHOLE_FILE_EFFECTS` is now **convolve alone**.
 
-**Next: convolve.** Rob picked the window: with a response file picked, that
-file gets a window of its own, placed by the frames the taps ask for, exactly
-as a brush painting from another file already does. The gate then asks whether
-the response is Self rather than whether the effect is present.
+### 4.4 — Convolve's response gets a window (2026-09-02)
 
-Status: 4.1 done, 4.2 done, 4.3 done. Convolve is the last one.
+Rob picked the window over a fit-whole refusal, so a response file of any
+length works.
+
+- `SourceWindowSlot` in `source-window.ts` holds one window pointed at one
+  file. The canvas keeps two: the file a step paints from, and the file a
+  convolve step takes its response from. A dab waits on both.
+- The response's textures reach the shader as `ImpulseFileInfo` on the stroke's
+  parameters, so `convolve-effect.ts` no longer reaches into `openFiles` for
+  another file's canvas — which was the fault: that canvas sits wherever its
+  own brush left it.
+- IR Start is a fraction of the response **file**, so it lands against the file
+  and is then measured against the window (`convolveIrViewStartFrame`,
+  `convolveIrFileFrameCount`). A test paints the same dab through a whole
+  response and through a one-block window of it and requires the same pixels;
+  drop either uniform and it fails.
+- The reach is the response's own length times Rate: the taps walk it one bin
+  each and cannot outrun it.
+
+`WHOLE_FILE_EFFECTS` is now **empty**. The only thing the gate still refuses
+among the effects is a convolve with no response file named, which filters
+through the canvas itself from its first frame.
+
+Status: Phase 4 done — every gated effect either declares a reach or names the
+one setting that reads the whole file.
 
 ---
 

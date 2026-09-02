@@ -17,7 +17,16 @@ import { createMockState } from "../../test/mock-state";
 import { metadataTextureRows } from "../band-layout";
 import { packedFold, padToFold } from "../constants";
 import { strokeReach, type ReachContext } from "../effect-reach";
-import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import { gatherPixelRanges } from "../pixel-ranges";
+import { SourceWindow } from "../source-window";
+import {
+  EffectsRegistry,
+  ImpulseFileInfo,
+  SourceFileInfo,
+  StrokeParams,
+  StrokeRenderer,
+  StrokeTextures,
+} from "../stroke-renderer";
 import { BRUSH_SIZE_PITCH_FULL } from "../utils";
 
 // A short file at a low sample rate, so a beat is a large, round number of
@@ -126,7 +135,7 @@ function putEnergy(data: SpectrogramData, from: number, to: number, magnitude?: 
 }
 
 /** The state of a brush whose only effect is the one under measurement. */
-function stateFor(effect: EffectType, params: Record<string, number>): State {
+function stateFor(effect: EffectType, params: Record<string, unknown>): State {
   const effects = [{ id: `probe-${effect}`, effect, enabled: true, params }];
   const step = {
     effects,
@@ -151,6 +160,7 @@ describe("what a gated effect really reads", () => {
   let effects: EffectsRegistry;
   let placeholderTex: DataTexture;
   let scaleLut: DataTexture;
+  let windows: SourceWindow[] = [];
 
   beforeEach(async () => {
     const [attract, blur, convolve, evolve, sort, transmute, passthrough] = await Promise.all([
@@ -175,16 +185,18 @@ describe("what a gated effect really reads", () => {
     gl.setSize(64, 64);
     placeholderTex = placeholder();
     scaleLut = modulatorScaleLut();
+    windows = [];
   });
 
   afterEach(() => {
+    for (const window of windows) window.dispose();
     placeholderTex.dispose();
     scaleLut.dispose();
     gl.dispose();
   });
 
   /** Paints the dab on silence, with an impulse at `frame` when one is asked for. */
-  async function paint(state: State, frame: number | null): Promise<Float32Array> {
+  async function paint(state: State, frame: number | null, impulse?: ImpulseFileInfo): Promise<Float32Array> {
     const data = createMockSpectrogramData({
       numFrames: NUM_FRAMES,
       numBands: NUM_BANDS,
@@ -231,6 +243,7 @@ describe("what a gated effect really reads", () => {
       pressure: 0,
       tiltX: 0,
       tiltY: 0,
+      impulse,
     };
     renderer.renderStroke(params, state, source);
     const out = await renderer.getFBOData();
@@ -382,6 +395,62 @@ describe("what a gated effect really reads", () => {
     }
     // Twice the scale, twice the read.
     expect(Math.abs(half.measured - 2 * quarter.measured)).toBeLessThanOrEqual(3 * PROBE_STEP_FRAMES);
+  });
+
+  it("reads a windowed response at the frames a whole one would", async () => {
+    // The response the taps read is a window of another file, placed where the
+    // taps ask. IR Start is a fraction of that file, so it has to land against
+    // the file before it is measured against the window.
+    const response = createMockSpectrogramData({
+      numFrames: NUM_FRAMES,
+      numBands: NUM_BANDS,
+      sampleRate: SAMPLE_RATE,
+      pattern: "silence",
+    });
+    const taps = 16;
+    const start = NUM_FRAMES / 2;
+    putEnergy(response, start, start + taps);
+
+    const blocks = {
+      spectrogram: response,
+      readCurrent: async (ranges: Uint32Array) => gatherPixelRanges(response.packedData!, ranges),
+      readRoot: async (ranges: Uint32Array) => gatherPixelRanges(response.packedData!, ranges),
+      revision: () => 0,
+    };
+    const infoFor = async (windowBlocks: number): Promise<ImpulseFileInfo> => {
+      const window = new SourceWindow(gl, "response", blocks, windowBlocks);
+      windows.push(window);
+      window.aim(start, start + taps, false);
+      await window.settled();
+      const textures = window.textures();
+      if (!textures) throw new Error("the response window read nothing");
+      return {
+        spectrogramData: response,
+        textures: { packed: textures.packed, metadata: textures.metadata },
+        view: textures.view,
+      };
+    };
+
+    const state = stateFor("convolve", {
+      convolveIrFile: { path: "/response.wav", name: "response.wav" },
+      convolveIrSize: taps,
+      convolveIrRate: 1,
+      convolveIrTimeOffset: 50,
+      convolveGainDb: 0,
+      convolveIrPitchShift: 0,
+      convolveEdgeMode: 1,
+    });
+
+    const whole = await infoFor(NUM_BANDS);
+    const windowed = await infoFor(1);
+    // The window really is a window, and it really is somewhere else.
+    expect(windowed.view!.startFrame).toBeGreaterThan(0);
+    expect(whole.view!.startFrame).toBe(0);
+
+    const filtered = await paint(state, null, whole);
+    // A response that changed nothing would make the comparison meaningless.
+    expect(dabChanged(filtered, await paint(state, null))).toBe(true);
+    expect(dabChanged(filtered, await paint(state, null, windowed))).toBe(false);
   });
 
   it("reads the head of the file when Convolve has no impulse response of its own", async () => {

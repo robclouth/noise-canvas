@@ -247,6 +247,18 @@ export interface SourceFileInfo {
   onsetTexture?: Texture | null;
 }
 
+/**
+ * The impulse response a convolve step filters through, when a step names a
+ * file for it. Its textures are a window this canvas owns, so a response file
+ * long enough to page is still read at the frames the taps ask for.
+ */
+export interface ImpulseFileInfo {
+  spectrogramData: SpectrogramData;
+  textures: { packed: WebGLRenderTarget; metadata: DataTexture };
+  /** The span `textures.packed` lays out. Absent when it holds the whole file. */
+  view?: CanvasView;
+}
+
 /** Frames the source textures lay out. */
 function sourceViewFrames(source: SourceFileInfo): number {
   return source.view ? source.view.endFrame - source.view.startFrame : source.spectrogramData.numFrames;
@@ -270,6 +282,8 @@ export interface StrokeParams {
   // The painted file's own onset map, read by passes after the first, which
   // sample the destination rather than the source file.
   destOnsetTexture?: Texture | null;
+  /** The impulse response a convolve step reads. Absent when none is named. */
+  impulse?: ImpulseFileInfo | null;
 }
 
 /**
@@ -1519,6 +1533,7 @@ export class StrokeRenderer {
           file: sourceFile,
           state: effectState,
           modContext: iterationContext,
+          impulse: params.impulse ?? null,
         });
 
         this.drawRanges(material, currentWriteFbo, isFinalPass ? finalRanges : passRanges);

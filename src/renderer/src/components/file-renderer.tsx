@@ -1,4 +1,4 @@
-import { createStepStateView, useStore } from "@/store";
+import { createEffectStateView, createStepStateView, useStore } from "@/store";
 import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
 import { diag } from "@renderer/lib/diag-log";
@@ -62,7 +62,13 @@ import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
 import { renderExportImage as renderExportImageToCanvas, type ImageExportOptions } from "../lib/image-export";
 import type { PosterInfo } from "../lib/image-export-poster";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
-import { GpuMemoryError, SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
+import {
+  GpuMemoryError,
+  ImpulseFileInfo,
+  SourceFileInfo,
+  StrokeRenderer,
+  StrokeTextures,
+} from "../lib/stroke-renderer";
 import { shallow } from "zustand/shallow";
 import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
@@ -981,6 +987,41 @@ const FileRendererInner = memo(
     };
 
     /**
+     * The response file and frames a convolve step reads, through a window of
+     * this canvas's own. Null when no step names a response file — the step
+     * filters through the source itself then, which the gate refuses on a
+     * windowed canvas.
+     *
+     * The taps run forward from IR Start, one response bin each, and the
+     * coarsest band's bin is the longest, so that band's stride sets the span.
+     */
+    const impulseNeedFor = (state: State): SourceNeed | null => {
+      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+      for (let index = 0; index < steps.length; index++) {
+        const step = createStepStateView(state, index);
+        for (const item of step.effects) {
+          if (!item.enabled || item.effect !== "convolve") continue;
+          const effect = createEffectStateView(state, index, item);
+          const path = effect.convolveIrFile?.path;
+          if (!path) continue;
+          const response = getOpenFileByPath(path);
+          const spectrogram = response?.spectrogramData;
+          if (!response || !spectrogram) continue;
+          const stride = 1 << Math.max(...spectrogram.synthesisMetadata.bandStepLog2s);
+          const taps = Math.max(1, Math.floor(Number(effect.convolveIrSize)));
+          const start = (Number(effect.convolveIrTimeOffset) / 100) * spectrogram.numFrames;
+          return {
+            fileId: response.id,
+            startFrame: Math.max(0, Math.floor(start)),
+            endFrame: Math.min(spectrogram.numFrames, Math.ceil(start + taps * stride)),
+            wantOriginal: false,
+          };
+        }
+      }
+      return null;
+    };
+
+    /**
      * Paints one stroke into the FBO from an explicit state snapshot. The frame
      * loop calls it with the live store and the cursor's brush origin; batch
      * a grid fill calls it once per stroke with a shared state. Returns false
@@ -1027,6 +1068,21 @@ const FileRendererInner = memo(
       const sourceNeed = sourceNeedFor(state, cursorPos);
       const sourceWindow = sourceNeed ? canvas?.aimSource(sourceNeed) : null;
       if (sourceNeed && !sourceWindow) return false;
+
+      // A convolve step filters through a third file, whose own canvas holds
+      // whatever span its own brush left it on, so that read gets a window too.
+      const impulseNeed = canvas && !canvas.wholeFile ? impulseNeedFor(state) : null;
+      const impulseWindow = impulseNeed ? canvas?.aimImpulse(impulseNeed) : null;
+      if (impulseNeed && !impulseWindow) return false;
+      const impulseSpectrogram = impulseNeed ? openFiles[impulseNeed.fileId]?.spectrogramData : null;
+      const impulse: ImpulseFileInfo | null =
+        impulseWindow && impulseSpectrogram
+          ? {
+              spectrogramData: impulseSpectrogram,
+              textures: { packed: impulseWindow.packed, metadata: impulseWindow.metadata },
+              view: impulseWindow.view,
+            }
+          : null;
 
       // Both onset maps are baked here rather than inside the renderer so the
       // sensitivity control and the file's latest detections reach the shader
@@ -1077,6 +1133,7 @@ const FileRendererInner = memo(
               tiltX: penState.tiltX,
               tiltY: penState.tiltY,
               destOnsetTexture,
+              impulse,
             },
             state,
             sourceFileInfo,
@@ -1407,8 +1464,12 @@ const FileRendererInner = memo(
         const preview = strokePreview.current;
         const dabStart = cursorPos.x * spectrogramData.numFrames - reach.before;
         const dabEnd = (cursorPos.x + brushSizeUv.x) * spectrogramData.numFrames + reach.after;
-        const sourceNeed = sourceNeedFor(state, cursorPos);
-        if (sourceNeed) canvas.aimSource(sourceNeed);
+        const needs = {
+          source: sourceNeedFor(state, cursorPos),
+          impulse: canvas.wholeFile ? null : impulseNeedFor(state),
+        };
+        if (needs.source) canvas.aimSource(needs.source);
+        if (needs.impulse) canvas.aimImpulse(needs.impulse);
         if (preview) {
           // A preview shows what a dab would do. One the canvas cannot take
           // shows the committed picture and stays asked for, so the brush keeps
@@ -1427,8 +1488,7 @@ const FileRendererInner = memo(
           // through, and then paints where it was asked to.
           const dabState = state;
           const dabPos = cursorPos.clone();
-          if (!canvas.paintWhenHeld(dabStart, dabEnd, sourceNeed, () => dispatchStroke(dabState, dabPos, false)))
-            return;
+          if (!canvas.paintWhenHeld(dabStart, dabEnd, needs, () => dispatchStroke(dabState, dabPos, false))) return;
           displayMode.current = "committed";
           applyStroke.current = false;
         }
@@ -1569,6 +1629,10 @@ const FileRendererInner = memo(
         canvasSeconds: canvas.windowSeconds(),
         bandsPerOctave: spectrogram.bandsPerOctave,
         numBands: spectrogram.numBands,
+        otherFileSeconds: (path) => {
+          const other = getOpenFileByPath(path)?.spectrogramData;
+          return other ? other.numFrames / other.sampleRate : null;
+        },
       };
     };
 

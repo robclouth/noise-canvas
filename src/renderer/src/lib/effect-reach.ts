@@ -14,6 +14,11 @@ export type TimeReach = { before: number; after: number };
 export type ReachContext = {
   /** The file's tempo. */
   bpm: number;
+  /**
+   * The seconds another open file holds, for an effect that reads one. Absent
+   * where no such file can be resolved, which makes those effects read nothing.
+   */
+  otherFileSeconds?: (path: string) => number | null;
   /** The file's whole duration. */
   fileSeconds: number;
   /** The span the canvas holds. */
@@ -196,6 +201,19 @@ function evolveReach(effect: State, ctx: ReachContext): TimeReach {
   return { before: span, after: span };
 }
 
+/**
+ * Convolve walks the response one bin per tap, and each of those bins covers
+ * one tap's worth of real time in the file it filters, scaled by Rate. The
+ * taps cannot outrun the response, so its own length is the bound.
+ */
+function convolveReach(effect: State, ctx: ReachContext): TimeReach {
+  const path = effect.convolveIrFile?.path;
+  const seconds = path ? (ctx.otherFileSeconds?.(path) ?? null) : null;
+  if (seconds === null) return NO_REACH;
+  const span = widest(stateRange(effect, "convolveIrRate")) * seconds;
+  return { before: span, after: span };
+}
+
 /** The brush's own span on each axis, in file seconds and in pitch UV. */
 function brushSpan(step: State, ctx: ReachContext): { seconds: number; pitchUv: number } {
   const footprint = resolveBrushFootprint({
@@ -233,6 +251,7 @@ export function brushReaches(state: State, ctx: ReachContext): StepReach[] {
       else if (item.effect === "transmute") reach = transmuteReach(effect, ctx);
       else if (item.effect === "attract") reach = attractReach(effect, ctx);
       else if (item.effect === "evolve") reach = evolveReach(effect, ctx);
+      else if (item.effect === "convolve") reach = convolveReach(effect, ctx);
       if (reach.before <= 0 && reach.after <= 0) continue;
       out.push({ effect: item.effect, step: index, brushSeconds: span.seconds, reach });
     }

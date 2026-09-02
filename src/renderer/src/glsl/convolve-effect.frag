@@ -4,6 +4,11 @@
 uniform sampler2D convolveIrTex;
 uniform sampler2D convolveIrMetadataTex;
 uniform float     convolveIrFrameCount;
+// Frames of the response file the texture starts at, and how many the file
+// holds. IR Start is a fraction of the file, so it lands against these before
+// it is measured against the window the texture is.
+uniform float     convolveIrViewStartFrame;
+uniform float     convolveIrFileFrameCount;
 uniform float     convolveIrBandCount;
 uniform float     convolveIrMinFreq;
 uniform float     convolveIrBandsPerOctave;
@@ -77,7 +82,7 @@ void main() {
   // IR base position in band-local units. The source per-tap position is
   // derived inside the loop via the dest-UV formulation so the brush edge mode
   // can rewrite it; no separate srcBaseBandIdx needed.
-  float irBaseBandIdx = (irTimeOff * convolveIrFrameCount) / irBandTimeScale;
+  float irBaseBandIdx = (irTimeOff * convolveIrFileFrameCount - convolveIrViewStartFrame) / irBandTimeScale;
 
   int effectiveTaps = int(min(float(convolveIrSize), irBandLength));
 
