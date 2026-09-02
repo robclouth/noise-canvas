@@ -7,6 +7,35 @@ import { CANVAS_WINDOW_SPARE_BLOCKS } from "./gpu-budget";
 /** Blocks the canvas keeps past the brush before the window moves. */
 export const CANVAS_WINDOW_MARGIN_BLOCKS = 1;
 
+/** Milliseconds an aim holds still before the window follows it. */
+export const CANVAS_WINDOW_REST_MS = 90;
+
+/**
+ * How long the frames the canvas is aimed at have held still. A pointer
+ * crossing the file pages every block it passes through the window and serves
+ * no dab, so a window that is not painting follows only an aim at rest.
+ */
+export class AimRest {
+  private startFrame = NaN;
+  private endFrame = NaN;
+  private since = 0;
+
+  /**
+   * Milliseconds [startFrame, endFrame) must still hold still before the
+   * window may follow it, and 0 once it has. A span different from the last
+   * one asked about restarts the wait.
+   */
+  wait(startFrame: number, endFrame: number, now: number, restMs = CANVAS_WINDOW_REST_MS): number {
+    if (startFrame !== this.startFrame || endFrame !== this.endFrame) {
+      this.startFrame = startFrame;
+      this.endFrame = endFrame;
+      this.since = now;
+      return restMs;
+    }
+    return Math.max(0, restMs - (now - this.since));
+  }
+}
+
 /** A run of blocks, both ends included. */
 export type BlockSpan = { firstBlock: number; lastBlock: number };
 

@@ -34,7 +34,10 @@ Four words, and everything else follows from them.
 
 So the canvas is a window of K blocks that follows the brush. `plan` decides
 where the window should sit, the slot cache pages the blocks in from disk, and
-`compose` draws them into the canvas.
+`compose` draws them into the canvas. A stroke moves the window every frame.
+Everything else — a pointer only hovering, a pan under way — moves it once the
+aim comes to rest, because paging in every block a pointer crosses serves no
+dab.
 
 ## Who owns what
 

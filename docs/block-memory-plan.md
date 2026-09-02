@@ -1108,17 +1108,45 @@ milliseconds, median of two runs.
   painting or not, so at whole-file zoom the pointer crosses a two-second block
   every few pixels and one sweep pages the file through sixteen slots. Zoomed
   in, where the detail work happens, the cost falls to 1.3–2.4×. Holding the
-  window still while the pointer only hovers is the first thing to try.
+  window still while the pointer only hovers is the section below.
 - **The commit is 3.5× `dev` and the window is not why** — it is the same with
   the window off. Not diagnosed.
 - `dev` refuses this machine anything past 248 seconds. Above that there is no
   comparison to draw.
 
-Found while driving it: a long stroke threw "the block has no slot" and died.
-Two claims could take a slot from the window the canvas was about to compose —
+Found while driving the measurement: a long stroke threw "the block has no
+slot" and died. Two claims could take a slot from the window the canvas was about to compose —
 a read the canvas had stopped waiting for, and a block leaving the window
 folding its paint back on the way out. Both pin the newest window now, and both
 are pinned by tests in `canvas-window.test.ts`.
+
+### Holding the window still on hover (2026-09-02)
+
+A window that is not painting now follows only an aim that has come to rest —
+`AimRest` in `canvas-window.ts`, 90 ms. A stroke still pages ahead of the brush
+every frame. A preview the canvas cannot serve shows the committed picture and
+stays asked for, so the brush keeps following the pointer and the preview
+appears when the window arrives, instead of the frame freezing where it was.
+
+The same build measured with the rest at 0 ms and at 90 ms, so nothing else
+differs. Main-thread task time, median of two runs, 180 s file:
+
+| gesture          | 0 ms     | 90 ms   |
+| ---------------- | -------- | ------- |
+| hover, 240 moves | **4277** | **576** |
+| zoom in, 10      | 260      | 231     |
+| pan wheel, 60    | 632      | 623     |
+| pan drag, 100    | 791      | 783     |
+| zoom out, 10     | 182      | 210     |
+| paint, 60 dabs   | 1006     | 1413    |
+| commit           | 2156     | 2290    |
+
+Hover falls below `dev`'s 740 ms. The stroke rises by about 400 ms because the
+window arrives at the brush cold now rather than warmed by the sweep that
+crossed it; that fill lands during the pause before the click, so the two
+gestures together fall from 5283 ms to 1989 ms. Frames while painting are
+slightly worse for it — p95 15.7 ms against 9.2, and two slow frames rather
+than one.
 
 ---
 

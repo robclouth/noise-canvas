@@ -4,7 +4,7 @@ import { useTransientStore } from "@renderer/store/transient";
 import { diag } from "@renderer/lib/diag-log";
 import { viewCoversFile, type CanvasView } from "@renderer/lib/canvas-view";
 import { blockGrid } from "@renderer/lib/block-grid";
-import { needsCanvasWindow } from "@renderer/lib/canvas-window";
+import { AimRest, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { canvasWindowBlocks } from "@renderer/lib/gpu-budget";
 import { ExportSourceWindow, exportBlockGrid } from "@renderer/lib/export-window";
 import { sourceReadSpan } from "@renderer/lib/source-window";
@@ -301,6 +301,8 @@ const FileRendererInner = memo(
     const displayMode = useRef<"preview" | "committed">("committed");
     const applyStroke = useRef(false);
     const clearingPreview = useRef(false);
+    const aimRest = useRef(new AimRest());
+    const aimRestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Whether the display material has been populated at least once for the
     // current StrokeRenderer. Reset whenever the StrokeRenderer is recreated.
     const hasDrawnDisplayRef = useRef(false);
@@ -387,6 +389,7 @@ const FileRendererInner = memo(
         unsubDisplay();
         unsubTransient();
         unsubActiveFileId();
+        if (aimRestTimer.current !== null) clearTimeout(aimRestTimer.current);
       };
     }, [fileId, scheduleSnapshotRefresh]);
 
@@ -1391,7 +1394,12 @@ const FileRendererInner = memo(
         const visible = visibleFrameRange(state);
         const start = cursorPos.x >= 0 ? cursorPos.x * numFrames - reach.before : visible.start;
         const end = cursorPos.x >= 0 ? (cursorPos.x + brushSizeUv.x) * numFrames + reach.after : visible.end;
-        canvas.aim(start, end);
+        // A stroke pages ahead of the brush every frame. Everything else — a
+        // pointer crossing the file, a pan under way — waits until the aim
+        // stops, and takes a frame at the moment it does.
+        const wait = canvas.isStroking ? 0 : aimRest.current.wait(start, end, performance.now());
+        if (wait === 0) canvas.aim(start, end);
+        else scheduleAimRest(wait);
       }
 
       // Render brush stroke if requested
@@ -1403,9 +1411,15 @@ const FileRendererInner = memo(
         if (sourceNeed) canvas.aimSource(sourceNeed);
         if (preview) {
           // A preview shows what a dab would do. One the canvas cannot take
-          // shows nothing rather than waiting for a position already stale.
-          if (!canvas.holdsFrames(dabStart, dabEnd)) return;
-          if (!dispatchStroke(state, cursorPos, true)) return;
+          // shows the committed picture and stays asked for, so the brush keeps
+          // following the pointer and the preview appears once the window
+          // holds the frames.
+          if (!canvas.holdsFrames(dabStart, dabEnd)) {
+            displayMode.current = "committed";
+          } else {
+            if (!dispatchStroke(state, cursorPos, true)) return;
+            applyStroke.current = false;
+          }
         } else {
           // A dab blends out of the canvas, so one landing on a block the
           // canvas has no content for would paint silence and commit it. The
@@ -1416,9 +1430,8 @@ const FileRendererInner = memo(
           if (!canvas.paintWhenHeld(dabStart, dabEnd, sourceNeed, () => dispatchStroke(dabState, dabPos, false)))
             return;
           displayMode.current = "committed";
+          applyStroke.current = false;
         }
-
-        applyStroke.current = false;
       }
 
       // Update display material uniforms (once per frame at the end)
@@ -1575,6 +1588,15 @@ const FileRendererInner = memo(
         before: Math.min(reach.before * sampleRate, numFrames),
         after: Math.min(reach.after * sampleRate, numFrames),
       };
+    };
+
+    /** Takes a frame when the aim comes to rest, since a still pointer sends no events. */
+    const scheduleAimRest = (wait: number): void => {
+      if (aimRestTimer.current !== null) clearTimeout(aimRestTimer.current);
+      aimRestTimer.current = setTimeout(() => {
+        aimRestTimer.current = null;
+        invalidateRef.current?.();
+      }, wait);
     };
 
     const regionToFileUv = (region: UvRegion | null): UvRegion | null =>

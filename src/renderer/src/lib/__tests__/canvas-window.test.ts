@@ -17,6 +17,8 @@ import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockPixelRanges, type BlockGrid } from "../block-grid";
 import { canvasViewOf, composeViewContent, fileRangesToView, viewRangesToFile, type CanvasView } from "../canvas-view";
 import {
+  AimRest,
+  CANVAS_WINDOW_REST_MS,
   canvasWindowView,
   CanvasWindow,
   needsCanvasWindow,
@@ -114,6 +116,26 @@ describe("placeCanvasWindow", () => {
     expect(
       placeCanvasWindow({ blockCount, windowBlocks: 4, firstNeeded: 1, lastNeeded: 2, current: wholeFile }),
     ).toEqual({ firstBlock: 0, lastBlock: 3 });
+  });
+});
+
+describe("AimRest", () => {
+  it("follows an aim only once it has held still", () => {
+    const rest = new AimRest();
+    expect(rest.wait(0, 100, 1000)).toBe(CANVAS_WINDOW_REST_MS);
+    expect(rest.wait(0, 100, 1000 + CANVAS_WINDOW_REST_MS - 10)).toBe(10);
+    expect(rest.wait(0, 100, 1000 + CANVAS_WINDOW_REST_MS)).toBe(0);
+    expect(rest.wait(0, 100, 9000)).toBe(0);
+  });
+
+  it("starts the wait again whenever the aim moves", () => {
+    const rest = new AimRest();
+    rest.wait(0, 100, 1000);
+    expect(rest.wait(0, 100, 1080)).toBe(10);
+    // The span moved, so the wait is the whole of it again, not the ten left.
+    expect(rest.wait(5, 105, 1080)).toBe(CANVAS_WINDOW_REST_MS);
+    expect(rest.wait(5, 105, 1085)).toBe(CANVAS_WINDOW_REST_MS - 5);
+    expect(rest.wait(5, 200, 1085)).toBe(CANVAS_WINDOW_REST_MS);
   });
 });
 

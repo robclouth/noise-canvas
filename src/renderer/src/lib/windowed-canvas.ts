@@ -118,6 +118,11 @@ export class WindowedCanvas {
     return this.revision;
   }
 
+  /** True between `beginStroke` and `endStroke`, while dabs are landing. */
+  get isStroking(): boolean {
+    return this.stroking;
+  }
+
   /** True while the canvas as it stands holds every frame of the file. */
   coversFile(): boolean {
     const view = this.view();
