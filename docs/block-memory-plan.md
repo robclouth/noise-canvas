@@ -1109,8 +1109,8 @@ milliseconds, median of two runs.
   every few pixels and one sweep pages the file through sixteen slots. Zoomed
   in, where the detail work happens, the cost falls to 1.3–2.4×. Holding the
   window still while the pointer only hovers is the section below.
-- **The commit is 3.5× `dev` and the window is not why** — it is the same with
-  the window off. Not diagnosed.
+- **The commit is 3.5× `dev`** — it is the same with the window off, so the
+  window is not why. Diagnosed below.
 - `dev` refuses this machine anything past 248 seconds. Above that there is no
   comparison to draw.
 
@@ -1147,6 +1147,35 @@ crossed it; that fill lands during the pause before the click, so the two
 gestures together fall from 5283 ms to 1989 ms. Frames while painting are
 slightly worse for it — p95 15.7 ms against 9.2, and two slow frames rather
 than one.
+
+---
+
+### What the commit costs, and why (2026-09-02)
+
+A single stroke over 90 seconds of a 180 s file, the same brush and the same
+gesture on both builds. Wall time from the app's own log, and the footprint
+each commit actually carried:
+
+| step              | `dev`  | branch |
+| ----------------- | ------ | ------ |
+| `commitStroke`    | 934 ms | 2040   |
+| `addStroke` delta | 55 ms  | 849    |
+| footprint, pixels | 1.11M  | 1.15M  |
+
+Both numbers are the block store, and both scale with the span the stroke
+covered rather than with the length of the file:
+
+- `commitStroke` reads the view's pre-stroke pixels with `currentRanges`, which
+  decodes every block the stroke's reach spans — 45 of them here, six megabytes
+  each. `dev` had the whole state in RAM already.
+- The `addStroke` delta is `tierStrokePatch` writing the stroke into the store:
+  the same blocks decoded again where the resident cache has dropped them,
+  patched, then encoded and written back.
+
+`DEFAULT_RESIDENT_BYTES` is 64 MB, about ten blocks at this length, so a stroke
+wider than that re-decodes. Raising it trades the memory this whole plan is
+about, and moving the store write off the commit needs a barrier against every
+reader, so neither is a small change. Left as it is, measured and named.
 
 ---
 
