@@ -1,4 +1,4 @@
-import { createEffectStateView, createStepStateView, useStore } from "@/store";
+import { createStepStateView, useStore } from "@/store";
 import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
 import { diag } from "@renderer/lib/diag-log";
@@ -55,6 +55,7 @@ import { DEFAULT_ONSET_SENSITIVITY, packedFold, padToFold } from "../lib/constan
 import { displayLevelChoice } from "../lib/display-pyramid";
 import type { DisplayTileRing } from "../lib/display-tiles-textures";
 import { getFileOnsets } from "../lib/file-onsets";
+import { impulseNeeds, type ImpulseNeed } from "../lib/impulse-need";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
@@ -986,40 +987,29 @@ const FileRendererInner = memo(
       return { fileId: source.id, ...sourceReadSpan(read, sourceSpectrogram.numFrames), wantOriginal };
     };
 
-    /**
-     * The response file and frames a convolve step reads, through a window of
-     * this canvas's own. Null when no step names a response file — the step
-     * filters through the source itself then, which the gate refuses on a
-     * windowed canvas.
-     *
-     * The taps run forward from IR Start, one response bin each, and the
-     * coarsest band's bin is the longest, so that band's stride sets the span.
-     */
-    const impulseNeedFor = (state: State): SourceNeed | null => {
-      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-      for (let index = 0; index < steps.length; index++) {
-        const step = createStepStateView(state, index);
-        for (const item of step.effects) {
-          if (!item.enabled || item.effect !== "convolve") continue;
-          const effect = createEffectStateView(state, index, item);
-          const path = effect.convolveIrFile?.path;
-          if (!path) continue;
-          const response = getOpenFileByPath(path);
-          const spectrogram = response?.spectrogramData;
-          if (!response || !spectrogram) continue;
-          const stride = 1 << Math.max(...spectrogram.synthesisMetadata.bandStepLog2s);
-          const taps = Math.max(1, Math.floor(Number(effect.convolveIrSize)));
-          const start = (Number(effect.convolveIrTimeOffset) / 100) * spectrogram.numFrames;
-          return {
-            fileId: response.id,
-            startFrame: Math.max(0, Math.floor(start)),
-            endFrame: Math.min(spectrogram.numFrames, Math.ceil(start + taps * stride)),
-            wantOriginal: false,
-          };
-        }
-      }
-      return null;
+    /** The file a convolve step filters through, by the path it names or this file. */
+    const responseFileFor = (path: string | null) => (path ? getOpenFileByPath(path) : openFiles[fileId]) ?? null;
+
+    /** True while that file's own canvas holds a window of it rather than all of it. */
+    const responseIsWindowed = (id: string): boolean => {
+      const response = openFiles[id];
+      const view = response?.rendererRef?.current?.getCanvasView();
+      if (!view || !response?.spectrogramData) return false;
+      return !viewCoversFile(view, response.spectrogramData.numFrames);
     };
+
+    /** The response every enabled convolve step reads, and the frames of it its taps cover. */
+    const impulseNeedsFor = (state: State): ImpulseNeed[] =>
+      impulseNeeds(state, (path) => {
+        const response = responseFileFor(path);
+        return response?.spectrogramData ? { id: response.id, spectrogramData: response.spectrogramData } : null;
+      });
+
+    /** The responses this canvas has to window, because their own canvases hold a window. */
+    const windowedImpulseNeeds = (state: State): SourceNeed[] =>
+      impulseNeedsFor(state)
+        .map((entry) => entry.need)
+        .filter((need) => responseIsWindowed(need.fileId));
 
     /**
      * Paints one stroke into the FBO from an explicit state snapshot. The frame
@@ -1069,20 +1059,31 @@ const FileRendererInner = memo(
       const sourceWindow = sourceNeed ? canvas?.aimSource(sourceNeed) : null;
       if (sourceNeed && !sourceWindow) return false;
 
-      // A convolve step filters through a third file, whose own canvas holds
-      // whatever span its own brush left it on, so that read gets a window too.
-      const impulseNeed = canvas && !canvas.wholeFile ? impulseNeedFor(state) : null;
-      const impulseWindow = impulseNeed ? canvas?.aimImpulse(impulseNeed) : null;
-      if (impulseNeed && !impulseWindow) return false;
-      const impulseSpectrogram = impulseNeed ? openFiles[impulseNeed.fileId]?.spectrogramData : null;
-      const impulse: ImpulseFileInfo | null =
-        impulseWindow && impulseSpectrogram
-          ? {
-              spectrogramData: impulseSpectrogram,
-              textures: { packed: impulseWindow.packed, metadata: impulseWindow.metadata },
-              view: impulseWindow.view,
-            }
-          : null;
+      // A convolve step filters through a file whose own canvas holds whatever
+      // span its own brush left it on, so a response on a windowed canvas gets
+      // a window of this canvas's own, placed where the taps read.
+      const impulses = new Map<string, ImpulseFileInfo>();
+      for (const entry of impulseNeedsFor(state)) {
+        const response = openFiles[entry.need.fileId];
+        const spectrogram = response?.spectrogramData;
+        if (!spectrogram) return false;
+        if (responseIsWindowed(entry.need.fileId)) {
+          const window = canvas?.aimImpulse(entry.need);
+          if (!window) return false;
+          impulses.set(entry.key, {
+            spectrogramData: spectrogram,
+            textures: { packed: window.packed, metadata: window.metadata },
+            view: window.view,
+          });
+          continue;
+        }
+        const textures = response.rendererRef?.current?.getTextures();
+        if (!textures) return false;
+        impulses.set(entry.key, {
+          spectrogramData: spectrogram,
+          textures: { packed: textures.packed, metadata: textures.metadata },
+        });
+      }
 
       // Both onset maps are baked here rather than inside the renderer so the
       // sensitivity control and the file's latest detections reach the shader
@@ -1133,7 +1134,7 @@ const FileRendererInner = memo(
               tiltX: penState.tiltX,
               tiltY: penState.tiltY,
               destOnsetTexture,
-              impulse,
+              impulses,
             },
             state,
             sourceFileInfo,
@@ -1466,10 +1467,11 @@ const FileRendererInner = memo(
         const dabEnd = (cursorPos.x + brushSizeUv.x) * spectrogramData.numFrames + reach.after;
         const needs = {
           source: sourceNeedFor(state, cursorPos),
-          impulse: canvas.wholeFile ? null : impulseNeedFor(state),
+          impulses: windowedImpulseNeeds(state),
         };
         if (needs.source) canvas.aimSource(needs.source);
-        if (needs.impulse) canvas.aimImpulse(needs.impulse);
+        for (const need of needs.impulses) canvas.aimImpulse(need);
+        canvas.dropImpulsesExcept(needs.impulses);
         if (preview) {
           // A preview shows what a dab would do. One the canvas cannot take
           // shows the committed picture and stays asked for, so the brush keeps
@@ -1629,9 +1631,11 @@ const FileRendererInner = memo(
         canvasSeconds: canvas.windowSeconds(),
         bandsPerOctave: spectrogram.bandsPerOctave,
         numBands: spectrogram.numBands,
-        otherFileSeconds: (path) => {
-          const other = getOpenFileByPath(path)?.spectrogramData;
-          return other ? other.numFrames / other.sampleRate : null;
+        responseSpan: (path) => {
+          const other = responseFileFor(path)?.spectrogramData;
+          if (!other) return null;
+          const stride = 1 << Math.max(...other.synthesisMetadata.bandStepLog2s);
+          return { seconds: other.numFrames / other.sampleRate, binSeconds: stride / other.sampleRate };
         },
       };
     };

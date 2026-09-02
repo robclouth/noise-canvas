@@ -240,8 +240,8 @@ export type UpdateEffectUniformsProps = {
   file: OpenFile;
   state?: State;
   modContext: ModContext;
-  /** The impulse response a convolve step reads, through a window of its own. */
-  impulse?: ImpulseFileInfo | null;
+  /** The impulse response each convolve step reads, keyed by `impulseKey`. */
+  impulses?: ReadonlyMap<string, ImpulseFileInfo>;
 };
 
 export abstract class BaseEffect {

@@ -1,20 +1,8 @@
 import { EFFECT_LABELS } from "@renderer/lib/constants";
 import { brushReaches, type ReachContext } from "@renderer/lib/effect-reach";
 import { BRUSH_SIZE_TIME_FULL } from "@renderer/lib/utils";
-import { createEffectStateView, createStepStateView } from "@renderer/store";
+import { createStepStateView } from "@renderer/store";
 import type { State } from "@renderer/store/types";
-
-/**
- * Effects that read the file rather than a span around the brush, so a canvas
- * holding a window of the file cannot serve them. Every effect declares a
- * reach in `effect-reach.ts` instead, except convolve with no response file
- * named, which reads the canvas from its first frame.
- */
-export const WHOLE_FILE_EFFECTS: ReadonlySet<string> = new Set();
-
-// Convolve with no response file named filters through the canvas itself, read
-// from its first frame whatever the dab covers.
-const SELF_RESPONSE = "Convolve with no IR";
 
 const TIME_WRAP = "Wrap in time";
 const FULL_BRUSH = "A brush the length of the file";
@@ -26,7 +14,8 @@ const SOURCE_TIME = "A source time offset";
  * Empty means the brush paints the same over a window of the file as it does
  * over all of it. Wrapping in time folds a read back onto the far end of the
  * canvas, and a full-length brush spans the canvas, so both read whatever span
- * the canvas holds rather than the file.
+ * the canvas holds rather than the file. Effects are absent: each one declares
+ * a reach around the dab in `effect-reach.ts`, which `overReachNeeds` measures.
  */
 export function wholeFileNeeds(state: State): string[] {
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
@@ -41,13 +30,6 @@ export function wholeFileNeeds(state: State): string[] {
       // Tracking and the time offset put that read anywhere in the file.
       if (step.sourcePositionMode !== "follow") needs.add(SOURCE_TRACKING);
       if (Number(step.sourceTimeOffset) !== 0) needs.add(SOURCE_TIME);
-    }
-    for (const item of step.effects) {
-      if (!item.enabled) continue;
-      if (WHOLE_FILE_EFFECTS.has(item.effect)) needs.add(EFFECT_LABELS[item.effect] ?? item.effect);
-      if (item.effect === "convolve" && !createEffectStateView(state, index, item).convolveIrFile) {
-        needs.add(SELF_RESPONSE);
-      }
     }
   }
   return [...needs];

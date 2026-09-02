@@ -1,3 +1,4 @@
+import { impulseKey } from "@renderer/lib/impulse-key";
 import { getNumberParameterDef } from "@renderer/parameters";
 import type { SpectrogramData } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
@@ -61,11 +62,11 @@ class ConvolveEffect extends BaseEffect {
     const material = this.materials[0];
     if (!material) return;
 
-    // The response is a window the canvas placed over the file a step named,
-    // or — with no file named — the source itself, read from its first frame.
-    // Painting a file onto itself collapses that to true self-convolution;
+    // The response is the file the step named, or — with no file named — the
+    // file it paints from, read from IR Start of that file either way. Painting
+    // a file onto itself collapses the second case to true self-convolution;
     // painting from B onto A gives B ⊛ B, a static response.
-    const impulse = props.impulse ?? null;
+    const impulse = props.impulses?.get(impulseKey(state)) ?? null;
     if (impulse) {
       const { spectrogramData: irData, textures, view } = impulse;
       material.uniforms.convolveIrTex.value = textures.packed.texture;
@@ -89,9 +90,10 @@ class ConvolveEffect extends BaseEffect {
     }
     material.uniforms.convolveIrEnabled.value = true;
 
-    // Normalize against a named response only. The "Self" fallback has no CPU
-    // spectrogram to measure here, so it stays unnormalized (scale 1).
-    material.uniforms.convolveIrNormScale.value = impulse ? getIrNormScale(impulse.spectrogramData) : 1;
+    // Normalize against a named response only, so filtering through the file
+    // being painted from keeps whatever level that file has.
+    material.uniforms.convolveIrNormScale.value =
+      state.convolveIrFile && impulse ? getIrNormScale(impulse.spectrogramData) : 1;
 
     material.uniforms.convolveIrSize.value = Math.max(1, Math.floor(state.convolveIrSize));
     material.uniforms.convolveEdgeMode.value = state.convolveEdgeMode;

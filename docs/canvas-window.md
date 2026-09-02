@@ -50,6 +50,7 @@ dab.
 | `lib/canvas-window.ts`    | placing the window, filling it, and what the canvas holds              |
 | `lib/packed-window.ts`    | the same window over the file's original, as one texture               |
 | `lib/source-window.ts`    | a window over another file, for a brush painting or filtering from it  |
+| `lib/impulse-need.ts`     | the response each convolve step reads, and the frames its taps cover   |
 | `lib/effect-reach.ts`     | how far past the brush each effect reads                               |
 | `lib/export-window.ts`    | spans of the committed state for an image export                       |
 | `lib/whole-file-gate.ts`  | what a brush asks for that a window cannot serve                       |
@@ -109,28 +110,32 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    (`sourceReadFrames` names them) and holds the dab until it lands. That
    window serves the other file's **committed** state, so it re-reads when that
    state moves — a stroke still under the other file's brush is not in it. The
-   canvas keeps one window per role: the file a step paints from, and the file
-   a convolve step takes its impulse response from. IR Start is a fraction of
+   canvas keeps one window for the file a step paints from, and one for each
+   file a convolve step filters through. A convolve that names no response file
+   filters through the file it paints from, which is the file it paints on when
+   it names neither, and that read is a window too. IR Start is a fraction of
    the response file, so it lands against the file before it is measured
-   against the window.
+   against the window. A response whose own canvas holds all of it is read
+   through that canvas, with no window of ours.
 8. **A phase turn taken over "the whole file" asks the file.** A reversal turns
    every band by the file's duration. `destFileAxisSec` and `sourceFileAxisSec`
    read the file's frame count; the canvas's own frame count is the span it
    holds. A canvas over the whole file returns the value it always did.
 9. **A brush that reads the whole file does not paint on a window.** Wrapping in
    time folds a read onto the far end of the canvas, a full-length brush spans
-   the canvas, source tracking away from Follow puts the read anywhere in the
-   file, and a convolve with no response file named filters through the canvas
-   itself, read from its first frame. `wholeFileNeeds` names them,
-   `dispatchStroke` refuses the dab and the file view says so once. The gate is
-   off while the canvas holds the whole file.
+   the canvas, and source tracking away from Follow puts the read anywhere in
+   the file. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab and
+   the file view says so once. No effect is among them: each declares a reach
+   instead. The gate is off while the canvas holds the whole file.
 10. **The canvas holds what an effect reads, not only what the dab covers.** A
     blur smear, a repeat gap and a warp's turn, stretch or shift all read past
     the brush when the edge mode is Bleed or Invert; the other edge modes fold
     the read back inside the brush and reach nothing. A transmute that moves a
     band along time reads where it lands, an attract reads the field it places
-    bands against, and an evolve reads the neighbourhood it flows through. `effect-reach.ts` says how far, in seconds of the
-    file, and the aim and the dab's own wait widen by it.
+    bands against, an evolve reads the neighbourhood it flows through, and a
+    convolve steps the read one response bin per tap, the way Rate's sign
+    points. `effect-reach.ts` says how far, in seconds of the file, and the aim
+    and the dab's own wait widen by it.
     A brush whose dab plus reach is wider than a whole window can never be
     served, so `overReachNeeds` names it and the dab is refused.
 11. **An offset added to a source UV converts against the span the source

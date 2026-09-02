@@ -26,7 +26,7 @@ export type UvRegion = { startX: number; endX: number; startY: number; endY: num
 export type { SourceNeed } from "./source-window";
 
 /** The other files a dab reads, each through a window this canvas owns. */
-export type OtherFileNeeds = { source: SourceNeed | null; impulse: SourceNeed | null };
+export type OtherFileNeeds = { source: SourceNeed | null; impulses: readonly SourceNeed[] };
 
 /** Paint waiting for the canvas to hold the frames it lands on. */
 type HeldPaint = { startFrame: number; endFrame: number; needs: OtherFileNeeds; paint: () => boolean };
@@ -85,7 +85,8 @@ export class WindowedCanvas {
   private readonly blocks: CanvasWindow | null;
   private readonly original: PackedWindow | null;
   private readonly source: SourceWindowSlot;
-  private readonly impulse: SourceWindowSlot;
+  private readonly impulses = new Map<string, SourceWindowSlot>();
+  private readonly windowBlocks: number;
   private request: CanvasView | null = null;
   private fill: Promise<void> | null = null;
   private readonly held: HeldPaint[] = [];
@@ -107,7 +108,7 @@ export class WindowedCanvas {
       this.original = null;
     }
     this.source = new SourceWindowSlot(deps.gl, windowBlocks);
-    this.impulse = new SourceWindowSlot(deps.gl, windowBlocks);
+    this.windowBlocks = windowBlocks;
   }
 
   /** True when this file is short enough for the canvas to hold all of it. */
@@ -272,13 +273,29 @@ export class WindowedCanvas {
   }
 
   /**
-   * The same, for the file a convolve step takes its impulse response from.
-   * It is its own window, because a step can paint from one file and filter
-   * through another.
+   * The same, for a file a convolve step takes its impulse response from. Each
+   * such file gets a window of its own, because a step can paint from one file
+   * and filter through another, and two steps can filter through two.
    */
   aimImpulse(need: SourceNeed): SourceWindowTextures | null {
     const blocks = this.deps.sourceBlocks(need.fileId);
-    return blocks ? this.impulse.aim(need, blocks) : null;
+    if (!blocks) return null;
+    let slot = this.impulses.get(need.fileId);
+    if (!slot) {
+      slot = new SourceWindowSlot(this.deps.gl, this.windowBlocks);
+      this.impulses.set(need.fileId, slot);
+    }
+    return slot.aim(need, blocks);
+  }
+
+  /** Drops the windows over response files the brush no longer filters through. */
+  dropImpulsesExcept(needs: readonly SourceNeed[]): void {
+    const wanted = new Set(needs.map((need) => need.fileId));
+    for (const [fileId, slot] of this.impulses) {
+      if (wanted.has(fileId)) continue;
+      slot.dispose();
+      this.impulses.delete(fileId);
+    }
   }
 
   /**
@@ -292,10 +309,12 @@ export class WindowedCanvas {
       const next = this.held[0];
       this.aim(next.startFrame, next.endFrame);
       if (next.needs.source) this.aimSource(next.needs.source);
-      if (next.needs.impulse) this.aimImpulse(next.needs.impulse);
-      const reads = [this.fill, this.source.settled(), this.impulse.settled()].filter(
-        (read): read is Promise<void> => read !== null,
-      );
+      for (const need of next.needs.impulses) this.aimImpulse(need);
+      const reads = [
+        this.fill,
+        this.source.settled(),
+        ...[...this.impulses.values()].map((slot) => slot.settled()),
+      ].filter((read): read is Promise<void> => read !== null);
       if (reads.length === 0) break;
       await Promise.all(reads);
       this.releaseHeld();
@@ -514,7 +533,8 @@ export class WindowedCanvas {
     this.blocks?.dispose();
     this.original?.dispose();
     this.source.dispose();
-    this.impulse.dispose();
+    for (const slot of this.impulses.values()) slot.dispose();
+    this.impulses.clear();
     this.request = null;
     this.held.length = 0;
   }
@@ -535,9 +555,10 @@ export class WindowedCanvas {
     }
   }
 
-  /** True while both other-file windows hold what the dab asked of them. */
+  /** True while every other-file window holds what the dab asked of it. */
   private othersHold(needs: OtherFileNeeds): boolean {
-    return this.source.holds(needs.source) && this.impulse.holds(needs.impulse);
+    if (!this.source.holds(needs.source)) return false;
+    return needs.impulses.every((need) => this.impulses.get(need.fileId)?.holds(need) ?? false);
   }
 
   private expectRenderer(): StrokeRenderer {

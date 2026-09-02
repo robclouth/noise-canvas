@@ -1301,12 +1301,42 @@ length works.
 - The reach is the response's own length times Rate: the taps walk it one bin
   each and cannot outrun it.
 
-`WHOLE_FILE_EFFECTS` is now **empty**. The only thing the gate still refuses
-among the effects is a convolve with no response file named, which filters
-through the canvas itself from its first frame.
+### 4.5 Convolve with no response file named
 
-Status: Phase 4 done — every gated effect either declares a reach or names the
-one setting that reads the whole file.
+The last refusal. With no file named, convolve filters through the file the
+step paints **from** — the file it paints **on** when it names neither — read
+from IR Start of that file. On a whole-file canvas the source textures held
+those frames, so the shader read them straight; on a window they hold the
+window, and the read was wrong. The gate covered it by refusing the dab, which
+made a freshly added Convolve say "Nothing painted" on any long file.
+
+- `lib/impulse-key.ts` holds the one rule for which file a step filters
+  through: the response it names, else the file it paints from, else this file.
+  It is a leaf with a type-only store import — `convolve-effect.ts` imports it,
+  and a value import of the store barrel from an effect is a cycle.
+- `lib/impulse-need.ts` walks the brush and gives each response the frames its
+  taps cover, merged over every step that reads it.
+- The canvas keeps one window **per response file**, not one in total, so two
+  convolve steps filtering through two files each get their own. A response
+  whose own canvas holds all of it is read through that canvas instead, which
+  is also what restores a named response on a short file — that path had been
+  reading the source textures since the window landed.
+- The reach is `Rate × min(taps × the coarsest response bin, the response's
+length)`, on the side Rate's sign points at. The taps walk the response one
+  bin each and cannot outrun it. Both bounds are needed: the taps keep a Self
+  convolve on a ten-minute file from claiming it reads the whole thing, and the
+  side keeps it inside a window. At 36 bands per octave the coarsest bin is
+  16384 frames, so the default 64 taps really do read 23.8 s back — two-sided,
+  that is 48 s and no window serves it; one-sided it fits.
+- Normalisation still applies to a **named** response only, so filtering
+  through the file painted from keeps that file's level.
+
+`WHOLE_FILE_EFFECTS` is gone, and with it the effects loop in `wholeFileNeeds`.
+What the gate still refuses is wrapping in time, a brush the length of the
+file, and source tracking away from Follow.
+
+Status: Phase 4 done — every effect declares a reach, and none reads the whole
+file.
 
 ---
 

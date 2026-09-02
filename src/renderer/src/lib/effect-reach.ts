@@ -1,6 +1,7 @@
 import { buildShapeTable, type CloneShapeKey } from "@renderer/effects/clone-shapes";
 import type { EffectType } from "@renderer/effects/types";
 import { EVOLVE_SCALE_FULL_BEATS } from "@renderer/lib/constants";
+import { responsePath } from "@renderer/lib/impulse-key";
 import { modulationWeight } from "@renderer/lib/static-modulation";
 import { originFraction, resolveBrushFootprint } from "@renderer/lib/utils";
 import { getNumberParameterDef } from "@renderer/parameters";
@@ -10,15 +11,19 @@ import type { ParameterKey, State } from "@renderer/store/types";
 /** Seconds of the file an effect reads either side of the brush's own span. */
 export type TimeReach = { before: number; after: number };
 
+/** How long a file is, and how much real time its coarsest stored bin covers. */
+export type FileSpan = { seconds: number; binSeconds: number };
+
 /** The clocks a reach is measured against. */
 export type ReachContext = {
   /** The file's tempo. */
   bpm: number;
   /**
-   * The seconds another open file holds, for an effect that reads one. Absent
-   * where no such file can be resolved, which makes those effects read nothing.
+   * The file an effect filters through: the one at `path`, or the file the
+   * brush paints from when `path` is null. Absent where none can be resolved,
+   * which makes those effects read nothing.
    */
-  otherFileSeconds?: (path: string) => number | null;
+  responseSpan?: (path: string | null) => FileSpan | null;
   /** The file's whole duration. */
   fileSeconds: number;
   /** The span the canvas holds. */
@@ -202,16 +207,19 @@ function evolveReach(effect: State, ctx: ReachContext): TimeReach {
 }
 
 /**
- * Convolve walks the response one bin per tap, and each of those bins covers
- * one tap's worth of real time in the file it filters, scaled by Rate. The
- * taps cannot outrun the response, so its own length is the bound.
+ * Convolve walks the response one bin per tap, and each tap steps the read
+ * through the file it filters by that bin's own length of real time, scaled by
+ * Rate. The taps cannot outrun the response either, so its length bounds them
+ * as well. Rate's sign decides which way they run, so a rate that cannot change
+ * sign reaches one way only.
  */
 function convolveReach(effect: State, ctx: ReachContext): TimeReach {
-  const path = effect.convolveIrFile?.path;
-  const seconds = path ? (ctx.otherFileSeconds?.(path) ?? null) : null;
-  if (seconds === null) return NO_REACH;
-  const span = widest(stateRange(effect, "convolveIrRate")) * seconds;
-  return { before: span, after: span };
+  const response = ctx.responseSpan?.(responsePath(effect)) ?? null;
+  if (!response) return NO_REACH;
+  const taps = Math.max(1, Math.floor(Number(effect.convolveIrSize)));
+  const span = Math.min(taps * response.binSeconds, response.seconds);
+  const rate = stateRange(effect, "convolveIrRate");
+  return { before: Math.max(0, rate.hi) * span, after: Math.max(0, -rate.lo) * span };
 }
 
 /** The brush's own span on each axis, in file seconds and in pitch UV. */
@@ -231,9 +239,7 @@ function brushSpan(step: State, ctx: ReachContext): { seconds: number; pitchUv: 
 
 /**
  * The reach of every enabled effect in the brush that reads past the dab's own
- * span. Effects that read only the texel they write are absent, and so are the
- * ones that read the whole file whatever their settings — `WHOLE_FILE_EFFECTS`
- * covers those.
+ * span. Effects that read only the texel they write are absent.
  */
 export function brushReaches(state: State, ctx: ReachContext): StepReach[] {
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];

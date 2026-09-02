@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
 import { brushReaches, strokeReach, type ReachContext, type TimeReach } from "../effect-reach";
@@ -216,35 +216,87 @@ describe("evolve reach", () => {
 
 describe("convolve reach", () => {
   const RESPONSE = { path: "/response.wav", name: "response.wav" };
-  const withResponse = (params: Record<string, unknown>): Partial<TestBrushStep> => ({
+  const SOURCE = { path: "/source.wav", name: "source.wav" };
+  const withResponse = (
+    params: Record<string, unknown>,
+    step: Partial<TestBrushStep> = {},
+  ): Partial<TestBrushStep> => ({
+    ...step,
     effects: [{ id: "mock-convolve", effect: "convolve", enabled: true, params }],
   });
-  const CTX_WITH_RESPONSE: ReachContext = { ...CTX, otherFileSeconds: () => 3 };
+  // A three-second response whose coarsest bin covers a hundredth of a second.
+  const asked: (string | null)[] = [];
+  const CTX_WITH_RESPONSE: ReachContext = {
+    ...CTX,
+    responseSpan: (path) => {
+      asked.push(path);
+      return { seconds: 3, binSeconds: 0.01 };
+    },
+  };
 
-  it("reads the response's own length back, scaled by the rate", () => {
-    const state = createMockStateWithSteps([
-      { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrRate: 2 }) },
-    ]);
-    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 6, after: 6 });
+  beforeEach(() => {
+    asked.length = 0;
   });
 
-  it("reads nothing when no response file is named", () => {
-    const state = createMockStateWithSteps([{ name: "Step", overrides: withResponse({ convolveIrRate: 2 }) }]);
-    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 0, after: 0 });
+  it("steps back one response bin per tap, scaled by the rate", () => {
+    const state = createMockStateWithSteps([
+      { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrSize: 64, convolveIrRate: 2 }) },
+    ]);
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.28, after: 0 });
+  });
+
+  it("stops at the response's own length, however many taps are asked for", () => {
+    const state = createMockStateWithSteps([
+      { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrSize: 512, convolveIrRate: 2 }) },
+    ]);
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 6, after: 0 });
+  });
+
+  it("filters through the file it paints from when no response is named", () => {
+    const state = createMockStateWithSteps([
+      { name: "Step", overrides: withResponse({ convolveIrSize: 64, convolveIrRate: 2 }, { sourceFile: SOURCE }) },
+    ]);
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.28, after: 0 });
+    expect(asked).toEqual([SOURCE.path]);
+  });
+
+  it("filters through the file it paints on when it names neither", () => {
+    const state = createMockStateWithSteps([
+      { name: "Step", overrides: withResponse({ convolveIrSize: 64, convolveIrRate: 2 }) },
+    ]);
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.28, after: 0 });
+    expect(asked).toEqual([null]);
   });
 
   it("reads nothing when the response file cannot be found", () => {
     const state = createMockStateWithSteps([
       { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrRate: 2 }) },
     ]);
-    expect(strokeReach(state, { ...CTX, otherFileSeconds: () => null })).toEqual({ before: 0, after: 0 });
+    expect(strokeReach(state, { ...CTX, responseSpan: () => null })).toEqual({ before: 0, after: 0 });
   });
 
-  it("takes the rate's sign off, since the taps run either way", () => {
+  it("runs the taps forward instead when the rate is negative", () => {
     const state = createMockStateWithSteps([
-      { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrRate: -2 }) },
+      { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrSize: 64, convolveIrRate: -2 }) },
     ]);
-    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 6, after: 6 });
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 0, after: 1.28 });
+  });
+
+  it("reaches both ways once modulation can turn the rate around", () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Step",
+        overrides: withResponse({
+          convolveIrFile: RESPONSE,
+          convolveIrSize: 64,
+          convolveIrRate: 2,
+          convolveIrRateMod1Amount: 100,
+        }),
+      },
+    ]);
+    const reach = strokeReach(state, CTX_WITH_RESPONSE);
+    expect(reach.before).toBeGreaterThan(0);
+    expect(reach.after).toBeGreaterThan(0);
   });
 });
 

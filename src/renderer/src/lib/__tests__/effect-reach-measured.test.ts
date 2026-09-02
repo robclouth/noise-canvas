@@ -196,7 +196,11 @@ describe("what a gated effect really reads", () => {
   });
 
   /** Paints the dab on silence, with an impulse at `frame` when one is asked for. */
-  async function paint(state: State, frame: number | null, impulse?: ImpulseFileInfo): Promise<Float32Array> {
+  async function paint(
+    state: State,
+    frame: number | null,
+    impulses?: ReadonlyMap<string, ImpulseFileInfo>,
+  ): Promise<Float32Array> {
     const data = createMockSpectrogramData({
       numFrames: NUM_FRAMES,
       numBands: NUM_BANDS,
@@ -243,7 +247,7 @@ describe("what a gated effect really reads", () => {
       pressure: 0,
       tiltX: 0,
       tiltY: 0,
-      impulse,
+      impulses,
     };
     renderer.renderStroke(params, state, source);
     const out = await renderer.getFBOData();
@@ -430,6 +434,7 @@ describe("what a gated effect really reads", () => {
         view: textures.view,
       };
     };
+    const heldAs = (key: string, info: ImpulseFileInfo): Map<string, ImpulseFileInfo> => new Map([[key, info]]);
 
     const state = stateFor("convolve", {
       convolveIrFile: { path: "/response.wav", name: "response.wav" },
@@ -447,27 +452,67 @@ describe("what a gated effect really reads", () => {
     expect(windowed.view!.startFrame).toBeGreaterThan(0);
     expect(whole.view!.startFrame).toBe(0);
 
-    const filtered = await paint(state, null, whole);
+    const key = "/response.wav";
+    const filtered = await paint(state, null, heldAs(key, whole));
     // A response that changed nothing would make the comparison meaningless.
     expect(dabChanged(filtered, await paint(state, null))).toBe(true);
-    expect(dabChanged(filtered, await paint(state, null, windowed))).toBe(false);
+    expect(dabChanged(filtered, await paint(state, null, heldAs(key, windowed)))).toBe(false);
   });
 
-  it("reads the head of the file when Convolve has no impulse response of its own", async () => {
-    // With no file picked, the impulse response is the canvas itself, read
-    // from its first frame: tap k takes IR frame k whatever the dab covers.
+  it("reads a windowed response at the frames a whole one would, with no file named", async () => {
+    // With no response file named the step filters through the file it paints
+    // from, read from IR Start of that file. That read is a window of its own
+    // too, so it holds the response's frames wherever the dab happens to be.
+    const taps = 16;
+    const start = NUM_FRAMES / 2;
+    const response = createMockSpectrogramData({
+      numFrames: NUM_FRAMES,
+      numBands: NUM_BANDS,
+      sampleRate: SAMPLE_RATE,
+      pattern: "silence",
+    });
+    putEnergy(response, start, start + taps);
+
+    const blocks = {
+      spectrogram: response,
+      readCurrent: async (ranges: Uint32Array) => gatherPixelRanges(response.packedData!, ranges),
+      readRoot: async (ranges: Uint32Array) => gatherPixelRanges(response.packedData!, ranges),
+      revision: () => 0,
+    };
+    const infoFor = async (windowBlocks: number): Promise<ImpulseFileInfo> => {
+      const window = new SourceWindow(gl, "self", blocks, windowBlocks);
+      windows.push(window);
+      window.aim(start, start + taps, false);
+      await window.settled();
+      const textures = window.textures();
+      if (!textures) throw new Error("the response window read nothing");
+      return {
+        spectrogramData: response,
+        textures: { packed: textures.packed, metadata: textures.metadata },
+        view: textures.view,
+      };
+    };
+
     const state = stateFor("convolve", {
-      convolveIrSize: 64,
+      convolveIrSize: taps,
       convolveIrRate: 1,
-      convolveIrTimeOffset: 0,
+      convolveIrTimeOffset: 50,
       convolveGainDb: 0,
       convolveIrPitchShift: 0,
       convolveEdgeMode: 1,
     });
-    const plain = await paint(state, null);
-    expect(dabChanged(plain, await paint(state, 8))).toBe(true);
-    // The far end of the file is past every tap, so the read has an end.
-    expect(dabChanged(plain, await paint(state, NUM_FRAMES - 8))).toBe(false);
+
+    const whole = await infoFor(NUM_BANDS);
+    const windowed = await infoFor(1);
+    expect(windowed.view!.startFrame).toBeGreaterThan(0);
+    expect(whole.view!.startFrame).toBe(0);
+
+    // A step that names no response file and paints from the file it is on is
+    // held under the empty key.
+    const heldAs = (info: ImpulseFileInfo): Map<string, ImpulseFileInfo> => new Map([["", info]]);
+    const filtered = await paint(state, null, heldAs(whole));
+    expect(dabChanged(filtered, await paint(state, null))).toBe(true);
+    expect(dabChanged(filtered, await paint(state, null, heldAs(windowed)))).toBe(false);
   });
 
   it("reads nothing outside the dab when it sorts", async () => {
