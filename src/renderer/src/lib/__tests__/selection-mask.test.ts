@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { selectionBandRange, selectionFrameRange, selectionMaskTest, type Selection } from "../selection";
-import { lassoSelection, maskBoundarySegments, unionSelections } from "../selection-mask";
+import { invertSelection, lassoSelection, maskBoundarySegments, unionSelections } from "../selection-mask";
 
 // 1 s at 100 Hz with 10 bands: frames and pitch UV stay easy to reason about.
 const spec = () => createMockSpectrogramData({ numFrames: 100, sampleRate: 100, numBands: 10 });
@@ -177,5 +177,77 @@ describe("maskBoundarySegments", () => {
   it("outlines a lone cell with its four edges", () => {
     const segments = maskBoundarySegments({ cols: 3, rows: 3, cells: new Uint8Array([0, 0, 0, 0, 255, 0, 0, 0, 0]) });
     expect(segments.length).toBe(16);
+  });
+});
+
+describe("invertSelection", () => {
+  it("returns the rest of the file as a plain rectangle when one side is free", () => {
+    const s = spec();
+    const head: Selection = { start: 0, end: 0.4, pitchLo: 0, pitchHi: 1 };
+    expect(invertSelection(head, s)).toEqual({ start: 0.4, end: 1, pitchLo: 0, pitchHi: 1 });
+    const tail: Selection = { start: 0.4, end: 1, pitchLo: 0, pitchHi: 1 };
+    expect(invertSelection(tail, s)).toEqual({ start: 0, end: 0.4, pitchLo: 0, pitchHi: 1 });
+    const bottom: Selection = { start: 0, end: 1, pitchLo: 0, pitchHi: 0.3 };
+    expect(invertSelection(bottom, s)).toEqual({ start: 0, end: 1, pitchLo: 0.3, pitchHi: 1 });
+    const top: Selection = { start: 0, end: 1, pitchLo: 0.3, pitchHi: 1 };
+    expect(invertSelection(top, s)).toEqual({ start: 0, end: 1, pitchLo: 0, pitchHi: 0.3 });
+  });
+
+  it("is null when the selection already covers the file", () => {
+    const s = spec();
+    expect(invertSelection({ start: 0, end: 1, pitchLo: 0, pitchHi: 1 }, s)).toBeNull();
+  });
+
+  it("masks out a rectangle in the middle and keeps everything around it", () => {
+    const s = spec();
+    const middle: Selection = { start: 0.3, end: 0.7, pitchLo: 0.3, pitchHi: 0.7 };
+    const inverted = invertSelection(middle, s);
+    expect(inverted).not.toBeNull();
+    if (!inverted) return;
+    expect(inverted).toMatchObject({ start: 0, end: 1, pitchLo: 0, pitchHi: 1 });
+    const test = selectionMaskTest(inverted, s.sampleRate, s.numBands);
+    const inner = selectionMaskTest(middle, s.sampleRate, s.numBands);
+    expect(test).not.toBeNull();
+    expect(inner).toBeNull();
+    if (!test) return;
+    const { lowBand, highBand } = selectionBandRange(middle, s.numBands);
+    const { startFrame, endFrame } = selectionFrameRange(middle, s.sampleRate);
+    const midBand = Math.floor((lowBand + highBand) / 2);
+    const midFrame = Math.floor((startFrame + endFrame) / 2);
+    expect(test(midBand, midFrame)).toBe(false);
+    // Same bands either side of it, and the same time above and below it.
+    expect(test(midBand, 5)).toBe(true);
+    expect(test(midBand, 95)).toBe(true);
+    expect(test(0, midFrame)).toBe(true);
+    expect(test(s.numBands - 1, midFrame)).toBe(true);
+  });
+
+  it("inverts a shape, and inverting twice comes back to it", () => {
+    const s = spec();
+    const triangle = lassoSelection(
+      [
+        { time: 0.5, pitchUv: 0.9 },
+        { time: 0.1, pitchUv: 0.1 },
+        { time: 0.9, pitchUv: 0.1 },
+      ],
+      s,
+    );
+    if (!triangle) throw new Error("no triangle");
+    const outside = invertSelection(triangle, s);
+    if (!outside) throw new Error("no inverse");
+    const back = invertSelection(outside, s);
+    if (!back) throw new Error("no round trip");
+    const triTest = selectionMaskTest(triangle, s.sampleRate, s.numBands);
+    const outTest = selectionMaskTest(outside, s.sampleRate, s.numBands);
+    const backTest = selectionMaskTest(back, s.sampleRate, s.numBands);
+    if (!triTest || !outTest || !backTest) throw new Error("no mask test");
+    const { lowBand, highBand } = selectionBandRange(triangle, s.numBands);
+    for (let band = lowBand; band <= highBand; band++) {
+      for (let frame = 5; frame < 100; frame += 10) {
+        const inside = triTest(band, frame);
+        expect(outTest(band, frame)).toBe(!inside);
+        expect(backTest(band, frame)).toBe(inside);
+      }
+    }
   });
 });

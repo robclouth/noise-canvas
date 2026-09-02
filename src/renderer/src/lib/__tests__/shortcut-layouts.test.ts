@@ -123,4 +123,12 @@ describe("the menus' own accelerators", () => {
     expect(commandFor("shift+KeyG")).toBe("ungroup-files");
     expect(commandFor("KeyF")).toBe("fill-grid");
   });
+
+  it("puts inverting on I and insert silence out of its way", () => {
+    const commandFor = (key: string) =>
+      acceleratorCommands().find(({ accelerator }) => spell(accelerator) === key)?.command;
+
+    expect(commandFor("KeyI")).toBe("invert-selection");
+    expect(commandFor("shift+KeyI")).toBe("insert-silence");
+  });
 });

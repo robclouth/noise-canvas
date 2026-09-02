@@ -10,6 +10,8 @@ import { useDropzone, type FileRejection } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { trackPointer } from "./lib/last-pointer";
 import { pointerFileAim } from "./lib/view-aim";
+import { fullHeightSelection } from "./lib/selection";
+import { invertSelection } from "./lib/selection-mask";
 import { openImageExportModal } from "./components/image-export-modal";
 import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
 import { AppMenuBar } from "./components/layout/menu-bar";
@@ -333,6 +335,20 @@ function App(): React.JSX.Element {
       void useStore.getState().silenceSelection();
     });
     unsubscribers.push(unsubSilenceSelection);
+
+    const unsubInvertSelection = ipcOn("invert-selection", () => {
+      const state = useStore.getState();
+      const fileId = state.activeFileId;
+      const spec = fileId ? openFiles[fileId]?.spectrogramData : undefined;
+      if (!fileId || !spec) return;
+      const selection = state.filesSelection[fileId] ?? null;
+      // With nothing selected the whole file is what the selection leaves out.
+      const inverted = selection
+        ? invertSelection(selection, spec)
+        : fullHeightSelection(0, spec.numFrames / spec.sampleRate);
+      state.setFileSelection(fileId, inverted);
+    });
+    unsubscribers.push(unsubInvertSelection);
 
     const unsubDuplicateSelection = ipcOn("duplicate-selection", () => {
       const state = useStore.getState();

@@ -883,6 +883,8 @@ Hold `Shift` and draw — with any shape — to **add** to the selection instead
 
 Dragging along the time legend selects the full frequency range, whichever mode you are in.
 
+`Cmd/Ctrl+I` inverts the selection: everything outside it becomes the selection, and what was inside is let go. With nothing selected it takes the whole file. Select one part, invert, and the stroke lands on all the rest.
+
 A selection on the canvas leaves the loop region alone — only a [drag on the time legend](#navigating-the-canvas) sets that. So you can loop one part of the file and cut, copy and paste in another without losing your place. `Esc` clears the selection.
 
 With a selection set, `Space` plays the selection alone: its stretch of time, and only the bands inside it. Everything outside stays silent, so you hear exactly what a cut would take. **Loop** loops it, and painting inside the selection while it loops lands in your ears on the next pass. Clear the selection and `Space` plays the whole file again.
@@ -1001,6 +1003,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Cut / Copy / Paste** (`Cmd/Ctrl+X`, `Cmd/Ctrl+C`, `Cmd/Ctrl+V`) – work on the selection. See [Selecting a Region](#selecting-a-region).
 - **Duplicate** (`Cmd/Ctrl+D`) – stamps a copy of the selection directly after it. With nothing selected it duplicates the file.
 - **Silence Selection** (`Backspace`) – empties the selection without copying it.
+- **Invert Selection** (`Cmd/Ctrl+I`) – selects everything the selection leaves out. With nothing selected it selects the whole file.
 - **Fill Grid with Brush** (`Cmd/Ctrl+F`) – see [Fill Grid](#fill-grid).
 - **Restore Original** – reloads the unedited file.
 - **Duplicate File**.
@@ -1008,7 +1011,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Ungroup** (`Cmd/Ctrl+Shift+G`) – drops the bracket around the active file's group.
 - **Double Length / Half Length** – stretches or shrinks the file's length.
 - **Set Length…** – cuts the file short at a length you give, or pads it with silence to reach it. The dialog opens on what the file measures now, in beats or seconds.
-- **Insert Silence…** (`Cmd/Ctrl+I`) – pushes the file apart and drops empty time in. With a selection, the selection's own stretch opens up: its length of silence lands at its start, what was selected moves later, and the silence stays selected. With nothing selected, a dialog asks for a **Length** in beats or seconds, and the silence lands at the play start marker.
+- **Insert Silence…** (`Cmd/Ctrl+Shift+I`) – pushes the file apart and drops empty time in. With a selection, the selection's own stretch opens up: its length of silence lands at its start, what was selected moves later, and the silence stays selected. With nothing selected, a dialog asks for a **Length** in beats or seconds, and the silence lands at the play start marker.
 
 **View**
 
@@ -1049,6 +1052,7 @@ The keys below are the ones your keyboard prints. On a layout that prints someth
 | `Cmd/Ctrl+X/C/V`       | Cut / copy / paste the selection                       |
 | `Cmd/Ctrl+D`           | Duplicate the selection in place                       |
 | `Backspace` / `Delete` | Silence the selection                                  |
+| `Cmd/Ctrl+I`           | Invert the selection                                   |
 | `Cmd/Ctrl+Shift+X/V/D` | Cut, paste or duplicate a stretch of time              |
 | `1`–`9`, `0`           | Select the top palette's first ten brushes             |
 | `a`–`z`                | Select the brush bound to that key                     |

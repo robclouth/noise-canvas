@@ -208,3 +208,53 @@ export function maskBoundarySegments(mask: SelectionMask): number[] {
   }
   return segments;
 }
+
+/**
+ * Everything the selection leaves out, as one selection over the whole file.
+ * A rectangle whose complement is itself a rectangle keeps its exact edges;
+ * every other shape comes back as a mask. Null when the selection already
+ * covers the whole file.
+ */
+export function invertSelection(selection: Selection, spec: SpectrogramData): Selection | null {
+  const totalDuration = spec.numFrames / spec.sampleRate;
+  const whole: Selection = { start: 0, end: totalDuration, pitchLo: 0, pitchHi: 1 };
+  if (!selection.mask) {
+    const spansTime = selection.start <= 0 && selection.end >= totalDuration;
+    const spansPitch = selection.pitchLo <= 0 && selection.pitchHi >= 1;
+    if (spansTime && spansPitch) return null;
+    if (spansPitch && selection.start <= 0) return { ...whole, start: selection.end };
+    if (spansPitch && selection.end >= totalDuration) return { ...whole, end: selection.start };
+    if (spansTime && selection.pitchLo <= 0) return { ...whole, pitchLo: selection.pitchHi };
+    if (spansTime && selection.pitchHi >= 1) return { ...whole, pitchHi: selection.pitchLo };
+  }
+
+  const { startFrame, endFrame } = selectionFrameRange(whole, spec.sampleRate);
+  const { lowBand, highBand } = selectionBandRange(whole, spec.numBands);
+  const rows = highBand - lowBand + 1;
+  const cols = maskColsFor(spec, startFrame, endFrame, lowBand, highBand);
+  const cells = new Uint8Array(rows * cols);
+  const framesPerCol = (endFrame - startFrame) / cols;
+
+  const frames = selectionFrameRange(selection, spec.sampleRate);
+  const bands = selectionBandRange(selection, spec.numBands);
+  const maskTest = selectionMaskTest(selection, spec.sampleRate, spec.numBands);
+  let any = false;
+  for (let row = 0; row < rows; row++) {
+    const band = lowBand + row;
+    for (let col = 0; col < cols; col++) {
+      // A cell is kept when its time centre falls outside the selection's shape.
+      const frame = startFrame + Math.floor((col + 0.5) * framesPerCol);
+      const inside =
+        band >= bands.lowBand &&
+        band <= bands.highBand &&
+        frame >= frames.startFrame &&
+        frame < frames.endFrame &&
+        (!maskTest || maskTest(band, frame));
+      if (inside) continue;
+      cells[row * cols + col] = 255;
+      any = true;
+    }
+  }
+  if (!any) return null;
+  return { ...whole, mask: { cols, rows, cells } };
+}

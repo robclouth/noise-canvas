@@ -107,6 +107,7 @@ export const APP_MENUS: AppMenu[] = [
       { type: "item", label: "Paste", command: "paste-selection", accelerator: { code: "KeyV" } },
       { type: "item", label: "Duplicate", command: "duplicate-selection", accelerator: { code: "KeyD" } },
       { type: "item", label: "Silence", command: "silence-selection" },
+      { type: "item", label: "Invert Selection", command: "invert-selection", accelerator: { code: "KeyI" } },
       { type: "separator" },
       { type: "item", label: "Cut Time", command: "cut-time-selection", accelerator: { code: "KeyX", shift: true } },
       {
@@ -137,7 +138,7 @@ export const APP_MENUS: AppMenu[] = [
       { type: "item", label: "Double Length", command: "double-active-file-length" },
       { type: "item", label: "Half Length", command: "halve-active-file-length" },
       { type: "item", label: "Set Length…", command: "set-file-length" },
-      { type: "item", label: "Insert Silence…", command: "insert-silence", accelerator: { code: "KeyI" } },
+      { type: "item", label: "Insert Silence…", command: "insert-silence", accelerator: { code: "KeyI", shift: true } },
     ],
   },
   {

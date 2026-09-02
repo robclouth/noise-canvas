@@ -190,6 +190,7 @@ export interface IpcRendererEvents {
   "cut-selection": () => void;
   "paste-selection": () => void;
   "silence-selection": () => void;
+  "invert-selection": () => void;
   "duplicate-selection": () => void;
   "cut-time-selection": () => void;
   "paste-time-selection": () => void;
