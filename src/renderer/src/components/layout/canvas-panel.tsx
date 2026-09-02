@@ -203,6 +203,8 @@ const FileGroupSection = memo(
               variant="subtle"
               color="gray"
               loading={anyLoading}
+              // One file has nothing to sum with.
+              disabled={group.memberIds.length < 2}
               onClick={() => useStore.getState().mergeFileGroup(groupId)}
             >
               <Merge size={16} />

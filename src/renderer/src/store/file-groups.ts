@@ -33,9 +33,8 @@ export interface FileGroupsState {
   createFileGroup: (group: Omit<FileGroup, "id" | "syncView"> & { syncView?: boolean }) => string;
   setFileGroupSyncView: (groupId: string, syncView: boolean) => void;
   /**
-   * Drop a file from whatever group it belongs to. A group that falls below two
-   * members stops being a group and is discarded — the remaining file keeps its
-   * contents, it just loses the bracket.
+   * Drop a file from whatever group it belongs to. A group holds any number of
+   * files, down to one, so only emptying it discards it.
    */
   removeFileFromGroup: (fileId: string) => void;
   /** Discard a group, leaving every member open as a file on its own. */
@@ -43,8 +42,8 @@ export interface FileGroupsState {
   /**
    * Move a file into `groupId`, or out of every group when it is null, and read
    * every group's members back in `order` — the canvas order the caller has just
-   * settled, which is what the member colours and the merge follow. A group left
-   * with fewer than two members is discarded.
+   * settled, which is what the member colours and the merge follow. A group is
+   * discarded once the move empties it.
    */
   setFileGroup: (fileId: string, groupId: string | null, order: string[]) => void;
 }
@@ -159,10 +158,7 @@ export const createFileGroupsSlice = (set: ZustandSet, get: ZustandGet): FileGro
           const group = state.fileGroups[from];
           if (group) {
             group.memberIds = group.memberIds.filter((id) => id !== fileId);
-            if (group.memberIds.length < 2) {
-              for (const id of group.memberIds) delete state.fileGroupOfFile[id];
-              delete state.fileGroups[from];
-            }
+            if (group.memberIds.length === 0) delete state.fileGroups[from];
           }
         }
 
@@ -202,10 +198,7 @@ export const createFileGroupsSlice = (set: ZustandSet, get: ZustandGet): FileGro
         const group = state.fileGroups[groupId];
         if (!group) return;
         group.memberIds = group.memberIds.filter((id) => id !== fileId);
-        if (group.memberIds.length < 2) {
-          for (const id of group.memberIds) delete state.fileGroupOfFile[id];
-          delete state.fileGroups[groupId];
-        }
+        if (group.memberIds.length === 0) delete state.fileGroups[groupId];
       }),
     );
   },

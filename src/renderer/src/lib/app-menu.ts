@@ -122,7 +122,7 @@ export const APP_MENUS: AppMenu[] = [
         accelerator: { code: "KeyD", shift: true },
       },
       { type: "separator" },
-      { type: "item", label: "Fill Grid with Brush", command: "fill-grid", accelerator: { code: "KeyG" } },
+      { type: "item", label: "Fill Grid with Brush", command: "fill-grid", accelerator: { code: "KeyF" } },
       { type: "separator" },
       { type: "item", label: "Restore Original", command: "restore-original" },
       {
@@ -131,7 +131,8 @@ export const APP_MENUS: AppMenu[] = [
         command: "duplicate-active-file",
         only: "electron",
       },
-      { type: "item", label: "Group Files…", command: "group-files" },
+      { type: "item", label: "Group Files…", command: "group-files", accelerator: { code: "KeyG" } },
+      { type: "item", label: "Ungroup", command: "ungroup-files", accelerator: { code: "KeyG", shift: true } },
       { type: "separator" },
       { type: "item", label: "Double Length", command: "double-active-file-length" },
       { type: "item", label: "Half Length", command: "halve-active-file-length" },

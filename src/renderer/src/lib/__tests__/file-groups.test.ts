@@ -33,7 +33,7 @@ const GROUP = {
   hue: 200,
 };
 
-describe("stem groups", () => {
+describe("file groups", () => {
   it("indexes every member back to the group", () => {
     const { state } = makeSlice();
     const groupId = state.createFileGroup(GROUP);
@@ -61,12 +61,22 @@ describe("stem groups", () => {
     expect(state.fileGroupOfFile).toEqual({ a: groupId, c: groupId });
   });
 
-  it("discards a group once fewer than two members remain", () => {
+  it("keeps a group down to its last member", () => {
     const { state } = makeSlice();
     const groupId = state.createFileGroup(GROUP);
 
     state.removeFileFromGroup("b");
     state.removeFileFromGroup("c");
+
+    expect(state.fileGroups[groupId].memberIds).toEqual(["a"]);
+    expect(state.fileGroupOfFile).toEqual({ a: groupId });
+  });
+
+  it("discards a group once nothing is left in it", () => {
+    const { state } = makeSlice();
+    const groupId = state.createFileGroup(GROUP);
+
+    for (const id of ["a", "b", "c"]) state.removeFileFromGroup(id);
 
     expect(state.fileGroups[groupId]).toBeUndefined();
     expect(state.fileGroupOfFile).toEqual({});
@@ -88,9 +98,9 @@ describe("stem groups", () => {
 
     state.removeFileFromGroup("d");
 
-    expect(state.fileGroups[second]).toBeUndefined();
+    expect(state.fileGroups[second].memberIds).toEqual(["e"]);
     expect(state.fileGroups[first].memberIds).toEqual(["a", "b", "c"]);
-    expect(state.fileGroupOfFile).toEqual({ a: first, b: first, c: first });
+    expect(state.fileGroupOfFile).toEqual({ a: first, b: first, c: first, e: second });
   });
 
   it("discards a group outright when it is ungrouped", () => {
@@ -158,7 +168,7 @@ describe("getFileSegments", () => {
   });
 });
 
-describe("stem colours", () => {
+describe("group colours", () => {
   it("gives every member the group's hue at a distinct lightness", () => {
     const colors = [0, 1, 2, 3].map((i) => groupMemberColor(210, i, 4));
 

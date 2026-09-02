@@ -688,7 +688,7 @@ Modulator parameters are themselves modulatable. You can modulate modulator 2's 
 
 ## Fill Grid
 
-**Fill Grid** paints the current brush on every cell of the grid at once, instead of you dragging out each stroke by hand. The grid icon on a file's header runs it, as does **Edit → Fill Grid with Brush** (`Cmd/Ctrl+G`). The whole pass commits as one stroke, so one undo takes it back.
+**Fill Grid** paints the current brush on every cell of the grid at once, instead of you dragging out each stroke by hand. The grid icon on a file's header runs it, as does **Edit → Fill Grid with Brush** (`Cmd/Ctrl+F`). The whole pass commits as one stroke, so one undo takes it back.
 
 It has no settings of its own. The rhythm comes from the grid set in the transport, and the size and shape of each stroke comes from the brush. Change the grid and you change the pattern; change the brush and you change the sound.
 
@@ -786,7 +786,9 @@ The split menu on each file header:
 
 A **group** brackets a run of lanes together: they share a colour, and the header above them acts on all of them at once. The members stay ordinary files, and every brush and effect works on them unchanged.
 
-Every split makes a group of its parts. To group files yourself, use **Edit → Group Files…** and tick the ones you want. They move together on the canvas, since a group is one bracket down a run of neighbouring lanes.
+Every split makes a group of its parts. To group files yourself, use **Edit → Group Files…** (`Cmd/Ctrl+G`) and tick the ones you want. They move together on the canvas, since a group is one bracket down a run of neighbouring lanes. **Edit → Ungroup** (`Cmd/Ctrl+Shift+G`) drops the bracket around the active file's group.
+
+A group holds any number of files, down to one, so a group you have emptied out to a single lane is still there to drag files back into. Merge needs two.
 
 Dragging a file by its grip also moves it in and out of groups, and the group it would land in lights up while you drag:
 
@@ -999,10 +1001,11 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Cut / Copy / Paste** (`Cmd/Ctrl+X`, `Cmd/Ctrl+C`, `Cmd/Ctrl+V`) – work on the selection. See [Selecting a Region](#selecting-a-region).
 - **Duplicate** (`Cmd/Ctrl+D`) – stamps a copy of the selection directly after it. With nothing selected it duplicates the file.
 - **Silence Selection** (`Backspace`) – empties the selection without copying it.
-- **Fill Grid with Brush** (`Cmd/Ctrl+G`) – see [Fill Grid](#fill-grid).
+- **Fill Grid with Brush** (`Cmd/Ctrl+F`) – see [Fill Grid](#fill-grid).
 - **Restore Original** – reloads the unedited file.
 - **Duplicate File**.
-- **Group Files…** – brackets open files together. See [Grouping Files](#grouping-files).
+- **Group Files…** (`Cmd/Ctrl+G`) – brackets open files together. See [Grouping Files](#grouping-files).
+- **Ungroup** (`Cmd/Ctrl+Shift+G`) – drops the bracket around the active file's group.
 - **Double Length / Half Length** – stretches or shrinks the file's length.
 - **Set Length…** – cuts the file short at a length you give, or pads it with silence to reach it. The dialog opens on what the file measures now, in beats or seconds.
 - **Insert Silence…** (`Cmd/Ctrl+I`) – pushes the file apart and drops empty time in. With a selection, the selection's own stretch opens up: its length of silence lands at its start, what was selected moves later, and the silence stays selected. With nothing selected, a dialog asks for a **Length** in beats or seconds, and the silence lands at the play start marker.

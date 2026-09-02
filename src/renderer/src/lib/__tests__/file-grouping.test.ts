@@ -124,17 +124,25 @@ describe("grouping files by hand", () => {
 
     get().groupFiles(["b", "c"]);
 
-    // 'a' is left alone in the old group, which drops below two and dissolves.
-    expect(get().fileGroups[first]).toBeUndefined();
-    expect(get().fileGroupOfFile["a"]).toBeUndefined();
+    // 'a' is left holding the old group on its own, which is a group still.
+    expect(get().fileGroups[first].memberIds).toEqual(["a"]);
     expect(get().fileGroups[get().fileGroupOfFile["b"]].memberIds).toEqual(["b", "c"]);
   });
 
-  it("does nothing for fewer than two open files", () => {
+  it("brackets a single file, so more can be dragged in later", () => {
     const get = makeStore(["a", "b"]);
 
     get().groupFiles(["a"]);
-    get().groupFiles(["a", "not-open"]);
+
+    const groupId = get().fileGroupOfFile["a"];
+    expect(get().fileGroups[groupId].memberIds).toEqual(["a"]);
+    expect(get().fileGroups[groupId].label).toBe("a");
+  });
+
+  it("does nothing when none of the picked files are open", () => {
+    const get = makeStore(["a", "b"]);
+
+    get().groupFiles(["not-open"]);
 
     expect(get().fileGroups).toEqual({});
     expect(get().openFileIds).toEqual(["a", "b"]);
@@ -196,10 +204,20 @@ describe("dropping a dragged file", () => {
     expect(get().openFileIds).toEqual(["m1", "m3", "loose", "m2"]);
   });
 
-  it("dissolves a group that a departure leaves with one member", () => {
+  it("keeps a group that a departure leaves with one member", () => {
     const { get, groupId } = makeGrouped(["m1", "m2", "loose"], ["m1", "m2"]);
 
     get().dropFile("m2", null, null);
+
+    expect(get().fileGroups[groupId].memberIds).toEqual(["m1"]);
+    expect(get().fileGroupOfFile).toEqual({ m1: groupId });
+  });
+
+  it("discards a group once its last member is dragged out", () => {
+    const { get, groupId } = makeGrouped(["m1", "m2", "loose"], ["m1", "m2"]);
+
+    get().dropFile("m2", null, null);
+    get().dropFile("m1", null, null);
 
     expect(get().fileGroups[groupId]).toBeUndefined();
     expect(get().fileGroupOfFile).toEqual({});
@@ -229,7 +247,7 @@ describe("dropping a dragged file", () => {
     expect(get().openFileIds).toEqual(["a1", "a2", "b1", "a3", "b2"]);
   });
 
-  it("dissolves the old group when the mover leaves only one behind", () => {
+  it("leaves the old group standing on its last member when one moves across", () => {
     const get = makeStore(["a1", "a2", "b1", "b2"]);
     const first = get().createFileGroup({
       method: "user",
@@ -248,8 +266,7 @@ describe("dropping a dragged file", () => {
 
     get().dropFile("a2", "b1", second);
 
-    expect(get().fileGroups[first]).toBeUndefined();
-    expect(get().fileGroupOfFile["a1"]).toBeUndefined();
+    expect(get().fileGroups[first].memberIds).toEqual(["a1"]);
     expect(get().fileGroups[second].memberIds).toEqual(["a2", "b1", "b2"]);
   });
 

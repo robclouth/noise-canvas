@@ -167,14 +167,14 @@ function persistProjection(state: State): Record<string, unknown> {
   }
 
   // Groups follow their members: drop any member that isn't coming back,
-  // and drop the group itself once fewer than two members remain.
+  // and drop the group itself once nothing is left in it.
   const groups = picked.fileGroups as Record<string, { memberIds: string[] }> | undefined;
   if (groups && typeof groups === "object") {
     const keptGroups: Record<string, unknown> = {};
     const keptOfFile: Record<string, string> = {};
     for (const [groupId, group] of Object.entries(groups)) {
       const memberIds = (group.memberIds ?? []).filter((id) => realIds.has(id));
-      if (memberIds.length < 2) continue;
+      if (memberIds.length === 0) continue;
       keptGroups[groupId] = { ...group, memberIds };
       for (const id of memberIds) keptOfFile[id] = groupId;
     }

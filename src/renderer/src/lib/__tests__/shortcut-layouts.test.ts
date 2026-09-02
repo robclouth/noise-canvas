@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../host", () => ({ host: { env: { platform: "darwin", isExtension: false } } }));
 
-import { matchesAccelerator } from "../app-menu";
+import { acceleratorCommands, matchesAccelerator } from "../app-menu";
 import { digitFor, letterFor } from "../keyboard";
 import { resolveShortcut, ShortcutAction } from "../useShortcuts";
 
@@ -95,5 +95,32 @@ describe("menu accelerators on other layouts", () => {
     const shifted = press({ key: "Z", code: "KeyZ", shiftKey: true, metaKey: true });
     expect(matchesAccelerator(shifted, undo)).toBe(false);
     expect(matchesAccelerator(shifted, { code: "KeyZ", shift: true })).toBe(true);
+  });
+});
+
+describe("the menus' own accelerators", () => {
+  /** How an accelerator is written as a comparable key, e.g. "shift+KeyG". */
+  const spell = (accelerator: { code: string; shift?: boolean; alt?: boolean }) =>
+    `${accelerator.alt ? "alt+" : ""}${accelerator.shift ? "shift+" : ""}${accelerator.code}`;
+
+  it("gives no two commands the same one", () => {
+    const seen = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const { accelerator, command } of acceleratorCommands()) {
+      const key = spell(accelerator);
+      const taken = seen.get(key);
+      if (taken && taken !== command) clashes.push(`${key}: ${taken} and ${command}`);
+      else seen.set(key, command);
+    }
+    expect(clashes).toEqual([]);
+  });
+
+  it("puts grouping on G and fill grid out of its way", () => {
+    const commandFor = (key: string) =>
+      acceleratorCommands().find(({ accelerator }) => spell(accelerator) === key)?.command;
+
+    expect(commandFor("KeyG")).toBe("group-files");
+    expect(commandFor("shift+KeyG")).toBe("ungroup-files");
+    expect(commandFor("KeyF")).toBe("fill-grid");
   });
 });

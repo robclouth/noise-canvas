@@ -183,6 +183,7 @@ export interface IpcRendererEvents {
   "double-active-file-length": () => void;
   "halve-active-file-length": () => void;
   "group-files": () => void;
+  "ungroup-files": () => void;
   "set-file-length": () => void;
   "insert-silence": () => void;
   "copy-selection": () => void;

@@ -412,8 +412,9 @@ export function openGroupFilesPrompt({
 }: OpenGroupFilesPromptOptions): string {
   const selection: RefObject<string[]> = { current: initial };
   const modalId: RefObject<string> = { current: "" };
-  // A group needs two files, so the button says so rather than swallowing a click.
-  const tooFew: RefObject<boolean> = { current: initial.length < 2 };
+  // Nothing ticked has nothing to group, so the button says so rather than
+  // swallowing a click.
+  const tooFew: RefObject<boolean> = { current: initial.length === 0 };
   const confirmProps = { size: "xs" } as const;
 
   modalId.current = openConfirmModal({
@@ -428,7 +429,7 @@ export function openGroupFilesPrompt({
           options={options}
           selection={selection}
           onChange={(picked) => {
-            const nowTooFew = picked.length < 2;
+            const nowTooFew = picked.length === 0;
             if (nowTooFew === tooFew.current) return;
             tooFew.current = nowTooFew;
             modals.updateModal({
@@ -443,7 +444,7 @@ export function openGroupFilesPrompt({
     confirmProps: { ...confirmProps, disabled: tooFew.current },
     cancelProps: { size: "xs" },
     onConfirm: async () => {
-      if (selection.current.length < 2) return;
+      if (selection.current.length === 0) return;
       await onConfirm(selection.current);
     },
     onCancel,

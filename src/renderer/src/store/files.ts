@@ -94,6 +94,8 @@ export interface FilesState {
   promptGroupFiles: () => Promise<void>;
   /** Brackets the given open files together, moving them into one run of lanes. */
   groupFiles: (fileIds: string[]) => void;
+  /** Drops the bracket around the active file's group, if it is in one. */
+  ungroupActiveFile: () => void;
   mergeFiles: (fileIds: string[]) => Promise<void>;
   mergeFileGroup: (groupId: string) => Promise<void>;
   /** Close every member of a group, after one confirmation covering all of them. */
@@ -1448,12 +1450,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   promptGroupFiles: async () => {
     const openIds = get().openFileIds;
-    if (openIds.length < 2) {
-      notifications.show({
-        title: "Nothing to group",
-        message: "Open a second file first.",
-        color: "yellow",
-      });
+    if (openIds.length === 0) {
+      notifications.show({ title: "Nothing to group", message: "Open a file first.", color: "yellow" });
       return;
     }
 
@@ -1475,13 +1473,18 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     });
     if (picked) get().groupFiles(picked);
   },
+  ungroupActiveFile: () => {
+    const fileId = get().activeFileId;
+    const groupId = fileId ? get().fileGroupOfFile[fileId] : undefined;
+    if (groupId) get().ungroupFiles(groupId);
+  },
   groupFiles: (fileIds: string[]) => {
     const openIds = get().openFileIds;
     const wanted = new Set(fileIds);
     // In canvas order, not the order they were ticked, so the bracket runs down
     // the lanes the way they already read.
     const memberIds = openIds.filter((id) => wanted.has(id));
-    if (memberIds.length < 2) return;
+    if (memberIds.length === 0) return;
 
     for (const id of memberIds) get().removeFileFromGroup(id);
     set(
@@ -1490,7 +1493,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }),
     );
 
-    const label = `${stripExtensionForLabel(openFiles[memberIds[0]]?.displayName ?? "Group")} + ${memberIds.length - 1} more`;
+    const first = stripExtensionForLabel(openFiles[memberIds[0]]?.displayName ?? "Group");
+    const label = memberIds.length > 1 ? `${first} + ${memberIds.length - 1} more` : first;
     registerFileGroup(get, "user", null, memberIds, label);
   },
   mergeFiles: async (fileIds: string[]) => {

@@ -405,6 +405,11 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubGroupFiles);
 
+    const unsubUngroupFiles = ipcOn("ungroup-files", () => {
+      useStore.getState().ungroupActiveFile();
+    });
+    unsubscribers.push(unsubUngroupFiles);
+
     const unsubSetFileLength = ipcOn("set-file-length", () => {
       void useStore.getState().setActiveFileLength();
     });
