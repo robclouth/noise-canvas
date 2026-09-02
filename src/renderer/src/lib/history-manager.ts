@@ -5,7 +5,7 @@ import { isManagedFilePath } from "@renderer/store/managed-path";
 import type { PhaseTurns } from "../../../main/lib/types";
 import { hasPhaseTurns, phaseTurnRanges, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
-import { bandLengthsTexels } from "./band-layout";
+import { bandLayoutOf, bandLengthsTexels } from "./band-layout";
 import { blockGrid } from "./block-grid";
 import { needsCanvasWindow } from "./canvas-window";
 import { canvasWindowBlocks } from "./gpu-budget";
@@ -233,7 +233,7 @@ function synthesisMetadataFromSpectrogram(s: SpectrogramData): NonNullable<Histo
  */
 export async function deriveSideData(node: HistoryNode): Promise<{
   inverseMap: Float32Array | undefined;
-  metadata: Float32Array;
+  metadata: Float64Array;
 }> {
   const { texels, numFrames, sampleRate } = node.dimensions;
   const layout = node.synthesisMetadata;
@@ -257,20 +257,14 @@ export async function deriveSideData(node: HistoryNode): Promise<{
   return { inverseMap, metadata };
 }
 
-/** The metadata texture rows of a band layout. */
-function bandMetadataRows(layout: NonNullable<HistoryNode["synthesisMetadata"]>, numBands: number): Float32Array {
-  const metadata = new Float32Array(numBands * 4);
-  for (let band = 0; band < numBands; band++) {
-    metadata[band * 4] = layout.bandOffsets[band];
-    metadata[band * 4 + 1] = layout.bandLengths[band];
-    metadata[band * 4 + 2] = layout.bandStepLog2s[band];
-    metadata[band * 4 + 3] = layout.bandFreqs[band];
-  }
-  return metadata;
+/** The band layout rows of a node's stored layout. */
+function bandMetadataRows(layout: NonNullable<HistoryNode["synthesisMetadata"]>, numBands: number): Float64Array {
+  return bandLayoutOf(numBands, layout.bandOffsets, layout.bandLengths, layout.bandStepLog2s, layout.bandFreqs)
+    .metadata;
 }
 
-/** The metadata texture rows of a full-snapshot node's band layout. */
-function bandMetadataOf(node: HistoryNode): Float32Array {
+/** The band layout rows of a full-snapshot node. */
+function bandMetadataOf(node: HistoryNode): Float64Array {
   const layout = node.synthesisMetadata;
   if (!layout) throw new Error(`HistoryManager: node ${node.id} has no band layout`);
   return bandMetadataRows(layout, node.dimensions.numBands);

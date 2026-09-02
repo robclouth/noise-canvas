@@ -14,6 +14,7 @@ import type { CanvasView } from "./canvas-view";
 import { needsCanvasWindow, type BlockValueReader } from "./canvas-window";
 import { canvasWindowBlocks } from "./gpu-budget";
 import { PackedWindow } from "./packed-window";
+import { metadataTextureRows } from "./band-layout";
 
 /** What a source window needs to read another file's blocks. */
 export type SourceFileBlocks = {
@@ -194,7 +195,7 @@ export class SourceWindow {
   private takeView(view: CanvasView): void {
     this.held = view;
     this.metadataTex?.dispose();
-    const metadata = new DataTexture(view.layout.metadata, view.layout.numBands, 1, RGBAFormat, FloatType);
+    const metadata = new DataTexture(metadataTextureRows(view.layout), view.layout.numBands, 1, RGBAFormat, FloatType);
     metadata.internalFormat = "RGBA32F";
     metadata.minFilter = NearestFilter;
     metadata.magFilter = NearestFilter;

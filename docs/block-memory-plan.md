@@ -1006,7 +1006,7 @@ Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
   a finaliser, rather than a memcpy into a fresh one.
 - **3.5.5 — a window is compulsory above one texture.** DONE.
 - **3.5.6 — MEASURE at 600 s.** DONE; see below.
-- **3.5.8 — the band layout stops being a texture row.** The 600 s run threw
+- **3.5.8 — the band layout stops being a texture row.** DONE. The 600 s run threw
   "the block lies outside the view": `BandLayout.metadata` is the Float32Array
   the metadata texture is built from, and float32 counts integers exactly only
   to 2^24. At 119M coefficients the band offsets round to multiples of 8, so

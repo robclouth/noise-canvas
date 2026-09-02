@@ -117,7 +117,7 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
   }
 
   // Create metadata (per-band info: start offset, length, time scale exponent, frequency)
-  const metadata = new Float32Array(numBands * 4);
+  const metadata = new Float64Array(numBands * 4);
   for (let band = 0; band < numBands; band++) {
     const baseIndex = band * 4;
     // Simple linear layout: each band has numFrames samples
@@ -217,9 +217,9 @@ export function constantQBandLayout(
 export function constantQMetadata(
   layout: ReturnType<typeof constantQBandLayout>,
   options: { bandsPerOctave?: number; minFreq?: number } = {},
-): Float32Array {
+): Float64Array {
   const { bandsPerOctave = 24, minFreq = 20 } = options;
-  const metadata = new Float32Array(layout.numBands * 4);
+  const metadata = new Float64Array(layout.numBands * 4);
   for (let band = 0; band < layout.numBands; band++) {
     metadata[band * 4] = layout.bandOffsets[band];
     metadata[band * 4 + 1] = layout.bandLengths[band];

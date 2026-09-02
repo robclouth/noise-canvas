@@ -16,6 +16,7 @@ import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockStateWithSteps } from "../../test/mock-state";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { packedFold, padToFold } from "../constants";
+import { metadataTextureRows } from "../band-layout";
 
 function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData) {
   const { packedData, inverseMap, metadata, texels, numBands } = spectrogramData;
@@ -48,7 +49,7 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData) {
   inverseMapTex.wrapS = ClampToEdgeWrapping;
   inverseMapTex.wrapT = ClampToEdgeWrapping;
   inverseMapTex.needsUpdate = true;
-  const metadataTex = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
+  const metadataTex = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
   metadataTex.internalFormat = "RGBA32F";
   metadataTex.minFilter = NearestFilter;
   metadataTex.magFilter = NearestFilter;

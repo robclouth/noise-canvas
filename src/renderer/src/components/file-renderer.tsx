@@ -50,6 +50,7 @@ import { getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
+import { metadataTextureRows } from "../lib/band-layout";
 import { DEFAULT_ONSET_SENSITIVITY, packedFold, padToFold } from "../lib/constants";
 import { displayLevelChoice } from "../lib/display-pyramid";
 import type { DisplayTileRing } from "../lib/display-tiles-textures";
@@ -532,7 +533,7 @@ const FileRendererInner = memo(
       inverse.generateMipmaps = false;
       inverse.needsUpdate = true;
 
-      const meta = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
+      const meta = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
       meta.internalFormat = "RGBA32F";
       meta.minFilter = NearestFilter;
       meta.magFilter = NearestFilter;

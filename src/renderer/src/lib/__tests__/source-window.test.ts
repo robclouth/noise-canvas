@@ -19,6 +19,7 @@ import { gatherPixelRanges } from "../pixel-ranges";
 import { SourceWindow, sourceReadSpan } from "../source-window";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { packedFold, padToFold } from "../constants";
+import { metadataTextureRows } from "../band-layout";
 
 const SAMPLE_RATE = 8000;
 // The window is built on the shipped block grid, so the file has to be long
@@ -112,7 +113,7 @@ describe("SourceWindow", () => {
       RGFormat,
       "RG32F",
     );
-    const metadataTex = dataTexture(file.metadata, file.numBands, 1, RGBAFormat, "RGBA32F");
+    const metadataTex = dataTexture(metadataTextureRows(file), file.numBands, 1, RGBAFormat, "RGBA32F");
     const placeholderTexture = dataTexture(new Float32Array(4), 1, 1, RGBAFormat, "RGBA32F");
     disposers.push(() => {
       originalPackedDataTex.dispose();

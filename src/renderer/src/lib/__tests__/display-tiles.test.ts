@@ -28,7 +28,7 @@ function layoutOf(durationSeconds: number, bandsPerOctave = 36): BandLayout & { 
 
 /** Bands laid out by hand, so a test can name every step. */
 function handLayout(steps: number[], lengths: number[]): BandLayout {
-  const metadata = new Float32Array(steps.length * 4);
+  const metadata = new Float64Array(steps.length * 4);
   let offset = 0;
   for (let band = 0; band < steps.length; band++) {
     metadata[band * 4] = offset;

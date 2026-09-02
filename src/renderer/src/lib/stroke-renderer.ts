@@ -26,6 +26,7 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
+import { metadataTextureRows, type BandLayout } from "./band-layout";
 import { copyMaterial } from "../components/copy-material";
 import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
@@ -95,7 +96,7 @@ const noise2D = createNoise2D();
 const PATCH_QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
 const PATCH_QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
-function metadataEquals(a: Float32Array, b: Float32Array): boolean {
+function metadataEquals(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
@@ -288,7 +289,7 @@ export class StrokeRenderer {
   // metadata texture and frame count reads from this view.
   private view: CanvasView;
   private viewSize: Vector2;
-  private viewSpec: { metadata: Float32Array; numBands: number; textureWidth: number; textureHeight: number };
+  private viewSpec: BandLayout & { textureWidth: number; textureHeight: number };
   private viewMetadataTex: DataTexture;
   private viewInverseMapTex: DataTexture;
   private ownsViewTextures = false;
@@ -403,7 +404,13 @@ export class StrokeRenderer {
     // A given view carries its own packed layout, so it gets its own metadata
     // and inverse-map textures; the whole-file default shares the file's.
     if (view) {
-      this.viewMetadataTex = viewDataTexture(view.layout.metadata, view.layout.numBands, 1, RGBAFormat, "RGBA32F");
+      this.viewMetadataTex = viewDataTexture(
+        metadataTextureRows(view.layout),
+        view.layout.numBands,
+        1,
+        RGBAFormat,
+        "RGBA32F",
+      );
       this.viewInverseMapTex = viewDataTexture(
         canvasViewInverseMap(view),
         textureWidth,
@@ -2323,7 +2330,13 @@ export class StrokeRenderer {
         this.viewMetadataTex.dispose();
         this.viewInverseMapTex.dispose();
       }
-      this.viewMetadataTex = viewDataTexture(next.layout.metadata, next.layout.numBands, 1, RGBAFormat, "RGBA32F");
+      this.viewMetadataTex = viewDataTexture(
+        metadataTextureRows(next.layout),
+        next.layout.numBands,
+        1,
+        RGBAFormat,
+        "RGBA32F",
+      );
       this.viewInverseMapTex = viewDataTexture(
         canvasViewInverseMap(next),
         next.textureWidth,

@@ -38,7 +38,7 @@ export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: num
   const startFrame = frameRangeOfBlock(grid, firstBlock).start;
   const endFrame = frameRangeOfBlock(grid, lastBlock).end;
   const ranges = new Uint32Array(layout.numBands * 2);
-  const metadata = new Float32Array(layout.numBands * 4);
+  const metadata = new Float64Array(layout.numBands * 4);
   const bandK0 = new Uint32Array(layout.numBands);
   let texels = 0;
   for (let band = 0; band < layout.numBands; band++) {
@@ -75,7 +75,7 @@ export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: num
 /** The view spanning the whole file. */
 export function wholeFileCanvasView(data: {
   numBands: number;
-  metadata: Float32Array;
+  metadata: Float64Array;
   numFrames: number;
   sampleRate: number;
 }): CanvasView {

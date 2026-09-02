@@ -37,7 +37,7 @@ import {
   type OutputLevels,
 } from "../lib/output-levels";
 import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type AudioStateMeta } from "../lib/audio-hop";
-import { bandLengthsTexels, type BandLayout } from "../lib/band-layout";
+import { bandLayoutOf, bandLengthsTexels, type BandLayout } from "../lib/band-layout";
 import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { reorderFileIds } from "../lib/file-reorder";
@@ -424,19 +424,19 @@ async function spectrogramFromAnalysis(
   result: AnalysisResult,
   opts: { minFreq: number; bandsPerOctave: number },
 ): Promise<SpectrogramData & { packedData: Float32Array }> {
-  const metadata = new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4);
+  const rows = new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4);
+  const freqs = new Float64Array(result.numBands);
+  for (let band = 0; band < result.numBands; band++) freqs[band] = rows[band * 4 + 3];
+  // Built from the exact per-band arrays, not from the metadata rows: those
+  // are floats for the texture, and a float cannot count a long file's
+  // coefficients one by one.
+  const layout = bandLayoutOf(result.numBands, result.bandOffsets, result.bandLengths, result.bandStepLog2s, freqs);
   const size = packedSizeOf(result.bandLengths);
-  const inverseMap = await wholeFileInverseMap(
-    { numBands: result.numBands, metadata },
-    result.numFrames,
-    result.sampleRate,
-    result,
-    size.texels,
-  );
+  const inverseMap = await wholeFileInverseMap(layout, result.numFrames, result.sampleRate, result, size.texels);
   return {
     packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
     inverseMap,
-    metadata,
+    metadata: layout.metadata,
     ...size,
     numFrames: result.numFrames,
     numBands: result.numBands,

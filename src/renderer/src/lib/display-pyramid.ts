@@ -36,7 +36,7 @@ export type DisplayPyramidLevel = {
 export type DisplayLevelChoice = { fine: number; coarse: number; blend: number };
 
 /** Bins band `band` keeps when the level's time step is 2^stepLog2 frames. */
-export function levelBinCount(metadata: Float32Array, band: number, stepLog2: number): number {
+export function levelBinCount(metadata: ArrayLike<number>, band: number, stepLog2: number): number {
   const length = metadata[band * 4 + 1];
   const sourceStep = metadata[band * 4 + 2];
   return Math.ceil(length / 2 ** Math.max(0, stepLog2 - sourceStep));

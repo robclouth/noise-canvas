@@ -40,6 +40,7 @@ import { DisplayTileRing } from "../display-tiles-textures";
 import { PackedWindow } from "../packed-window";
 import { gatherPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import { metadataTextureRows } from "../band-layout";
 
 async function loadEffects(): Promise<EffectsRegistry> {
   const [
@@ -138,7 +139,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       RGFormat,
       "RG32F",
     );
-    const metadataTex = dataTexture(data.metadata, data.numBands, 1, RGBAFormat, "RGBA32F");
+    const metadataTex = dataTexture(metadataTextureRows(data), data.numBands, 1, RGBAFormat, "RGBA32F");
     const placeholderTexture = dataTexture(new Float32Array(4), 1, 1, RGBAFormat, "RGBA32F");
     disposers.push(() => {
       originalPackedDataTex.dispose();
@@ -407,7 +408,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
         RGFormat,
         "RG32F",
       ),
-      metadataTex: dataTexture(sourceData.metadata, sourceData.numBands, 1, RGBAFormat, "RGBA32F"),
+      metadataTex: dataTexture(metadataTextureRows(sourceData), sourceData.numBands, 1, RGBAFormat, "RGBA32F"),
     };
     disposers.push(() => {
       sourceTextures.originalPackedDataTex.dispose();

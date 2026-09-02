@@ -17,7 +17,7 @@ const HUGE_GPU_BYTES = 256 * 1024 ** 3;
 function gridOf(seconds: number): BlockGrid {
   const numBands = 20;
   const numFrames = Math.round(seconds * SAMPLE_RATE);
-  const metadata = new Float32Array(numBands * 4);
+  const metadata = new Float64Array(numBands * 4);
   let offset = 0;
   for (let band = 0; band < numBands; band++) {
     const step = Math.min(9, Math.floor(band / 2));

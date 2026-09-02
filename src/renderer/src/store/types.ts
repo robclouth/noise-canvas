@@ -56,7 +56,8 @@ export type SpectrogramData = {
   // it; rebuilt in milliseconds from the band layout when a derived file or a
   // reopen needs it again.
   inverseMap?: Float32Array;
-  metadata: Float32Array;
+  /** The band layout, four per band; `metadataTextureRows` makes the texture the shaders read. */
+  metadata: Float64Array;
   /** Packed coefficients the file holds: the sum of the band lengths, with no padding. */
   texels: number;
   numFrames: number;

@@ -136,7 +136,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     cannot hold, and a span that falls short of what it serves stops the
     reader rather than drawing clamped values.
 
-13. **A file with more coefficients than one texture always paints through a
+13. **The band layout is doubles, and the metadata texture is a conversion of
+    it.** A float counts integers exactly only to 2^24, and a ten-minute file
+    has 119M coefficients, so offsets held as floats round to multiples of
+    eight while the lengths beside them stay exact. The two then disagree, a
+    pixel at the end of one band reads as the start of the next, and a block
+    lands outside the view that holds it. `bandLayoutOf` builds the layout from
+    the exact per-band arrays; `metadataTextureRows` makes the floats the
+    shaders sample, whose own offsets are a view's and stay small.
+
+14. **A file with more coefficients than one texture always paints through a
     window.** The canvas is a texture pair, so neither the graphics budget nor
     a pinned `VITE_CANVAS_WINDOW_BLOCKS` may keep the whole file past
     `MAX_PACKED_TEXTURE_TEXELS`; `canvasWindowBlocks` returns a finite figure

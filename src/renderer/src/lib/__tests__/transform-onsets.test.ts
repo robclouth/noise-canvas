@@ -245,7 +245,7 @@ describe("onset transport in the neutral transform", () => {
     shift: { beats?: number; semis?: number },
     makeSpec: () => SeededSpectrogramData,
     scaleTime: number,
-  ): Promise<{ data: Float32Array; destMeta: Float32Array }> {
+  ): Promise<{ data: Float32Array; destMeta: Float64Array }> {
     const srcSpec = makeSpec();
     const destSpec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     const srcTextures = createHarnessTextures(srcSpec);

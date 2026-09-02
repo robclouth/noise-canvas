@@ -1,5 +1,6 @@
 import { Vector2, type WebGLRenderer } from "three";
 import type { SpectrogramData } from "../store/types";
+import type { BandLayout } from "./band-layout";
 import { blockGrid, blockOfFrame, blocksForPixelRanges } from "./block-grid";
 import {
   clipRangesToView,
@@ -534,7 +535,7 @@ export class WindowedCanvas {
     return renderer;
   }
 
-  private layout(): { numBands: number; metadata: Float32Array } {
+  private layout(): BandLayout {
     return { numBands: this.deps.spectrogram.numBands, metadata: this.deps.spectrogram.metadata };
   }
 

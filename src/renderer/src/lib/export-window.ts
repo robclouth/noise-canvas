@@ -5,6 +5,7 @@ import type { BlockValueReader } from "./canvas-window";
 import type { ExportSpan, ExportWindow } from "./image-export";
 import { PackedWindow } from "./packed-window";
 import type { SpectrogramData } from "@renderer/store/types";
+import { metadataTextureRows } from "./band-layout";
 
 /**
  * Serves an image export spans of a file's committed state, for a canvas that
@@ -59,8 +60,8 @@ export function exportBlockGrid(spectrogram: SpectrogramData): BlockGrid {
 }
 
 function metadataTexture(view: CanvasView): DataTexture {
-  const { metadata, numBands } = view.layout;
-  const texture = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
+  const { numBands } = view.layout;
+  const texture = new DataTexture(metadataTextureRows(view.layout), numBands, 1, RGBAFormat, FloatType);
   texture.internalFormat = "RGBA32F";
   texture.minFilter = NearestFilter;
   texture.magFilter = NearestFilter;

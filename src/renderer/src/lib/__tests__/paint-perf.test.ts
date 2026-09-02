@@ -19,6 +19,7 @@ import { hasActiveModulatorRouting } from "../../store/modulators";
 import { resolveBrushAnchor } from "../utils";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { packedFold, padToFold } from "../constants";
+import { metadataTextureRows } from "../band-layout";
 
 // Runtime paint-latency profiler. Times real stroke renders on the actual GPU
 // (Playwright -> ANGLE/WebKit on macOS) with a GPU sync per render. Uses the
@@ -62,7 +63,7 @@ function createTextures(data: SpectrogramData) {
   inverseMapTex.wrapT = ClampToEdgeWrapping;
   inverseMapTex.needsUpdate = true;
 
-  const metadataTex = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
+  const metadataTex = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
   metadataTex.internalFormat = "RGBA32F";
   metadataTex.minFilter = NearestFilter;
   metadataTex.magFilter = NearestFilter;
