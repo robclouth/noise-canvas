@@ -77,11 +77,12 @@ function aimToBrushBlUv(aim: AimUv, fileId: string, bpm: number, stepIndex: numb
   );
 }
 
-// Where the earliest step of the brush starts painting, in seconds. The stroke
-// covers every step, so the region it reports starts at the earliest of them.
-function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): number {
+// The bottom-left of the rectangle the brush covers for an aim point, in the
+// file's own UV. Full-size axes sit at 0, matching the rectangle drawn under
+// the cursor.
+function aimToBrushRectBlUv(aim: AimUv, fileId: string, bpm: number): { blX: number; blY: number } {
   const spectrogramData = openFiles[fileId]?.spectrogramData;
-  if (!spectrogramData) return aim.x;
+  if (!spectrogramData) return { blX: aim.x, blY: aim.y };
   const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
   const union = brushUnionForAim(
     useStore.getState(),
@@ -92,7 +93,16 @@ function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): numbe
     spectrogramData.bandsPerOctave,
     spectrogramData.numBands,
   );
-  return union.blX * totalDuration;
+  return { blX: union.blX, blY: union.blY };
+}
+
+// Where the earliest step of the brush starts painting, in seconds. The stroke
+// covers every step, so the region it reports starts at the earliest of them.
+function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): number {
+  const spectrogramData = openFiles[fileId]?.spectrogramData;
+  if (!spectrogramData) return aim.x;
+  const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+  return aimToBrushRectBlUv(aim, fileId, bpm).blX * totalDuration;
 }
 
 export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
@@ -660,9 +670,11 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       // Pick mode: clicking on a canvas sets the file path and position params
       if (state.pickingFileParam) {
         state.setParameter(state.pickingFileParam, { path: openFiles[fileId].filePath });
-        // Set position params (UV 0-1 → 0-100%).
-        state.setParameter("sourceTimeOffset" as import("@renderer/store/types").ParameterKey, aim.x * 100);
-        state.setParameter("sourcePitchOffset" as import("@renderer/store/types").ParameterKey, aim.y * 100);
+        // The offsets hold the sampling rectangle's bottom-left, so the click
+        // lands the rectangle the cursor was showing (UV 0-1 → 0-100%).
+        const { blX, blY } = aimToBrushRectBlUv(aim, fileId, bpm);
+        state.setParameter("sourceTimeOffset" as import("@renderer/store/types").ParameterKey, blX * 100);
+        state.setParameter("sourcePitchOffset" as import("@renderer/store/types").ParameterKey, blY * 100);
         state.setPickingFileParam(null);
         return;
       }
