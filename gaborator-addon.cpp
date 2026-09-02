@@ -502,18 +502,15 @@ public:
         std::vector<gaborator::coefs<float>> allCoefs;
         allCoefs.reserve(channels);
 
-        std::vector<std::vector<std::vector<float>>> previousPhases(channels);
         for (int ch = 0; ch < channels; ++ch)
         {
-            previousPhases[ch].resize(numBands);
-            for (int bandIdx = 0; bandIdx < numBands; ++bandIdx)
-            {
-                previousPhases[ch][bandIdx].resize(bandLengths[bandIdx], 0.0f);
-            }
-        }
-
-        for (int ch = 0; ch < channels; ++ch)
-        {
+            // Unwrapping reads the bin before the one being written, and the
+            // walk visits a band's bins in ascending order, so one phase and
+            // one bin index per band stand in for the whole history. A bin
+            // whose predecessor the walk did not visit unwraps against zero.
+            // Declared per channel, because a channel starts with no history.
+            std::vector<float> lastPhase(numBands, 0.0f);
+            std::vector<int64_t> lastBin(numBands, -1);
             allCoefs.emplace_back(analyzer);
             analyzer.analyze(audioChannels[ch], 0, static_cast<int64_t>(numFrames), allCoefs.back());
             gaborator::process(
@@ -541,8 +538,10 @@ public:
                     // Unwrap phase: accumulate phase changes
                     float unwrappedPhase = phase;
                     if (tInBand > 0)
-                        unwrappedPhase = unwrapForward(phase, previousPhases[ch][bandIdx][tInBand - 1]);
-                    previousPhases[ch][bandIdx][tInBand] = unwrappedPhase;
+                        unwrappedPhase =
+                            unwrapForward(phase, lastBin[bandIdx] == tInBand - 1 ? lastPhase[bandIdx] : 0.0f);
+                    lastPhase[bandIdx] = unwrappedPhase;
+                    lastBin[bandIdx] = tInBand;
 
                     size_t writeOffset = baseOffset * floatsPerPixel;
                     data[writeOffset + ch * 2 + 0] = magnitude;

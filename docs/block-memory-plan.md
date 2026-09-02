@@ -998,7 +998,7 @@ Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
   only when it builds a whole-file texture. What limits the length now is the
   RAM one analysis holds at its peak (`analysisPeakTexels`), which is what
   `remainingCoefficientBudget` returns for a file a window will serve.
-- **3.5.3 — one unwrapped phase a band.** `unwrapForward` reads the previous
+- **3.5.3 — one unwrapped phase a band.** DONE. `unwrapForward` reads the previous
   bin only, and the walk is ascending inside a band, so the analyser keeps one
   phase and one bin index per band instead of one phase per coefficient.
 - **3.5.4 — hand the coefficients over without copying them.** The worker's
