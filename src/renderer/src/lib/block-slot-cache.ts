@@ -135,10 +135,11 @@ export class BlockSlotCache {
   /**
    * Folds the blocks' texels from the composed `source` texture back into
    * their slots, claiming slots as needed. The claims never evict one of the
-   * given blocks for another.
+   * given blocks for another, nor one of `keep`.
    */
-  copyBack(view: CanvasView, blocks: number[], source: Texture): void {
+  copyBack(view: CanvasView, blocks: number[], source: Texture, keep?: Iterable<number>): void {
     const pinned = new Set(blocks);
+    if (keep) for (const block of keep) pinned.add(block);
     for (const block of blocks) this.claim(block, pinned);
     const byPage = this.viewTriplesByPage(view, blocks);
     gatherMaterial.uniforms.sourceTex.value = source;

@@ -186,7 +186,16 @@ export class WindowedCanvas {
       if (!filled || !originalFilled || !live?.getIsInitialized()) return;
       if (original) live.setOriginalTexture(original.texture);
       const held = live.committedSource().view;
-      if (held.firstBlock !== next.firstBlock || held.lastBlock !== next.lastBlock) {
+      const moving = held.firstBlock !== next.firstBlock || held.lastBlock !== next.lastBlock;
+      // A read the canvas no longer waits for still lands, and it claims a
+      // slot when it does, so slots can go between the read that filled them
+      // and this move. Composing one that went would draw silence over paint,
+      // so the move waits for the next aim, which reads them again.
+      if (!window.ready(moving ? next : held)) {
+        this.releaseHeld();
+        return;
+      }
+      if (moving) {
         if (this.stroking) this.carryPaintOff(live, next);
         live.slideView(next, (target, blocks) => window.compose(next, blocks, target), { midStroke: this.stroking });
         window.markSlid(next, held);

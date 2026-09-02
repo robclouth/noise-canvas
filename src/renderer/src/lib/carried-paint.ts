@@ -128,7 +128,7 @@ export type PaintCanvas = {
 /** What it needs from the block slots behind the canvas. */
 export type PaintSlots = {
   grid: BlockGrid;
-  copyBack(view: CanvasView, blocks: number[], source: Texture): void;
+  copyBack(view: CanvasView, blocks: number[], source: Texture, keep?: Iterable<number>): void;
   /** True while the block's slot still holds paint the canvas gave it. */
   holdsPaint(block: number): boolean;
 };
@@ -156,7 +156,12 @@ export function carryPaintOut(
   for (let block = current.firstBlock; block <= current.lastBlock; block++) {
     if (block < next.firstBlock || block > next.lastBlock) leaving.push(block);
   }
-  slots.copyBack(current, leaving, texture);
+  // A leaving block whose slot went while it was off the window claims a new
+  // one here, and the slide that follows composes `next` out of its slots, so
+  // those are the ones the claim must not take.
+  const entering: number[] = [];
+  for (let block = next.firstBlock; block <= next.lastBlock; block++) entering.push(block);
+  slots.copyBack(current, leaving, texture, entering);
 
   const fileRanges = viewRangesToFile(current, carry);
   const read = canvas.readPixelRanges(carry);

@@ -78,6 +78,10 @@ export class CanvasWindow {
   // abandons leaves its blocks out, so a slide onto them composes them rather
   // than shifting an empty overlap into place.
   private readonly onCanvas = new Set<number>();
+  // The blocks of the newest window asked for. A read started for a window
+  // that has since been abandoned still lands, and it must not take a slot
+  // from these: the canvas composes them, and a block with no slot is a hole.
+  private requested: ReadonlySet<number> = new Set<number>();
   private disposed = false;
 
   constructor(
@@ -155,16 +159,16 @@ export class CanvasWindow {
    * can be composed; false when a read failed or the window was disposed.
    */
   async acquire(view: BlockSpan): Promise<boolean> {
-    const wanted = new Set(this.blocksOf(view));
-    const results = await Promise.all(this.missing(view).map((block) => this.loadBlock(block, wanted)));
+    this.requested = new Set(this.blocksOf(view));
+    const results = await Promise.all(this.missing(view).map((block) => this.loadBlock(block)));
     if (this.disposed) return false;
     return results.every(Boolean) && this.ready(view);
   }
 
   /** Starts reading the view's missing blocks without waiting for them. */
   prefetch(view: BlockSpan): void {
-    const wanted = new Set(this.blocksOf(view));
-    for (const block of this.missing(view)) void this.loadBlock(block, wanted);
+    this.requested = new Set(this.blocksOf(view));
+    for (const block of this.missing(view)) void this.loadBlock(block);
   }
 
   /** Draws the blocks' committed texels into `target` where `view` places them. */
@@ -183,9 +187,12 @@ export class CanvasWindow {
     return [...cold];
   }
 
-  /** Folds the painted texels of the view's blocks back into their slots. */
-  copyBack(view: CanvasView, blocks: number[], source: Texture): void {
-    this.cache.copyBack(view, blocks, source);
+  /**
+   * Folds the painted texels of the view's blocks back into their slots,
+   * leaving the slots of `keep` alone.
+   */
+  copyBack(view: CanvasView, blocks: number[], source: Texture, keep?: Iterable<number>): void {
+    this.cache.copyBack(view, blocks, source, keep);
     for (const block of blocks) this.painted.add(block);
   }
 
@@ -238,7 +245,7 @@ export class CanvasWindow {
     this.cache.dispose();
   }
 
-  private loadBlock(block: number, wanted?: ReadonlySet<number>): Promise<boolean> {
+  private loadBlock(block: number): Promise<boolean> {
     const pending = this.loading.get(block);
     if (pending) return pending;
     const list = blockPixelRanges(this.grid, block);
@@ -246,8 +253,9 @@ export class CanvasWindow {
     const load = this.read(ranges)
       .then((values) => {
         if (this.disposed || !values) return false;
-        // Never at the cost of another block of the view being read for.
-        this.cache.upload(block, values, wanted);
+        // Read as the value lands, not as the read started: the window asked
+        // for may have moved on, and it is the newest one a slot is owed to.
+        this.cache.upload(block, values, this.requested);
         this.painted.delete(block);
         return true;
       })

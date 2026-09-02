@@ -666,6 +666,92 @@ describe("a canvas window that follows the brush", () => {
     expect(original.slotCount).toBe(readOnly.slotCount);
   });
 
+  it("keeps the window a carry moves to when the blocks it leaves need slots", async () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Carry",
+        overrides: {
+          transformShiftSemis: 3,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
+        },
+      },
+    ]);
+    const pitch = 0.35;
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 2,
+      maxBytes: 0,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => window.dispose());
+    const first = window.viewFor({ firstBlock: 0, lastBlock: 1 });
+    expect(await window.acquire(first)).toBe(true);
+    const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, first);
+    renderer.initialize();
+    disposers.push(() => renderer.dispose());
+    window.compose(first, window.blocksOf(first), renderer.getTextures().packed);
+    const viewFrames = first.endFrame - first.startFrame;
+    renderer.beginStroke();
+    renderer.renderStroke(
+      strokeParams(new Vector2(0.5, pitch), viewFrames / SAMPLE_RATE),
+      state,
+      sourceFor(renderer, first),
+    );
+
+    // Four slots, six blocks: the two the canvas paints on lose theirs while
+    // the window is away, and composing the middle pair leaves the pair the
+    // carry moves to as the least recently used — the slots a careless claim
+    // for the blocks coming back would take.
+    const middle = window.viewFor({ firstBlock: 2, lastBlock: 3 });
+    const next = window.viewFor({ firstBlock: 4, lastBlock: 5 });
+    expect(await window.acquire(middle)).toBe(true);
+    expect(await window.acquire(next)).toBe(true);
+    const target = new WebGLRenderTarget(middle.textureWidth, middle.textureHeight, {
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+    disposers.push(() => target.dispose());
+    window.compose(middle, window.blocksOf(middle), target);
+    expect(window.missing(first)).toEqual([0, 1]);
+
+    expect(carryPaintOut(renderer, window, new CarriedPaint(), next, data.numFrames)).not.toBeNull();
+    expect(window.missing(next)).toEqual([]);
+  });
+
+  it("keeps the newest window blocks when an abandoned read lands", async () => {
+    const pending: Array<() => void> = [];
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 2,
+      maxBytes: 0,
+      read: (ranges) =>
+        new Promise((resolve) => {
+          pending.push(() => resolve(gatherPixelRanges(data.packedData, ranges)));
+        }),
+    });
+    disposers.push(() => window.dispose());
+    // Two windows worth of slots, so four blocks landing at once fill them.
+    expect(window.slotCount).toBe(4);
+
+    const abandoned = [
+      window.acquire(window.viewFor({ firstBlock: 0, lastBlock: 1 })),
+      window.acquire(window.viewFor({ firstBlock: 2, lastBlock: 3 })),
+    ];
+    const wanted = window.viewFor({ firstBlock: 5, lastBlock: 6 });
+    const live = window.acquire(wanted);
+
+    // The newest window lands first; the abandoned reads land after it, and
+    // the slots they claim have to come from somewhere.
+    for (const settle of pending.slice(4)) settle();
+    expect(await live).toBe(true);
+    for (const settle of pending.slice(0, 4)) settle();
+    await Promise.all(abandoned);
+
+    expect(window.missing(wanted)).toEqual([]);
+  });
+
   it("reports a view it could not fill", async () => {
     const window = new CanvasWindow(gl, grid, {
       windowBlocks: 4,
