@@ -642,6 +642,7 @@ They appear in the shape picker under a "User" group.
 ### Modulator Controls
 
 - **Depth** – how far the modulator swings. Negative inverts it.
+- **Steps** – how many even levels the output is held to, so a smooth shape climbs in stages instead of gliding. The lowest and highest levels are still the ends of the swing, so the average stays where it was. At **Off** the output is continuous.
 - **Rate ↔** – how many beats one cycle of the pattern spans. Bigger is slower. Two linked settings sit below the shortest span: **Grid** covers one cell of the time grid, **Brush** covers the width of the brush, and each follows that size as you change it. At the bottom, **Off**, the pattern stops varying along time.
 - **Rate ↕** – how many semitones one cycle spans, with the same **Grid**, **Brush** and **Off** settings against the pitch grid and the height of the brush.
 - **Rotation** – turns the pattern on the canvas, so it cuts diagonally.
@@ -697,6 +698,7 @@ Drag on the time legend to set a loop region and the fill covers only that span.
 
 - Turn **Snap Time** or **Snap Pitch** off and that axis stops being divided, so one stroke spans it. With both off, a single stroke covers the whole file, which is how you apply a brush to everything at once.
 - Every stroke uses the same brush, so a bare fill repeats one sound. A Random pattern on **Strength** gives each stroke its own level, and a sequencer on it draws a rhythm outright.
+- The **Randomise** source draws a fresh set of values each time you run the fill, so running it again over the same grid gives a different result rather than the same one back.
 
 ---
 

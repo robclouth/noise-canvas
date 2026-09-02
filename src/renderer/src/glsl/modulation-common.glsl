@@ -14,6 +14,7 @@ struct Modulator {
   ModulatorParameter modulatorPatternRateX;
   ModulatorParameter modulatorPatternRateY;
   ModulatorParameter modulatorStrength;
+  int modulatorSteps; // even output levels; 0 or 1 leaves the output continuous
   ModulatorParameter modulatorRotation;
   ModulatorParameter modulatorStereoSpread; // read-position offset applied as ∓spread/2 per channel
   float modulatorEnvelopeSmoothing; // UV half-width of the averaging window
@@ -111,6 +112,18 @@ vec2 brushSpaceUv(vec2 uv) {
   return getEffectiveBrushOffset(uv) / max(brushSizeUv, vec2(0.0001));
 }
 
+// Snaps a modulator's raw 0..1 output to `steps` evenly spaced levels, then
+// scales it by depth. The levels reach both ends and the rounding is symmetric
+// about the middle, so switching steps on leaves the modulator's average where
+// it was.
+float finishModulator(float v, int steps, float strength) {
+  if (steps > 1) {
+    float levels = float(steps - 1);
+    v = round(clamp(v, 0.0, 1.0) * levels) / levels;
+  }
+  return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+}
+
 // Scalar evaluator used by both the stereo wrapper and by nested modulation.
 // stereoPhase shifts this channel's read position: a fraction of a cycle in
 // pattern mode, a fraction of the loop in sequencer mode, and a UV offset along
@@ -142,7 +155,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     } else {
       v = sampleEnvelopeAtUv(src, envUv, audioLevelDb, minDb, maxDb);
     }
-    return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+    return finishModulator(v, modulator.modulatorSteps, strength);
   }
 
   // Handle sequencer mode
@@ -176,8 +189,8 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     
     // Sample from data texture
     v = getSeqDataValue(modulatorIndex, stepX, stepY);
-    
-    return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+
+    return finishModulator(v, modulator.modulatorSteps, strength);
   }
 
   // Pattern mode (mode 0) - continue with pattern generation
@@ -300,7 +313,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     }
   }
 
-  return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+  return finishModulator(v, modulator.modulatorSteps, strength);
 }
 
 // Stereo-aware wrapper. Reads the modulator at ∓stereoSpread/4 and returns

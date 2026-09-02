@@ -162,6 +162,18 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     includeInStep: true,
     modulatable: true,
   };
+  modulatorDefs[`modulator${idx}Steps`] = {
+    kind: "number",
+    name: `Modulator Steps ${idx}`,
+    label: "Steps",
+    description: "Locks the output to this many even levels, so it jumps between them instead of gliding.",
+    default: 0,
+    min: 2,
+    max: 64,
+    step: 1,
+    leftValue: { value: 0, label: "Off" },
+    includeInStep: true,
+  };
   modulatorDefs[`modulator${idx}PatternRateBeats`] = {
     kind: "number",
     name: `Modulator Pattern Rate Beats ${idx}`,

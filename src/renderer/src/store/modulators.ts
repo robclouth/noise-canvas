@@ -75,6 +75,8 @@ export type ModulatorParameters = {
 } & {
   [K in Range<1, 4> as `modulator${K}Strength`]: number;
 } & {
+  [K in Range<1, 4> as `modulator${K}Steps`]: number;
+} & {
   [K in Range<1, 4> as `modulator${K}Rotation`]: number;
 } & {
   [K in Range<1, 4> as `modulator${K}StereoSpread`]: number;
@@ -131,6 +133,7 @@ function createModulatorParams(): ModulatorsState {
           `modulator${idx}PatternRateSemis` as keyof ModulatorsState,
         ).default,
         [`modulator${idx}Strength`]: getNumberParameterDef(`modulator${idx}Strength` as keyof ModulatorsState).default,
+        [`modulator${idx}Steps`]: getNumberParameterDef(`modulator${idx}Steps` as keyof ModulatorsState).default,
         [`modulator${idx}Rotation`]: getNumberParameterDef(`modulator${idx}Rotation` as keyof ModulatorsState).default,
         [`modulator${idx}StereoSpread`]: getNumberParameterDef(`modulator${idx}StereoSpread` as keyof ModulatorsState)
           .default,

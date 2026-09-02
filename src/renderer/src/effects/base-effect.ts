@@ -14,6 +14,7 @@ export type Modulator = {
   modulatorPatternRateX: ModulatorParameterUniform;
   modulatorPatternRateY: ModulatorParameterUniform;
   modulatorStrength: ModulatorParameterUniform;
+  modulatorSteps: number;
   modulatorRotation: ModulatorParameterUniform;
   modulatorStereoSpread: ModulatorParameterUniform;
   modulatorEnvelopeMinDb: number;

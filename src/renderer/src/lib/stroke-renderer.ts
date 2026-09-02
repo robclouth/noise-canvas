@@ -357,6 +357,11 @@ export class StrokeRenderer {
   // result if a new stroke began meanwhile, so it never writes over new dabs.
   private strokeGeneration = 0;
 
+  // Offsets the field the Random source reads, so each committed gesture draws
+  // a different set of values. Advanced in endStroke() rather than at the start
+  // so the hover preview shows the values the stroke it precedes will use.
+  private randomSeed = 0;
+
   constructor(
     gl: WebGLRenderer,
     spectrogramData: SpectrogramData,
@@ -1107,7 +1112,7 @@ export class StrokeRenderer {
     }
 
     // Generate random value seeded by position using Perlin noise
-    const strokeRandom = (noise2D(cursorPos.x * 50, cursorPos.y * 50) + 1) / 2;
+    const strokeRandom = this.randomAt(cursorPos);
 
     for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
       const geometry = stepGeometries[stepIndex];
@@ -2096,6 +2101,18 @@ export class StrokeRenderer {
   }
 
   /**
+   * The Random source's value at a cursor position, 0–1. Reads one noise field
+   * per seed, so the dabs of a gesture still differ from each other while the
+   * whole set changes from one gesture to the next. The two strides are
+   * unrelated, keeping successive seeds off a single line through the field.
+   */
+  private randomAt(cursorPos: Vector2): number {
+    const seedX = this.randomSeed * 137.13;
+    const seedY = this.randomSeed * 311.71;
+    return (noise2D(cursorPos.x * 50 + seedX, cursorPos.y * 50 + seedY) + 1) / 2;
+  }
+
+  /**
    * Begin a new stroke (snapshot current state).
    */
   beginStroke(): void {
@@ -2179,6 +2196,8 @@ export class StrokeRenderer {
    * End the current stroke (prepare for next stroke).
    */
   endStroke(): void {
+    this.randomSeed++;
+
     // Without the scratch pool there is nothing to reset; the next
     // acquireScratch establishes the same state.
     if (!this.pool.ownedBy(this) || !this.scratch) return;
