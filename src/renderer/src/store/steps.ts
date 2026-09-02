@@ -14,6 +14,7 @@ export interface StepsState {
   addStep: () => void;
   removeStep: (index: number) => void;
   duplicateStep: (index: number) => void;
+  toggleStepEnabled: (index: number) => void;
   reorderSteps: (from: number, to: number) => void;
   getActiveStep: () => BrushStep;
   getSteps: () => BrushStep[];
@@ -87,6 +88,16 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
         const newStep = { ...stepToDuplicate, id: crypto.randomUUID(), color };
         draftSteps.splice(index + 1, 0, newStep);
         draft.activeStepIndex = index + 1;
+      }),
+    );
+  },
+
+  toggleStepEnabled: (index: number) => {
+    set(
+      produce((draft: State) => {
+        const step = draft.brushes[draft.activeBrushIndex]?.steps[index];
+        if (!step) return;
+        step.enabled = step.enabled === false;
       }),
     );
   },

@@ -71,6 +71,7 @@ export function createBrushStepSchema() {
     .object({
       id: z.string(),
       name: z.string(),
+      enabled: z.boolean().optional(),
       color: brushColorSchema.optional(),
       // Recomputed at the start of every stroke; stored only because a step is
       // persisted whole.
@@ -176,7 +177,7 @@ const getPresetShape = () => (presetShape ??= createSchema().shape);
  * the effect chain, which `syncEffects` repairs item by item rather than
  * failing whole.
  */
-const STEP_OWN_KEYS = new Set(["id", "name", "color", "lockedOffset", "effects"]);
+const STEP_OWN_KEYS = new Set(["id", "name", "enabled", "color", "lockedOffset", "effects"]);
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};

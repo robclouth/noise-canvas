@@ -2014,6 +2014,8 @@ export const getStepParameterKeys = (): ParameterKey[] => {
 export type BrushStep = {
   id: string;
   name: string;
+  // An absent flag counts as enabled, so brushes saved before it existed stay on.
+  enabled?: boolean;
   color?: BrushColor;
   lockedOffset?: { beats: number; pitch: number } | null;
   sourceFile?: FileParameterValue;

@@ -259,6 +259,8 @@ function selectionClipFor(
 
 /** Where one step's brush lands, from that step's own size and anchor mode. */
 interface StepGeometry {
+  /** Index into the brush's steps array; steps switched off hold no entry. */
+  index: number;
   state: State;
   sizeUv: Vector2;
   /** Bottom-left origin in pitch UV, after Full-axis anchoring. */
@@ -709,6 +711,7 @@ export class StrokeRenderer {
     const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     const geometries: StepGeometry[] = [];
     for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      if (steps[stepIndex].enabled === false) continue;
       const stepState = createStepStateView(state, stepIndex);
       const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, aim.x);
       const { blX, blY } = footprintAimToBlUv(aim.x, aim.y, footprint, {
@@ -718,6 +721,7 @@ export class StrokeRenderer {
         snapTime: stepState.snapTime,
       });
       geometries.push({
+        index: stepIndex,
         state: stepState,
         sizeUv: footprint.sizeUv,
         anchor: resolveBrushAnchor(new Vector2(blX, blY), footprint.fullTime, footprint.fullPitch),
@@ -1123,7 +1127,7 @@ export class StrokeRenderer {
       // The step's own Source control names the file it samples. A step with no
       // source of its own reads what the steps before it produced, so its
       // effects work on the running result rather than on another file.
-      const namedSource = params.stepSources?.[stepIndex];
+      const namedSource = params.stepSources?.[geometry.index];
       const namedSpec = namedSource?.spectrogramData;
       const hasOwnSource = Boolean(
         namedSource && namedSpec && namedSpec.numFrames > 0 && namedSpec.numBands > 0 && namedSpec.sampleRate > 0,
@@ -1170,7 +1174,7 @@ export class StrokeRenderer {
       const sourceBpm = state.filepathsBpm?.[stepSource.filePath] || bpm;
       const stepSourceDuration = stepSource.spectrogramData.numFrames / stepSource.spectrogramData.sampleRate;
       const sourceOffsetUv = this.calculateSourceOffset(
-        state.isStroking ? steps[stepIndex]?.lockedOffset : null,
+        state.isStroking ? steps[geometry.index]?.lockedOffset : null,
         stepState.sourcePositionMode as string,
         stepAnchor,
         readsSourceFile ? (bpm * totalDuration) / (sourceBpm * stepSourceDuration) : 1,
@@ -1221,7 +1225,7 @@ export class StrokeRenderer {
       const attractReadsModulators = enabledEffectItems.some(
         (item) =>
           item.effect === "attract" &&
-          createEffectStateView(state, stepIndex, item).attractMap >= ATTRACT_MODULATOR_MAP_START,
+          createEffectStateView(state, geometry.index, item).attractMap >= ATTRACT_MODULATOR_MAP_START,
       );
       const effectItemsRouteModulators = enabledEffectItems.some((item) => paramsRouteModulators(item.params));
       if (hasActiveModulatorRouting(stepState) || effectItemsRouteModulators || attractReadsModulators) {
@@ -1286,7 +1290,7 @@ export class StrokeRenderer {
       for (const effectItem of enabledEffectItems) {
         const effect = this.effects[effectItem.effect];
         if (!effect) continue;
-        const effectState = createEffectStateView(state, stepIndex, effectItem);
+        const effectState = createEffectStateView(state, geometry.index, effectItem);
         const activePasses = effect.getActivePasses?.(effectState) ?? effect.materials.map((_, index) => index);
         if (activePasses.length === 0) continue;
         for (let i = 0; i < brushIterations; i++) {
@@ -1304,7 +1308,7 @@ export class StrokeRenderer {
         if (passthrough) {
           plannedPasses.push({
             effect: passthrough,
-            effectState: createStepStateView(state, stepIndex),
+            effectState: createStepStateView(state, geometry.index),
             passIndex: 0,
             iteration: 0,
             inSwappedDomain: false,

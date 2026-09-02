@@ -322,6 +322,45 @@ describe("per-step source independence", () => {
     expect(mid[1]).toBeLessThan(0.05);
   });
 
+  it("skips a step switched off, and keeps later steps' sources aligned", async () => {
+    // A lone disabled step paints nothing at all.
+    const disabledOnly = (() => {
+      const destSpec = flat(destFrames, 0);
+      const destRenderer = makeRenderer(destSpec, "dest-off-solo");
+      const srcSpec = flat(destFrames, 0.5);
+      const srcRenderer = makeRenderer(srcSpec, "src-off-solo");
+      const srcFile = sourceFileFor(srcRenderer, srcSpec, "src-off-solo", srcPath);
+      destRenderer.renderStroke(
+        { ...params(0), stepSources: [srcFile] },
+        stateWithSteps([{ sourceFile: { path: srcPath }, enabled: false }], 0),
+        sourceFileFor(destRenderer, destSpec, "dest-off-solo", destPath),
+      );
+      return destRenderer;
+    })();
+    const silent = magByFrame(await disabledOnly.getFBOData(), destFrames, numBands);
+    for (let frame = 0; frame < destFrames; frame++) {
+      expect(silent[frame]).toBeLessThan(1e-5);
+    }
+
+    // A disabled first step must not shift the second step onto its source
+    // slot: the paint still comes from the file the second step names.
+    const shifted = (() => {
+      const destSpec = flat(destFrames, 0);
+      const destRenderer = makeRenderer(destSpec, "dest-off-first");
+      const srcSpec = flat(destFrames, 0.5);
+      const srcRenderer = makeRenderer(srcSpec, "src-off-first");
+      const srcFile = sourceFileFor(srcRenderer, srcSpec, "src-off-first", srcPath);
+      destRenderer.renderStroke(
+        { ...params(0), stepSources: [undefined, srcFile] },
+        stateWithSteps([{ sourceFile: null, enabled: false }, { sourceFile: { path: srcPath } }], 0),
+        sourceFileFor(destRenderer, destSpec, "dest-off-first", destPath),
+      );
+      return destRenderer;
+    })();
+    const painted = magByFrame(await shifted.getFBOData(), destFrames, numBands);
+    expect(painted[8]).toBeGreaterThan(0.4);
+  });
+
   it("blurs the canvas, then multiplies a source over it, whichever step is selected", async () => {
     // Blur the target in one step, then cross-synthesise a second file over the
     // result in the next: the shape that first showed the preview moving with

@@ -243,7 +243,7 @@ Brushes live inside a palette. Each is an independent set of steps, effects, mod
 
 A brush can have up to **5 steps**, shown as a tab strip. Each step is a complete, independent set of brush parameters and effects, and a single stroke runs through **all** of them in order. This is how you build multi-stage moves: step 1 synthesises a tone, step 2 blurs it, step 3 places it in space.
 
-- **Drag** to reorder, **Duplicate** and **Delete** from the buttons on the right.
+- **Drag** to reorder. The buttons on the right switch the current step **on or off**, **Duplicate** it, or **Delete** it. A step switched off is skipped when you paint and keeps its settings.
 - The strip is fixed-width, so adding or removing a step never rescales the others.
 - Switching tabs switches the whole brush panel. To hold one value the same in every step, link it from its label menu. See [Linking Parameters Across Steps](#linking-parameters-across-steps).
 

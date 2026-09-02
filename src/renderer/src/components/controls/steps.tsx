@@ -8,7 +8,7 @@ import { SECTION_GAP } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
 import { MAX_STEPS } from "@renderer/store/steps";
 import type { BrushColor } from "@renderer/store/types";
-import { Copy, Plus, Trash } from "lucide-react";
+import { Copy, Plus, Power, PowerOff, Trash } from "lucide-react";
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 import { HelpActionIcon } from "./help-control";
@@ -42,46 +42,59 @@ export function StepScope({ children }: { children: React.ReactNode }) {
 
 export function Steps() {
   const theme = useMantineTheme();
-  // The tab bar only displays each step's id + color, the count, and which step
-  // is active — never any step parameter value. Selecting the whole `steps`
-  // array would re-render this (and the heavy DragDropContext) on every
-  // step-param drag, since immer gives the array a new reference each edit.
-  // Select a primitive signature of just the displayed fields instead, so a
-  // value drag doesn't touch this component. (`id` and `color` never contain a
-  // newline, so it is a safe entry delimiter.)
-  const { stepSig, stepCount, activeStepIndex, setActiveStepIndex, addStep, removeStep, duplicateStep, reorderSteps } =
-    useStore(
-      useShallow((state) => {
-        const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-        return {
-          stepSig: steps.map((s) => `${s.id} ${s.color ? `${s.color.hue}:${s.color.variation}` : ""}`).join("\n"),
-          stepCount: steps.length,
-          activeStepIndex: state.activeStepIndex,
-          setActiveStepIndex: state.setActiveStepIndex,
-          addStep: state.addStep,
-          removeStep: state.removeStep,
-          duplicateStep: state.duplicateStep,
-          reorderSteps: state.reorderSteps,
-        };
-      }),
-    );
+  // The tab bar only displays each step's id, enabled flag and color, the
+  // count, and which step is active — never any step parameter value. Selecting
+  // the whole `steps` array would re-render this (and the heavy DragDropContext)
+  // on every step-param drag, since immer gives the array a new reference each
+  // edit. Select a primitive signature of just the displayed fields instead, so
+  // a value drag doesn't touch this component. (`id` and `color` never contain
+  // a space or newline, so those are safe delimiters.)
+  const {
+    stepSig,
+    stepCount,
+    activeStepIndex,
+    setActiveStepIndex,
+    addStep,
+    removeStep,
+    duplicateStep,
+    toggleStepEnabled,
+    reorderSteps,
+  } = useStore(
+    useShallow((state) => {
+      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+      return {
+        stepSig: steps
+          .map((s) => `${s.id} ${s.enabled === false ? 0 : 1} ${s.color ? `${s.color.hue}:${s.color.variation}` : ""}`)
+          .join("\n"),
+        stepCount: steps.length,
+        activeStepIndex: state.activeStepIndex,
+        setActiveStepIndex: state.setActiveStepIndex,
+        addStep: state.addStep,
+        removeStep: state.removeStep,
+        duplicateStep: state.duplicateStep,
+        toggleStepEnabled: state.toggleStepEnabled,
+        reorderSteps: state.reorderSteps,
+      };
+    }),
+  );
 
   const stepMeta = useMemo(
     () =>
       stepSig === ""
         ? []
         : stepSig.split("\n").map((entry) => {
-            const sep = entry.indexOf(" ");
-            const colorStr = entry.slice(sep + 1);
+            const [id, enabledBit, colorStr = ""] = entry.split(" ");
             const colorSep = colorStr.indexOf(":");
             const color: BrushColor | undefined =
               colorSep > 0
                 ? { hue: colorStr.slice(0, colorSep), variation: Number(colorStr.slice(colorSep + 1)) }
                 : undefined;
-            return { id: entry.slice(0, sep), color };
+            return { id, enabled: enabledBit === "1", color };
           }),
     [stepSig],
   );
+
+  const activeStepEnabled = stepMeta[activeStepIndex]?.enabled !== false;
 
   const canAddStep = stepCount < MAX_STEPS;
   const canRemoveStep = stepCount > 1;
@@ -153,6 +166,7 @@ export function Steps() {
                             color: active ? theme.white : theme.colors.dark[1],
                             backgroundColor: active ? theme.colors.dark[5] : "transparent",
                             border: `1px solid ${active ? theme.colors.dark[4] : "transparent"}`,
+                            opacity: step.enabled ? 1 : 0.4,
                             boxShadow:
                               snapshot.isDragging && !snapshot.isDropAnimating
                                 ? "0 0 12px rgba(0, 0, 0, 0.4)"
@@ -205,6 +219,15 @@ export function Steps() {
       </DragDropContext>
 
       <Group gap={2} wrap="nowrap">
+        <HelpActionIcon
+          help="step-enable"
+          size="sm"
+          variant="subtle"
+          color="gray"
+          onClick={() => toggleStepEnabled(activeStepIndex)}
+        >
+          {activeStepEnabled ? <Power size={14} /> : <PowerOff size={14} />}
+        </HelpActionIcon>
         <HelpActionIcon
           help="step-duplicate"
           size="sm"

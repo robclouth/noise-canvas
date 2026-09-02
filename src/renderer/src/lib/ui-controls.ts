@@ -299,6 +299,11 @@ export const UI_CONTROLS = {
     description: "Adds a step to the end of the sequence.",
     manualSection: "steps",
   },
+  "step-enable": {
+    label: "Step on/off",
+    description: "Switches the current step off so a stroke skips it, keeping its settings.",
+    manualSection: "steps",
+  },
   "step-duplicate": {
     label: "Duplicate step",
     description: "Copies the current step and its parameters into a new step.",
