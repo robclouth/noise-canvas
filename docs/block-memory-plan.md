@@ -1013,7 +1013,7 @@ Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
   the CPU range arithmetic picks the wrong band. The exact figures are already
   in the payload as `bandOffsets`/`bandLengths`/`bandStepLog2s`; the CPU layout
   must read those and the texture stay a separate, converted payload.
-- **3.5.7 — analyse in spans and forget.** DONE for two of the three terms.
+- **3.5.7 — analyse in spans and forget.** DONE; see Phase 5.
   - The worker's constructor works out the band layout — it follows from the
     sample rate, the resolution and the frame count alone — checks the budget
     and claims the result array on the JavaScript thread. Execute fills it in
@@ -1030,9 +1030,8 @@ Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
     phase carries the arbitrariness of every near-silent bin before it, so
     equivalence is judged on magnitudes and on the phase STEP between bins that
     carry signal.
-  - **What is left:** the coefficient run itself (16 B a texel), which needs
-    the renderer to drive the spans and seed the block store as they arrive.
-    That reshapes the open path, so it is its own piece of work.
+  - The coefficient run itself was the last of the three, and needed the
+    renderer to drive the spans. That is Phase 5.
 
 ### Phase 3.5 measurements (2026-09-02)
 
@@ -1067,7 +1066,7 @@ What the measurement says:
 - The rows are the run after 3.5.7 and 3.5.8. Before 3.5.8, painting the
   ten-minute file threw "the block lies outside the view" on the first stroke.
 
-Status: in progress.
+Status: done.
 
 ### What the window costs the interaction (2026-09-02)
 
@@ -1337,6 +1336,89 @@ file, and source tracking away from Follow.
 
 Status: Phase 4 done — every effect declares a reach, and none reads the whole
 file.
+
+---
+
+## Phase 5 — nothing holds the run of a whole file (2026-09-02)
+
+The Phase 3.5 measurement left one term: 1.9 GB of coefficients at ten minutes,
+16 bytes a texel, held because the analysis returned them in one array. Three
+passes wanted that array — the analysis that produced it, the onset detector
+that read it, and the synthesis that turned it back into audio. Removing it
+meant giving all three a way to work a chunk at a time.
+
+### What was built
+
+- **`AnalysisStream`** (addon). The band layout follows from the sample rate,
+  the resolution and the frame count alone, so it is known before any audio is
+  read. Each `span(startFrame, endFrame)` call returns the coefficients of its
+  own frames, laid out as the block of the packed state covering them — the
+  same per-band ranges `blockPixelRanges` names, so a span **is** a block and
+  `BlockStore.seedFrom` writes it straight out. The analyser carries its
+  coefficient tree, its unwrapped phase and its running totals across the
+  spans. It also carries each band's loudest moment, which the onset pass would
+  otherwise find by reading the whole run.
+- **Onsets a chunk at a time** (`onset-scan.ts`). A pass can now read a view of
+  the packed state and can stop once it has the gate. Two rounds: the silence
+  gate is a share of the loudest moment of the detection function anywhere in
+  the file, so one round finds that moment and the next judges every chunk
+  against it. A regional pass also looks for peaks far enough before its span
+  to find the last one a whole-file pass would have accepted — without that a
+  chunk edge in dense material adds an event, which is how the equivalence test
+  found it.
+- **Synthesis a chunk at a time** (`synthesis-chunks.ts`). `synthesize` takes a
+  view, deriving its per-band ranges through the same helper a windowed commit
+  uses, and refuses one that falls short of the fill it needs. Each pass splices
+  its chunk into the audio the pass before it left, so the seams are crossfades
+  between two syntheses of the same coefficients.
+- **The open path.** A file the canvas can hold whole still keeps its run:
+  everything downstream of a short file works on one. A longer one gets none —
+  the root snapshot takes the store as it stands, and the display draws the file
+  out of the store block by block.
+- A host that answers whole passes only — the extension, which reaches the addon
+  over RPC and drops the view fields — keeps the whole-run path.
+
+### Phase 5 measurements (2026-09-02)
+
+Same machine as before: Apple M4 Pro, 24 GB, a 16 GB graphics budget. Mono
+44.1 kHz, 36 bands per octave, the window the budget picks. Renderer private MB,
+polled every 300 ms; `peak` is the largest reading during the gesture.
+
+| file  | texels | idle | open       | paint      | undo      | redo      |
+| ----- | ------ | ---- | ---------- | ---------- | --------- | --------- |
+| 300 s | 59.5M  | 295  | 543 (874)  | 592 (1135) | 572 (633) | 532 (680) |
+| 600 s | 119.0M | 296  | 692 (1026) | 757 (1725) | 929 (929) | 933 (940) |
+
+- **The ten-minute open peaks at 1.0 GB, against 2.78 GB before.** Nothing in
+  RAM holds the run of a whole file any more.
+- Over the idle figure, the two opens fit **441 MB flat plus 2.3 bytes a
+  coefficient**. The flat part is the chunk each pass reads, the blocks that
+  stay decoded and the canvas window; the per-coefficient part is the audio —
+  the decoded samples the analysis reads and the buffer the file plays from.
+  `analysisPeakTexels` now has that shape, which takes an eight-gigabyte machine
+  from about eight minutes to about twenty-two.
+- The paint peaks are not comparable between the rows: the driver drags across
+  the same **fraction** of the view, so the ten-minute stroke covers twice the
+  frames and the commit does twice the work.
+- Time to first view at ten minutes is 25 s, almost all of it the analysis. The
+  chunked synthesis takes 8.7 s where the whole-file one took 2.4 s plus 5.1 s
+  to read the run out.
+
+### What still takes the whole run
+
+Each is user-initiated and transient, and each would spike by 16 bytes a texel
+on a long file:
+
+- duplicating a file, and the merge and stem paths, which derive a new
+  spectrogram from `readCurrentPackedData`;
+- a synthesis with onsets asked for and no reference to judge a span by, which
+  falls back to the whole-run path rather than guess a gate.
+
+### Untested
+
+Every figure here is from the M4 Pro. The plan targets an 8 GB Iris 655, where
+the caches are narrower and the window smaller; the flat 441 MB charged there is
+more than that machine holds.
 
 ---
 
