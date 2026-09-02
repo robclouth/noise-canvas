@@ -7,10 +7,9 @@ export type DiagData = Record<string, unknown>;
 // Describes the flat object returned directly from the C++ addon
 export interface GaboratorAnalysisResult {
   data: Float32Array;
-  inverseMap: Float32Array;
   metadata: Float32Array;
-  textureWidth: number;
-  textureHeight: number;
+  /** Packed coefficients the run holds: the sum of the band lengths, with no padding. */
+  texels: number;
   numFrames: number;
   numChannels: number;
   numBands: number;

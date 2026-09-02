@@ -39,14 +39,16 @@ describe("analysis coefficient budget", () => {
       minFreq: 40,
       maxCoefficients: 10_000_000,
     });
-    expect(result.textureWidth * result.textureHeight).toBeGreaterThan(0);
-    expect(result.textureWidth * result.textureHeight).toBeLessThanOrEqual(10_000_000);
+    expect(result.texels).toBeGreaterThan(0);
+    expect(result.texels).toBeLessThanOrEqual(10_000_000);
+    // The coefficients come back as a run of them, with no padding to a texture.
+    expect(result.data.length).toBe(result.texels * 4);
   });
 
   it("refuses a file that exceeds the budget, quoting the allowed duration", async () => {
     const channel = noiseChannel(2);
     const fits = await addon.analyze([channel], 1, SAMPLE_RATE, { bandsPerOctave: 12, minFreq: 40 });
-    const needed = fits.textureWidth * fits.textureHeight;
+    const needed = fits.texels;
 
     await expect(
       addon.analyze([channel], 1, SAMPLE_RATE, {
@@ -93,8 +95,7 @@ describe("analysis coefficient budget", () => {
       maxCoefficients: 0,
     });
     const without = await addon.analyze([channel], 1, SAMPLE_RATE, { bandsPerOctave: 12, minFreq: 40 });
-    expect(withZero.textureWidth).toBe(without.textureWidth);
-    expect(withZero.textureHeight).toBe(without.textureHeight);
+    expect(withZero.texels).toBe(without.texels);
   });
 
   it("reports GPU memory as a non-negative number", () => {

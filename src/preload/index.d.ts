@@ -27,10 +27,8 @@ declare global {
         params: AnalysisParams,
       ) => Promise<{
         data: Float32Array;
-        inverseMap: Float32Array;
         metadata: Float32Array;
-        textureWidth: number;
-        textureHeight: number;
+        texels: number;
         numFrames: number;
         numChannels: number;
         numBands: number;
@@ -53,10 +51,8 @@ declare global {
         params: AnalysisParams,
       ) => Promise<{
         data: Float32Array;
-        inverseMap: Float32Array;
         metadata: Float32Array;
-        textureWidth: number;
-        textureHeight: number;
+        texels: number;
         numFrames: number;
         numChannels: number;
         numBands: number;

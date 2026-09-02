@@ -44,6 +44,8 @@ vi.mock("../host", () => ({
     analysis: {
       getGpuMemoryInfo: () => ({ bytes: 8 * 1024 ** 3, unified: true }),
       analyze: () => new Promise((resolve) => (gate.resolve = resolve)),
+      buildHistoryInverseMap: async (_o: Uint32Array, _l: Uint32Array, _s: Int32Array, pixelCount: number) =>
+        new Float32Array(pixelCount * 2),
     },
   },
 }));

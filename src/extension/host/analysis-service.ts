@@ -49,7 +49,6 @@ type AnalysisResult = Awaited<ReturnType<typeof analyze>>;
 function resultToFrame(result: AnalysisResult): Frame {
   const arrays: Record<string, NumericArray> = {
     data: result.data,
-    inverseMap: result.inverseMap,
     metadata: result.metadata,
     bandOffsets: result.bandOffsets,
     bandStepLog2s: result.bandStepLog2s,
@@ -66,8 +65,7 @@ function resultToFrame(result: AnalysisResult): Frame {
 
   return {
     meta: {
-      textureWidth: result.textureWidth,
-      textureHeight: result.textureHeight,
+      texels: result.texels,
       numFrames: result.numFrames,
       numChannels: result.numChannels,
       numBands: result.numBands,

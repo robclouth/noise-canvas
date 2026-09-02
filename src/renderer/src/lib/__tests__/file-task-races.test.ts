@@ -126,6 +126,8 @@ vi.mock("../host", () => ({
         gate.order.push("analyse");
         return gate.analysisResult();
       },
+      buildHistoryInverseMap: async (_o: Uint32Array, _l: Uint32Array, _s: Int32Array, pixelCount: number) =>
+        new Float32Array(pixelCount * 2),
     },
   },
 }));

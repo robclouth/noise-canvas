@@ -29,11 +29,14 @@
 #endif
 
 #define OVERLAP 0.7
-#define MAX_TEXTURE_SIZE 8192
 // Packed coefficients per input frame at the densest resolution the app offers
 // (12 bands/octave). Must stay at or above every resolution's own density, or a
 // file that opens at one resolution fails to re-analyse at another.
 #define MAX_COEFFICIENT_DENSITY 4.79
+// Coefficients one analysis may hold. Four floats each, and a JavaScript typed
+// array holds at most 2^32-1 elements, so past this the result cannot be handed
+// over whatever memory the machine has. The caller's budget is the real limit.
+#define MAX_PACKED_COEFFICIENTS ((size_t)0xFFFFFFFFu / 4)
 
 // Debug logging to file, compiled in by Debug builds only (see binding.gyp).
 #ifdef GABORATOR_DEBUG_LOG
@@ -462,12 +465,11 @@ public:
             totalComplexCoefficients += len;
         }
 
-        // The coefficient cap is the texture dimension limit or the caller's
-        // GPU-memory budget, whichever is smaller. Checked before any
+        // The coefficient cap is the caller's memory budget, or what a result
+        // array can hold when the caller named none. Checked before any
         // allocation so an oversized file fails with a clear message instead
         // of exhausting memory.
-        size_t maxCoefficients = (size_t)MAX_TEXTURE_SIZE * MAX_TEXTURE_SIZE;
-        maxCoefficients = std::min(maxCoefficients, maxCoefficientBudget);
+        size_t maxCoefficients = std::min(MAX_PACKED_COEFFICIENTS, maxCoefficientBudget);
 
         double worstCaseCoefficients = (double)numFrames * MAX_COEFFICIENT_DENSITY;
         if (worstCaseCoefficients > (double)maxCoefficients || totalComplexCoefficients > maxCoefficients)
@@ -480,18 +482,10 @@ public:
             return;
         }
 
-        textureWidth = std::min((size_t)MAX_TEXTURE_SIZE, totalComplexCoefficients);
-        textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0;
+        texels = totalComplexCoefficients;
 
         size_t floatsPerPixel = 4;
-        size_t dataFloatCount = (size_t)textureWidth * textureHeight * floatsPerPixel;
-        data.assign(dataFloatCount, 0.0f);
-
-        size_t floatsPerMapPixel = 2;
-        size_t paddedMapFloatCount = (size_t)textureWidth * textureHeight * floatsPerMapPixel;
-        inverseMap.assign(paddedMapFloatCount, 0.0f);
-
-        size_t maxPixelIndex = (size_t)textureWidth * textureHeight;
+        data.assign(texels * floatsPerPixel, 0.0f);
 
         size_t floatsPerMetaPixel = 4;
         size_t metadataFloatCount = (size_t)numBands * floatsPerMetaPixel;
@@ -503,17 +497,6 @@ public:
             metadata[i * floatsPerMetaPixel + 1] = static_cast<float>(bandLengths[i]);
             metadata[i * floatsPerMetaPixel + 2] = static_cast<float>(bandStepLog2s[i]);
             metadata[i * floatsPerMetaPixel + 3] = bandFreqsHz[i];
-        }
-
-        for (int bandIdx = 0; bandIdx < numBands; ++bandIdx)
-        {
-            uint64_t timeStep = 1ULL << bandStepLog2s[bandIdx];
-            for (uint32_t i = 0; i < bandLengths[bandIdx]; ++i)
-            {
-                size_t linearPixelIndex = bandOffsets[bandIdx] + i;
-                inverseMap[linearPixelIndex * 2 + 0] = static_cast<float>(i * timeStep);
-                inverseMap[linearPixelIndex * 2 + 1] = static_cast<float>(bandIdx);
-            }
         }
 
         std::vector<gaborator::coefs<float>> allCoefs;
@@ -543,8 +526,7 @@ public:
                     if (tInBand < 0 || (size_t)tInBand >= bandLengths[bandIdx])
                         return;
                     size_t baseOffset = bandOffsets[bandIdx] + tInBand;
-                    // Only write if within the clamped texture bounds
-                    if (baseOffset >= maxPixelIndex)
+                    if (baseOffset >= texels)
                         return;
 
                     // Convert to magnitude and phase
@@ -580,16 +562,11 @@ public:
         memcpy(dataJs.Data(), data.data(), data.size() * sizeof(float));
         resultJs.Set("data", dataJs);
 
-        Napi::Float32Array inverseMapJs = Napi::Float32Array::New(env, inverseMap.size());
-        memcpy(inverseMapJs.Data(), inverseMap.data(), inverseMap.size() * sizeof(float));
-        resultJs.Set("inverseMap", inverseMapJs);
-
         Napi::Float32Array metadataJs = Napi::Float32Array::New(env, metadata.size());
         memcpy(metadataJs.Data(), metadata.data(), metadata.size() * sizeof(float));
         resultJs.Set("metadata", metadataJs);
 
-        resultJs.Set("textureWidth", Napi::Number::New(env, textureWidth));
-        resultJs.Set("textureHeight", Napi::Number::New(env, textureHeight));
+        resultJs.Set("texels", Napi::Number::New(env, texels));
         resultJs.Set("numFrames", Napi::Number::New(env, numFrames));
         resultJs.Set("numChannels", Napi::Number::New(env, channels));
         resultJs.Set("numBands", Napi::Number::New(env, numBands));
@@ -636,10 +613,8 @@ private:
 
     // Results
     std::vector<float> data;
-    std::vector<float> inverseMap;
     std::vector<float> metadata;
-    int textureWidth;
-    int textureHeight;
+    size_t texels = 0;
     size_t numFrames;
     int numBands;
     std::vector<uint32_t> bandOffsets;

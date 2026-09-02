@@ -2,6 +2,7 @@ import { FloatType, HalfFloatType, RedFormat, RGFormat, RGBAFormat, UnsignedByte
 import type { WebGLRenderTarget } from "three";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  analysisPeakTexels,
   canvasWindowBlocks,
   canvasWindowBudgetBytes,
   canvasWindowBytes,
@@ -179,8 +180,11 @@ describe("history cache overhead", () => {
     );
   });
 
-  it("stops limiting the length once a window will serve the new file", () => {
-    expect(remainingCoefficientBudget([])).toBeUndefined();
+  it("measures a file a window will serve against the RAM the analysis holds, not the graphics budget", () => {
+    // Far past what the graphics budget would allow the whole file.
+    const gpuLimit = (GPU_MEMORY * GPU_BUDGET_SHARE) / (GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE);
+    expect(remainingCoefficientBudget([])).toBe(analysisPeakTexels());
+    expect(analysisPeakTexels()).toBeGreaterThan(gpuLimit);
   });
 
   it("takes the caches out of the budget a new file too big for a window is measured against", () => {

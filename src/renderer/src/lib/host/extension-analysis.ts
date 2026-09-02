@@ -34,7 +34,6 @@ function frameToAnalysis(frame: {
   const { meta, arrays } = frame;
   return {
     data: f32(arrays.data, "data"),
-    inverseMap: f32(arrays.inverseMap, "inverseMap"),
     metadata: f32(arrays.metadata, "metadata"),
     bandOffsets: u32(arrays.bandOffsets, "bandOffsets"),
     bandStepLog2s: i32(arrays.bandStepLog2s, "bandStepLog2s"),
@@ -42,8 +41,7 @@ function frameToAnalysis(frame: {
     onsets: f32(arrays.onsets, "onsets"),
     onsetOdfMax: meta.onsetOdfMax === undefined ? undefined : Number(meta.onsetOdfMax),
     onsetBandMax: arrays.onsetBandMax ? f32(arrays.onsetBandMax, "onsetBandMax") : undefined,
-    textureWidth: Number(meta.textureWidth),
-    textureHeight: Number(meta.textureHeight),
+    texels: Number(meta.texels),
     numFrames: Number(meta.numFrames),
     numChannels: Number(meta.numChannels),
     numBands: Number(meta.numBands),

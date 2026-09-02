@@ -22,6 +22,11 @@ export const GPU_BYTES_PER_TEXEL_SCRATCH = 74;
 // CPU-side copies (packedData 16, inverseMap 8); they compete with the
 // textures only on unified-memory GPUs.
 export const CPU_BYTES_PER_TEXEL_FILE = 24;
+// RAM one packed coefficient costs while the analysis runs: the coefficient run
+// the analyser fills (16) and its own coefficient tree beside it (8 a channel).
+const ANALYSIS_BYTES_PER_TEXEL = 32;
+// Share of the machine's memory one analysis may hold at its peak.
+const ANALYSIS_MEMORY_SHARE = 0.25;
 // Fraction of the GPU pool the spectrogram data may claim; the rest stays for
 // the compositor, other apps, and everything else the app allocates.
 const GPU_BUDGET_SHARE = 0.5;
@@ -113,6 +118,11 @@ export function gpuMemoryInfo(): { bytes: number; unified: boolean } {
   return cachedInfo;
 }
 
+/** Packed coefficients one analysis may hold in RAM while it runs. */
+export function analysisPeakTexels(): number {
+  return Math.floor((host.os.totalmem() * ANALYSIS_MEMORY_SHARE) / ANALYSIS_BYTES_PER_TEXEL);
+}
+
 /**
  * RAM the history caches may hold — stroke deltas, hop audio and resident
  * packed blocks. A flat overhead, not a per-texel rate: the budgets are the
@@ -179,10 +189,10 @@ export function usedBudgetFraction(open: OpenFileTexels[]): number | undefined {
 
 /**
  * Largest packed coefficient count one more analysis may produce, given what
- * the files already open hold. Undefined when the budget does not limit the
- * length at all — because the host names no GPU memory figure, or because the
- * new file will paint through a window, which costs the same however long it
- * is. Either way only the analyser's own texture cap is left.
+ * the files already open hold. A file that will paint through a window costs
+ * the graphics device the same however long it is, so what limits it is the
+ * RAM the analysis itself holds at its peak. Undefined when the host names no
+ * GPU memory figure, which leaves no graphics budget to measure against.
  */
 export function remainingCoefficientBudget(open: OpenFileTexels[]): number | undefined {
   const info = gpuMemoryInfo();
@@ -201,7 +211,7 @@ export function remainingCoefficientBudget(open: OpenFileTexels[]): number | und
   budget -= DISPLAY_PYRAMID_MAX_TEXELS * DISPLAY_PYRAMID_BYTES_PER_TEXEL + displayTilesBytes();
 
   const window = canvasWindowBudgetBytes();
-  if (window > 0 && budget - GPU_BYTES_PER_TEXEL_SCRATCH * largest >= window) return undefined;
+  if (window > 0 && budget - GPU_BYTES_PER_TEXEL_SCRATCH * largest >= window) return analysisPeakTexels();
 
   // The new file has to fit whole. Within the scratch the open files already
   // pay for, or growing the pool with it.

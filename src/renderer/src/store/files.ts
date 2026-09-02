@@ -380,6 +380,61 @@ export function openFileTexelCounts(excludeFileId?: string): OpenFileTexels[] {
   return counts;
 }
 
+/** What a fresh analysis returns, whichever host ran it. */
+type AnalysisResult = {
+  data: Float32Array;
+  metadata: Float32Array;
+  bandOffsets: Uint32Array;
+  bandStepLog2s: Int32Array;
+  bandLengths: Uint32Array;
+  numFrames: number;
+  numBands: number;
+  numChannels: number;
+  sampleRate: number;
+  magnitudeEnergy: number;
+};
+
+/**
+ * A fresh analysis as the state the renderer paints on. The analysis returns
+ * coefficients alone, so the inverse map is built here — and only when the
+ * canvas will hold the whole file, because a windowed canvas builds its own
+ * from the view and never samples a file-sized one.
+ */
+async function spectrogramFromAnalysis(
+  result: AnalysisResult,
+  opts: { minFreq: number; bandsPerOctave: number },
+): Promise<SpectrogramData & { packedData: Float32Array }> {
+  const metadata = new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4);
+  const size = packedSizeOf(result.bandLengths);
+  const grid = blockGrid({ numBands: result.numBands, metadata }, result.numFrames, result.sampleRate);
+  const inverseMap = needsCanvasWindow(grid, canvasWindowBlocks(grid))
+    ? undefined
+    : await host.analysis.buildHistoryInverseMap(
+        new Uint32Array(result.bandOffsets),
+        new Uint32Array(result.bandLengths),
+        new Int32Array(result.bandStepLog2s),
+        size.texels,
+      );
+  return {
+    packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+    inverseMap,
+    metadata,
+    ...size,
+    numFrames: result.numFrames,
+    numBands: result.numBands,
+    numChannels: result.numChannels,
+    sampleRate: result.sampleRate,
+    minFreq: opts.minFreq,
+    bandsPerOctave: opts.bandsPerOctave,
+    magnitudeEnergy: result.magnitudeEnergy,
+    synthesisMetadata: {
+      bandOffsets: result.bandOffsets,
+      bandStepLog2s: result.bandStepLog2s,
+      bandLengths: result.bandLengths,
+    },
+  };
+}
+
 /** Logs a file's spectrogram footprint and the share of the graphics budget all open files now hold. */
 export function logFileFootprint(fileId: string, event: string, extra?: Record<string, unknown>): void {
   const file = openFiles[fileId];
@@ -432,28 +487,7 @@ async function loadRealFileViaGaborator(
     throw error;
   }
   const analysisMs = performance.now() - analysisStart;
-  const spectrogramData = {
-    packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-    inverseMap: new Float32Array(
-      result.inverseMap.buffer,
-      result.inverseMap.byteOffset,
-      result.inverseMap.byteLength / 4,
-    ),
-    metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-    ...packedSizeOf(result.bandLengths),
-    numFrames: result.numFrames,
-    numBands: result.numBands,
-    numChannels: result.numChannels,
-    sampleRate: result.sampleRate,
-    minFreq,
-    bandsPerOctave,
-    magnitudeEnergy: result.magnitudeEnergy,
-    synthesisMetadata: {
-      bandOffsets: result.bandOffsets,
-      bandStepLog2s: result.bandStepLog2s,
-      bandLengths: result.bandLengths,
-    },
-  };
+  const spectrogramData = await spectrogramFromAnalysis(result, { minFreq, bandsPerOctave });
   diag.timing("file", "analysis", analysisMs, { name: host.path.basename(filePath), bandsPerOctave });
   return updateOpenFile(fileId, {
     spectrogramData,
@@ -755,28 +789,10 @@ async function rebuildFileFromAudioNow(
 
   if (!openFiles[fileId]) return;
 
-  file.spectrogramData = {
-    packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-    inverseMap: new Float32Array(
-      result.inverseMap.buffer,
-      result.inverseMap.byteOffset,
-      result.inverseMap.byteLength / 4,
-    ),
-    metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-    ...packedSizeOf(result.bandLengths),
-    numFrames: result.numFrames,
-    numBands: result.numBands,
-    numChannels: result.numChannels,
-    sampleRate: result.sampleRate,
+  file.spectrogramData = await spectrogramFromAnalysis(result, {
     minFreq: analysisParams.minFreq,
     bandsPerOctave: analysisParams.bandsPerOctave,
-    magnitudeEnergy: result.magnitudeEnergy,
-    synthesisMetadata: {
-      bandOffsets: result.bandOffsets,
-      bandStepLog2s: result.bandStepLog2s,
-      bandLengths: result.bandLengths,
-    },
-  };
+  });
   file.audioBuffer = audioBuffer;
   file.unprojectedPaint = false;
   // The rebuild moves every frame, so the onsets this analysis found replace
@@ -1042,28 +1058,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
       });
 
-      const spectrogramData = {
-        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-        inverseMap: new Float32Array(
-          result.inverseMap.buffer,
-          result.inverseMap.byteOffset,
-          result.inverseMap.byteLength / 4,
-        ),
-        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-        ...packedSizeOf(result.bandLengths),
-        numFrames: result.numFrames,
-        numBands: result.numBands,
-        numChannels: result.numChannels,
-        sampleRate: result.sampleRate,
+      const spectrogramData = await spectrogramFromAnalysis(result, {
         minFreq: state.minFreq,
         bandsPerOctave: state.bandsPerOctave,
-        magnitudeEnergy: result.magnitudeEnergy,
-        synthesisMetadata: {
-          bandOffsets: result.bandOffsets,
-          bandStepLog2s: result.bandStepLog2s,
-          bandLengths: result.bandLengths,
-        },
-      };
+      });
 
       const fileId = generateFileId();
       const filepath = makeManagedFilePath(fileId);
@@ -1544,35 +1542,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         });
 
         updateOpenFile(stemIds[i], {
-          spectrogramData: {
-            packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-            inverseMap: new Float32Array(
-              result.inverseMap.buffer,
-              result.inverseMap.byteOffset,
-              result.inverseMap.byteLength / 4,
-            ),
-            metadata: new Float32Array(
-              result.metadata.buffer,
-              result.metadata.byteOffset,
-              result.metadata.byteLength / 4,
-            ),
-            ...packedSizeOf(result.bandLengths),
-            numFrames: result.numFrames,
-            numBands: result.numBands,
-            numChannels: result.numChannels,
-            sampleRate: result.sampleRate,
-            // From analysisParams, not the current global setting — a stem has
-            // to record the resolution it was actually analysed at, or it stops
-            // lining up with the file it was split from.
+          // From analysisParams, not the current global setting — a stem has to
+          // record the resolution it was actually analysed at, or it stops
+          // lining up with the file it was split from.
+          spectrogramData: await spectrogramFromAnalysis(result, {
             minFreq: analysisParams.minFreq,
             bandsPerOctave: analysisParams.bandsPerOctave,
-            magnitudeEnergy: result.magnitudeEnergy,
-            synthesisMetadata: {
-              bandOffsets: result.bandOffsets,
-              bandStepLog2s: result.bandStepLog2s,
-              bandLengths: result.bandLengths,
-            },
-          },
+          }),
         });
       }
 
@@ -2678,33 +2654,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           : await host.analysis.analyze(file.filePath, reanalysisParams);
         const analysisMs = performance.now() - analysisStart;
 
-        const reshaped = new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4);
-        const spectrogramData = {
-          packedData: reshaped,
-          inverseMap: new Float32Array(
-            result.inverseMap.buffer,
-            result.inverseMap.byteOffset,
-            result.inverseMap.byteLength / 4,
-          ),
-          metadata: new Float32Array(
-            result.metadata.buffer,
-            result.metadata.byteOffset,
-            result.metadata.byteLength / 4,
-          ),
-          ...packedSizeOf(result.bandLengths),
-          numFrames: result.numFrames,
-          numBands: result.numBands,
-          numChannels: result.numChannels,
-          sampleRate: result.sampleRate,
-          minFreq,
-          bandsPerOctave,
-          magnitudeEnergy: result.magnitudeEnergy,
-          synthesisMetadata: {
-            bandOffsets: result.bandOffsets,
-            bandStepLog2s: result.bandStepLog2s,
-            bandLengths: result.bandLengths,
-          },
-        };
+        const spectrogramData = await spectrogramFromAnalysis(result, { minFreq, bandsPerOctave });
+        const reshaped = spectrogramData.packedData;
 
         if (!openFiles[fileId]) return;
 

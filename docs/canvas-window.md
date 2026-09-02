@@ -19,8 +19,10 @@ canvas has to stop growing with the file.
 
 Four words, and everything else follows from them.
 
-- **File** — the whole analysed spectrogram, as packed texels. The unit
-  everything outside the renderer speaks in.
+- **File** — the whole analysed spectrogram, as a run of packed texels: the
+  band lengths laid end to end, with no width, no height and no padding. The
+  unit everything outside the renderer speaks in. A texture built from any part
+  of it picks its own fold through `packedFold`.
 - **Block** — a fixed span of the file, about two seconds, aligned to the
   coarsest band's bin grid. The file is a row of blocks. Blocks are what the
   disk store, the GPU slot cache and the undo footprints all count in.
