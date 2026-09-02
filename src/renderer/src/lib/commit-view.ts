@@ -1,20 +1,9 @@
+import { alignToBandGrid, packedViewOf, type PackedView } from "../../../main/lib/packed-view";
 import type { CommitWindow, PackedLayout } from "../../../main/lib/types";
 import { copyCompactOverlap, subtractPixelRanges } from "./pixel-ranges";
 
 /** The packed pixels a windowed commit works on, and their map back into the file. */
-export type CommitView = {
-  /** Absolute frame span the view holds; both edges sit on every band's grid. */
-  startFrame: number;
-  endFrame: number;
-  /** The view's packed pixels as [start, count] pairs, per band in band order. */
-  ranges: Uint32Array;
-  /** Texel offset of each band's span inside the gathered buffer. */
-  bandOffsets: Uint32Array;
-  /** Absolute coefficient index of each band's first gathered texel. */
-  bandK0: Uint32Array;
-  /** Texels the view holds. */
-  texels: number;
-};
+export type CommitView = PackedView;
 
 /**
  * The view a commit over `window` needs: the window plus the reach of every
@@ -27,31 +16,16 @@ export type CommitView = {
 export function commitViewOf(layout: PackedLayout, window: CommitWindow, sampleRate: number): CommitView | null {
   let maxStep = 0;
   for (let b = 0; b < layout.numBands; b++) maxStep = Math.max(maxStep, layout.bandStepLog2s[b]);
-  const quantum = 1 << maxStep;
-  const quantumSec = quantum / sampleRate;
+  const quantumSec = (1 << maxStep) / sampleRate;
   const leadSec = 0.25 + 6.0 + 0.08 + 2 * quantumSec + 0.5;
   const trailSec = Math.max(0.1 + 2.0 + quantumSec, 0.25 + 0.19 + 2 * quantumSec) + 0.5;
-  const startFrame = Math.max(0, Math.floor((window.startFrame - leadSec * sampleRate) / quantum) * quantum);
-  const endFrame = Math.min(layout.numFrames, Math.ceil((window.endFrame + trailSec * sampleRate) / quantum) * quantum);
-  if ((startFrame <= 0 && endFrame >= layout.numFrames) || endFrame <= startFrame) return null;
-
-  const ranges = new Uint32Array(layout.numBands * 2);
-  const bandOffsets = new Uint32Array(layout.numBands);
-  const bandK0 = new Uint32Array(layout.numBands);
-  let texels = 0;
-  for (let b = 0; b < layout.numBands; b++) {
-    const step = layout.bandStepLog2s[b];
-    const len = layout.bandLengths[b];
-    const k0 = Math.min(len, startFrame / 2 ** step);
-    const kEnd = endFrame >= layout.numFrames ? len : Math.min(len, endFrame / 2 ** step);
-    const count = Math.max(0, kEnd - k0);
-    bandOffsets[b] = texels;
-    bandK0[b] = k0;
-    ranges[b * 2] = layout.bandOffsets[b] + k0;
-    ranges[b * 2 + 1] = count;
-    texels += count;
-  }
-  return { startFrame, endFrame, ranges, bandOffsets, bandK0, texels };
+  const span = alignToBandGrid(
+    layout,
+    window.startFrame - leadSec * sampleRate,
+    window.endFrame + trailSec * sampleRate,
+  );
+  if ((span.startFrame <= 0 && span.endFrame >= layout.numFrames) || span.endFrame <= span.startFrame) return null;
+  return packedViewOf(layout, span.startFrame, span.endFrame);
 }
 
 /**

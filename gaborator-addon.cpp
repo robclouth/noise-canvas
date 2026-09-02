@@ -1291,7 +1291,8 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
                                                 double sampleRate,
                                                 const OnsetRegion *region = nullptr,
                                                 double *odfMaxOut = nullptr,
-                                                std::vector<float> *bandMaxOut = nullptr)
+                                                std::vector<float> *bandMaxOut = nullptr,
+                                                bool gateOnly = false)
 {
     std::vector<DetectedOnset> onsets;
     if (!packed || layout.numBands <= 0 || numFrames <= 0 || sampleRate <= 0.0)
@@ -1333,8 +1334,8 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     // and measured: the peak window, the mean before a peak and the walk down
     // an attack ahead of the span, plus the spread of the widest coefficient.
     // The whitening's warm-up ahead of that is read but not summed.
-    const double curveLeadSec = ONSET_PEAK_WINDOW_SEC + ONSET_MEAN_PRE_SEC + ONSET_RIDGE_SEARCH_SEC +
-                                ONSET_ATTACK_SEARCH_SEC + 2.0 * maxStrideSec;
+    const double curveLeadSec = ONSET_MIN_GAP_SEC + 2.0 * ONSET_PEAK_WINDOW_SEC + ONSET_MEAN_PRE_SEC +
+                                ONSET_RIDGE_SEARCH_SEC + ONSET_ATTACK_SEARCH_SEC + 2.0 * maxStrideSec;
     const double curveStartSec = region ? std::max(readStartSec, emitStartSec - curveLeadSec) : 0.0;
     // Whitened values are kept from a stride's reach ahead of the curves, where
     // the max filter starts reading them; before that the warm-up only has to
@@ -1638,7 +1639,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     const double odfGate = region ? std::max(maxOdf, region->odfReference) : maxOdf;
     if (odfMaxOut)
         *odfMaxOut = odfGate;
-    if (odfGate <= 0.0)
+    if (odfGate <= 0.0 || gateOnly)
         return onsets;
 
     // Smoothed for choosing which bin the top of an attack is, kept raw for
@@ -1674,8 +1675,13 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     // outside can still belong to an event just inside. After it, because how
     // big an event is depends on where the next one starts, and the last event
     // in the span would otherwise be measured as if nothing followed.
+    // Far enough back to find the last peak a whole-file pass would have
+    // accepted before this span, so the minimum gap between events carries into
+    // it rather than starting again at the edge.
     const int64_t pickLo =
-        region ? std::max<int64_t>(0, emitLo - (int64_t)std::llround((ONSET_RIDGE_SEARCH_SEC +
+        region ? std::max<int64_t>(0, emitLo - (int64_t)std::llround((ONSET_MIN_GAP_SEC +
+                                                                     ONSET_PEAK_WINDOW_SEC +
+                                                                     ONSET_RIDGE_SEARCH_SEC +
                                                                      ONSET_ATTACK_SEARCH_SEC) /
                                                                     ONSET_BIN_SEC))
                : 0;
@@ -1870,6 +1876,24 @@ public:
                 }
                 hasRegion = true;
             }
+            gateOnly = options.Has("gateOnly") && options.Get("gateOnly").ToBoolean().Value();
+            // The packed buffer holds only the coefficients of the region's own
+            // span, so the pass needs the map back into the file. Reading a
+            // view without a bandMax reference would judge every band by what
+            // the view alone holds.
+            if (options.Has("view") && options.Get("view").IsObject())
+            {
+                Napi::Object viewJs = options.Get("view").As<Napi::Object>();
+                Napi::Uint32Array offsets = viewJs.Get("offsets").As<Napi::Uint32Array>();
+                Napi::Uint32Array lens = viewJs.Get("lens").As<Napi::Uint32Array>();
+                Napi::Float64Array k0 = viewJs.Get("k0").As<Napi::Float64Array>();
+                viewOffsets.assign(offsets.Data(), offsets.Data() + offsets.ElementLength());
+                viewLens.assign(lens.Data(), lens.Data() + lens.ElementLength());
+                viewK0.resize(k0.ElementLength());
+                for (size_t i = 0; i < viewK0.size(); ++i)
+                    viewK0[i] = (int64_t)k0[i];
+                hasView = true;
+            }
         }
 
         // Held by reference and read from its backing store on the worker
@@ -1903,8 +1927,14 @@ public:
         layout.bandOffsets = bandOffsets.data();
         layout.bandLengths = bandLengths.data();
         layout.bandStepLog2s = bandStepLog2s.data();
+        if (hasView)
+        {
+            layout.viewOffsets = viewOffsets.data();
+            layout.viewLens = viewLens.data();
+            layout.viewK0 = viewK0.data();
+        }
         onsets = computeOnsets(packed, packedFloats, layout, numFrames, sampleRate, hasRegion ? &region : nullptr,
-                               &odfMax, &bandMaxOut);
+                               &odfMax, &bandMaxOut, gateOnly);
     }
 
     void OnOK() override
@@ -1946,6 +1976,11 @@ private:
     Napi::Promise::Deferred deferred;
     OnsetRegion region{0.0, 0.0, 0.0, nullptr, 0};
     bool hasRegion = false;
+    bool hasView = false;
+    bool gateOnly = false;
+    std::vector<uint32_t> viewOffsets;
+    std::vector<uint32_t> viewLens;
+    std::vector<int64_t> viewK0;
     std::vector<float> bandMaxIn;
     std::vector<float> bandMaxOut;
     double odfMax = 0.0;
