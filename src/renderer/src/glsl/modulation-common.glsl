@@ -106,10 +106,12 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
   }
 }
 
-// Brush-space UV for phaseMode == 1: 0..1 across the brush footprint, following
-// the brush around the canvas edge when that axis wraps.
+// Brush-space UV for phaseMode == 1: the offset from the brush's bottom-left
+// corner, following the brush around the canvas edge when that axis wraps. The
+// offset keeps canvas scale, so a rate or a loop measures the same span in
+// either phase mode and the brush only moves the origin.
 vec2 brushSpaceUv(vec2 uv) {
-  return getEffectiveBrushOffset(uv) / max(brushSizeUv, vec2(0.0001));
+  return getEffectiveBrushOffset(uv);
 }
 
 // Snaps a modulator's raw 0..1 output to `steps` evenly spaced levels, then
@@ -210,7 +212,10 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   float s = sin(rot);
   float c = cos(rot);
   mat2 m = mat2(c, -s, s, c);
-  vec2 rotatedUv = m * (adjustedUv - 0.5) + 0.5;
+  // Rotate about the middle of whatever the pattern is pinned to: the canvas,
+  // or the brush footprint in brush phase mode.
+  vec2 pivot = modulator.modulatorPhaseMode == 1 ? brushSizeUv * 0.5 : vec2(0.5);
+  vec2 rotatedUv = m * (adjustedUv - pivot) + pivot;
 
   vec2 pos = rotatedUv * rates;
 
