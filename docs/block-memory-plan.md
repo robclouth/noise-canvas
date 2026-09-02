@@ -1196,7 +1196,51 @@ the effects registry:
 No memory change; this phase removes the Phase 3 gate so the ~0.9 GB figure
 covers the full effect set.
 
-Status: not started.
+### 4.1 — what each gated effect really reads (2026-09-02)
+
+Measured against the shaders, not read off them. `effect-reach-measured.test.ts`
+paints a dab on a filled brush, puts a one-bin impulse a known distance outside
+it, and paints again; the furthest distance whose impulse changes the dab is
+the reach. A blur, whose reach `effect-reach.ts` already declares, is the
+control that says the measurement can be believed — it finds the smear's taps
+to within one probe step. Every reading below is pinned by a test, and each
+test fails when the shader's reach is changed.
+
+| effect    | reads outside the dab                | scales with                |
+| --------- | ------------------------------------ | -------------------------- |
+| sort      | nothing                              | —                          |
+| transmute | up to Amount, in beats               | Amount, when To is Time    |
+| attract   | up to Smooth Time, in beats          | Smooth Time                |
+| evolve    | over a quarter of the canvas         | the settings and the sound |
+| convolve  | not measured yet — needs a picked IR | the IR's length × Rate     |
+
+What that means for each:
+
+- **Sort is not a global sort.** It is an odd–even transposition, four passes,
+  each swapping a bin with the one beside it and only when that one is inside
+  the brush as well. The measurement finds no read outside the dab at all. The
+  STOP-ASK the plan carried for it does not arise: there is nothing to stream
+  and no range to cap.
+- **Transmute** reads elsewhere only on the To = Time route, and only as far as
+  Amount says, in beats. Doubling Amount doubles the measured reach.
+- **Attract** gathers energy only from bins the brush covers; what leaves the
+  brush is the field it reads to decide where that energy lands, and the
+  kernel holds that to Smooth Time either side. Widening the window the gather
+  covers widens the measured reach, and the test catches it.
+- **Evolve** is the one that cannot be served. Its neighbourhood and drift are
+  fractions of the canvas rather than of the file, so the same settings mean a
+  different span through a window; and the advection follows the magnitude
+  gradient, so how far it reads depends on the sound. Measured over a quarter
+  of the canvas either side at full settings.
+
+So four of the five come off the gate with a reach entry, not with a streaming
+rewrite. **Next: measure convolve with an IR, then move sort, transmute,
+attract and convolve out of `WHOLE_FILE_EFFECTS` into `effect-reach.ts`.**
+Evolve is the STOP-ASK — putting its offsets on the file's clock changes what
+existing brushes do on long files, and Rob picks whether that or the gate is
+the right answer.
+
+Status: 4.1 in progress — four of five effects measured.
 
 ---
 
