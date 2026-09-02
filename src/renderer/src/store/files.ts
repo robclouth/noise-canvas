@@ -37,7 +37,7 @@ import {
   type OutputLevels,
 } from "../lib/output-levels";
 import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type AudioStateMeta } from "../lib/audio-hop";
-import { bandLengthsTexels } from "../lib/band-layout";
+import { bandLengthsTexels, type BandLayout } from "../lib/band-layout";
 import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { reorderFileIds } from "../lib/file-reorder";
@@ -395,10 +395,30 @@ type AnalysisResult = {
 };
 
 /**
+ * The synthesis inverse map for a file's whole layout, or nothing when the
+ * canvas will hold a window: a windowed canvas builds its own from the view
+ * and never samples a file-sized one, which at ten minutes is half a gigabyte.
+ */
+async function wholeFileInverseMap(
+  layout: BandLayout,
+  numFrames: number,
+  sampleRate: number,
+  synthesis: { bandOffsets: Uint32Array; bandStepLog2s: Int32Array; bandLengths: Uint32Array },
+  texels: number,
+): Promise<Float32Array | undefined> {
+  const grid = blockGrid(layout, numFrames, sampleRate);
+  if (needsCanvasWindow(grid, canvasWindowBlocks(grid))) return undefined;
+  return await host.analysis.buildHistoryInverseMap(
+    new Uint32Array(synthesis.bandOffsets),
+    new Uint32Array(synthesis.bandLengths),
+    new Int32Array(synthesis.bandStepLog2s),
+    texels,
+  );
+}
+
+/**
  * A fresh analysis as the state the renderer paints on. The analysis returns
- * coefficients alone, so the inverse map is built here — and only when the
- * canvas will hold the whole file, because a windowed canvas builds its own
- * from the view and never samples a file-sized one.
+ * coefficients alone, so the inverse map is built here.
  */
 async function spectrogramFromAnalysis(
   result: AnalysisResult,
@@ -406,15 +426,13 @@ async function spectrogramFromAnalysis(
 ): Promise<SpectrogramData & { packedData: Float32Array }> {
   const metadata = new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4);
   const size = packedSizeOf(result.bandLengths);
-  const grid = blockGrid({ numBands: result.numBands, metadata }, result.numFrames, result.sampleRate);
-  const inverseMap = needsCanvasWindow(grid, canvasWindowBlocks(grid))
-    ? undefined
-    : await host.analysis.buildHistoryInverseMap(
-        new Uint32Array(result.bandOffsets),
-        new Uint32Array(result.bandLengths),
-        new Int32Array(result.bandStepLog2s),
-        size.texels,
-      );
+  const inverseMap = await wholeFileInverseMap(
+    { numBands: result.numBands, metadata },
+    result.numFrames,
+    result.sampleRate,
+    result,
+    size.texels,
+  );
   return {
     packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
     inverseMap,
@@ -688,12 +706,7 @@ export function getFileIdByPath(filePath: string): string | undefined {
 export async function deriveSpectrogramData(base: SpectrogramData, packedData: Float32Array): Promise<SpectrogramData> {
   const inverseMap =
     base.inverseMap ??
-    (await host.analysis.buildHistoryInverseMap(
-      new Uint32Array(base.synthesisMetadata.bandOffsets),
-      new Uint32Array(base.synthesisMetadata.bandLengths),
-      new Int32Array(base.synthesisMetadata.bandStepLog2s),
-      base.texels,
-    ));
+    (await wholeFileInverseMap(base, base.numFrames, base.sampleRate, base.synthesisMetadata, base.texels));
   return {
     ...base,
     packedData,

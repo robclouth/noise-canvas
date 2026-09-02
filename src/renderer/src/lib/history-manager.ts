@@ -6,6 +6,9 @@ import type { PhaseTurns } from "../../../main/lib/types";
 import { hasPhaseTurns, phaseTurnRanges, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
 import { bandLengthsTexels } from "./band-layout";
+import { blockGrid } from "./block-grid";
+import { needsCanvasWindow } from "./canvas-window";
+import { canvasWindowBlocks } from "./gpu-budget";
 import type { BlockStore } from "./block-store";
 import {
   blockStoreDirectory,
@@ -229,12 +232,18 @@ function synthesisMetadataFromSpectrogram(s: SpectrogramData): NonNullable<Histo
  * half a megabyte to save a loop that runs in a few milliseconds.
  */
 export async function deriveSideData(node: HistoryNode): Promise<{
-  inverseMap: Float32Array;
+  inverseMap: Float32Array | undefined;
   metadata: Float32Array;
 }> {
-  const { texels } = node.dimensions;
+  const { texels, numFrames, sampleRate } = node.dimensions;
   const layout = node.synthesisMetadata;
   if (!layout) throw new Error(`HistoryManager: node ${node.id} has no band layout`);
+
+  const metadata = bandMetadataOf(node);
+  // A canvas holding a window builds its own inverse map from the view, so the
+  // file-sized one is not made for it.
+  const grid = blockGrid({ numBands: node.dimensions.numBands, metadata }, numFrames, sampleRate);
+  if (needsCanvasWindow(grid, canvasWindowBlocks(grid))) return { inverseMap: undefined, metadata };
 
   // The inverse map has an entry per packed pixel, so the addon fills it; the
   // metadata texture is four floats per band and stays here.
@@ -245,7 +254,7 @@ export async function deriveSideData(node: HistoryNode): Promise<{
     texels,
   );
 
-  return { inverseMap, metadata: bandMetadataOf(node) };
+  return { inverseMap, metadata };
 }
 
 /** The metadata texture rows of a band layout. */
