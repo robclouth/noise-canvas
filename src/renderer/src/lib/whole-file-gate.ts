@@ -7,11 +7,10 @@ import type { State } from "@renderer/store/types";
 /**
  * Effects that read the file rather than a span around the brush, so a canvas
  * holding a window of the file cannot serve them. Convolve with no impulse
- * response picked reads the canvas from its first frame, and Evolve's
- * neighbourhood, drift and advection are fractions of the canvas that the
- * sound itself moves. The rest declare a reach in `effect-reach.ts`.
+ * response picked reads the canvas from its first frame. The rest declare a
+ * reach in `effect-reach.ts`.
  */
-export const WHOLE_FILE_EFFECTS: ReadonlySet<string> = new Set(["convolve", "evolve"]);
+export const WHOLE_FILE_EFFECTS: ReadonlySet<string> = new Set(["convolve"]);
 
 const TIME_WRAP = "Wrap in time";
 const FULL_BRUSH = "A brush the length of the file";

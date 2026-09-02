@@ -1,5 +1,6 @@
 import { buildShapeTable, type CloneShapeKey } from "@renderer/effects/clone-shapes";
 import type { EffectType } from "@renderer/effects/types";
+import { EVOLVE_SCALE_FULL_BEATS } from "@renderer/lib/constants";
 import { modulationWeight } from "@renderer/lib/static-modulation";
 import { originFraction, resolveBrushFootprint } from "@renderer/lib/utils";
 import { getNumberParameterDef } from "@renderer/parameters";
@@ -47,6 +48,10 @@ const ATTRACT_MAP_FIRST_MODULATOR = 3;
 // The field lattice rounds the kernel up to its next tap, and a tap is a
 // quarter of the smoothing, so the read passes the smoothing by a little.
 const ATTRACT_KERNEL_TAPS = 2;
+
+// The gradient taps read one neighbourhood out, and the shader holds the flow
+// step to eight more.
+const EVOLVE_REACH_NEIGHBOURHOODS = 9;
 
 type ValueRange = { lo: number; hi: number };
 
@@ -181,6 +186,16 @@ function attractReach(effect: State, ctx: ReachContext): TimeReach {
   return { before: span, after: span };
 }
 
+/**
+ * Evolve reads a neighbourhood around each point and flows it upstream, both
+ * measured against the neighbourhood Scale sets.
+ */
+function evolveReach(effect: State, ctx: ReachContext): TimeReach {
+  const beats = (widest(stateRange(effect, "evolveScaleX")) / 100) * EVOLVE_SCALE_FULL_BEATS;
+  const span = EVOLVE_REACH_NEIGHBOURHOODS * beats * (60 / ctx.bpm);
+  return { before: span, after: span };
+}
+
 /** The brush's own span on each axis, in file seconds and in pitch UV. */
 function brushSpan(step: State, ctx: ReachContext): { seconds: number; pitchUv: number } {
   const footprint = resolveBrushFootprint({
@@ -217,6 +232,7 @@ export function brushReaches(state: State, ctx: ReachContext): StepReach[] {
       else if (item.effect === "transform") reach = transformReach(effect, ctx, span.seconds, span.pitchUv);
       else if (item.effect === "transmute") reach = transmuteReach(effect, ctx);
       else if (item.effect === "attract") reach = attractReach(effect, ctx);
+      else if (item.effect === "evolve") reach = evolveReach(effect, ctx);
       if (reach.before <= 0 && reach.after <= 0) continue;
       out.push({ effect: item.effect, step: index, brushSeconds: span.seconds, reach });
     }

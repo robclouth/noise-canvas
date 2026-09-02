@@ -350,25 +350,38 @@ describe("what a gated effect really reads", () => {
     expect(half).toBeGreaterThan(quarter);
   });
 
-  it("reads a quarter of the canvas away when Evolve flows", async () => {
-    // Evolve's offsets are fractions of the canvas, and the advection follows
-    // the magnitude gradient, so how far it reads depends on the sound as well
-    // as on the settings. This is why a window cannot serve it.
-    const state = stateFor("evolve", {
-      evolveScaleX: 100,
-      evolveScaleY: 0,
-      evolveFlow: 100,
-      evolveDriftX: 100,
-      evolveDriftY: 0,
-      evolveSpread: 100,
-      evolveGrow: 0,
-      evolveSwirl: 0,
-      evolveDecay: 0,
-      evolveEdgeMode: 1,
-    });
-    const measured = await measureReach(state, Math.round(NUM_FRAMES / 3), 3 * PROBE_STEP_FRAMES);
-    expect(measured.before).toBeGreaterThan(NUM_FRAMES / 8);
-    expect(measured.after).toBeGreaterThan(NUM_FRAMES / 8);
+  it("reads the neighbourhood Evolve is scaled to, in beats", async () => {
+    // Scale sets the neighbourhood in beats and the flow step is measured
+    // against it, so the whole read follows the file's clock rather than a
+    // fraction of whatever the canvas holds.
+    const at = async (scale: number): Promise<{ measured: number; declared: number }> => {
+      const state = stateFor("evolve", {
+        evolveScaleX: scale,
+        evolveScaleY: 0,
+        evolveFlow: 100,
+        evolveDriftX: 100,
+        evolveDriftY: 0,
+        evolveSpread: 100,
+        evolveGrow: 0,
+        evolveSwirl: 0,
+        evolveDecay: 0,
+        evolveEdgeMode: 1,
+      });
+      const declared = strokeReach(state, reachContext).after * SAMPLE_RATE;
+      const measured = await measureReach(state, Math.round(declared) + PROBE_STEP_FRAMES, 3 * PROBE_STEP_FRAMES);
+      return { measured: Math.max(measured.before, measured.after), declared };
+    };
+    const quarter = await at(25);
+    const half = await at(50);
+
+    // The canvas has to hold what the effect reads, so what it reads must stay
+    // inside what it declares — and the declaration must not be idle either.
+    for (const { measured, declared } of [quarter, half]) {
+      expect(measured).toBeLessThanOrEqual(declared);
+      expect(measured).toBeGreaterThan(declared / 2);
+    }
+    // Twice the scale, twice the read.
+    expect(Math.abs(half.measured - 2 * quarter.measured)).toBeLessThanOrEqual(3 * PROBE_STEP_FRAMES);
   });
 
   it("reads the head of the file when Convolve has no impulse response of its own", async () => {

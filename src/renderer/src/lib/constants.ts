@@ -2,6 +2,10 @@ import { BASE_HUES } from "./colors";
 
 export const MULTIPLIER_UNIT = "x";
 
+/** The neighbourhood Evolve reads at full Scale, either side of each point. */
+export const EVOLVE_SCALE_FULL_BEATS = 1;
+export const EVOLVE_SCALE_FULL_SEMIS = 4;
+
 // Most steps one brush can hold. The stroke scratch pool sizes its per-step
 // mask allocation against this, and the GPU budget charges for that worst case.
 export const MAX_STEPS = 5;

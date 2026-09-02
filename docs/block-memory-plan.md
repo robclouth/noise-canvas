@@ -1257,14 +1257,36 @@ duration, where the step it builds is added to a source UV and must convert
 against the span the source textures hold (`docs/canvas-window.md`, rule 11).
 It was wrong through a window, and wrong across two files of different lengths.
 
-**Next: convolve.** With a response picked it reads that other file, which a
-source window already serves, and reads the painted file only as far as IR Size
-× Rate × the band's stride; so the gate should ask whether the response is Self
-rather than whether the effect is present. Evolve stays the STOP-ASK — putting
-its offsets on the file's clock changes what existing brushes do on long files,
-and Rob picks whether that or the gate is the right answer.
+### 4.3 — Evolve moves onto the file's clock (2026-09-02)
 
-Status: 4.1 done, 4.2 done for three of the five effects.
+Rob's call: a fraction of the canvas was never right. It was a fraction of the
+**file** before the window existed, so the same brush read half a second of a
+ten-second file and fifteen seconds of a five-minute one.
+
+- **Scale ↔ is beats, Scale ↕ is semitones.** Full scale is one beat and four
+  semitones, converted against the span the source textures hold. The controls
+  stay percentages of that full scale, as the blur's Amount does, so no stored
+  brush changes value.
+- **Flow is measured in neighbourhoods.** The gradient still says which way and
+  how hard; the neighbourhood says how far. At full Scale on a ten-second file
+  at 120 bpm the step is exactly what it was, which is where the anchor came
+  from.
+- **The step is capped at eight neighbourhoods.** The gradient grows with the
+  sound, so without a cap a loud passage carries the read anywhere and no reach
+  can be declared. The cap only bites on material louder than the old formula
+  ever handled well.
+
+Evolve declares nine neighbourhoods and comes off the gate. Measured: the read
+stays inside what it declares, and doubling Scale doubles it.
+
+`WHOLE_FILE_EFFECTS` is now **convolve alone**.
+
+**Next: convolve.** Rob picked the window: with a response file picked, that
+file gets a window of its own, placed by the frames the taps ask for, exactly
+as a brush painting from another file already does. The gate then asks whether
+the response is Self rather than whether the effect is present.
+
+Status: 4.1 done, 4.2 done, 4.3 done. Convolve is the last one.
 
 ---
 

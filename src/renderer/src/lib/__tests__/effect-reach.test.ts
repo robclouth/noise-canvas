@@ -198,6 +198,22 @@ describe("attract reach", () => {
   });
 });
 
+describe("evolve reach", () => {
+  it("reads nine neighbourhoods, and the neighbourhood is beats", () => {
+    // Full Scale is a beat, so half of it is a quarter of a second here, and
+    // the gradient taps plus the flow step cover nine of those.
+    expect(reachOf(withEffect("evolve", { evolveScaleX: 50 }))).toEqual({ before: 2.25, after: 2.25 });
+  });
+
+  it("reads nothing along time with no neighbourhood to flow through", () => {
+    expect(reachOf(withEffect("evolve", { evolveScaleX: 0, evolveFlow: 100 }))).toEqual({ before: 0, after: 0 });
+  });
+
+  it("takes the scale's sign off, since the neighbourhood is a width", () => {
+    expect(reachOf(withEffect("evolve", { evolveScaleX: -50 }))).toEqual({ before: 2.25, after: 2.25 });
+  });
+});
+
 describe("the brush's reach as a whole", () => {
   it("finds nothing in effects that read only the texel they write", () => {
     expect(reachOf(withEffect("dynamics"), withEffect("synthesize"))).toEqual({ before: 0, after: 0 });
