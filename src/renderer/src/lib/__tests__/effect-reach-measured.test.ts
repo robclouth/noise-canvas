@@ -153,9 +153,10 @@ describe("what a gated effect really reads", () => {
   let scaleLut: DataTexture;
 
   beforeEach(async () => {
-    const [attract, blur, evolve, sort, transmute, passthrough] = await Promise.all([
+    const [attract, blur, convolve, evolve, sort, transmute, passthrough] = await Promise.all([
       import("../../effects/attract-effect"),
       import("../../effects/blur-effect"),
+      import("../../effects/convolve-effect"),
       import("../../effects/evolve-effect"),
       import("../../effects/sort-effect"),
       import("../../effects/transmute-effect"),
@@ -164,6 +165,7 @@ describe("what a gated effect really reads", () => {
     effects = {
       attract: attract.attractEffect,
       blur: blur.blurEffect,
+      convolve: convolve.convolveEffect,
       evolve: evolve.evolveEffect,
       sort: sort.sortEffect,
       transmute: transmute.transmuteEffect,
@@ -367,6 +369,23 @@ describe("what a gated effect really reads", () => {
     const measured = await measureReach(state, Math.round(NUM_FRAMES / 3), 3 * PROBE_STEP_FRAMES);
     expect(measured.before).toBeGreaterThan(NUM_FRAMES / 8);
     expect(measured.after).toBeGreaterThan(NUM_FRAMES / 8);
+  });
+
+  it("reads the head of the file when Convolve has no impulse response of its own", async () => {
+    // With no file picked, the impulse response is the canvas itself, read
+    // from its first frame: tap k takes IR frame k whatever the dab covers.
+    const state = stateFor("convolve", {
+      convolveIrSize: 64,
+      convolveIrRate: 1,
+      convolveIrTimeOffset: 0,
+      convolveGainDb: 0,
+      convolveIrPitchShift: 0,
+      convolveEdgeMode: 1,
+    });
+    const plain = await paint(state, null);
+    expect(dabChanged(plain, await paint(state, 8))).toBe(true);
+    // The far end of the file is past every tap, so the read has an end.
+    expect(dabChanged(plain, await paint(state, NUM_FRAMES - 8))).toBe(false);
   });
 
   it("reads nothing outside the dab when it sorts", async () => {

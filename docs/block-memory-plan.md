@@ -1211,8 +1211,8 @@ test fails when the shader's reach is changed.
 | sort      | nothing                              | —                          |
 | transmute | up to Amount, in beats               | Amount, when To is Time    |
 | attract   | up to Smooth Time, in beats          | Smooth Time                |
+| convolve  | the head of the file, with no IR set | IR Size × Rate, past that  |
 | evolve    | over a quarter of the canvas         | the settings and the sound |
-| convolve  | not measured yet — needs a picked IR | the IR's length × Rate     |
 
 What that means for each:
 
@@ -1227,20 +1227,27 @@ What that means for each:
   brush is the field it reads to decide where that energy lands, and the
   kernel holds that to Smooth Time either side. Widening the window the gather
   covers widens the measured reach, and the test catches it.
+- **Convolve** with no impulse response picked uses the canvas itself as the
+  response, and reads it from the file's first frame: tap k takes IR frame k
+  wherever the dab sits. That is a whole-file read at any setting. With a file
+  picked, the response comes out of that file — which a source window already
+  serves — and what is read of the painted file is the taps alone, IR Size ×
+  Rate × the band's stride.
 - **Evolve** is the one that cannot be served. Its neighbourhood and drift are
   fractions of the canvas rather than of the file, so the same settings mean a
   different span through a window; and the advection follows the magnitude
   gradient, so how far it reads depends on the sound. Measured over a quarter
   of the canvas either side at full settings.
 
-So four of the five come off the gate with a reach entry, not with a streaming
-rewrite. **Next: measure convolve with an IR, then move sort, transmute,
-attract and convolve out of `WHOLE_FILE_EFFECTS` into `effect-reach.ts`.**
-Evolve is the STOP-ASK — putting its offsets on the file's clock changes what
-existing brushes do on long files, and Rob picks whether that or the gate is
-the right answer.
+So three of the five come off the gate with a reach entry rather than a
+streaming rewrite, and convolve comes off it whenever an impulse response is
+picked. **Next: move sort, transmute and attract out of `WHOLE_FILE_EFFECTS`
+into `effect-reach.ts`, and gate convolve on the response being Self rather
+than on the effect being present.** Evolve is the STOP-ASK — putting its
+offsets on the file's clock changes what existing brushes do on long files, and
+Rob picks whether that or the gate is the right answer.
 
-Status: 4.1 in progress — four of five effects measured.
+Status: 4.1 done — every gated effect measured, nothing un-gated yet.
 
 ---
 
