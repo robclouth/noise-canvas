@@ -1069,6 +1069,57 @@ What the measurement says:
 
 Status: in progress.
 
+### What the window costs the interaction (2026-09-02)
+
+Memory was the only thing measured until now. This is the CPU side: the same
+gestures a user makes, timed against `dev`.
+
+Method: `cpu-bench.mjs` drives the built app through idle, a 240-move hover, a
+zoom in, a wheel pan, a right-button drag pan, a zoom out, a 60-dab stroke and
+the commit. It reads main-thread task time from CDP `Performance.getMetrics`
+either side of each gesture, and frame cadence from a rAF sampler in the page.
+A run whose frames stop arriving is dropped, not reported — the display going
+to sleep stops rAF and silently flatters the numbers.
+
+The brush matters more than anything else here. A fresh profile starts on a
+brush whose effect chain is empty, and a chain of nothing measures nothing;
+these runs load the factory blur brush through the picker first.
+
+180 s file — the longest `dev` opens on this machine. Main-thread task time in
+milliseconds, median of two runs.
+
+| gesture          | dev  | branch, window off | branch, window on |
+| ---------------- | ---- | ------------------ | ----------------- |
+| idle, 3 s        | 78   | 45                 | 57                |
+| hover, 240 moves | 740  | 630                | **4670**          |
+| zoom in, 10      | 104  | 73                 | 263               |
+| pan wheel, 60    | 308  | 263                | 640               |
+| pan drag, 100    | 709  | 612                | 793               |
+| zoom out, 10     | 70   | 73                 | 176               |
+| paint, 60 dabs   | 274  | 174                | 926               |
+| commit           | 508  | **2012**           | **1796**          |
+| graphics budget  | 68 % | 72 %               | 21 %              |
+
+- **The branch costs nothing by itself.** With the window off it matches `dev`
+  or beats it on every navigation gesture.
+- **The window is the whole cost, and hover is its worst case** — 7× `dev`,
+  with p95 frame time 20.9 ms against 9.1 and ten slow frames in a five-second
+  sweep. `file-renderer.tsx` aims the canvas at the pointer on every move,
+  painting or not, so at whole-file zoom the pointer crosses a two-second block
+  every few pixels and one sweep pages the file through sixteen slots. Zoomed
+  in, where the detail work happens, the cost falls to 1.3–2.4×. Holding the
+  window still while the pointer only hovers is the first thing to try.
+- **The commit is 3.5× `dev` and the window is not why** — it is the same with
+  the window off. Not diagnosed.
+- `dev` refuses this machine anything past 248 seconds. Above that there is no
+  comparison to draw.
+
+Found while driving it: a long stroke threw "the block has no slot" and died.
+Two claims could take a slot from the window the canvas was about to compose —
+a read the canvas had stopped waiting for, and a block leaving the window
+folding its paint back on the way out. Both pin the newest window now, and both
+are pinned by tests in `canvas-window.test.ts`.
+
 ---
 
 ## Phase 4 — whole-file effects inside the budget (1–2 weeks)
