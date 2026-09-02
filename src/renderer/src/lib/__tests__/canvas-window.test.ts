@@ -33,6 +33,7 @@ import {
   pixelRangeCount,
 } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import { packedFold, padToFold } from "../constants";
 
 const SAMPLE_RATE = 8000;
 const BLOCK_SECONDS = 0.3;
@@ -161,8 +162,9 @@ describe("a canvas window that follows the brush", () => {
     }
     grid = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, SAMPLE_RATE, BLOCK_SECONDS);
 
-    const originalPackedDataTex = packedTexture(packed, data.textureWidth, data.textureHeight, "RGBA32F");
-    const inverseMapTex = packedTexture(data.inverseMap!, data.textureWidth, data.textureHeight, "RG32F");
+    const fold = packedFold(data.texels);
+    const originalPackedDataTex = packedTexture(padToFold(packed, data.texels, 4), fold.width, fold.height, "RGBA32F");
+    const inverseMapTex = packedTexture(padToFold(data.inverseMap!, data.texels, 2), fold.width, fold.height, "RG32F");
     const metadataTex = packedTexture(data.metadata, data.numBands, 1, "RGBA32F");
     const placeholderTexture = packedTexture(new Float32Array(4), 1, 1, "RGBA32F");
     disposers.push(() => {

@@ -30,6 +30,7 @@ import { brushEnvelopeShape } from "../brush-envelope";
 import { wholeFileCanvasView } from "../canvas-view";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
+import { packedFold, padToFold } from "../constants";
 
 // Mock shaders check brush bounds in packed UV space, which doesn't align with
 // the unpacked band-index rows and footprint the real brush occupies. Draw the
@@ -354,9 +355,16 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData): {
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
 } {
-  const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+  const { packedData, inverseMap, metadata, texels, numBands } = spectrogramData;
+  const { width: textureWidth, height: textureHeight } = packedFold(texels);
 
-  const originalPackedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+  const originalPackedDataTex = new DataTexture(
+    padToFold(packedData!, texels, 4),
+    textureWidth,
+    textureHeight,
+    RGBAFormat,
+    FloatType,
+  );
   originalPackedDataTex.internalFormat = "RGBA32F";
   originalPackedDataTex.minFilter = NearestFilter;
   originalPackedDataTex.magFilter = NearestFilter;
@@ -364,7 +372,13 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData): {
   originalPackedDataTex.wrapT = ClampToEdgeWrapping;
   originalPackedDataTex.needsUpdate = true;
 
-  const inverseMapTex = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+  const inverseMapTex = new DataTexture(
+    padToFold(inverseMap!, texels, 2),
+    textureWidth,
+    textureHeight,
+    RGFormat,
+    FloatType,
+  );
   inverseMapTex.internalFormat = "RG32F";
   inverseMapTex.minFilter = NearestFilter;
   inverseMapTex.magFilter = NearestFilter;
@@ -689,7 +703,7 @@ describe("StrokeRenderer", () => {
       const before = new Float32Array(await renderer.getFBOData());
       const width = spectrogramData.packedTextureSize.x;
       // Disjoint ranges: mid-row, crossing a row boundary, and a long run.
-      const ranges = new Uint32Array([5, 10, width * 3 - 4, 8, width * 7 + 20, width]);
+      const ranges = new Uint32Array([5, 10, width * 2 - 4, 8, width * 3 + 20, width - 20]);
       const modified = modifyRanges(before, ranges);
 
       renderer.patchFBOData(modified, ranges);
@@ -703,7 +717,7 @@ describe("StrokeRenderer", () => {
       renderer.initialize();
       const before = new Float32Array(await renderer.getFBOData());
       const width = spectrogramData.packedTextureSize.x;
-      const ranges = new Uint32Array([5, 10, width * 3 - 4, 8, width * 7 + 20, width]);
+      const ranges = new Uint32Array([5, 10, width * 2 - 4, 8, width * 3 + 20, width - 20]);
       const modified = modifyRanges(before, ranges);
 
       renderer.patchFBODataCompact(gatherPixelRanges(modified, ranges), ranges);
@@ -736,7 +750,7 @@ describe("StrokeRenderer", () => {
       renderer.initialize();
       const before = new Float32Array(await renderer.getFBOData());
       const width = spectrogramData.packedTextureSize.x;
-      const ranges = new Uint32Array([5, 10, width * 3 - 4, 8, width * 7 + 20, width]);
+      const ranges = new Uint32Array([5, 10, width * 2 - 4, 8, width * 3 + 20, width - 20]);
       const modified = modifyRanges(before, ranges);
       renderer.patchFBOData(modified, ranges);
 
@@ -765,7 +779,7 @@ describe("StrokeRenderer", () => {
 
       const c0 = Math.fround(2 * Math.PI * 3);
       const c1 = Math.fround(-2 * Math.PI);
-      const turns = [5, 10, c0, c1, width * 3 - 4, 8, c0, 0, width * 7 + 20, width, 0, c1];
+      const turns = [5, 10, c0, c1, width * 2 - 4, 8, c0, 0, width * 3 + 20, width - 20, 0, c1];
       const expected = new Float32Array(seeded);
       for (let i = 0; i < turns.length; i += 4) {
         for (let p = turns[i]; p < turns[i] + turns[i + 1]; p++) {
@@ -2096,7 +2110,7 @@ describe("StrokeRenderer", () => {
       expect(rows).not.toBeNull();
       expect(rows!.rowStart).toBeGreaterThanOrEqual(0);
       expect(rows!.rowCount).toBeGreaterThan(0);
-      expect(rows!.rowCount).toBeLessThan(spectrogramData.textureHeight);
+      expect(rows!.rowCount).toBeLessThan(packedFold(spectrogramData.texels).height);
     });
 
     it("should return null for a brush covering most bands", () => {

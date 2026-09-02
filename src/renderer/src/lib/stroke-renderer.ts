@@ -51,7 +51,7 @@ import {
 import type { CommittedSource } from "./display-decimate";
 import { DisplayPyramid } from "./display-pyramid-textures";
 import { DisplayTileRing } from "./display-tiles-textures";
-import { ATTRACT_MODULATOR_MAP_START } from "./constants";
+import { ATTRACT_MODULATOR_MAP_START, padToFold } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
 import {
@@ -1952,12 +1952,12 @@ export class StrokeRenderer {
    * Set the FBO data from an external source (e.g., for undo/redo).
    */
   setFBOData(data: Float32Array): void {
-    const { textureWidth, textureHeight } = this.view;
+    const { textureWidth, textureHeight, texels } = this.view;
 
     this.releaseRollback();
     this.pingPong = 0;
 
-    const dataTex = new DataTexture(data, textureWidth, textureHeight, RGBAFormat, FloatType);
+    const dataTex = new DataTexture(padToFold(data, texels, 4), textureWidth, textureHeight, RGBAFormat, FloatType);
     dataTex.needsUpdate = true;
 
     this.gl.initTexture(dataTex);

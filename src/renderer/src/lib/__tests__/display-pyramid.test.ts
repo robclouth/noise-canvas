@@ -18,6 +18,7 @@ import {
   levelDecimation,
   sourceBinRanges,
 } from "../display-pyramid";
+import { packedFold } from "../constants";
 
 /** A constant-Q layout of any length, without the coefficient arrays. */
 function layoutOf(durationSeconds: number, bandsPerOctave = 24): BandLayout {
@@ -30,8 +31,9 @@ describe("display pyramid layout", () => {
     const data = createConstantQMockSpectrogramData({ durationSeconds: 2, sampleRate: 8000, bandsPerOctave: 4 });
     const level = displayPyramidLevel({ numBands: data.numBands, metadata: data.metadata }, 0);
     expect(Array.from(level.metadata)).toEqual(Array.from(data.metadata));
-    expect(level.textureWidth).toBe(data.textureWidth);
-    expect(level.textureHeight).toBe(data.textureHeight);
+    const fold = packedFold(data.texels);
+    expect(level.textureWidth).toBe(fold.width);
+    expect(level.textureHeight).toBe(fold.height);
   });
 
   it("holds a band unchanged until the level step passes the band's own", () => {

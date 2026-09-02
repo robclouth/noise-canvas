@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { constantQBandLayout, constantQMetadata } from "../../test/mock-spectrogram";
 import { layoutTexels, type BandLayout } from "../band-layout";
+import { ANALYSIS_MAX_TEXTURE_SIZE, packedFold, padToFold } from "../constants";
 import { blockGrid, blockPixelRanges, blockTexels } from "../block-grid";
 import {
   canvasViewOf,
@@ -197,5 +198,40 @@ describe("view UV translation", () => {
     const fileX = viewUvToFileUv(view, small.numFrames, 0.25);
     expect(fileX).toBeCloseTo((view.startFrame + 0.25 * (view.endFrame - view.startFrame)) / small.numFrames, 12);
     expect(fileUvToViewUv(view, small.numFrames, fileX)).toBeCloseTo(0.25, 12);
+  });
+});
+
+describe("the fold a packed run takes", () => {
+  it("lays a short run along one row", () => {
+    expect(packedFold(1)).toEqual({ width: 1, height: 1 });
+    expect(packedFold(100)).toEqual({ width: 100, height: 1 });
+    expect(packedFold(ANALYSIS_MAX_TEXTURE_SIZE)).toEqual({ width: ANALYSIS_MAX_TEXTURE_SIZE, height: 1 });
+  });
+
+  it("wraps a longer run at the widest texture, leaving the last row short", () => {
+    const fold = packedFold(ANALYSIS_MAX_TEXTURE_SIZE * 3 + 7);
+    expect(fold).toEqual({ width: ANALYSIS_MAX_TEXTURE_SIZE, height: 4 });
+    expect(fold.width * fold.height).toBeGreaterThan(ANALYSIS_MAX_TEXTURE_SIZE * 3 + 7);
+  });
+
+  it("gives an empty run a texture of one texel, because no texture may be empty", () => {
+    expect(packedFold(0)).toEqual({ width: 1, height: 1 });
+  });
+
+  it("grows a run to fill the texture its fold makes, keeping the values it had", () => {
+    const texels = ANALYSIS_MAX_TEXTURE_SIZE + 3;
+    const run = new Float32Array(texels * 4);
+    for (let i = 0; i < run.length; i++) run[i] = i + 1;
+    const padded = padToFold(run, texels, 4);
+    const fold = packedFold(texels);
+    expect(padded.length).toBe(fold.width * fold.height * 4);
+    expect(Array.from(padded.subarray(0, 8))).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(padded[run.length - 1]).toBe(run.length);
+    expect(padded[run.length]).toBe(0);
+  });
+
+  it("hands back a run that already fills its texture", () => {
+    const run = new Float32Array(64 * 2);
+    expect(padToFold(run, 64, 2)).toBe(run);
   });
 });

@@ -62,7 +62,7 @@ async function seeded(opts: { targetSeconds?: number; maxResidentBytes?: number;
     codec: opts.codec ?? rawCodec,
     maxResidentBytes: opts.maxResidentBytes ?? 1 << 30,
     overlay,
-    texelCount: data.textureWidth * data.textureHeight,
+    texelCount: data.texels,
   });
   await store.seed(packed);
   return { grid, backend, overlay, store };
@@ -151,7 +151,7 @@ describe("BlockStore", () => {
       codec: rawCodec,
       maxResidentBytes: 1 << 30,
       overlay,
-      texelCount: data.textureWidth * data.textureHeight,
+      texelCount: data.texels,
     });
     expect(firstDifference(await reopened.readAll(), expected)).toBe(-1);
   });
@@ -329,7 +329,7 @@ describe("BlockStore", () => {
       codec: rawCodec,
       maxResidentBytes: 1 << 30,
       overlay: slowOverlay,
-      texelCount: data.textureWidth * data.textureHeight,
+      texelCount: data.texels,
     });
     await store.seed(packed);
 

@@ -77,8 +77,7 @@ export function buildStrokeCommitSnapshot(opts: {
     hasUnprojectedPaint: opts.hasUnprojectedPaint ?? false,
     spec,
     dimensions: {
-      textureWidth: spec.textureWidth,
-      textureHeight: spec.textureHeight,
+      texels: spec.texels,
       numFrames: spec.numFrames,
       numBands: spec.numBands,
       numChannels: spec.numChannels,

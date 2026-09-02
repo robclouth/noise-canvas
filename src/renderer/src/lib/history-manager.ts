@@ -1,4 +1,3 @@
-import { Vector2 } from "three";
 import { useStore } from "@renderer/store";
 import { awaitFileSynthesis, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
@@ -6,6 +5,7 @@ import { isManagedFilePath } from "@renderer/store/managed-path";
 import type { PhaseTurns } from "../../../main/lib/types";
 import { hasPhaseTurns, phaseTurnRanges, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
+import { bandLengthsTexels } from "./band-layout";
 import type { BlockStore } from "./block-store";
 import {
   blockStoreDirectory,
@@ -14,6 +14,7 @@ import {
   openBlockStore,
   releaseBlockStores,
 } from "./block-stores";
+import { packedTextureSizeOf } from "./canvas-view";
 import { applyCanvasTurns, type CanvasTurn } from "./canvas-phase-turns";
 import { clearCanvasPatchStash, takeCanvasPatchStash } from "./canvas-patch-stash";
 import { diag } from "./diag-log";
@@ -35,8 +36,8 @@ const MANIFEST_WRITE_DEBOUNCE_MS = 400;
 export type HistoryNodeKind = "root" | "stroke" | "resize" | "reanalyze" | "checkpoint";
 
 export interface HistoryDimensions {
-  textureWidth: number;
-  textureHeight: number;
+  /** Packed coefficients the state holds: the sum of the band lengths, with no padding. */
+  texels: number;
   numFrames: number;
   numBands: number;
   numChannels: number;
@@ -48,11 +49,38 @@ export interface HistoryDimensions {
   magnitudeEnergy?: number;
 }
 
+/** Dimensions as manifest version 4 wrote them, naming the packed state's texture fold. */
+type FoldedDimensions = Omit<HistoryDimensions, "texels"> & { textureWidth: number; textureHeight: number };
+
+type FoldedManifest = Omit<HistoryManifest, "version" | "nodes"> & {
+  version: 4;
+  nodes: Record<string, Omit<HistoryNode, "dimensions"> & { dimensions: FoldedDimensions }>;
+};
+
+function isFoldedManifest(manifest: { version?: number }): manifest is FoldedManifest {
+  return manifest.version === 4;
+}
+
+/**
+ * A version-4 manifest as a current one. The fold was `min(8192, texels)` wide
+ * and the arrays were padded to it, so the product is the padded count; the
+ * band layout gives the real one.
+ */
+function migrateFoldedManifest(manifest: FoldedManifest): HistoryManifest {
+  const nodes: Record<string, HistoryNode> = {};
+  for (const [id, node] of Object.entries(manifest.nodes)) {
+    const { textureWidth, textureHeight, ...rest } = node.dimensions;
+    const layout = node.synthesisMetadata;
+    const texels = layout ? bandLengthsTexels(layout.bandLengths) : textureWidth * textureHeight;
+    nodes[id] = { ...node, dimensions: { ...rest, texels } };
+  }
+  return { ...manifest, version: HISTORY_MANIFEST_VERSION, nodes };
+}
+
 /** Whether two nodes' packed states share one analysis grid, texel for texel. */
 function sameStoreDimensions(a: HistoryDimensions, b: HistoryDimensions): boolean {
   return (
-    a.textureWidth === b.textureWidth &&
-    a.textureHeight === b.textureHeight &&
+    a.texels === b.texels &&
     a.numFrames === b.numFrames &&
     a.numBands === b.numBands &&
     a.sampleRate === b.sampleRate &&
@@ -90,7 +118,7 @@ export interface HistoryNode {
   favorited?: boolean;
 }
 
-const HISTORY_MANIFEST_VERSION = 4;
+const HISTORY_MANIFEST_VERSION = 5;
 
 interface HistoryManifest {
   version: typeof HISTORY_MANIFEST_VERSION;
@@ -204,7 +232,7 @@ export async function deriveSideData(node: HistoryNode): Promise<{
   inverseMap: Float32Array;
   metadata: Float32Array;
 }> {
-  const { textureWidth, textureHeight } = node.dimensions;
+  const { texels } = node.dimensions;
   const layout = node.synthesisMetadata;
   if (!layout) throw new Error(`HistoryManager: node ${node.id} has no band layout`);
 
@@ -214,7 +242,7 @@ export async function deriveSideData(node: HistoryNode): Promise<{
     new Uint32Array(layout.bandOffsets),
     new Uint32Array(layout.bandLengths),
     new Int32Array(layout.bandStepLog2s),
-    textureWidth * textureHeight,
+    texels,
   );
 
   return { inverseMap, metadata: bandMetadataOf(node) };
@@ -241,8 +269,7 @@ function bandMetadataOf(node: HistoryNode): Float32Array {
 
 function dimensionsFromSpectrogram(s: SpectrogramData): HistoryDimensions {
   return {
-    textureWidth: s.textureWidth,
-    textureHeight: s.textureHeight,
+    texels: s.texels,
     numFrames: s.numFrames,
     numBands: s.numBands,
     numChannels: s.numChannels,
@@ -456,6 +483,7 @@ export class HistoryManager {
       const path = host.path.join(dir, MANIFEST_FILENAME);
       const buf = await host.fs.readFile(path, "utf8");
       const parsed = JSON.parse(buf as unknown as string) as { version?: number } & HistoryManifest;
+      if (isFoldedManifest(parsed)) return migrateFoldedManifest(parsed);
       if (parsed.version !== HISTORY_MANIFEST_VERSION) {
         // A different manifest version uses an incompatible delta encoding that
         // would decode wrong, so wipe and start over.
@@ -714,7 +742,7 @@ export class HistoryManager {
     const store = await openBlockStore(
       this.fileId,
       { numBands: s.numBands, metadata: s.metadata },
-      { numFrames: s.numFrames, sampleRate: s.sampleRate, texelCount: s.textureWidth * s.textureHeight },
+      { numFrames: s.numFrames, sampleRate: s.sampleRate, texelCount: s.texels },
     );
     await store.seed(opts.data);
     await this.writeManifest();
@@ -773,14 +801,12 @@ export class HistoryManager {
     const id = shortId();
     const parentId = this.manifest.currentId;
     const parent = this.manifest.nodes[parentId];
-    const sameDims =
-      parent.dimensions.textureWidth === opts.dimensions.textureWidth &&
-      parent.dimensions.textureHeight === opts.dimensions.textureHeight;
+    const sameDims = parent.dimensions.texels === opts.dimensions.texels;
 
     const ranges = opts.dirtyRanges;
     let footprintPixels = 0;
     if (ranges) for (let r = 1; r < ranges.length; r += 2) footprintPixels += ranges[r];
-    const texturePixels = opts.dimensions.textureWidth * opts.dimensions.textureHeight;
+    const texturePixels = opts.dimensions.texels;
     // A footprint commit compares against the values it saved before the
     // stroke; any other reads them back from the block store's tier.
     const turnsIn = hasPhaseTurns(opts.turns) ? opts.turns : null;
@@ -943,11 +969,11 @@ export class HistoryManager {
   private seedBlockStore(holder: HistoryNode): Promise<BlockStore> {
     const open = getBlockStore(this.fileId);
     if (open) return open;
-    const { textureWidth, textureHeight, numFrames, numBands, sampleRate } = holder.dimensions;
+    const { texels, numFrames, numBands, sampleRate } = holder.dimensions;
     return openBlockStore(
       this.fileId,
       { numBands, metadata: bandMetadataOf(holder) },
-      { numFrames, sampleRate, texelCount: textureWidth * textureHeight },
+      { numFrames, sampleRate, texelCount: texels },
     );
   }
 
@@ -1006,7 +1032,7 @@ export class HistoryManager {
     const store = await openBlockStore(
       this.fileId,
       { numBands: dims.numBands, metadata: bandMetadataRows(layout, dims.numBands) },
-      { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.textureWidth * dims.textureHeight },
+      { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.texels },
     );
     await store.seed(packed);
     if (this.manifest !== manifest) return;
@@ -1140,13 +1166,7 @@ export class HistoryManager {
       const store = await this.seedBlockStore(holder);
       const values = await store.readRanges(spans);
       const dims = target.dimensions;
-      return await host.analysis.applyHistoryDeltasWindowed(
-        values,
-        spans,
-        deltas,
-        inverts,
-        dims.textureWidth * dims.textureHeight,
-      );
+      return await host.analysis.applyHistoryDeltasWindowed(values, spans, deltas, inverts, dims.texels);
     } catch (error) {
       console.warn("history: the tier's delta walk failed", error);
       return null;
@@ -1249,8 +1269,7 @@ export class HistoryManager {
       packedData,
       inverseMap,
       metadata,
-      textureWidth: dims.textureWidth,
-      textureHeight: dims.textureHeight,
+      texels: dims.texels,
       numFrames: dims.numFrames,
       numBands: dims.numBands,
       numChannels: dims.numChannels,
@@ -1258,7 +1277,7 @@ export class HistoryManager {
       minFreq: dims.minFreq,
       bandsPerOctave: dims.bandsPerOctave,
       magnitudeEnergy: dims.magnitudeEnergy,
-      packedTextureSize: new Vector2(dims.textureWidth, dims.textureHeight),
+      packedTextureSize: packedTextureSizeOf(dims.texels),
       synthesisMetadata: {
         bandOffsets: new Uint32Array(fullAnchor.synthesisMetadata.bandOffsets),
         bandStepLog2s: new Int32Array(fullAnchor.synthesisMetadata.bandStepLog2s),
@@ -1775,8 +1794,7 @@ export class HistoryManager {
       packedData,
       inverseMap,
       metadata,
-      textureWidth: dims.textureWidth,
-      textureHeight: dims.textureHeight,
+      texels: dims.texels,
       numFrames: dims.numFrames,
       numBands: dims.numBands,
       numChannels: dims.numChannels,
@@ -1784,7 +1802,7 @@ export class HistoryManager {
       minFreq: dims.minFreq,
       bandsPerOctave: dims.bandsPerOctave,
       magnitudeEnergy: dims.magnitudeEnergy,
-      packedTextureSize: new Vector2(dims.textureWidth, dims.textureHeight),
+      packedTextureSize: packedTextureSizeOf(dims.texels),
       synthesisMetadata: {
         bandOffsets: new Uint32Array(synthMeta.bandOffsets),
         bandStepLog2s: new Int32Array(synthMeta.bandStepLog2s),
@@ -2125,7 +2143,7 @@ export class HistoryManager {
     const store = await openBlockStore(
       this.fileId,
       { numBands: dims.numBands, metadata: bandMetadataRows(layout, dims.numBands) },
-      { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.textureWidth * dims.textureHeight },
+      { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.texels },
     );
     await store.seed(packed);
     if (!this.manifest) return;

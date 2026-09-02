@@ -50,7 +50,7 @@ import { getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
+import { DEFAULT_ONSET_SENSITIVITY, packedFold, padToFold } from "../lib/constants";
 import { displayLevelChoice } from "../lib/display-pyramid";
 import type { DisplayTileRing } from "../lib/display-tiles-textures";
 import { getFileOnsets } from "../lib/file-onsets";
@@ -473,7 +473,7 @@ const FileRendererInner = memo(
         }
         disposeCanvasRef.current?.();
       };
-    }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
+    }, [spectrogramData.texels]);
 
     // The packed and inverse-map values the next texture build seeds from.
     // Captured from the spectrogram once, so releasing the spectrogram's
@@ -489,23 +489,26 @@ const FileRendererInner = memo(
      * Used both on initial load and when reloading textures.
      */
     const createTextures = useCallback(() => {
-      const { metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+      const { metadata, texels, numBands } = spectrogramData;
       // A canvas holding a window of the file takes its content, its original
       // and its inverse map from the block store and the view, so nothing
       // samples the file-sized pair. At ten minutes they are the largest thing
       // this file puts on the graphics device, so they are never built.
       const grid = blockGrid({ numBands, metadata }, spectrogramData.numFrames, spectrogramData.sampleRate);
       const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
-      const texWidth = windowed ? 1 : textureWidth;
-      const texHeight = windowed ? 1 : textureHeight;
-      let packedData = windowed ? new Float32Array(4) : packedSeedRef.current;
+      const fold = packedFold(texels);
+      const texWidth = windowed ? 1 : fold.width;
+      const texHeight = windowed ? 1 : fold.height;
+      const packedSeed = packedSeedRef.current;
+      let packedData = windowed ? new Float32Array(4) : packedSeed && padToFold(packedSeed, texels, 4);
       if (!packedData || packedData.length !== texWidth * texHeight * 4) {
         // The seed was already released; the canvas rebuilds from history.
         console.warn("history: the packed seed was already released; the canvas needs a full restore");
         getHistoryManager(fileId).markFboOutOfSync();
         packedData = new Float32Array(texWidth * texHeight * 4);
       }
-      let inverseMap = windowed ? new Float32Array(2) : inverseSeedRef.current;
+      const inverseSeed = inverseSeedRef.current;
+      let inverseMap = windowed ? new Float32Array(2) : inverseSeed && padToFold(inverseSeed, texels, 2);
       if (!inverseMap || inverseMap.length !== texWidth * texHeight * 2) {
         console.warn("history: the inverse-map seed was already released");
         inverseMap = new Float32Array(texWidth * texHeight * 2);
@@ -545,8 +548,7 @@ const FileRendererInner = memo(
       // swaps the object, and listing `inverseMap` here would pin the released
       // array in this hook's dependency record until the next render.
       spectrogramData,
-      spectrogramData.textureWidth,
-      spectrogramData.textureHeight,
+      spectrogramData.texels,
       spectrogramData.numBands,
     ]);
 

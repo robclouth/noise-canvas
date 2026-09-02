@@ -6,8 +6,35 @@ export const MULTIPLIER_UNIT = "x";
 // mask allocation against this, and the GPU budget charges for that worst case.
 export const MAX_STEPS = 5;
 
-// Widest packed texture the analyser produces (gaborator-addon.cpp MAX_TEXTURE_SIZE).
+// Widest packed texture the app builds. Every fold of a linear packed run —
+// a canvas view, a display level, a block-slot page — is this wide.
 export const ANALYSIS_MAX_TEXTURE_SIZE = 8192;
+
+/** Packed texels one texture of the widest fold can hold. */
+export const MAX_PACKED_TEXTURE_TEXELS = ANALYSIS_MAX_TEXTURE_SIZE * ANALYSIS_MAX_TEXTURE_SIZE;
+
+/**
+ * The texture a linear run of `texels` packed coefficients folds into. The
+ * last row is short unless the count divides the width, so a texture built
+ * this way needs `width * height` texels of storage, not `texels`.
+ */
+export function packedFold(texels: number): { width: number; height: number } {
+  const width = Math.min(ANALYSIS_MAX_TEXTURE_SIZE, Math.max(1, texels));
+  return { width, height: Math.max(1, Math.ceil(texels / width)) };
+}
+
+/**
+ * `values` grown to fill the texture `texels` coefficients fold into, at
+ * `componentsPerTexel` floats each. Returned unchanged when it already does.
+ */
+export function padToFold(values: Float32Array, texels: number, componentsPerTexel: number): Float32Array {
+  const { width, height } = packedFold(texels);
+  const needed = width * height * componentsPerTexel;
+  if (values.length >= needed) return values;
+  const out = new Float32Array(needed);
+  out.set(values);
+  return out;
+}
 
 // Sentinel bottom position of the time-grid slider: below the smallest real
 // beat value, the grid is the file's detected onsets instead of beats.

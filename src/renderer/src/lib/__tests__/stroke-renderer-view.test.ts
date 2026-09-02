@@ -30,7 +30,7 @@ import {
   PACKED_BYTES_PER_TEXEL,
   type BlockGrid,
 } from "../block-grid";
-import { NEUTRAL_ALGORITHM } from "../constants";
+import { NEUTRAL_ALGORITHM, packedFold, padToFold } from "../constants";
 import { bakeOnsetTexture } from "../onset-map";
 import { BlockSlotCache } from "../block-slot-cache";
 import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
@@ -123,8 +123,21 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     viewFrames = view.endFrame - view.startFrame;
     viewCursor = new Vector2((fileCursor.x * data.numFrames - view.startFrame) / viewFrames, fileCursor.y);
 
-    const originalPackedDataTex = dataTexture(packed, data.textureWidth, data.textureHeight, RGBAFormat, "RGBA32F");
-    const inverseMapTex = dataTexture(data.inverseMap!, data.textureWidth, data.textureHeight, RGFormat, "RG32F");
+    const fold = packedFold(data.texels);
+    const originalPackedDataTex = dataTexture(
+      padToFold(packed, data.texels, 4),
+      fold.width,
+      fold.height,
+      RGBAFormat,
+      "RGBA32F",
+    );
+    const inverseMapTex = dataTexture(
+      padToFold(data.inverseMap!, data.texels, 2),
+      fold.width,
+      fold.height,
+      RGFormat,
+      "RG32F",
+    );
     const metadataTex = dataTexture(data.metadata, data.numBands, 1, RGBAFormat, "RGBA32F");
     const placeholderTexture = dataTexture(new Float32Array(4), 1, 1, RGBAFormat, "RGBA32F");
     disposers.push(() => {
@@ -288,7 +301,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       outside.set(data.packedData.subarray(fileStart * 4, (fileStart + count) * 4), fileStart * 4);
     }
     let leaked = 0;
-    for (let i = 0; i < outside.length; i++) if (outside[i] !== data.packedData[i]) leaked++;
+    for (let i = 0; i < data.packedData.length; i++) if (outside[i] !== data.packedData[i]) leaked++;
     expect(leaked).toBe(0);
 
     // The sub-view stroke lands on the same coefficients. The two paths
@@ -377,19 +390,20 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       sourcePacked[i * 4 + 2] = 0.05 + 0.45 * (1 + Math.cos(i * 0.37));
       sourcePacked[i * 4 + 3] = Math.cos(i * 0.61) * 3;
     }
+    const sourceFold = packedFold(sourceData.texels);
     const sourceTextures: StrokeTextures = {
       ...strokeTextures,
       originalPackedDataTex: dataTexture(
-        sourcePacked,
-        sourceData.textureWidth,
-        sourceData.textureHeight,
+        padToFold(sourcePacked, sourceData.texels, 4),
+        sourceFold.width,
+        sourceFold.height,
         RGBAFormat,
         "RGBA32F",
       ),
       inverseMapTex: dataTexture(
-        sourceData.inverseMap!,
-        sourceData.textureWidth,
-        sourceData.textureHeight,
+        padToFold(sourceData.inverseMap!, sourceData.texels, 2),
+        sourceFold.width,
+        sourceFold.height,
         RGFormat,
         "RG32F",
       ),

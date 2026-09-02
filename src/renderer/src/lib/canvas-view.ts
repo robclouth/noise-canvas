@@ -1,6 +1,7 @@
+import { Vector2 } from "three";
 import { bandAtPixel, type BandLayout } from "./band-layout";
 import { blockGrid, frameRangeOfBlock, type BlockGrid } from "./block-grid";
-import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
+import { packedFold } from "./constants";
 
 /**
  * A block-aligned span of a file as its own packed layout. The view's
@@ -24,6 +25,12 @@ export type CanvasView = {
   textureWidth: number;
   textureHeight: number;
 };
+
+/** The texture a whole file's packed run folds into, as a shader reads its size. */
+export function packedTextureSizeOf(texels: number): Vector2 {
+  const { width, height } = packedFold(texels);
+  return new Vector2(width, height);
+}
 
 /** The view spanning the blocks [firstBlock, lastBlock] of `grid`. */
 export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: number): CanvasView {
@@ -50,8 +57,7 @@ export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: num
     bandK0[band] = k0;
     texels += count;
   }
-  const textureWidth = Math.min(ANALYSIS_MAX_TEXTURE_SIZE, Math.max(1, texels));
-  const textureHeight = Math.max(1, Math.ceil(texels / textureWidth));
+  const { width: textureWidth, height: textureHeight } = packedFold(texels);
   return {
     firstBlock,
     lastBlock,
@@ -66,24 +72,15 @@ export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: num
   };
 }
 
-/**
- * The view spanning the whole file, keeping the file's own texture fold —
- * not every analysis sizes its packed texture by the view width convention.
- */
+/** The view spanning the whole file. */
 export function wholeFileCanvasView(data: {
   numBands: number;
   metadata: Float32Array;
   numFrames: number;
   sampleRate: number;
-  textureWidth: number;
-  textureHeight: number;
 }): CanvasView {
   const grid = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate);
-  return {
-    ...canvasViewOf(grid, 0, grid.blockCount - 1),
-    textureWidth: data.textureWidth,
-    textureHeight: data.textureHeight,
-  };
+  return canvasViewOf(grid, 0, grid.blockCount - 1);
 }
 
 /**

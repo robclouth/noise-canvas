@@ -18,6 +18,7 @@ import { createStepStateView } from "../../store";
 import { hasActiveModulatorRouting } from "../../store/modulators";
 import { resolveBrushAnchor } from "../utils";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import { packedFold, padToFold } from "../constants";
 
 // Runtime paint-latency profiler. Times real stroke renders on the actual GPU
 // (Playwright -> ANGLE/WebKit on macOS) with a GPU sync per render. Uses the
@@ -27,9 +28,16 @@ import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTe
 // Set VITE_SHADER_DEFINES=ABLATE_BRUSH_REJECT to measure cost without the reject.
 
 function createTextures(data: SpectrogramData) {
-  const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = data;
+  const { packedData, inverseMap, metadata, texels, numBands } = data;
+  const { width: textureWidth, height: textureHeight } = packedFold(texels);
 
-  const packedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+  const packedDataTex = new DataTexture(
+    padToFold(packedData!, texels, 4),
+    textureWidth,
+    textureHeight,
+    RGBAFormat,
+    FloatType,
+  );
   packedDataTex.internalFormat = "RGBA32F";
   packedDataTex.minFilter = NearestFilter;
   packedDataTex.magFilter = NearestFilter;
@@ -40,7 +48,13 @@ function createTextures(data: SpectrogramData) {
   const originalPackedDataTex = packedDataTex.clone();
   originalPackedDataTex.needsUpdate = true;
 
-  const inverseMapTex = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+  const inverseMapTex = new DataTexture(
+    padToFold(inverseMap!, texels, 2),
+    textureWidth,
+    textureHeight,
+    RGFormat,
+    FloatType,
+  );
   inverseMapTex.internalFormat = "RG32F";
   inverseMapTex.minFilter = NearestFilter;
   inverseMapTex.magFilter = NearestFilter;
@@ -240,7 +254,7 @@ function fragCount(h: Harness, scenario: Scenario): number {
   const fp = h.renderer.resolveBrushFootprint(buildState("passthrough", scenario), BPM, TOTAL_DURATION);
   const anchor = resolveBrushAnchor(scenario.cursor, fp.fullTime, fp.fullPitch);
   const rows = h.renderer.calculateScissorRows(anchor, fp.sizeUv);
-  return rows ? rows.rowCount * h.data.textureWidth : h.data.textureWidth * h.data.textureHeight;
+  return rows ? rows.rowCount * packedFold(h.data.texels).width : h.data.texels;
 }
 
 const defines = (import.meta.env.VITE_SHADER_DEFINES as string | undefined) ?? "none";
@@ -268,7 +282,8 @@ describe.skipIf(!RUN_PROFILE)("paint perf profile", () => {
         const frags = fragCount(h, s);
         return `${ms.toFixed(2)}/${(frags / 1000).toFixed(0)}k`.padStart(12);
       });
-      out += `${String(durationSeconds).padEnd(8)} ${String(data.textureWidth).padStart(6)} ${String(data.textureHeight).padStart(6)} ${cells.join(" ")}\n`;
+      const fold = packedFold(data.texels);
+      out += `${String(durationSeconds).padEnd(8)} ${String(fold.width).padStart(6)} ${String(fold.height).padStart(6)} ${cells.join(" ")}\n`;
       h.dispose();
     }
     out += `(cell = ms / scissor-fragment-count)\n`;
@@ -372,7 +387,8 @@ describe.skipIf(!RUN_PROFILE)("paint perf profile", () => {
     const unmasked = dbg ? ctx.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "n/a";
     let out = `\n=== Sine-modulated brush intensity vs unmodulated (mean ms/render) [defines: ${defines}] ===\n`;
     out += `GPU (unmasked): ${unmasked}\n`;
-    out += `texture: ${h.data.textureWidth}x${h.data.textureHeight} (${((h.data.textureWidth * h.data.textureHeight) / 1e6).toFixed(1)}M px), numFrames=${h.data.numFrames}, numBands=${h.data.numBands}\n`;
+    const fold = packedFold(h.data.texels);
+    out += `texture: ${fold.width}x${fold.height} (${(h.data.texels / 1e6).toFixed(1)}M px), numFrames=${h.data.numFrames}, numBands=${h.data.numBands}\n`;
     out += `modulation actually engaged: ${engaged}\n`;
     out += `cells are median/mean/max ms per render\n`;
     out += `${"effect".padEnd(12)} ${modScenarios.map((s) => `${s.label} off`.padStart(16)).join(" ")} ${modScenarios.map((s) => `${s.label} SINE`.padStart(16)).join(" ")}\n`;

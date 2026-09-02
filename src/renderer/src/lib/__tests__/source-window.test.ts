@@ -18,6 +18,7 @@ import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-vie
 import { gatherPixelRanges } from "../pixel-ranges";
 import { SourceWindow, sourceReadSpan } from "../source-window";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import { packedFold, padToFold } from "../constants";
 
 const SAMPLE_RATE = 8000;
 // The window is built on the shipped block grid, so the file has to be long
@@ -96,14 +97,21 @@ describe("SourceWindow", () => {
   const disposers: Array<() => void> = [];
 
   function texturesFor(file: SpectrogramData & { packedData: Float32Array }): StrokeTextures {
+    const fold = packedFold(file.texels);
     const originalPackedDataTex = dataTexture(
-      file.packedData,
-      file.textureWidth,
-      file.textureHeight,
+      padToFold(file.packedData, file.texels, 4),
+      fold.width,
+      fold.height,
       RGBAFormat,
       "RGBA32F",
     );
-    const inverseMapTex = dataTexture(file.inverseMap!, file.textureWidth, file.textureHeight, RGFormat, "RG32F");
+    const inverseMapTex = dataTexture(
+      padToFold(file.inverseMap!, file.texels, 2),
+      fold.width,
+      fold.height,
+      RGFormat,
+      "RG32F",
+    );
     const metadataTex = dataTexture(file.metadata, file.numBands, 1, RGBAFormat, "RGBA32F");
     const placeholderTexture = dataTexture(new Float32Array(4), 1, 1, RGBAFormat, "RGBA32F");
     disposers.push(() => {

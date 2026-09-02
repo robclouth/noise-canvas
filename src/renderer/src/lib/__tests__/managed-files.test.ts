@@ -372,7 +372,7 @@ describe("deriveSpectrogramData", () => {
     try {
       const derived = await deriveSpectrogramData(released, new Float32Array(base.packedData.length));
       expect(build).toHaveBeenCalledTimes(1);
-      expect(derived.inverseMap!.length).toBe(base.textureWidth * base.textureHeight * 2);
+      expect(derived.inverseMap!.length).toBe(base.texels * 2);
       expect(derived.inverseMap![0]).toBe(7);
     } finally {
       g.audioAnalysis = prev;
@@ -393,8 +393,7 @@ describe("deriveSpectrogramData", () => {
     const packed = new Float32Array(base.packedData.length).fill(0.5);
     const derived = await deriveSpectrogramData(base, packed);
     expect(derived.packedData).toBe(packed);
-    expect(derived.textureWidth).toBe(base.textureWidth);
-    expect(derived.textureHeight).toBe(base.textureHeight);
+    expect(derived.texels).toBe(base.texels);
     expect(derived.numFrames).toBe(base.numFrames);
     expect(derived.numBands).toBe(base.numBands);
   });

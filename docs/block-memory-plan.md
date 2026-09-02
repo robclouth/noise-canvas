@@ -578,7 +578,7 @@ driver).
 Status: step (1) in progress —
 
 - `canvas-view.ts`: view layout, file↔view range remapping, view inverse map,
-  view content compose, whole-file view (keeps the file's own texture fold).
+  view content compose, whole-file view.
 - `block-slot-cache.ts`: paged slot store with LRU claim, upload / compose /
   copy-back over the existing patch and gather materials.
 - StrokeRenderer renders over a view: every dest-space size, layout, metadata
@@ -924,6 +924,92 @@ built. Lifting the cap is therefore a separate piece of work, and a decision:
 raise `MAX_TEXTURE_SIZE` (the device here reports 16384, which would take the
 cap to about 21 minutes), or stop shaping the analysed state as a texture at
 all. **STOP-ASK.**
+
+---
+
+## Phase 3.5 — the analysed state stops being a texture
+
+Rob answered the Phase 3 exit STOP-ASK on 2026-09-02: drop the texture shape.
+
+### The shape it takes
+
+A file's analysed state is **N coefficients in band order**, four floats each —
+magnitude and unwrapped phase per channel. N is the sum of the band lengths. It
+has no width, no height and no padding. Where a piece of it goes on the
+graphics device, that piece picks its own fold: `width = min(8192, texels)`,
+`height = ceil(texels / width)`. `canvasViewOf`, `display-pyramid`,
+`display-tiles` and `block-slot-cache` already fold that way. The file stops
+being the one thing that carries a fold of its own.
+
+Why four floats interleaved, and not two planes or a narrower mono pixel:
+
+- Every consumer already reads and writes this stride — the window upload, the
+  block patch, the FBO readback, `gatherPixelRanges` and
+  `scatterCompactPixelRanges`. Planes would add a de-interleave to every block
+  upload and a re-interleave to every readback, on the JS thread.
+- Storage is already planar where planes pay: `encodeHistorySnapshot` reorders
+  into planes before zstd, so a mono file's two empty channels cost almost
+  nothing on disk.
+- In RAM only bounded pieces are held now, so a mono file's empty channels cost
+  nothing that grows with length.
+
+What leaves the analysis payload:
+
+- **The inverse map.** It is `(k << stepLog2, band)` for each coefficient — a
+  pure function of the band layout, which the payload already carries three
+  ways. It costs 8 bytes a coefficient to build and send, and the renderer
+  drops it unread as soon as the canvas holds a window.
+  `buildHistoryInverseMap` already rebuilds it on demand.
+- **The padding to a rectangle.**
+- **`textureWidth` and `textureHeight`.** One `texels` count replaces them.
+
+### What the length limit becomes
+
+- The analyser's own cap goes. What is left is the caller's coefficient budget,
+  which measures RAM rather than a texture edge.
+- One texture still cannot exceed the device's edge, so a file with more than
+  `ANALYSIS_MAX_TEXTURE_SIZE²` coefficients can never hold its whole state on
+  one canvas. `canvasWindowBlocks` must return a finite window for such a file
+  whatever the budget says.
+
+### What the analyser holds while it works
+
+Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
+
+| held at once                        | today        | after this phase |
+| ----------------------------------- | ------------ | ---------------- |
+| the coefficients                    | 1.90 GB      | 1.90 GB          |
+| their copy into JS                  | 1.90 GB      | —                |
+| the inverse map                     | 0.95 GB      | —                |
+| its copy into JS                    | 0.95 GB      | —                |
+| one unwrapped phase per coefficient | 0.48 GB      | —                |
+| the analyser's own coefficient tree | 0.95 GB      | 0.95 GB          |
+| **peak**                            | **≈ 7.1 GB** | **≈ 2.9 GB**     |
+
+### Tasks
+
+- **3.5.1 — `texels` replaces the texture pair.** DONE. `SpectrogramData` and
+  `HistoryDimensions` carry `texels`. A `packedFold(texels)` helper gives the
+  fold where a whole-file texture is really built. `wholeFileCanvasView`
+  collapses into `canvasViewOf`, because there is one fold convention now. A
+  manifest written before this reads its pair and keeps working.
+- **3.5.2 — the analyser returns coefficients, not an image.** No padding, no
+  inverse map, no `MAX_TEXTURE_SIZE` cap. The renderer builds the inverse map
+  only when it builds a whole-file texture.
+- **3.5.3 — one unwrapped phase a band.** `unwrapForward` reads the previous
+  bin only, and the walk is ascending inside a band, so the analyser keeps one
+  phase and one bin index per band instead of one phase per coefficient.
+- **3.5.4 — hand the coefficients over without copying them.** The worker's
+  vector becomes the JS array's storage through an external `ArrayBuffer` with
+  a finaliser, rather than a memcpy into a fresh one.
+- **3.5.5 — a window is compulsory above one texture.**
+- **3.5.6 — MEASURE at 600 s** and record it here.
+- **3.5.7 — analyse in spans and forget.** Only if 3.5.6 says the peak is still
+  over the target. Gaborator supports incremental analysis with
+  `forget_before`, so the analyser can emit a block at a time and keep neither
+  the coefficient tree nor the output whole.
+
+Status: in progress.
 
 ---
 

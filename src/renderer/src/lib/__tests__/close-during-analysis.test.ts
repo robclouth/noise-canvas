@@ -66,7 +66,7 @@ function analysisResult() {
     numBands: 96,
     bandOffsets: new Uint32Array(96),
     bandStepLog2s: new Int32Array(96),
-    bandLengths: new Uint32Array(96),
+    bandLengths: new Uint32Array(96).fill(TEXELS),
     sampleRate: 48000,
     magnitudeEnergy: 1,
     onsets: new Float32Array(0),
@@ -132,7 +132,7 @@ describe("closing a file while it is being analysed", () => {
     gate.resolve?.(analysisResult());
     await opening;
 
-    expect(openFiles[fileId]?.spectrogramData?.textureWidth).toBe(TEXELS);
+    expect(openFiles[fileId]?.spectrogramData?.texels).toBe(96 * TEXELS);
     expect(get().activeFileId).toBe(fileId);
     expect(get().filesLoading[fileId]).toBeUndefined();
   });

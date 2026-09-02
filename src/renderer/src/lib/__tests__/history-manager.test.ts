@@ -343,8 +343,7 @@ function makeSpectrogram(packed: Float32Array, w: number, h: number): Spectrogra
     packedData: packed,
     inverseMap,
     metadata,
-    textureWidth: w,
-    textureHeight: h,
+    texels: w * h,
     numFrames: w,
     numBands: h,
     numChannels: 1,
@@ -444,8 +443,7 @@ describe("HistoryManager undo/redo round-trip", () => {
     const a = lossyFill(w, h, 1);
     const b = lossyFill(w, h, 2);
     const dimensions = {
-      textureWidth: w,
-      textureHeight: h,
+      texels: w * h,
       numFrames: w,
       numBands: h,
       numChannels: 1,
@@ -486,8 +484,7 @@ describe("HistoryManager undo/redo round-trip", () => {
     const rs = new Uint32Array([5, 5]); // pixels 5..9
     for (let p = 5; p < 10; p++) for (let c = 0; c < 4; c++) a[p * 4 + c] = ((p * 3 + c) % 89) / 89;
     const dimensions = {
-      textureWidth: w,
-      textureHeight: h,
+      texels: w * h,
       numFrames: w,
       numBands: h,
       numChannels: 1,
@@ -522,8 +519,7 @@ describe("HistoryManager undo/redo round-trip", () => {
     const rs = new Uint32Array([5, 5]);
     for (let p = 5; p < 10; p++) for (let c = 0; c < 4; c++) a[p * 4 + c] = ((p * 3 + c) % 89) / 89;
     const dimensions = {
-      textureWidth: w,
-      textureHeight: h,
+      texels: w * h,
       numFrames: w,
       numBands: h,
       numChannels: 1,
@@ -657,8 +653,7 @@ describe("HistoryManager undo/redo round-trip", () => {
     const a = lossyFill(w, h, 1);
     const b = lossyFill(w, h, 2);
     const dimensions = {
-      textureWidth: w,
-      textureHeight: h,
+      texels: w * h,
       numFrames: w,
       numBands: h,
       numChannels: 1,
@@ -697,8 +692,7 @@ describe("HistoryManager undo/redo round-trip", () => {
     const rs = new Uint32Array([5, 5]);
     for (let p = 5; p < 10; p++) for (let c = 0; c < 4; c++) a[p * 4 + c] = ((p * 3 + c) % 89) / 89;
     const dimensions = {
-      textureWidth: w,
-      textureHeight: h,
+      texels: w * h,
       numFrames: w,
       numBands: h,
       numChannels: 1,
@@ -735,8 +729,7 @@ describe("HistoryManager hops", () => {
   const w = 8;
   const h = 4;
   const dimensions = {
-    textureWidth: w,
-    textureHeight: h,
+    texels: w * h,
     numFrames: w,
     numBands: h,
     numChannels: 1,
@@ -818,8 +811,7 @@ describe("HistoryManager hops", () => {
     const wide = 20000;
     const bands = 2;
     const wideDims = {
-      textureWidth: wide,
-      textureHeight: bands,
+      texels: wide * bands,
       numFrames: wide,
       numBands: bands,
       numChannels: 1,
@@ -858,6 +850,49 @@ describe("HistoryManager hops", () => {
     expect(firstDifference(await store.readAll(), b)).toBe(-1);
     expect(firstDifference(await store.readAllRoot(), root)).toBe(-1);
     clearAllHistoryManagers();
+  });
+
+  it("reads a manifest written before the packed state stopped being a texture", async () => {
+    const { files } = installManagerEnv();
+    installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    const rootId = await mgr.addRootSnapshot({
+      data: root,
+      kind: "root",
+      label: "root",
+      spectrogram: makeSpectrogram(root, w, h),
+    });
+    const { id: aId } = await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.awaitTierFlush();
+    clearAllHistoryManagers();
+
+    // Version 4 named a texture fold, padded past the coefficients.
+    const treePath = "/userdata/history/f1/tree.json";
+    const parsed = JSON.parse(files.get(treePath) as string) as {
+      version: number;
+      nodes: Record<string, { dimensions: Record<string, number> }>;
+    };
+    parsed.version = 4;
+    for (const node of Object.values(parsed.nodes)) {
+      delete node.dimensions.texels;
+      node.dimensions.textureWidth = w * h + 5;
+      node.dimensions.textureHeight = 1;
+    }
+    files.set(treePath, JSON.stringify(parsed));
+
+    const fresh = getHistoryManager("f1");
+    await fresh.initialize();
+    expect(fresh.getNode(rootId)).not.toBeNull();
+    // The band layout counts the coefficients, so the padding does not survive.
+    expect(fresh.getNode(rootId)?.dimensions.texels).toBe(w * h);
+    expect(fresh.getNode(aId)?.dimensions.texels).toBe(w * h + 5);
+    expect(firstDifference((await fresh.currentBlockState())!, a)).toBe(-1);
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
   });
 
   it("serves the current state from the blocks, byte for byte, while the marker stands", async () => {
@@ -958,8 +993,7 @@ describe("HistoryManager hops", () => {
     const wide = 20000;
     const bands = 2;
     const wideDims = {
-      textureWidth: wide,
-      textureHeight: bands,
+      texels: wide * bands,
       numFrames: wide,
       numBands: bands,
       numChannels: 1,
@@ -1499,8 +1533,7 @@ describe("HistoryManager pruneAudioCache", () => {
     const w = 6,
       h = 4;
     const dimensions = {
-      textureWidth: w,
-      textureHeight: h,
+      texels: w * h,
       numFrames: w,
       numBands: h,
       numChannels: 1,
@@ -1553,8 +1586,7 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
     const a = lossyFill(w, h, 1);
     const b = lossyFill(w, h, 2);
     const dimensions = {
-      textureWidth: w,
-      textureHeight: h,
+      texels: w * h,
       numFrames: w,
       numBands: h,
       numChannels: 1,
@@ -1605,8 +1637,7 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
     const a = lossyFill(w, h, 1);
     const b = lossyFill(w, h, 2);
     const dimensions = {
-      textureWidth: w,
-      textureHeight: h,
+      texels: w * h,
       numFrames: w,
       numBands: h,
       numChannels: 1,
@@ -1643,8 +1674,7 @@ describe("HistoryManager footprint commits over anchors", () => {
   const w = 8;
   const h = 4;
   const dimensions = {
-    textureWidth: w,
-    textureHeight: h,
+    texels: w * h,
     numFrames: w,
     numBands: h,
     numChannels: 1,
@@ -1755,8 +1785,7 @@ describe("HistoryManager under concurrent work", () => {
   const w = 6;
   const h = 4;
   const dimensions = {
-    textureWidth: w,
-    textureHeight: h,
+    texels: w * h,
     numFrames: w,
     numBands: h,
     numChannels: 1,
@@ -1942,8 +1971,7 @@ describe("HistoryManager reshaped store", () => {
   const h = 4;
   const w2 = 10;
   const dims1 = {
-    textureWidth: w,
-    textureHeight: h,
+    texels: w * h,
     numFrames: w,
     numBands: h,
     numChannels: 1,
@@ -1951,7 +1979,7 @@ describe("HistoryManager reshaped store", () => {
     minFreq: 20,
     bandsPerOctave: 12,
   };
-  const dims2 = { ...dims1, textureWidth: w2, numFrames: w2 };
+  const dims2 = { ...dims1, texels: w2 * h, numFrames: w2 };
 
   /** Paints pixels `start..start+count` of `base` with a lossy fill keyed by `salt`. */
   function paintAt(base: Float32Array, start: number, count: number, salt: number): Float32Array {

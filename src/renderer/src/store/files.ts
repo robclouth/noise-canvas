@@ -37,6 +37,8 @@ import {
   type OutputLevels,
 } from "../lib/output-levels";
 import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type AudioStateMeta } from "../lib/audio-hop";
+import { bandLengthsTexels } from "../lib/band-layout";
+import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
@@ -352,6 +354,12 @@ function stripExtensionForLabel(name: string): string {
 }
 
 /** Texel counts of the open files' packed textures, skipping `excludeFileId`. */
+/** The packed-size fields of a spectrogram, from the band lengths the analysis returned. */
+function packedSizeOf(bandLengths: Uint32Array): { texels: number; packedTextureSize: Vector2 } {
+  const texels = bandLengthsTexels(bandLengths);
+  return { texels, packedTextureSize: packedTextureSizeOf(texels) };
+}
+
 /** What each open file holds, for the graphics budget. */
 export function openFileTexelCounts(excludeFileId?: string): OpenFileTexels[] {
   const counts: OpenFileTexels[] = [];
@@ -359,7 +367,7 @@ export function openFileTexelCounts(excludeFileId?: string): OpenFileTexels[] {
     if (id === excludeFileId) continue;
     const data = file.spectrogramData;
     if (!data) continue;
-    const texels = data.textureWidth * data.textureHeight;
+    const texels = data.texels;
     const grid = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate);
     const blocks = canvasWindowBlocks(grid);
     if (needsCanvasWindow(grid, blocks)) {
@@ -383,9 +391,7 @@ export function logFileFootprint(fileId: string, event: string, extra?: Record<s
     sampleRate: data.sampleRate,
     channels: data.numChannels,
     bandsPerOctave: data.bandsPerOctave,
-    textureWidth: data.textureWidth,
-    textureHeight: data.textureHeight,
-    texels: data.textureWidth * data.textureHeight,
+    texels: data.texels,
     windowBlocks: canvasWindowBlocks(
       blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate),
     ),
@@ -434,13 +440,11 @@ async function loadRealFileViaGaborator(
       result.inverseMap.byteLength / 4,
     ),
     metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-    textureWidth: result.textureWidth,
-    textureHeight: result.textureHeight,
+    ...packedSizeOf(result.bandLengths),
     numFrames: result.numFrames,
     numBands: result.numBands,
     numChannels: result.numChannels,
     sampleRate: result.sampleRate,
-    packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
     minFreq,
     bandsPerOctave,
     magnitudeEnergy: result.magnitudeEnergy,
@@ -654,7 +658,7 @@ export async function deriveSpectrogramData(base: SpectrogramData, packedData: F
       new Uint32Array(base.synthesisMetadata.bandOffsets),
       new Uint32Array(base.synthesisMetadata.bandLengths),
       new Int32Array(base.synthesisMetadata.bandStepLog2s),
-      base.textureWidth * base.textureHeight,
+      base.texels,
     ));
   return {
     ...base,
@@ -759,13 +763,11 @@ async function rebuildFileFromAudioNow(
       result.inverseMap.byteLength / 4,
     ),
     metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-    textureWidth: result.textureWidth,
-    textureHeight: result.textureHeight,
+    ...packedSizeOf(result.bandLengths),
     numFrames: result.numFrames,
     numBands: result.numBands,
     numChannels: result.numChannels,
     sampleRate: result.sampleRate,
-    packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
     minFreq: analysisParams.minFreq,
     bandsPerOctave: analysisParams.bandsPerOctave,
     magnitudeEnergy: result.magnitudeEnergy,
@@ -1048,13 +1050,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           result.inverseMap.byteLength / 4,
         ),
         metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-        textureWidth: result.textureWidth,
-        textureHeight: result.textureHeight,
+        ...packedSizeOf(result.bandLengths),
         numFrames: result.numFrames,
         numBands: result.numBands,
         numChannels: result.numChannels,
         sampleRate: result.sampleRate,
-        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
         minFreq: state.minFreq,
         bandsPerOctave: state.bandsPerOctave,
         magnitudeEnergy: result.magnitudeEnergy,
@@ -1556,13 +1556,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
               result.metadata.byteOffset,
               result.metadata.byteLength / 4,
             ),
-            textureWidth: result.textureWidth,
-            textureHeight: result.textureHeight,
+            ...packedSizeOf(result.bandLengths),
             numFrames: result.numFrames,
             numBands: result.numBands,
             numChannels: result.numChannels,
             sampleRate: result.sampleRate,
-            packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
             // From analysisParams, not the current global setting — a stem has
             // to record the resolution it was actually analysed at, or it stops
             // lining up with the file it was split from.
@@ -2693,13 +2691,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             result.metadata.byteOffset,
             result.metadata.byteLength / 4,
           ),
-          textureWidth: result.textureWidth,
-          textureHeight: result.textureHeight,
+          ...packedSizeOf(result.bandLengths),
           numFrames: result.numFrames,
           numBands: result.numBands,
           numChannels: result.numChannels,
           sampleRate: result.sampleRate,
-          packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
           minFreq,
           bandsPerOctave,
           magnitudeEnergy: result.magnitudeEnergy,
@@ -3053,7 +3049,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           // machine, reopens at any size and exhausts the GPU pool.
           const otherTexelCounts = openFileTexelCounts(fileId);
           const allowed = remainingCoefficientBudget(otherTexelCounts);
-          const coefficients = spectrogramData.textureWidth * spectrogramData.textureHeight;
+          const coefficients = spectrogramData.texels;
           if (allowed !== undefined && coefficients > allowed) {
             throw new Error(
               otherTexelCounts.length > 0

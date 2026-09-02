@@ -1,4 +1,5 @@
 import { Vector2 } from "three";
+import { packedTextureSizeOf } from "../lib/canvas-view";
 import { SpectrogramData } from "../store/types";
 
 /** Mock spectrograms always carry their packed state; tests read it freely. */
@@ -52,20 +53,16 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
     metadataFreqDriftBands = 0,
   } = options;
 
-  // Calculate texture dimensions
-  // For simplicity, we'll use a square-ish texture
-  const totalPixels = numFrames * numBands;
-  const textureWidth = Math.ceil(Math.sqrt(totalPixels));
-  const textureHeight = Math.ceil(totalPixels / textureWidth);
+  const texels = numFrames * numBands;
 
   // Create packed data (RGBA: magnitude L, phase L, magnitude R, phase R)
-  const packedData = new Float32Array(textureWidth * textureHeight * 4);
+  const packedData = new Float32Array(texels * 4);
 
   // Fill based on pattern
   for (let band = 0; band < numBands; band++) {
     for (let frame = 0; frame < numFrames; frame++) {
       const pixelIndex = band * numFrames + frame;
-      if (pixelIndex >= textureWidth * textureHeight) break;
+      if (pixelIndex >= texels) break;
 
       const baseIndex = pixelIndex * 4;
       let magnitude = 0;
@@ -113,18 +110,10 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
   }
 
   // Create inverse map (maps packed texture UV to unpacked spectrogram coordinates)
-  const inverseMap = new Float32Array(textureWidth * textureHeight * 2);
-  for (let y = 0; y < textureHeight; y++) {
-    for (let x = 0; x < textureWidth; x++) {
-      const pixelIndex = y * textureWidth + x;
-      const linearIndex = pixelIndex;
-      const band = Math.floor(linearIndex / numFrames);
-      const frame = linearIndex % numFrames;
-
-      const baseIndex = pixelIndex * 2;
-      inverseMap[baseIndex] = frame; // x coordinate (time)
-      inverseMap[baseIndex + 1] = band; // y coordinate (frequency)
-    }
+  const inverseMap = new Float32Array(texels * 2);
+  for (let pixelIndex = 0; pixelIndex < texels; pixelIndex++) {
+    inverseMap[pixelIndex * 2] = pixelIndex % numFrames; // x coordinate (time)
+    inverseMap[pixelIndex * 2 + 1] = Math.floor(pixelIndex / numFrames); // y coordinate (frequency)
   }
 
   // Create metadata (per-band info: start offset, length, time scale exponent, frequency)
@@ -160,13 +149,12 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
     packedData,
     inverseMap,
     metadata,
-    textureWidth,
-    textureHeight,
+    texels,
     numFrames,
     numBands,
     numChannels,
     sampleRate,
-    packedTextureSize: new Vector2(textureWidth, textureHeight),
+    packedTextureSize: packedTextureSizeOf(texels),
     minFreq,
     bandsPerOctave,
     synthesisMetadata: {
@@ -177,12 +165,6 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
   };
 }
 
-// Hard cap from the native analyzer (gaborator-addon.cpp MAX_TEXTURE_SIZE). The
-// packed texture is min(8192, totalCoefficients) wide and at most 8192 tall; a
-// file that would exceed that is rejected at analysis time, so a realistic mock
-// must respect the same bound.
-const MAX_TEXTURE_SIZE = 8192;
-
 /**
  * Creates mock SpectrogramData that matches the real gaborator packing for a
  * file of a given duration, so paint-latency profiling sees realistic
@@ -190,7 +172,6 @@ const MAX_TEXTURE_SIZE = 8192;
  *   - numFrames = round(durationSeconds * sampleRate)   (raw sample count)
  *   - each octave toward lower frequency adds one to the time step exponent, so
  *     bandLength = ((numFrames - 1) >> stepLog2) + 1   (high bands are longest)
- *   - textureWidth = min(8192, totalCoefficients), textureHeight = ceil(total / width)
  * High-frequency bands hold far more time-frames than low ones and the packed
  * layout stacks variable-length bands — the property that makes the scissor
  * over-cover the upper bands and the precompute pass span most of the texture.
@@ -272,16 +253,7 @@ export function createConstantQMockSpectrogramData(
     minFreq,
   });
 
-  const textureWidth = Math.min(MAX_TEXTURE_SIZE, totalPacked);
-  const textureHeight = totalPacked > 0 ? Math.ceil(totalPacked / textureWidth) : 0;
-  if (textureHeight > MAX_TEXTURE_SIZE) {
-    throw new Error(
-      `Mock exceeds the analyzer's ${MAX_TEXTURE_SIZE}x${MAX_TEXTURE_SIZE} cap (${textureWidth}x${textureHeight}). ` +
-        `Reduce durationSeconds or bandsPerOctave — the real app would reject this file.`,
-    );
-  }
-
-  const packedData = new Float32Array(textureWidth * textureHeight * 4);
+  const packedData = new Float32Array(totalPacked * 4);
   for (let i = 0; i < totalPacked; i++) {
     const baseIndex = i * 4;
     packedData[baseIndex] = constantMagnitude;
@@ -289,12 +261,7 @@ export function createConstantQMockSpectrogramData(
   }
 
   // Inverse map: packed linear index -> (full-res frame = i << stepLog2, band).
-  // Padding pixels beyond the packed data map to the lowest band at frame 0.
-  const inverseMap = new Float32Array(textureWidth * textureHeight * 2);
-  for (let i = 0; i < textureWidth * textureHeight; i++) {
-    inverseMap[i * 2] = 0;
-    inverseMap[i * 2 + 1] = numBands - 1;
-  }
+  const inverseMap = new Float32Array(totalPacked * 2);
   for (let band = 0; band < numBands; band++) {
     const start = bandOffsets[band];
     const len = bandLengths[band];
@@ -315,13 +282,12 @@ export function createConstantQMockSpectrogramData(
     packedData,
     inverseMap,
     metadata,
-    textureWidth,
-    textureHeight,
+    texels: totalPacked,
     numFrames,
     numBands,
     numChannels: 2,
     sampleRate,
-    packedTextureSize: new Vector2(textureWidth, textureHeight),
+    packedTextureSize: packedTextureSizeOf(totalPacked),
     minFreq,
     bandsPerOctave,
     synthesisMetadata: {
@@ -345,7 +311,7 @@ export function createMockSpectrogramWithMarkers(options: MockSpectrogramOptions
   const centerBand = Math.floor(spectrogramData.numBands / 2);
   const centerPixel = centerBand * spectrogramData.numFrames + centerFrame;
 
-  if (centerPixel < spectrogramData.textureWidth * spectrogramData.textureHeight) {
+  if (centerPixel < spectrogramData.texels) {
     const baseIndex = centerPixel * 4;
     spectrogramData.packedData[baseIndex] = 1.0; // Mark with max magnitude
     spectrogramData.packedData[baseIndex + 2] = 1.0;
@@ -371,15 +337,14 @@ export function readSpectrogramPixel(
   band: number,
   numFrames: number,
   numBands: number,
-  textureWidth: number,
-  textureHeight: number,
+  texels: number,
 ): [number, number, number, number] | null {
   if (frame < 0 || frame >= numFrames || band < 0 || band >= numBands) {
     return null;
   }
 
   const pixelIndex = band * numFrames + frame;
-  if (pixelIndex >= textureWidth * textureHeight) {
+  if (pixelIndex >= texels) {
     return null;
   }
 
@@ -457,8 +422,7 @@ export function getPixelAtUv(
     band,
     spectrogramData.numFrames,
     spectrogramData.numBands,
-    spectrogramData.textureWidth,
-    spectrogramData.textureHeight,
+    spectrogramData.texels,
   );
 }
 

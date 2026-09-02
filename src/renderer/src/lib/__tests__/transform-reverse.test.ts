@@ -14,11 +14,19 @@ import { SpectrogramData, State } from "../../store/types";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import { packedFold, padToFold } from "../constants";
 
 function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData) {
-  const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+  const { packedData, inverseMap, metadata, texels, numBands } = spectrogramData;
+  const { width: textureWidth, height: textureHeight } = packedFold(texels);
 
-  const packedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+  const packedDataTex = new DataTexture(
+    padToFold(packedData!, texels, 4),
+    textureWidth,
+    textureHeight,
+    RGBAFormat,
+    FloatType,
+  );
   packedDataTex.internalFormat = "RGBA32F";
   packedDataTex.minFilter = NearestFilter;
   packedDataTex.magFilter = NearestFilter;
@@ -29,7 +37,13 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData) {
   const originalPackedDataTex = packedDataTex.clone();
   originalPackedDataTex.needsUpdate = true;
 
-  const inverseMapTex = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+  const inverseMapTex = new DataTexture(
+    padToFold(inverseMap!, texels, 2),
+    textureWidth,
+    textureHeight,
+    RGFormat,
+    FloatType,
+  );
   inverseMapTex.internalFormat = "RG32F";
   inverseMapTex.minFilter = NearestFilter;
   inverseMapTex.magFilter = NearestFilter;

@@ -57,8 +57,8 @@ export type SpectrogramData = {
   // reopen needs it again.
   inverseMap?: Float32Array;
   metadata: Float32Array;
-  textureWidth: number;
-  textureHeight: number;
+  /** Packed coefficients the file holds: the sum of the band lengths, with no padding. */
+  texels: number;
   numFrames: number;
   numBands: number;
   numChannels: number;

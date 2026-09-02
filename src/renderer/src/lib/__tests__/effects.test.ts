@@ -20,6 +20,7 @@ import {
 import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL } from "../utils";
+import { packedFold, padToFold } from "../constants";
 
 /**
  * Creates WebGL textures from SpectrogramData for testing.
@@ -30,9 +31,16 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData): {
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
 } {
-  const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+  const { packedData, inverseMap, metadata, texels, numBands } = spectrogramData;
+  const { width: textureWidth, height: textureHeight } = packedFold(texels);
 
-  const packedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+  const packedDataTex = new DataTexture(
+    padToFold(packedData!, texels, 4),
+    textureWidth,
+    textureHeight,
+    RGBAFormat,
+    FloatType,
+  );
   packedDataTex.internalFormat = "RGBA32F";
   packedDataTex.minFilter = NearestFilter;
   packedDataTex.magFilter = NearestFilter;
@@ -43,7 +51,13 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData): {
   const originalPackedDataTex = packedDataTex.clone();
   originalPackedDataTex.needsUpdate = true;
 
-  const inverseMapTex = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+  const inverseMapTex = new DataTexture(
+    padToFold(inverseMap!, texels, 2),
+    textureWidth,
+    textureHeight,
+    RGFormat,
+    FloatType,
+  );
   inverseMapTex.internalFormat = "RG32F";
   inverseMapTex.minFilter = NearestFilter;
   inverseMapTex.magFilter = NearestFilter;
@@ -979,8 +993,7 @@ describe("Effects", () => {
             band,
             destSpectrogramData.numFrames,
             destSpectrogramData.numBands,
-            destSpectrogramData.textureWidth,
-            destSpectrogramData.textureHeight,
+            destSpectrogramData.texels,
           );
           if (pixel) {
             sum += pixel[0];
@@ -1139,15 +1152,7 @@ describe("Effects", () => {
       renderer.renderStroke(params, state, sourceFile);
       const output = await renderer.getFBOData();
 
-      const hitPixel = readSpectrogramPixel(
-        output,
-        testFrame,
-        testBand,
-        spec.numFrames,
-        spec.numBands,
-        spec.textureWidth,
-        spec.textureHeight,
-      );
+      const hitPixel = readSpectrogramPixel(output, testFrame, testBand, spec.numFrames, spec.numBands, spec.texels);
       expect(hitPixel).not.toBeNull();
       expect(hitPixel![0]).toBeCloseTo(testMag, 2);
       expect(hitPixel![2]).toBeCloseTo(testMag, 2);
@@ -1159,15 +1164,7 @@ describe("Effects", () => {
       for (let band = 0; band < spec.numBands; band++) {
         for (let frame = 0; frame < spec.numFrames; frame++) {
           if (band === testBand && frame === testFrame) continue;
-          const pix = readSpectrogramPixel(
-            output,
-            frame,
-            band,
-            spec.numFrames,
-            spec.numBands,
-            spec.textureWidth,
-            spec.textureHeight,
-          );
+          const pix = readSpectrogramPixel(output, frame, band, spec.numFrames, spec.numBands, spec.texels);
           if (pix && (pix[0] > 0.01 || pix[2] > 0.01)) {
             stray.push({ band, frame, magL: pix[0], magR: pix[2] });
           }
@@ -1352,15 +1349,7 @@ describe("Effects", () => {
       let total = 0;
       for (let band = 0; band < spec.numBands; band++) {
         for (let frame = 0; frame < spec.numFrames; frame++) {
-          const pixel = readSpectrogramPixel(
-            output,
-            frame,
-            band,
-            spec.numFrames,
-            spec.numBands,
-            spec.textureWidth,
-            spec.textureHeight,
-          );
+          const pixel = readSpectrogramPixel(output, frame, band, spec.numFrames, spec.numBands, spec.texels);
           if (!pixel) continue;
           weighted += pixel[0] * frame;
           total += pixel[0];

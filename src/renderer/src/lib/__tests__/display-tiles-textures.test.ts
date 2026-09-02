@@ -21,6 +21,7 @@ import type { CommittedSource } from "../display-decimate";
 import { DisplayTileRing, type RingView } from "../display-tiles-textures";
 import { DISPLAY_TILES_BYTES_PER_TEXEL, displayTilesBytes, tileGrid } from "../display-tiles";
 import { gatherPixelRanges } from "../pixel-ranges";
+import { packedFold, padToFold } from "../constants";
 
 const RESOLVE_VERT = /* glsl */ `
 in vec3 position;
@@ -61,7 +62,9 @@ describe("display tile ring", () => {
 
   // The mock's magnitude is the same everywhere, which hides a bin read from
   // the wrong place; this varies it along the packed layout.
-  const varied = Float32Array.from(data.packedData);
+  // Padded to the fold once, so a test that writes into it writes into the
+  // array its texture is bound to.
+  const varied = padToFold(Float32Array.from(data.packedData), data.texels, 4);
   for (let i = 0; i < varied.length / 4; i++) {
     varied[i * 4] = 0.05 + 0.45 * (1 + Math.sin(i * 0.37));
     varied[i * 4 + 2] = 0.05 + 0.45 * (1 + Math.cos(i * 0.11));
@@ -97,7 +100,8 @@ describe("display tile ring", () => {
 
   /** The packed state as the canvas holds it: magnitude and phase per channel. */
   function makeCanvas(packed: Float32Array): DataTexture {
-    const texture = new DataTexture(packed, data.textureWidth, data.textureHeight, RGBAFormat, FloatType);
+    const fold = packedFold(data.texels);
+    const texture = new DataTexture(packed, fold.width, fold.height, RGBAFormat, FloatType);
     texture.internalFormat = "RGBA32F";
     texture.minFilter = NearestFilter;
     texture.magFilter = NearestFilter;
@@ -287,7 +291,7 @@ describe("display tile ring", () => {
     for (let i = 0; i < packed.length; i += 4) packed[i] *= 3;
     canvas.needsUpdate = true;
     ring.refreshFromCanvas(gl, asSource(canvas), {
-      ranges: Uint32Array.of(0, data.textureWidth * data.textureHeight),
+      ranges: Uint32Array.of(0, data.texels),
       count: 1,
     });
 

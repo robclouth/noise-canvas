@@ -8,6 +8,7 @@ import {
   Vector2,
   WebGLRenderer,
 } from "three";
+import { packedFold, padToFold } from "../lib/constants";
 import type { EffectType } from "../effects/types";
 import type { SpectrogramData, State } from "../store/types";
 import { createMockState } from "./mock-state";
@@ -36,9 +37,16 @@ export function createSpectrogramTextures(spectrogramData: SpectrogramData): {
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
 } {
-  const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+  const { packedData, inverseMap, metadata, texels, numBands } = spectrogramData;
+  const { width: textureWidth, height: textureHeight } = packedFold(texels);
 
-  const packedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+  const packedDataTex = new DataTexture(
+    padToFold(packedData!, texels, 4),
+    textureWidth,
+    textureHeight,
+    RGBAFormat,
+    FloatType,
+  );
   packedDataTex.internalFormat = "RGBA32F";
   packedDataTex.minFilter = NearestFilter;
   packedDataTex.magFilter = NearestFilter;
@@ -49,7 +57,13 @@ export function createSpectrogramTextures(spectrogramData: SpectrogramData): {
   const originalPackedDataTex = packedDataTex.clone();
   originalPackedDataTex.needsUpdate = true;
 
-  const inverseMapTex = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+  const inverseMapTex = new DataTexture(
+    padToFold(inverseMap!, texels, 2),
+    textureWidth,
+    textureHeight,
+    RGFormat,
+    FloatType,
+  );
   inverseMapTex.internalFormat = "RG32F";
   inverseMapTex.minFilter = NearestFilter;
   inverseMapTex.magFilter = NearestFilter;

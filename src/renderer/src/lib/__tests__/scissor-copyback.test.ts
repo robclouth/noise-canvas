@@ -17,6 +17,7 @@ import type { SpectrogramData, State } from "../../store/types";
 import { readRenderTargetPixelsAsync } from "../async-readpixels";
 import { BRUSH_SIZE_PITCH_FULL } from "../utils";
 import { StrokeRenderer, type EffectsRegistry } from "../stroke-renderer";
+import { packedFold } from "../constants";
 
 /**
  * Equivalence guard for the footprint render and copy-back optimisation.
@@ -216,7 +217,8 @@ describe("footprint copy-back equivalence", () => {
 
       const previewTarget = previewRenderer["pingPong"] === 0 ? previewRenderer["fbo2"] : previewRenderer["fbo1"];
       expect(previewTarget.texture).toBe(display.preview);
-      const { textureWidth, textureHeight, numBands, metadata } = spectrogramData;
+      const { texels, numBands, metadata } = spectrogramData;
+      const { width: textureWidth, height: textureHeight } = packedFold(texels);
       const preview = await readRenderTargetPixelsAsync(gl, previewTarget, 0, 0, textureWidth, textureHeight);
       const binRanges = display.binRanges.image.data as Float32Array;
 

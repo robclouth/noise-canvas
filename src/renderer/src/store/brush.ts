@@ -218,13 +218,13 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       // whole canvas, or the store when the canvas holds a window of it.
       const historyManager = getHistoryManager(activeFileId);
       const currentIdBefore = historyManager.getCurrentId();
-      const { textureWidth, textureHeight } = file.spectrogramData;
+      const { texels } = file.spectrogramData;
       const footprintRanges = snapshot.dirtyRanges;
       const footprintOnly =
         !projectsWholeFile(snapshot) &&
         footprintRanges != null &&
         footprintRanges.length > 0 &&
-        pixelRangeCount(footprintRanges) < textureWidth * textureHeight * 0.5;
+        pixelRangeCount(footprintRanges) < texels * 0.5;
       const painted = footprintRanges != null && footprintRanges.length > 0 ? footprintRanges : null;
       const readPromise = footprintOnly ? renderer.readPixelRanges(footprintRanges) : renderer.getFBOData();
       // Both reads are issued before the queue so they see this stroke's end.

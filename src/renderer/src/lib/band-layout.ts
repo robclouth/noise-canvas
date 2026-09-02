@@ -26,6 +26,13 @@ export function bandAtPixel(layout: BandLayout, pixel: number): number {
   return low;
 }
 
+/** Packed texels a run of band lengths holds. */
+export function bandLengthsTexels(bandLengths: ArrayLike<number>): number {
+  let texels = 0;
+  for (let i = 0; i < bandLengths.length; i++) texels += bandLengths[i];
+  return texels;
+}
+
 /** Packed texels the whole layout holds, from the last band's offset and length. */
 export function layoutTexels(layout: BandLayout): number {
   const last = (layout.numBands - 1) * 4;
