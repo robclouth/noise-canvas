@@ -536,7 +536,9 @@ export const factoryPresets: PresetType[] = [
   },
 
   // --- Blur ---
-  // Smears energy forward in time (origin Left) into a reverb-like tail. Add blend layers the tail over the dry sound.
+  // A send: step 1's rising erase leaves the brush's opening stretch against
+  // silence, step 2 smears that alone into a tail, and step 3 (Read From Start,
+  // same envelope as the erase) lays the untouched canvas back underneath.
   // Macro 1 sets the tail length, Macro 2 the wet level, Macro 3 roughens the smear.
   {
     id: "reverb",
@@ -548,6 +550,25 @@ export const factoryPresets: PresetType[] = [
       {
         id: "reverb-step-1",
         name: "Step 1",
+        effects: [
+          {
+            id: "reverb-erase",
+            effect: "dynamics",
+            enabled: true,
+            params: { dynamicsGainDb: -80 },
+          },
+        ],
+        brushSizeTime: 6,
+        brushSizePitch: 128,
+        brushCurveTime: 50,
+        brushCurvePitch: 100,
+        brushSkewTime: 100,
+        brushAnchorMode: 0,
+        blendMode: 0,
+      },
+      {
+        id: "reverb-step-2",
+        name: "Step 2",
         effects: [
           {
             id: "reverb-blur",
@@ -573,6 +594,19 @@ export const factoryPresets: PresetType[] = [
         brushIterations: 2,
         brushIntensity: 80,
         brushIntensityModMacro2Amount: 100,
+        blendMode: 1,
+      },
+      {
+        id: "reverb-step-3",
+        name: "Step 3",
+        effects: [],
+        sourceDataMode: "start",
+        brushSizeTime: 6,
+        brushSizePitch: 128,
+        brushCurveTime: 50,
+        brushCurvePitch: 100,
+        brushSkewTime: 100,
+        brushAnchorMode: 0,
         blendMode: 1,
       },
     ],
