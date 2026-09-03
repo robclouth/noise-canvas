@@ -29,6 +29,8 @@ export interface AudioState {
    * plays, crossfading out of the buffer it replaces.
    */
   swapPlayingBuffer: (audioBuffer: AudioBuffer) => void;
+  /** Swaps without the selection-audition re-mask; the audition path itself calls this. */
+  swapPlayingBufferRaw: (audioBuffer: AudioBuffer) => void;
   togglePlayback: () => Promise<void>;
   stopAudio: () => void;
 
@@ -90,7 +92,9 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     let pos = playerClock.startOffset + elapsed * rate;
 
     if (loop) {
-      const L0 = loopRegion?.start ?? 0;
+      // The clock's own window: a selection audition loops a span no stored
+      // loop region describes.
+      const L0 = playerClock.loopStart;
       const L1 = playerClock.loopEnd;
       const len = Math.max(0, L1 - L0);
       if (len <= 0) return L1;
@@ -272,6 +276,16 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   },
 
   swapPlayingBuffer: (audioBuffer) => {
+    // While a selection auditions itself, a commit's fresh audio is re-masked
+    // before it reaches the running player, so the mask survives painting.
+    if (get().selectionAudition) {
+      get().remaskPlayingBuffer(audioBuffer);
+      return;
+    }
+    get().swapPlayingBufferRaw(audioBuffer);
+  },
+
+  swapPlayingBufferRaw: (audioBuffer) => {
     const { getPlayer, getPlaybackTime, setPlaybackTime } = get();
     // One clock reading for both the position and the restart, so the incoming
     // source lines up with the outgoing one it fades across.
@@ -307,12 +321,27 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
       await Tone.start();
     }
 
+    // A selection auditions itself: its own bands, over its own stretch of
+    // time. A full-height selection needs no masking, only the window.
+    const selection = state.filesSelection[activeFileId] ?? null;
+    let playBuffer = buffer;
+    if (selection) {
+      const masked = await get().selectionAuditionBuffer(activeFileId, selection);
+      if (masked) playBuffer = masked;
+      set({ selectionAudition: masked !== null });
+    } else if (state.selectionAudition) {
+      set({ selectionAudition: false });
+    }
+    const region = selection ? { start: selection.start, end: selection.end } : loopRegion;
+
     const player = getPlayer();
-    player.buffer = new Tone.ToneAudioBuffer(buffer);
+    player.buffer = new Tone.ToneAudioBuffer(playBuffer);
     player.volume.value = 0;
 
-    const end = loopRegion?.end ?? buffer.duration;
-    const loopStart = loopRegion?.start ?? 0;
+    // The buffer bounds the window: a region measured against an older, longer
+    // file cannot push the loop points past the end.
+    const end = Math.min(region?.end ?? playBuffer.duration, playBuffer.duration);
+    const loopStart = Math.min(region?.start ?? 0, end);
 
     // When Link is enabled and active, phase-align and adjust playback rate
     const { linkEnabled, linkTempo, linkQuantum, filepathsBpm, linkLatencyMs } = get();
@@ -345,16 +374,16 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
         // A zero-length span makes the modulo below NaN, and a NaN offset
         // reaches player.start. Fall through to the normal, unsynced start.
-        const spanSeconds = loop && loopRegion ? loopRegion.end - loopRegion.start : buffer.duration;
+        const spanSeconds = loop && region ? region.end - region.start : playBuffer.duration;
         if (!(spanSeconds > 0) || !Number.isFinite(secondsPerBeat) || secondsPerBeat <= 0) {
           throw new Error("Link sync needs a non-empty span and a positive tempo");
         }
 
         let offset: number;
-        if (loop && loopRegion) {
+        if (loop && region) {
           const loopLenBeats = spanSeconds / secondsPerBeat;
           const posInLoopBeats = ((adjustedBeat % loopLenBeats) + loopLenBeats) % loopLenBeats;
-          offset = loopRegion.start + posInLoopBeats * secondsPerBeat;
+          offset = region.start + posInLoopBeats * secondsPerBeat;
         } else {
           const durationBeats = spanSeconds / secondsPerBeat;
           const posBeats = ((adjustedBeat % durationBeats) + durationBeats) % durationBeats;
@@ -383,8 +412,11 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
       }
     }
 
+    // The play marker starts playback only when it sits inside the window a
+    // selection scopes; from anywhere else the selection plays from its start.
     const startTime = filesPlaybackStartTime[activeFileId];
-    const offset = Math.min(Math.max(startTime, 0), end);
+    const marker = region && !(startTime >= region.start && startTime < region.end) ? region.start : startTime;
+    const offset = Math.min(Math.max(marker, 0), end);
 
     if (loop) {
       player.loop = true;
@@ -470,6 +502,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     set((s) => ({
       isPlaying: false,
+      selectionAudition: false,
       playerClock: {
         ...s.playerClock,
         startAt: null,

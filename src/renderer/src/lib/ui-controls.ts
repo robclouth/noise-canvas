@@ -33,6 +33,21 @@ export const UI_CONTROLS = {
     description: "Plays back the region you painted as soon as a stroke finishes.",
     manualSection: "transport-and-output",
   },
+  "transport-brush-mode": {
+    label: "Brush mode",
+    description: "Paints when you drag on the canvas.",
+    manualSection: "selecting-a-region",
+  },
+  "transport-select-mode": {
+    label: "Select mode",
+    description: "Draws a selection when you drag on the canvas.",
+    manualSection: "selecting-a-region",
+  },
+  "transport-select-shape": {
+    label: "Selection shape",
+    description: "Picks what a selection drag draws: a rectangle, a freehand lasso, or the magic wand.",
+    manualSection: "selecting-a-region",
+  },
   "transport-link": {
     label: "Ableton Link",
     description: "Syncs tempo and playback with other Ableton Link apps on the network.",
@@ -133,21 +148,26 @@ export const UI_CONTROLS = {
     manualSection: "navigating-the-canvas",
   },
 
-  // Stem groups
-  "stem-sync-view": {
+  // File groups
+  "group-sync-view": {
     label: "Link views",
-    description: "Ties zoom and scroll together across the parts of a split.",
-    manualSection: "stem-groups",
+    description: "Ties zoom and scroll together across the files in the group.",
+    manualSection: "grouping-files",
   },
-  "stem-merge": {
-    label: "Merge parts",
-    description: "Combines every part of a split into one new file, leaving the parts open.",
-    manualSection: "stem-groups",
+  "group-merge": {
+    label: "Merge",
+    description: "Sums every file in the group into one new file, leaving them open.",
+    manualSection: "grouping-files",
   },
-  "stem-close": {
-    label: "Close split",
-    description: "Closes every part of a split at once.",
-    manualSection: "stem-groups",
+  "group-ungroup": {
+    label: "Ungroup",
+    description: "Drops the bracket, leaving every file open on its own.",
+    manualSection: "grouping-files",
+  },
+  "group-close": {
+    label: "Close group",
+    description: "Closes every file in the group at once.",
+    manualSection: "grouping-files",
   },
 
   // History
@@ -279,6 +299,11 @@ export const UI_CONTROLS = {
     description: "Adds a step to the end of the sequence.",
     manualSection: "steps",
   },
+  "step-enable": {
+    label: "Step on/off",
+    description: "Switches the current step off so a stroke skips it, keeping its settings.",
+    manualSection: "steps",
+  },
   "step-duplicate": {
     label: "Duplicate step",
     description: "Copies the current step and its parameters into a new step.",
@@ -334,6 +359,11 @@ export const UI_CONTROLS = {
     label: "Step Linked",
     description: "Shares one value for this parameter across every step.",
     manualSection: "linking-parameters-across-steps",
+  },
+  "param-quantise": {
+    label: "Quantise",
+    description: "Snaps this parameter's modulation to the control's own values.",
+    manualSection: "parameter-controls",
   },
 
   // Modulators

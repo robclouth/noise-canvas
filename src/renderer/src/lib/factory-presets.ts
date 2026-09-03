@@ -536,8 +536,11 @@ export const factoryPresets: PresetType[] = [
   },
 
   // --- Blur ---
-  // Smears energy forward in time (origin Left) into a reverb-like tail. Add blend layers the tail over the dry sound.
-  // Macro 1 sets the tail length, Macro 2 the wet level, Macro 3 roughens the smear.
+  // A send: step 1's rising erase leaves the brush's opening stretch against
+  // silence, step 2 stretches that alone to 1.5× and smears it into a tail at
+  // full weight, and step 3 (Read From Start) lays the untouched canvas back
+  // underneath. Macro 1 sets the tail length, Macro 2 the wet level, Macro 3
+  // roughens the smear.
   {
     id: "reverb",
     name: "Reverb",
@@ -550,6 +553,31 @@ export const factoryPresets: PresetType[] = [
         name: "Step 1",
         effects: [
           {
+            id: "reverb-erase",
+            effect: "dynamics",
+            enabled: true,
+            params: { dynamicsGainDb: -80 },
+          },
+        ],
+        brushSizeTime: 6,
+        brushSizePitch: 128,
+        brushCurveTime: 80,
+        brushCurvePitch: 100,
+        brushSkewTime: 100,
+        brushAnchorMode: 0,
+        blendMode: 0,
+      },
+      {
+        id: "reverb-step-2",
+        name: "Step 2",
+        effects: [
+          {
+            id: "reverb-stretch",
+            effect: "transform",
+            enabled: true,
+            params: { transformScaleTime: 1.5 },
+          },
+          {
             id: "reverb-blur",
             effect: "blur",
             enabled: true,
@@ -560,25 +588,38 @@ export const factoryPresets: PresetType[] = [
               blurNoiseTime: 0,
               blurNoiseTimeModMacro3Amount: 100,
               blurSamplesX: 48,
+              blurSamplesY: 1,
               blurOrigin: 0,
             },
           },
         ],
         brushSizeTime: 6,
         brushSizePitch: 128,
-        brushCurveTime: -40,
-        brushCurvePitch: 100,
-        brushSkewTime: -100,
+        brushCurveTime: 100,
+        brushCurvePitch: 85,
+        brushSkewPitch: 100,
         brushAnchorMode: 0,
         brushIterations: 2,
-        brushIntensity: 80,
         brushIntensityModMacro2Amount: 100,
+        blendMode: 1,
+        algorithm: 1,
+      },
+      {
+        id: "reverb-step-3",
+        name: "Step 3",
+        effects: [],
+        sourceDataMode: "start",
+        brushSizeTime: 6,
+        brushSizePitch: 128,
+        brushCurveTime: 100,
+        brushCurvePitch: 100,
+        brushAnchorMode: 0,
         blendMode: 1,
       },
     ],
     linkedParams: [],
     macroNames: ["Size", "Mix", "Grain", "Macro 4"],
-    macroValues: [30, park("brushIntensity", 80), 0, 50],
+    macroValues: [50, park("brushIntensity", 100), 50, 50],
   },
 
   // --- Clone ---

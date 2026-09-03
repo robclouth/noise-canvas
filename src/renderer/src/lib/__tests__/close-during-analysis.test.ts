@@ -12,6 +12,8 @@ vi.mock("../modals", () => ({
   openConfirm: vi.fn(),
   openNewFilePrompt: vi.fn(),
   openInsertSilencePrompt: vi.fn(),
+  openSetLengthPrompt: vi.fn(),
+  openGroupFilesPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
@@ -90,9 +92,9 @@ function makeStore() {
     minFreq: 20,
     isPlaying: false,
     stopAudio: vi.fn(),
-    removeFileFromStemGroup: vi.fn(),
-    stemGroups: {},
-    stemGroupOfFile: {},
+    removeFileFromGroup: vi.fn(),
+    fileGroups: {},
+    fileGroupOfFile: {},
   } as unknown as State;
 
   return { get, files };

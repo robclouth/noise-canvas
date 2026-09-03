@@ -14,12 +14,13 @@ export interface StepsState {
   addStep: () => void;
   removeStep: (index: number) => void;
   duplicateStep: (index: number) => void;
+  toggleStepEnabled: (index: number) => void;
   reorderSteps: (from: number, to: number) => void;
   getActiveStep: () => BrushStep;
   getSteps: () => BrushStep[];
   setStepParameter: (key: ParameterKey, value: unknown) => void;
   setStepName: (index: number, name: string) => void;
-  updateActiveStepLockedOffset: (offset: { beats: number; pitch: number } | null) => void;
+  lockStepSourceOffsets: (offsets: readonly ({ beats: number; pitch: number } | null)[]) => void;
 }
 
 export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState => ({
@@ -91,6 +92,16 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
     );
   },
 
+  toggleStepEnabled: (index: number) => {
+    set(
+      produce((draft: State) => {
+        const step = draft.brushes[draft.activeBrushIndex]?.steps[index];
+        if (!step) return;
+        step.enabled = step.enabled === false;
+      }),
+    );
+  },
+
   reorderSteps: (fromIndex: number, toIndex: number) => {
     set(
       produce((draft: State) => {
@@ -141,12 +152,14 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
     );
   },
 
-  updateActiveStepLockedOffset: (offset) => {
+  lockStepSourceOffsets: (offsets) => {
     set(
       produce((draft: State) => {
         const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
-        if (draftSteps && draftSteps[draft.activeStepIndex]) {
-          draftSteps[draft.activeStepIndex].lockedOffset = offset;
+        if (!draftSteps) return;
+        for (let index = 0; index < draftSteps.length; index++) {
+          const offset = offsets[index];
+          if (offset !== undefined) draftSteps[index].lockedOffset = offset;
         }
       }),
     );

@@ -26,13 +26,23 @@ export type UvRegion = { startX: number; endX: number; startY: number; endY: num
 export type { SourceNeed } from "./source-window";
 
 /** The other files a dab reads, each through a window this canvas owns. */
-export type OtherFileNeeds = { source: SourceNeed | null; impulses: readonly SourceNeed[] };
+export type OtherFileNeeds = { sources: readonly SourceNeed[]; impulses: readonly SourceNeed[] };
 
 /** Paint waiting for the canvas to hold the frames it lands on. */
 type HeldPaint = { startFrame: number; endFrame: number; needs: OtherFileNeeds; paint: () => boolean };
 
 /** Fills `settle` waits through before it gives up on the paint still held. */
 const HELD_PAINT_FILLS = 8;
+
+/** Drops the slots for files no need names any more. */
+function dropExcept(slots: Map<string, SourceWindowSlot>, needs: readonly SourceNeed[]): void {
+  const wanted = new Set(needs.map((need) => need.fileId));
+  for (const [fileId, slot] of slots) {
+    if (wanted.has(fileId)) continue;
+    slot.dispose();
+    slots.delete(fileId);
+  }
+}
 
 /** What a windowed canvas needs from its owner. */
 export type WindowedCanvasDeps = {
@@ -85,7 +95,7 @@ export class WindowedCanvas {
   private readonly grid: BlockGrid;
   private readonly blocks: CanvasWindow | null;
   private readonly original: PackedWindow | null;
-  private readonly source: SourceWindowSlot;
+  private readonly sources = new Map<string, SourceWindowSlot>();
   private readonly impulses = new Map<string, SourceWindowSlot>();
   private readonly windowBlocks: number;
   private request: CanvasView | null = null;
@@ -109,7 +119,6 @@ export class WindowedCanvas {
       this.blocks = null;
       this.original = null;
     }
-    this.source = new SourceWindowSlot(deps.gl, windowBlocks);
     this.windowBlocks = windowBlocks;
   }
 
@@ -285,11 +294,11 @@ export class WindowedCanvas {
    * Points a window at the frames a dab reads of another file, building it on
    * first use and re-reading it once that file's committed state moves.
    * Returns the textures to sample that file through, or null while the window
-   * cannot serve the frames.
+   * cannot serve the frames. Each file painted from gets a window of its own,
+   * because every step names its own source.
    */
   aimSource(need: SourceNeed): SourceWindowTextures | null {
-    const blocks = this.deps.sourceBlocks(need.fileId);
-    return blocks ? this.source.aim(need, blocks) : null;
+    return this.aimIn(this.sources, need);
   }
 
   /**
@@ -298,24 +307,17 @@ export class WindowedCanvas {
    * and filter through another, and two steps can filter through two.
    */
   aimImpulse(need: SourceNeed): SourceWindowTextures | null {
-    const blocks = this.deps.sourceBlocks(need.fileId);
-    if (!blocks) return null;
-    let slot = this.impulses.get(need.fileId);
-    if (!slot) {
-      slot = new SourceWindowSlot(this.deps.gl, this.windowBlocks);
-      this.impulses.set(need.fileId, slot);
-    }
-    return slot.aim(need, blocks);
+    return this.aimIn(this.impulses, need);
+  }
+
+  /** Drops the windows over files the brush no longer paints from. */
+  dropSourcesExcept(needs: readonly SourceNeed[]): void {
+    dropExcept(this.sources, needs);
   }
 
   /** Drops the windows over response files the brush no longer filters through. */
   dropImpulsesExcept(needs: readonly SourceNeed[]): void {
-    const wanted = new Set(needs.map((need) => need.fileId));
-    for (const [fileId, slot] of this.impulses) {
-      if (wanted.has(fileId)) continue;
-      slot.dispose();
-      this.impulses.delete(fileId);
-    }
+    dropExcept(this.impulses, needs);
   }
 
   /**
@@ -328,11 +330,11 @@ export class WindowedCanvas {
     for (let fills = 0; this.held.length > 0 && fills < HELD_PAINT_FILLS; fills++) {
       const next = this.held[0];
       this.aim(next.startFrame, next.endFrame);
-      if (next.needs.source) this.aimSource(next.needs.source);
+      for (const need of next.needs.sources) this.aimSource(need);
       for (const need of next.needs.impulses) this.aimImpulse(need);
       const reads = [
         this.fill,
-        this.source.settled(),
+        ...[...this.sources.values()].map((slot) => slot.settled()),
         ...[...this.impulses.values()].map((slot) => slot.settled()),
       ].filter((read): read is Promise<void> => read !== null);
       if (reads.length === 0) break;
@@ -552,7 +554,8 @@ export class WindowedCanvas {
   dispose(): void {
     this.blocks?.dispose();
     this.original?.dispose();
-    this.source.dispose();
+    for (const slot of this.sources.values()) slot.dispose();
+    this.sources.clear();
     for (const slot of this.impulses.values()) slot.dispose();
     this.impulses.clear();
     this.request = null;
@@ -577,8 +580,20 @@ export class WindowedCanvas {
 
   /** True while every other-file window holds what the dab asked of it. */
   private othersHold(needs: OtherFileNeeds): boolean {
-    if (!this.source.holds(needs.source)) return false;
+    if (!needs.sources.every((need) => this.sources.get(need.fileId)?.holds(need) ?? false)) return false;
     return needs.impulses.every((need) => this.impulses.get(need.fileId)?.holds(need) ?? false);
+  }
+
+  /** The slot in `slots` for the need's file, building one on first use. */
+  private aimIn(slots: Map<string, SourceWindowSlot>, need: SourceNeed): SourceWindowTextures | null {
+    const blocks = this.deps.sourceBlocks(need.fileId);
+    if (!blocks) return null;
+    let slot = slots.get(need.fileId);
+    if (!slot) {
+      slot = new SourceWindowSlot(this.deps.gl, this.windowBlocks);
+      slots.set(need.fileId, slot);
+    }
+    return slot.aim(need, blocks);
   }
 
   private expectRenderer(): StrokeRenderer {

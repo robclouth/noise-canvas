@@ -1,5 +1,6 @@
 import type { IpcRendererEvents } from "../../../main/lib/types";
 import { host } from "./host";
+import { letterFor } from "./keyboard";
 import { ipcEmitLocal, ipcSend } from "./ipc";
 
 /**
@@ -101,20 +102,43 @@ export const APP_MENUS: AppMenu[] = [
       { type: "item", label: "Undo", command: "undo", accelerator: { code: "KeyZ" } },
       { type: "item", label: "Redo", command: "redo", accelerator: { code: "KeyZ", shift: true } },
       { type: "separator" },
-      { type: "item", label: "Fill Grid with Brush", command: "fill-grid", accelerator: { code: "KeyG" } },
+      { type: "item", label: "Cut", command: "cut-selection", accelerator: { code: "KeyX" } },
+      { type: "item", label: "Copy", command: "copy-selection", accelerator: { code: "KeyC" } },
+      { type: "item", label: "Paste", command: "paste-selection", accelerator: { code: "KeyV" } },
+      { type: "item", label: "Duplicate", command: "duplicate-selection", accelerator: { code: "KeyD" } },
+      { type: "item", label: "Silence", command: "silence-selection" },
+      { type: "item", label: "Invert Selection", command: "invert-selection", accelerator: { code: "KeyI" } },
+      { type: "separator" },
+      { type: "item", label: "Cut Time", command: "cut-time-selection", accelerator: { code: "KeyX", shift: true } },
+      {
+        type: "item",
+        label: "Paste Time",
+        command: "paste-time-selection",
+        accelerator: { code: "KeyV", shift: true },
+      },
+      {
+        type: "item",
+        label: "Duplicate Time",
+        command: "duplicate-time-selection",
+        accelerator: { code: "KeyD", shift: true },
+      },
+      { type: "separator" },
+      { type: "item", label: "Fill Grid with Brush", command: "fill-grid", accelerator: { code: "KeyF" } },
       { type: "separator" },
       { type: "item", label: "Restore Original", command: "restore-original" },
       {
         type: "item",
         label: "Duplicate File",
         command: "duplicate-active-file",
-        accelerator: { code: "KeyD" },
         only: "electron",
       },
+      { type: "item", label: "Group Files…", command: "group-files", accelerator: { code: "KeyG" } },
+      { type: "item", label: "Ungroup", command: "ungroup-files", accelerator: { code: "KeyG", shift: true } },
       { type: "separator" },
       { type: "item", label: "Double Length", command: "double-active-file-length" },
       { type: "item", label: "Half Length", command: "halve-active-file-length" },
-      { type: "item", label: "Insert Silence…", command: "insert-silence" },
+      { type: "item", label: "Set Length…", command: "set-file-length" },
+      { type: "item", label: "Insert Silence…", command: "insert-silence", accelerator: { code: "KeyI", shift: true } },
     ],
   },
   {
@@ -187,13 +211,33 @@ export function acceleratorLabel(accelerator: Accelerator): string {
   return parts.join("+");
 }
 
-/** True when the key event is this accelerator, with Cmd on macOS and Ctrl elsewhere. */
+/** The character a punctuation accelerator stands for, wherever a layout prints it. */
+const CODE_CHARS: Record<string, string> = {
+  Comma: ",",
+  Slash: "/",
+};
+
+/**
+ * True when the key event is this accelerator, with Cmd on macOS and Ctrl
+ * elsewhere. A letter is the one the layout prints, falling back to the letter
+ * at that place on a US board where the layout prints no Latin letter at all.
+ * Punctuation answers to its character on any layout, since a layout is free to
+ * put it behind Shift or on another key.
+ */
 export function matchesAccelerator(event: KeyboardEvent, accelerator: Accelerator): boolean {
   const modifier = host.env.platform === "darwin" ? event.metaKey : event.ctrlKey;
   if (!modifier) return false;
-  if (event.code !== accelerator.code) return false;
+  if (event.altKey !== Boolean(accelerator.alt)) return false;
+
+  const letter = /^Key[A-Z]$/.test(accelerator.code) ? accelerator.code.slice(3).toLowerCase() : null;
+  if (letter) {
+    if (event.shiftKey !== Boolean(accelerator.shift)) return false;
+    return letterFor(event) === letter;
+  }
+
+  if (event.key === CODE_CHARS[accelerator.code]) return true;
   if (event.shiftKey !== Boolean(accelerator.shift)) return false;
-  return event.altKey === Boolean(accelerator.alt);
+  return event.code === accelerator.code;
 }
 
 /**

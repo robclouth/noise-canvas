@@ -17,6 +17,7 @@ import type {
   PackedLayout,
   PackedOnsets,
   PhaseTurns,
+  SplicePiece,
 } from "./types";
 import { getModelPath } from "./ai-separation";
 import { loadNativeAddon } from "./native-addon";
@@ -433,6 +434,22 @@ export async function analyseChannels(channelArrays: Float32Array[], sampleRate:
   const analyzeTime = performance.now() - analyzeStart;
   console.log(`[analyseChannels] Gaborator analyze time: ${analyzeTime.toFixed(2)}ms`);
 
+  // A caller that already knows the onsets — a splice moves them rigidly with
+  // the audio — passes detectOnsets: false and skips the detection pass. The
+  // empty map stands in only for the shape; such a caller replaces it.
+  if (params.detectOnsets === false) {
+    return {
+      ...analysisResult,
+      onsets: new Float32Array(0),
+      onsetOdfMax: 0,
+      onsetBandMax: new Float32Array(0),
+      sampleRate,
+      format: "wav", // in-memory audio is always PCM data
+      codec: "pcm_f32le",
+      channels,
+    };
+  }
+
   const onsetResult = await analysisOnsets(analysisResult, sampleRate);
   return {
     ...analysisResult,
@@ -453,6 +470,67 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
     channelArrays.push(audioBuffer.getChannelData(ch));
   }
   return analyseChannels(channelArrays, audioBuffer.sampleRate, params);
+}
+
+/**
+ * The splice grid in samples: an edit whose length is a multiple of this keeps
+ * every fine band on its own bin grid, so `spliceAnalyseChannels` rigid-moves
+ * them instead of re-analysing. About 1.5 ms of audio.
+ */
+export function spliceQuantSamples(sampleRate: number): number {
+  return 1 << init().spliceQuantLog2(sampleRate);
+}
+
+/**
+ * Analyse spliced audio against the file's previous analysis. `pieces` names
+ * the sample ranges of `channelArrays` that are identical to ranges of the old
+ * audio; their coefficients copy across, and only the seams and the shifted
+ * coarse bands are re-analysed. Result shape matches `analyseChannels` with
+ * onset detection off — the caller supplies the spliced onset map. Rejects
+ * when the layouts cannot splice; callers fall back to a full analysis. None
+ * of the buffers may be touched while the promise is in flight.
+ */
+export async function spliceAnalyseChannels(
+  channelArrays: Float32Array[],
+  sampleRate: number,
+  params: AnalysisParams,
+  oldPacked: Float32Array,
+  oldLayout: PackedLayout,
+  pieces: SplicePiece[],
+) {
+  const gab = init();
+  const newFrames = channelArrays[0]?.length ?? 0;
+  let total = 0;
+  for (let b = 0; b < oldLayout.numBands; b++) {
+    total += newFrames > 0 ? ((newFrames - 1) >> oldLayout.bandStepLog2s[b]) + 1 : 0;
+  }
+  const out = {
+    data: new Float32Array(total * 4),
+    metadata: new Float32Array(oldLayout.numBands * 4),
+  };
+
+  const spliceStart = performance.now();
+  const analysisResult: GaboratorAnalysisResult & { sampleRate: number } = await gab.spliceAnalyze(
+    channelArrays,
+    sampleRate,
+    params,
+    oldPacked,
+    oldLayout,
+    pieces,
+    out,
+  );
+  console.log(`[spliceAnalyse] time: ${(performance.now() - spliceStart).toFixed(2)}ms`);
+
+  return {
+    ...analysisResult,
+    onsets: new Float32Array(0),
+    onsetOdfMax: 0,
+    onsetBandMax: new Float32Array(0),
+    sampleRate,
+    format: "wav",
+    codec: "pcm_f32le",
+    channels: channelArrays.length,
+  };
 }
 
 export interface SynthesisResult {

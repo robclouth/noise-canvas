@@ -8,6 +8,7 @@ import { resolveBrushColor } from "@renderer/lib/colors";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { INPUT_HEIGHT } from "@renderer/lib/ui-density";
+import { letterFor } from "@renderer/lib/keyboard";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
 import { collectBrushReferencedPaths } from "@renderer/store/files";
 import type { Brush } from "@renderer/store/types";
@@ -287,10 +288,11 @@ export function SidebarPanel() {
       setHotkeyListenIndex(null);
       return;
     }
-    if (!/^[a-z]$/.test(event.key) || event.ctrlKey || event.altKey || event.metaKey) return;
-    if (RESERVED_KEYS.has(event.key)) return;
+    if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+    const letter = letterFor(event);
+    if (!letter || RESERVED_KEYS.has(letter)) return;
     event.preventDefault();
-    useStore.getState().setBrushHotkey(hotkeyListenIndex, event.key);
+    useStore.getState().setBrushHotkey(hotkeyListenIndex, letter);
     setHotkeyListenIndex(null);
   });
 

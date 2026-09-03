@@ -86,6 +86,7 @@ function makeStore(overrides: Partial<State> = {}) {
     linkLatencyMs: 0,
     filepathsBpm: { "/audio/a.wav": 120 },
     filesPlaybackStartTime: { f1: 0 },
+    filesSelection: {},
     stopAudio: vi.fn(),
     ...overrides,
   } as unknown as State;

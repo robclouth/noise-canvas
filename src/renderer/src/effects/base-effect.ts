@@ -15,6 +15,7 @@ export type Modulator = {
   modulatorPatternRateX: ModulatorParameterUniform;
   modulatorPatternRateY: ModulatorParameterUniform;
   modulatorStrength: ModulatorParameterUniform;
+  modulatorSteps: number;
   modulatorRotation: ModulatorParameterUniform;
   modulatorStereoSpread: ModulatorParameterUniform;
   modulatorEnvelopeMinDb: number;
@@ -57,6 +58,16 @@ export type CommonUniforms = {
   originalSpectrogramTex: { value: Texture | null };
   brushBottomLeftUv: { value: Vector2 };
   brushSizeUv: { value: Vector2 };
+  // Selection clip: 0 when no selection is set, and the brush writes everywhere
+  // it would otherwise. The frames are (startFrame, endFrame) and the bands are
+  // the inclusive (lowBand, highBand) pair the selection covers.
+  selectionActive: { value: number };
+  selectionFrames: { value: Vector2 };
+  selectionBands: { value: Vector2 };
+  // Shape mask over the selection's bounding rectangle; 0 when the selection
+  // is a plain rectangle.
+  selectionMaskActive: { value: number };
+  selectionMaskTex: { value: Texture | null };
   viewZoomPower: { value: number };
   viewOffset: { value: number };
   viewZoomPowerY: { value: number };
@@ -95,6 +106,7 @@ export type CommonUniforms = {
   inSwappedDomain?: { value: boolean };
   magnitudeLimit: { value: number };
   gainLut: { value: Texture | null };
+  quantizeLutTex: { value: Texture | null };
   modulator1ImageTex: { value: Texture | null };
   modulator2ImageTex: { value: Texture | null };
   modulator3ImageTex: { value: Texture | null };
@@ -148,6 +160,11 @@ export function createDefaultUniforms(): CommonUniforms {
     originalSpectrogramTex: { value: null },
     brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
     brushSizeUv: { value: new Vector2(0.1, 0.1) },
+    selectionActive: { value: 0 },
+    selectionFrames: { value: new Vector2(0.0, 0.0) },
+    selectionBands: { value: new Vector2(0.0, 0.0) },
+    selectionMaskActive: { value: 0 },
+    selectionMaskTex: { value: null },
     viewZoomPower: { value: 0.0 },
     viewOffset: { value: 0.0 },
     viewZoomPowerY: { value: 0.0 },
@@ -178,6 +195,7 @@ export function createDefaultUniforms(): CommonUniforms {
     inSwappedDomain: { value: false },
     modulators: { value: [] },
     gainLut: { value: null },
+    quantizeLutTex: { value: null },
     modulator1ImageTex: { value: null },
     modulator2ImageTex: { value: null },
     modulator3ImageTex: { value: null },

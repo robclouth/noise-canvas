@@ -208,7 +208,7 @@ Per open file, windowed, at K blocks:
 - block slots on the GPU: two windows plus four spare, because a slide holds
   the window it enters and the one whose paint it folds back
 - the original window: one window plus four spare, plus its composed texture
-- a source window while a brush paints from another windowed file, and its
+- a source window per windowed file a step paints from, and its
   original once a step reads that
 - the display pyramid and tile ring, which are bounded by the viewport
 

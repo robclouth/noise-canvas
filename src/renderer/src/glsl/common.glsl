@@ -21,6 +21,11 @@ struct Parameter {
     float staticWeight;
     int scaleKind; // 0 linear, 1 log, 2 log-bipolar, 3 log1p
     vec2 logEnds; // log: natural logs of the slider's ends; log-bipolar and log1p: log1p of the largest magnitude
+    // Valid-value snapping for the modulated value: a texel range in
+    // quantizeLutTex, or a value-space step. Zero count and zero step means off.
+    int quantizeOffset;
+    int quantizeCount;
+    float quantizeStep;
 };
 
 // A modulator parameter. Its stroke-context and macro contributions arrive as an

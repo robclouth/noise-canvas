@@ -8,12 +8,15 @@ import type { BrushState } from "./brush";
 import type { EffectsState } from "./effects";
 import type { FilesState } from "./files";
 import type { FillState } from "./fill";
+import type { SelectionAuditionState } from "./selection-audition";
+import type { SelectionClipboardState } from "./selection-clipboard";
+import type { SelectionRippleState } from "./selection-ripple";
 import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
 import type { PalettesState } from "./palettes";
 import type { PresetsState } from "./presets";
 import type { SectionPresetsState } from "./section-presets";
-import type { StemGroupsState } from "./stem-groups";
+import type { FileGroupsState } from "./file-groups";
 import type { StepsState } from "./steps";
 
 export type BrushColor = {
@@ -138,7 +141,10 @@ export type State = BrushState &
   StepsState &
   LinkState &
   FillState &
-  StemGroupsState & {
+  FileGroupsState &
+  SelectionAuditionState &
+  SelectionClipboardState &
+  SelectionRippleState & {
     setParameter: (key: ParameterKey, value: unknown, effectId?: string) => void;
     randomizationAmounts: Record<string, number>;
     setRandomizationAmount: (key: string, amount: number) => void;

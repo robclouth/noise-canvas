@@ -117,6 +117,7 @@ export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
         // so every writer must hand over a new object rather than edit this one.
         levels: openFiles[fileId]?.outputLevels,
         loading: state.filesLoading[fileId],
+        busy: state.filesBusy[fileId],
       }),
       draw,
       { equalityFn: shallow, fireImmediately: true },

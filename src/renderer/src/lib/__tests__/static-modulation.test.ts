@@ -312,6 +312,30 @@ describe("static modulation on the GPU", () => {
     expect(maxMagDifference(viaSlider, viaMacro)).toBeLessThan(1e-4);
   });
 
+  it("snaps a modulated pitch shift to the control's marked values", async () => {
+    const banded = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "bandGradient" });
+    const shifted = (params: Record<string, number>, stepOverrides: Record<string, unknown> = {}): State =>
+      effectState("transform", { transformEdgeMode: 0, ...params }, { snapPitch: false, ...stepOverrides });
+
+    // A macro parks the shift at 2.3 semitones; the nearest marked value is 2.
+    const park = normalizeParameterValue("transformShiftSemis", 2.3) * 100;
+    const modulated = (quantize: boolean): State => {
+      const state = shifted(
+        { transformShiftSemis: 0, transformShiftSemisModMacro1Amount: 100 },
+        quantize ? { transformShiftSemisModQuantize: true } : {},
+      );
+      state.brushes[0].macroValues = [park, 50, 50, 50];
+      return state;
+    };
+
+    const snapped = await render(modulated(true), 0, banded);
+    const free = await render(modulated(false), 0, banded);
+    const exactTwo = await render(shifted({ transformShiftSemis: 2 }), 0, banded);
+
+    expect(maxMagDifference(snapped, free)).toBeGreaterThan(1e-3);
+    expect(maxMagDifference(snapped, exactTwo)).toBeLessThan(1e-4);
+  });
+
   it("moves a modulator's phase from a macro", async () => {
     const sweep = (macroValue: number): State => {
       const state = gainState(

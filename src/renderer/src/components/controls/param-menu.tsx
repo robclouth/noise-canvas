@@ -2,7 +2,13 @@ import { Box, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantin
 import { openPrompt } from "@renderer/lib/modals";
 import { helpProps } from "@renderer/lib/ui-controls";
 import { CONTROL_ROW_HEIGHT, LABEL_WIDTH } from "@renderer/lib/ui-density";
-import { getParameterDef, isEffectParameter, parameterDefs, resolveDescription } from "@renderer/parameters";
+import {
+  getParameterDef,
+  getQuantizeParamKey,
+  isEffectParameter,
+  parameterDefs,
+  resolveDescription,
+} from "@renderer/parameters";
 import {
   getMacroValueIndex,
   getModulationParamKeys,
@@ -15,12 +21,16 @@ import {
   getMacroAmountParamKeys,
   getModAmountParamKeys,
 } from "@renderer/store/modulators";
+import {
+  formatModulationReach,
+  modulationReach,
+  scopedStateView,
+  totalModulationWeight,
+} from "@renderer/lib/macro-targets";
 import { manualSectionForParameter } from "@renderer/lib/ui-areas";
 import { ParameterKey } from "@renderer/store/types";
-import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { BookOpen, Link2, Pencil, RotateCcw } from "lucide-react";
 import React, { useState } from "react";
-import { useShallow } from "zustand/shallow";
 
 const EMPTY_STRING_ARRAY: readonly string[] = [];
 import { Tooltip } from "../tooltip";
@@ -29,41 +39,18 @@ import { ParameterControl } from "./parameter-control";
 import { SectionMenu } from "./section-menu";
 import { SwitchControl } from "./switch-control";
 
-const formatRangeValue = (v: number, unit?: string) => `${parseFloat(v.toFixed(2))}${unit ?? ""}`;
-
 const ModulationRange = ({ paramKey, effectId }: { paramKey: ParameterKey; effectId?: string }) => {
-  const parameter = getParameterDef(paramKey);
+  const text = useStore((state) => {
+    const view = scopedStateView(state, state.activeStepIndex, effectId);
+    const reach = modulationReach(view, paramKey, totalModulationWeight(view, paramKey));
+    return reach ? formatModulationReach(paramKey, reach) : null;
+  });
 
-  const { value, totalAbs } = useStore(
-    useShallow((state) => {
-      const useEffectScope = !!effectId && isEffectParameter(paramKey);
-      const selectVal = (k: ParameterKey) =>
-        useEffectScope ? selectEffectParameter(effectId, k)(state) : selectParameter(k)(state);
-      const val = selectVal(paramKey) as number;
-      const amountKeys: ParameterKey[] = [
-        ...getModAmountParamKeys(paramKey),
-        ...getContextualModAmountParamKeys(paramKey),
-        ...getMacroAmountParamKeys(paramKey),
-      ];
-      let total = 0;
-      for (const k of amountKeys) {
-        const a = selectVal(k) as number;
-        total += Math.abs(a);
-      }
-      return { value: val, totalAbs: Math.min(100, total) / 100 };
-    }),
-  );
-
-  if (parameter.kind !== "number" || totalAbs === 0) return null;
-
-  // Sources sweep the slider's own arc, so the reach is measured in knob position.
-  const position = normalizeParameterValue(paramKey, value);
-  const lower = denormalizeParameterValue(paramKey, position * (1 - totalAbs));
-  const upper = denormalizeParameterValue(paramKey, position + totalAbs * (1 - position));
+  if (!text) return null;
 
   return (
     <Text size="xs" c="dimmed">
-      {formatRangeValue(lower, parameter.unit)} – {formatRangeValue(upper, parameter.unit)}
+      {text}
     </Text>
   );
 };
@@ -158,6 +145,21 @@ export const ParamMenu = ({
   const modulatorParamKeys = isModulatable && !contextualOnly ? getModAmountParamKeys(paramKey) : undefined;
   const contextualModParamKeys = isModulatable ? getContextualModAmountParamKeys(paramKey) : undefined;
   const macroAmountParamKeys = isModulatable && !contextualOnly ? getMacroAmountParamKeys(paramKey) : undefined;
+
+  const quantizeParamKey = isModulatable ? getQuantizeParamKey(paramKey) : null;
+  const quantizeOn = useStore((state) => {
+    if (!quantizeParamKey) return false;
+    const useEffectScope = !!effectId && isEffectParameter(quantizeParamKey);
+    const value = useEffectScope
+      ? selectEffectParameter(effectId, quantizeParamKey)(state)
+      : selectParameter(quantizeParamKey)(state);
+    return value === true;
+  });
+  const setQuantizeOn = (value: boolean) => {
+    if (!quantizeParamKey) return;
+    const useEffectScope = !!effectId && isEffectParameter(quantizeParamKey);
+    setParameter(quantizeParamKey, value, useEffectScope ? effectId : undefined);
+  };
 
   return (
     <Menu opened={opened} onChange={setOpened} position="bottom" withArrow>
@@ -365,6 +367,17 @@ export const ParamMenu = ({
                   />
                 ))}
               </Box>
+              {quantizeParamKey && (
+                <SwitchControl
+                  labelComponent={
+                    <Text size="xs" w={LABEL_WIDTH} {...helpProps("param-quantise")}>
+                      Quantise
+                    </Text>
+                  }
+                  value={quantizeOn}
+                  setValue={setQuantizeOn}
+                />
+              )}
             </>
           )}
         </Stack>

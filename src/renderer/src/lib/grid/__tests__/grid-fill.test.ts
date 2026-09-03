@@ -63,7 +63,7 @@ describe("resolveGridFill", () => {
     const { anchors } = resolveGridFill(stateWith(), target({ start: 0, end: 0.5 }));
     expect(anchors.length).toBe(whole / 2);
     // Everything the fill places starts inside the region.
-    expect(anchors.every((anchor) => anchor.blX < 0.5 + 1e-6)).toBe(true);
+    expect(anchors.every((anchor) => anchor.aimX < 0.5 + 1e-6)).toBe(true);
   });
 
   it("collapses an axis to one stroke when its snapping is off", () => {

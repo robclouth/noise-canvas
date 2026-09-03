@@ -40,6 +40,14 @@ uniform float     destFileFrameCount;
 
 uniform sampler2D originalSpectrogramTex;
 
+uniform float selectionActive;
+uniform vec2  selectionFrames;
+uniform vec2  selectionBands;
+// Set when the selection carries a shape mask over its bounding rectangle:
+// rows span the inclusive band pair, columns the frame range, looked up
+// proportionally so the mask survives translation and cross-file drops.
+uniform float selectionMaskActive;
+uniform sampler2D selectionMaskTex;
 uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float viewZoomPowerY;
@@ -170,6 +178,11 @@ float destFileUvX(float uvX) {
 float sourceFileUvX(float uvX) {
   if (sourceViewStartFrame == 0.0 && sourceFileFrameCount == sourceFrameCount) return uvX;
   return sourceFileFrame(uvX) / max(sourceFileFrameCount, 1.0);
+}
+// A distance along a canvas UV axis, in the file's UV scale.
+float destFileUvDx(float dx) {
+  if (destViewStartFrame == 0.0 && destFileFrameCount == destFrameCount) return dx;
+  return dx * destFrameCount / max(destFileFrameCount, 1.0);
 }
 // Seconds from the file's start on the axis convention the phase terms use,
 // where the FILE's UV 1.0 is its last frame rather than one frame past it.
@@ -402,6 +415,7 @@ float getAudioLevelDb(vec2 uv) {
 // envelope follower can directly sample phase/panning from the spectrogram.
 #define HAS_SPECTROGRAM_SAMPLING
 #define MODULATOR_FILE_UV_X(x) destFileUvX(x)
+#define MODULATOR_FILE_UV_DX(x) destFileUvDx(x)
 #include "modulation-common.glsl"
 
 // Forward freq-preserving map: dest UV.y → source UV.y such that the two UVs
@@ -1332,10 +1346,35 @@ float getBrushTimeCoverage(vec2 unpackedUv, vec4 meta, out float localX) {
   return (inside || fallback) ? 1.0 : 0.0;
 }
 
+// Selection clip. A bin is inside the selection iff its left edge k·2^step
+// falls in [startFrame, endFrame) — the same edge-of-bin rule the brush's own
+// time coverage uses, so a selection edge and a brush edge landing on the same
+// frame claim the same bins. A band is inside iff its index falls in the
+// inclusive band pair, which the CPU rounds outwards: a band is the smallest
+// thing that can be painted.
+bool insideSelection(vec2 unpackedUv, vec4 meta) {
+  if (selectionActive < 0.5) return true;
+
+  float bandIndex = floor((1.0 - unpackedUv.y) * destBandCount);
+  if (bandIndex < selectionBands.x || bandIndex > selectionBands.y) return false;
+
+  float cellFrames = exp2(meta.b);
+  float pixelFrame = floor(unpackedUv.x * destFrameCount + 0.5);
+  float binIndex = clamp(floor((pixelFrame + 0.5) / cellFrames), 0.0, meta.g - 1.0);
+  float edgeFrame = binIndex * cellFrames;
+  if (edgeFrame < selectionFrames.x || edgeFrame >= selectionFrames.y) return false;
+  if (selectionMaskActive < 0.5) return true;
+
+  float rowUv = (bandIndex - selectionBands.x + 0.5) / (selectionBands.y - selectionBands.x + 1.0);
+  float colUv = (edgeFrame - selectionFrames.x) / max(1.0, selectionFrames.y - selectionFrames.x);
+  return texture(selectionMaskTex, vec2(clamp(colUv, 0.0, 1.0), rowUv)).r > 0.5;
+}
+
 // Returns vec2(weightL, weightR) — brush weight can decorrelate per channel
 // when the modulators driving envelope curve/skew have non-zero stereo spread.
 vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
   vec4 meta = getDestMetadata(unpackedUv);
+  if (!insideSelection(unpackedUv, meta)) return vec2(0.0);
 
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
@@ -1406,11 +1445,13 @@ bool brushWeightIsZero(vec2 unpackedUv) {
 #ifdef ABLATE_BRUSH_REJECT
   return false;
 #else
+  vec4 meta = getDestMetadata(unpackedUv);
+  if (!insideSelection(unpackedUv, meta)) return true;
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   float safeBrushY = max(EPSILON, brushSizeUv.y);
   if (off.y < 0.0 || off.y > safeBrushY) return true;
   float localX;
-  return getBrushTimeCoverage(unpackedUv, getDestMetadata(unpackedUv), localX) <= 0.0;
+  return getBrushTimeCoverage(unpackedUv, meta, localX) <= 0.0;
 #endif
 }
 

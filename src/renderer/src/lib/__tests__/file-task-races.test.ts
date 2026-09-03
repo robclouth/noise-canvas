@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { openInsertSilencePrompt } from "../modals";
 
 // Gates the addon calls a test drives, so work can be left in flight while the
 // store is asked to do something else.
@@ -15,7 +16,8 @@ const gate = vi.hoisted(() => ({
   analysed: [] as Float32Array[],
   snapshotLabels: [] as string[],
   storedOnsets: [] as { nodeId: string; packed: Float32Array }[],
-  silenceValues: null as { length: number; unit: "beats" | "seconds"; position: string } | null,
+  silenceValues: null as { length: number; unit: "beats" | "seconds" } | null,
+  setLengthValues: null as { length: number; unit: "beats" | "seconds" } | null,
   analysisResult: () => {
     const bands = 4;
     return {
@@ -53,6 +55,11 @@ vi.mock("../modals", () => ({
     if (gate.silenceValues) opts.onConfirm(gate.silenceValues);
     else opts.onClose?.();
   }),
+  openSetLengthPrompt: vi.fn((opts: { onConfirm: (values: unknown) => void; onClose?: () => void }) => {
+    if (gate.setLengthValues) opts.onConfirm(gate.setLengthValues);
+    else opts.onClose?.();
+  }),
+  openGroupFilesPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
@@ -156,9 +163,9 @@ function makeStore(overrides: Partial<State> = {}) {
     brushes: [],
     filesDirty: {},
     stopAudio: vi.fn(),
-    removeFileFromStemGroup: vi.fn(),
-    stemGroups: {},
-    stemGroupOfFile: {},
+    removeFileFromGroup: vi.fn(),
+    fileGroups: {},
+    fileGroupOfFile: {},
     ...overrides,
   } as unknown as State;
 
@@ -485,6 +492,7 @@ describe("rebuilding a file from its audio", () => {
     gate.storedOnsets = [];
     gate.snapshotLabels = [];
     gate.silenceValues = null;
+    gate.setLengthValues = null;
   });
 
   /** Hands the queued synthesis `samples` and waits for the rebuild to finish. */
@@ -528,7 +536,7 @@ describe("rebuilding a file from its audio", () => {
   });
 
   it("splices silence at the play start, and refreshes the onsets with it", async () => {
-    gate.silenceValues = { length: 3 / 48000, unit: "seconds", position: "play-start" };
+    gate.silenceValues = { length: 3 / 48000, unit: "seconds" };
     const { files } = makeStore({
       filesPlaybackStartTime: { [FILE_ID]: 2 / 48000 },
     } as unknown as Partial<State>);
@@ -541,16 +549,76 @@ describe("rebuilding a file from its audio", () => {
     expect(Array.from(gate.storedOnsets[0].packed)).toEqual([3, 0.25, 1]);
   });
 
-  it("takes the length in beats from the file's BPM", async () => {
-    gate.silenceValues = { length: 1, unit: "beats", position: "end" };
+  it("cuts the file at the length it is set to", async () => {
+    gate.setLengthValues = { length: 2 / 48000, unit: "seconds" };
+    const { files } = makeStore();
+    openTestFile();
+
+    await runRebuild(files.setActiveFileLength(), [1, 2, 3, 4]);
+
+    expect(Array.from(gate.analysed[0])).toEqual([1, 2]);
+    expect(gate.snapshotLabels).toEqual(["Set length"]);
+  });
+
+  it("pads the file with silence to reach a longer length", async () => {
+    gate.setLengthValues = { length: 7 / 48000, unit: "seconds" };
+    const { files } = makeStore();
+    openTestFile();
+
+    await runRebuild(files.setActiveFileLength(), [1, 2, 3, 4]);
+
+    expect(Array.from(gate.analysed[0])).toEqual([1, 2, 3, 4, 0, 0, 0]);
+  });
+
+  it("reads a set length in beats against the file's BPM", async () => {
+    gate.setLengthValues = { length: 1, unit: "beats" };
     // 240 BPM is a quarter-second beat, so one beat is 12000 samples at 48 kHz.
+    const { files } = makeStore({ filepathsBpm: { "/audio/a.wav": 240 } } as unknown as Partial<State>);
+    openTestFile("/audio/a.wav");
+
+    await runRebuild(files.setActiveFileLength(), [1, 2]);
+
+    expect(gate.analysed[0]).toHaveLength(12000);
+    expect(Array.from(gate.analysed[0].subarray(0, 3))).toEqual([1, 2, 0]);
+  });
+
+  it("does not rebuild when the set-length dialog is dismissed", async () => {
+    const { files } = makeStore();
+    openTestFile();
+
+    await files.setActiveFileLength();
+
+    expect(gate.analysed).toHaveLength(0);
+  });
+
+  it("takes the length in beats from the file's BPM", async () => {
+    gate.silenceValues = { length: 1, unit: "beats" };
+    // 240 BPM is a quarter-second beat, so one beat is 12000 samples at 48 kHz.
+    // No play marker is set, so the silence lands at the file start.
     const { files } = makeStore({ filepathsBpm: { "/audio/a.wav": 240 } } as unknown as Partial<State>);
     openTestFile("/audio/a.wav");
 
     await runRebuild(files.insertSilenceIntoActiveFile(), [1, 2]);
 
     expect(gate.analysed[0]).toHaveLength(2 + 12000);
-    expect(Array.from(gate.analysed[0].subarray(0, 3))).toEqual([1, 2, 0]);
+    expect(Array.from(gate.analysed[0].subarray(0, 3))).toEqual([0, 0, 0]);
+    expect(Array.from(gate.analysed[0].subarray(12000))).toEqual([1, 2]);
+  });
+
+  it("with a selection, opens the selection's own stretch as silence without asking", async () => {
+    vi.mocked(openInsertSilencePrompt).mockClear();
+    const { files, get } = makeStore({
+      filesSelection: { [FILE_ID]: { start: 1 / 48000, end: 3 / 48000, pitchLo: 0, pitchHi: 1 } },
+      retargetSelectionAudition: vi.fn(),
+    } as unknown as Partial<State>);
+    openTestFile();
+
+    await runRebuild(files.insertSilenceIntoActiveFile(), [1, 2, 3, 4]);
+
+    expect(openInsertSilencePrompt).not.toHaveBeenCalled();
+    expect(Array.from(gate.analysed[0])).toEqual([1, 0, 0, 2, 3, 4]);
+    // The silence keeps the selection, so the edit reads back as what it made.
+    expect(get().filesSelection[FILE_ID]).toMatchObject({ start: 1 / 48000, end: 3 / 48000 });
   });
 
   it("does nothing when the dialog is dismissed", async () => {

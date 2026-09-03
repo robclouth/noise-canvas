@@ -58,7 +58,9 @@ function openingTag(source: string, start: number): string {
   return source.slice(start);
 }
 
-const BUTTON_TAG = /<(ActionIcon|Button|UnstyledButton)\b/g;
+// The negative lookahead passes over member tags like <ActionIcon.Group>,
+// which group buttons rather than being one.
+const BUTTON_TAG = /<(ActionIcon|Button|UnstyledButton)\b(?!\.)/g;
 
 describe("control help coverage", () => {
   it("every button in the main interface carries help", () => {

@@ -6,22 +6,41 @@ import { View } from "@react-three/drei";
 import { openFiles, viewSyncTargets } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
 import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Vector2 } from "three";
-import { resolveAimUv, type AimUv } from "../lib/aim";
-import { aimUvToBrushBlUv } from "../lib/brush-anchor";
+import { type AimUv } from "../lib/aim";
+import { aimUvToBrushBlUv, brushUnionForAim } from "../lib/brush-anchor";
 import { heldRepeatIntervalMs } from "../lib/brush-repeat";
-import { getFileOnsets } from "../lib/file-onsets";
 import { penState } from "../lib/pen-state";
+import { getHistoryManager } from "../lib/history-manager";
+import {
+  growWandSelection,
+  WAND_DEFAULT_TOLERANCE_DB,
+  WAND_MAX_TOLERANCE_DB,
+  WAND_MIN_TOLERANCE_DB,
+} from "../lib/magic-wand";
+import { normaliseSelection, type Selection, type SelectionCorner } from "../lib/selection";
+import { lassoSelection, unionSelections, type LassoPoint } from "../lib/selection-mask";
 import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
+import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
+import { SelectionRegion } from "./selection-region";
 import { LevelStrip } from "./level-strip";
 import { OnsetLegend } from "./onset-legend";
 import { laneAnchorProps } from "../lib/ui-anchors";
 import { PITCH_LEGEND_WIDTH, PitchLegend } from "./pitch-legend";
 import { PlaybackLine } from "./playback-line";
 import { TimeLegend } from "./time-legend";
+
+// The select-mode crosshair with a small plus: Shift is down, so the next
+// drag or click adds to the selection instead of replacing it.
+const ADD_TO_SELECTION_CURSOR =
+  `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">` +
+  `<g stroke="black" stroke-width="3"><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/>` +
+  `<line x1="19.5" y1="16.5" x2="19.5" y2="22.5"/><line x1="16.5" y1="19.5" x2="22.5" y2="19.5"/></g>` +
+  `<g stroke="white" stroke-width="1.5"><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/>` +
+  `<line x1="19.5" y1="16.5" x2="19.5" y2="22.5"/><line x1="16.5" y1="19.5" x2="22.5" y2="19.5"/></g>` +
+  `</svg>') 12 12, crosshair`;
 
 export interface FileViewProps {
   fileId: string;
@@ -41,47 +60,9 @@ const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
  */
 type ViewPhase = "live" | "unveiling" | "static";
 
-// Resolves a pointer position to the aim point in pitch UV, reading the grid,
-// scale and anchor settings off the store. Center-anchor mode snaps the aim to
-// cell midpoints; corner-anchor mode snaps it to cell starts.
-function getSnappedCoordinates(clientX: number, clientY: number, rect: DOMRect, fileId: string, bpm: number) {
-  if (rect.width === 0 || rect.height === 0) return null;
-  const spectrogramData = openFiles[fileId]?.spectrogramData;
-  if (!spectrogramData) return null;
-
-  const state = useStore.getState();
-  const activeStep = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
-    | Record<string, unknown>
-    | undefined;
-
-  return resolveAimUv({
-    viewUv: new Vector2((clientX - rect.left) / rect.width, (clientY - rect.top) / rect.height),
-    zoom: new Vector2(state.filesZoom[fileId], state.filesZoomY[fileId] ?? 0),
-    offset: new Vector2(state.filesOffset[fileId], state.filesOffsetY[fileId] ?? 0),
-    bpm,
-    spectrogram: {
-      numBands: spectrogramData.numBands,
-      bandsPerOctave: spectrogramData.bandsPerOctave,
-      minFreq: spectrogramData.minFreq,
-      totalDuration: spectrogramData.numFrames / spectrogramData.sampleRate,
-    },
-    snapping: {
-      snapTime: state.snapTime,
-      snapPitch: state.snapPitch,
-      gridSizeBeats: state.gridSizeBeats,
-      gridSizeSemis: state.gridSizeSemis,
-      gridSwing: state.gridSwing,
-      scaleTonic: state.scaleTonic,
-      scaleType: state.scaleType,
-      anchorMode: (activeStep?.brushAnchorMode as number | undefined) ?? state.brushAnchorMode,
-    },
-    onsets: getFileOnsets(fileId),
-  });
-}
-
-// Resolves the aim point to the brush's bottom-left UV for the active file,
-// using the shared brush-anchor helper.
-function aimToBrushBlUv(aim: AimUv, fileId: string, bpm: number): { blX: number; blY: number } {
+// Resolves the aim point to one step's brush bottom-left UV for the active
+// file, using the shared brush-anchor helper.
+function aimToBrushBlUv(aim: AimUv, fileId: string, bpm: number, stepIndex: number): { blX: number; blY: number } {
   const spectrogramData = openFiles[fileId]?.spectrogramData;
   if (!spectrogramData) return { blX: aim.x, blY: aim.y };
   const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
@@ -93,7 +74,36 @@ function aimToBrushBlUv(aim: AimUv, fileId: string, bpm: number): { blX: number;
     totalDuration,
     spectrogramData.bandsPerOctave,
     spectrogramData.numBands,
+    stepIndex,
   );
+}
+
+// The bottom-left of the rectangle the brush covers for an aim point, in the
+// file's own UV. Full-size axes sit at 0, matching the rectangle drawn under
+// the cursor.
+function aimToBrushRectBlUv(aim: AimUv, fileId: string, bpm: number): { blX: number; blY: number } {
+  const spectrogramData = openFiles[fileId]?.spectrogramData;
+  if (!spectrogramData) return { blX: aim.x, blY: aim.y };
+  const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+  const union = brushUnionForAim(
+    useStore.getState(),
+    aim.x,
+    aim.y,
+    bpm,
+    totalDuration,
+    spectrogramData.bandsPerOctave,
+    spectrogramData.numBands,
+  );
+  return { blX: union.blX, blY: union.blY };
+}
+
+// Where the earliest step of the brush starts painting, in seconds. The stroke
+// covers every step, so the region it reports starts at the earliest of them.
+function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): number {
+  const spectrogramData = openFiles[fileId]?.spectrogramData;
+  if (!spectrogramData) return aim.x;
+  const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+  return aimToBrushRectBlUv(aim, fileId, bpm).blX * totalDuration;
 }
 
 export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
@@ -106,6 +116,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const isZooming = useStore((state) => state.isZooming);
   const isSynthesizing = useStore((state) => state.filesSynthesizing[fileId]);
   const loadingMessage = useStore((state) => state.filesLoading[fileId]);
+  const busyMessage = useStore((state) => state.filesBusy[fileId]);
 
   const isHovered = useTransientStore((state) => state.hoveredFile === fileId);
   // An axis drag moves every view-synced file, so all of them stay live.
@@ -115,24 +126,48 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   );
   const cursorVisible = useTransientStore((state) => state.cursorVisible);
   const isStroking = useStore((state) => state.isStroking);
-  const explicitSourcePath = useStore((state) => {
+  // Every step names its own source file, so any of them keeps this lane live.
+  const isExplicitSource = useStore((state) => {
     const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-    return steps[state.activeStepIndex]?.sourceFile?.path ?? null;
+    return steps.some((step) => step.sourceFile?.path === filePath);
   });
 
   const [isPanning, setIsPanning] = useState(false);
+  const editMode = useStore((state) => state.editMode);
+  const shiftHeld = useTransientStore((state) => state.shiftHeld);
 
   const cursorStyle = useMemo(() => {
     if (isPanning) return { cursor: "grabbing" };
     if (isZooming) return { cursor: "zoom-in" };
     if (pickingFileParam) return { cursor: "crosshair" };
+    if (editMode === "select" && shiftHeld) return { cursor: ADD_TO_SELECTION_CURSOR };
     return { cursor: "crosshair" };
-  }, [pickingFileParam, isPanning, isZooming]);
+  }, [pickingFileParam, isPanning, isZooming, editMode, shiftHeld]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);
+  // The corner a selection drag started from, or null when none is running.
+  const selectionStartRef = useRef<SelectionCorner | null>(null);
+  // The freehand path under way, in the file's seconds and pitch UV.
+  const lassoPointsRef = useRef<LassoPoint[] | null>(null);
+  // Set when the gesture started with Shift down: its result joins the
+  // selection that was already there instead of replacing it.
+  const addToSelectionRef = useRef(false);
+  // A wand press in flight: where it grows from, and the vertical drag that
+  // widens its tolerance. One grow runs at a time; the newest tolerance waits.
+  const wandRef = useRef<{
+    startY: number;
+    time: number;
+    pitchUv: number;
+    /** The selection committed before the press, when Shift asked to add to it. */
+    base: Selection | null;
+    latest: Selection | null;
+    busy: boolean;
+    pendingTol: number | null;
+    done: boolean;
+  } | null>(null);
   const momentumRef = useRef<{ vx: number; vy: number; raf: number | null }>({ vx: 0, vy: 0, raf: null });
   // Non-null while the held brush repeats on its own clock; the move handlers
   // then leave the painting to the clock instead of dabbing per movement.
@@ -142,15 +177,11 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   // A view is live only while it can show cursor-dependent UI: hovered (brush
   // preview), active with a cursor anywhere (stroking + implicit-source
-  // rectangle), the active step's explicit source file (sampling rectangle),
-  // fullscreen, or an axis-legend drag zooming/panning the view. Everything
-  // else is presented as a static snapshot.
+  // rectangle), a step's explicit source file (sampling rectangle), fullscreen,
+  // or an axis-legend drag zooming/panning the view. Everything else is
+  // presented as a static snapshot.
   const wantsLive =
-    isHovered ||
-    isFullscreen ||
-    isAxisDragging ||
-    (isActive && (cursorVisible || isStroking)) ||
-    (explicitSourcePath !== null && explicitSourcePath === filePath);
+    isHovered || isFullscreen || isAxisDragging || (isActive && (cursorVisible || isStroking)) || isExplicitSource;
 
   const [phase, setPhase] = useState<ViewPhase>("live");
   const phaseRef = useRef(phase);
@@ -400,6 +431,30 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     (event) => {
       // A control drag is aimed at the control, wherever the pointer travels.
       if (isPanning || useTransientStore.getState().controlDragging) return;
+      const store = useStore.getState();
+      if (store.placing) {
+        // The ghost follows the pointer across views: entering another file's
+        // canvas carries it over, keeping its frequencies.
+        if (store.placing.fileId !== fileId) store.retargetPlacing(fileId);
+        const placing = useStore.getState().placing;
+        if (placing?.fileId !== fileId) return;
+        const corner = getSelectionCorner(
+          event.clientX,
+          event.clientY,
+          event.currentTarget.getBoundingClientRect(),
+          fileId,
+          store.filepathsBpm[openFiles[fileId].filePath],
+        );
+        const spectrogram = openFiles[fileId]?.spectrogramData;
+        if (!corner || !spectrogram) return;
+        const duration = spectrogram.numFrames / spectrogram.sampleRate;
+        // Shift holds the region at the pitch it was picked up from, so a move
+        // along the file cannot drift off its own frequencies.
+        const pitch = event.shiftKey ? placing.rect.pitchLo : corner.pitchUv;
+        store.movePlacing(corner.timeUv * duration, pitch);
+        return;
+      }
+      if (store.editMode === "select") return;
       penState.pressure = event.pointerType === "pen" ? event.pressure : 1;
       penState.tiltX = event.tiltX;
       penState.tiltY = event.tiltY;
@@ -419,9 +474,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (isStrokingRef.current && strokeTimeRangeRef.current.min !== null) {
         const { spectrogramData } = file;
         if (!spectrogramData) return;
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const { blX } = aimToBrushBlUv(aim, fileId, bpm);
-        const currentBrushTime = blX * totalDuration;
+        const currentBrushTime = aimToStrokeStartSeconds(aim, fileId, bpm);
         strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min!, currentBrushTime);
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushTime);
       }
@@ -453,6 +506,10 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const handleMouseEnter: PointerEventHandler<HTMLDivElement> = useCallback(
     (event) => {
       if (isPanning || useTransientStore.getState().controlDragging) return;
+      if (useStore.getState().editMode === "select") {
+        useTransientStore.getState().setHoveredFile(fileId);
+        return;
+      }
       const state = useStore.getState();
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
       const aim = getSnappedCoordinates(
@@ -521,6 +578,73 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   useEffect(() => stopRepeatClock, [stopRepeatClock]);
 
+  // Select mode has no brush under the pointer, so the hover preview goes away
+  // with the mode rather than waiting for the pointer to leave the lane.
+  useEffect(() => {
+    if (editMode !== "select") return;
+    useTransientStore.getState().setCursorVisible(false);
+    rendererRef.current?.clearPreview();
+  }, [editMode]);
+
+  // Grows the wand region from the current canvas coefficients.
+  const wandSelectionAt = useCallback(
+    async (timeSec: number, pitchUv: number, tolDb: number) => {
+      const spec = openFiles[fileId]?.spectrogramData;
+      const renderer = rendererRef?.current;
+      if (!spec || !renderer) return null;
+      await getHistoryManager(fileId).awaitPackedReaders();
+      const packed = await renderer.getFBOData();
+      if (!packed) return null;
+      return growWandSelection(packed, spec, timeSec, pitchUv, tolDb);
+    },
+    [fileId, rendererRef],
+  );
+
+  const runWand = useCallback(
+    (tolDb: number) => {
+      const wand = wandRef.current;
+      if (!wand || wand.done) return;
+      if (wand.busy) {
+        wand.pendingTol = tolDb;
+        return;
+      }
+      wand.busy = true;
+      void wandSelectionAt(wand.time, wand.pitchUv, tolDb).then((grown) => {
+        if (wandRef.current !== wand) return;
+        wand.busy = false;
+        const spec = openFiles[fileId]?.spectrogramData;
+        const selection = grown && wand.base && spec ? unionSelections(wand.base, grown, spec) : grown;
+        if (selection) {
+          wand.latest = selection;
+          if (wand.done) {
+            wandRef.current = null;
+            useTransientStore.getState().setSelectionDrag(null);
+            useStore.getState().setFileSelection(fileId, selection);
+            return;
+          }
+          useTransientStore.getState().setSelectionDrag({ fileId, selection });
+        }
+        if (wand.pendingTol !== null) {
+          const tol = wand.pendingTol;
+          wand.pendingTol = null;
+          runWand(tol);
+        }
+      });
+    },
+    [fileId, wandSelectionAt],
+  );
+
+  const finishWand = useCallback(() => {
+    const wand = wandRef.current;
+    if (!wand) return;
+    wand.done = true;
+    // With a grow still running, its own landing commits instead.
+    if (!wand.latest && wand.busy) return;
+    wandRef.current = null;
+    useTransientStore.getState().setSelectionDrag(null);
+    if (wand.latest) useStore.getState().setFileSelection(fileId, wand.latest);
+  }, [fileId]);
+
   const handleCanvasMouseDown: PointerEventHandler<HTMLDivElement> = useCallback(
     async (event) => {
       if (event.button !== 0) return;
@@ -536,13 +660,70 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       );
       if (!aim) return;
 
+      // A drop beats pick mode: while a region is in flight, the click puts it
+      // down whatever else the canvas is armed for.
+      if (state.placing) {
+        if (state.placing.fileId !== fileId) state.retargetPlacing(fileId);
+        if (useStore.getState().placing?.fileId === fileId) await state.dropPlacing();
+        return;
+      }
+
       // Pick mode: clicking on a canvas sets the file path and position params
       if (state.pickingFileParam) {
         state.setParameter(state.pickingFileParam, { path: openFiles[fileId].filePath });
-        // Set position params (UV 0-1 → 0-100%).
-        state.setParameter("sourceTimeOffset" as import("@renderer/store/types").ParameterKey, aim.x * 100);
-        state.setParameter("sourcePitchOffset" as import("@renderer/store/types").ParameterKey, aim.y * 100);
+        // The offsets hold the sampling rectangle's bottom-left, so the click
+        // lands the rectangle the cursor was showing (UV 0-1 → 0-100%).
+        const { blX, blY } = aimToBrushRectBlUv(aim, fileId, bpm);
+        state.setParameter("sourceTimeOffset" as import("@renderer/store/types").ParameterKey, blX * 100);
+        state.setParameter("sourcePitchOffset" as import("@renderer/store/types").ParameterKey, blY * 100);
         state.setPickingFileParam(null);
+        return;
+      }
+
+      if (state.editMode === "select") {
+        if (!isActive) state.setActiveFileId(fileId);
+        const spectrogramData = openFiles[fileId]?.spectrogramData;
+        if (!spectrogramData) return;
+        if (state.selectShape !== "rectangle") {
+          const point = getFreehandCorner(
+            event.clientX,
+            event.clientY,
+            event.currentTarget.getBoundingClientRect(),
+            fileId,
+            bpm,
+          );
+          if (!point) return;
+          addToSelectionRef.current = event.shiftKey;
+          const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
+          if (state.selectShape === "lasso") {
+            lassoPointsRef.current = [{ time: point.timeUv * duration, pitchUv: point.pitchUv }];
+          } else {
+            wandRef.current = {
+              startY: event.clientY,
+              time: point.timeUv * duration,
+              pitchUv: point.pitchUv,
+              base: event.shiftKey ? (state.filesSelection[fileId] ?? null) : null,
+              latest: null,
+              busy: false,
+              pendingTol: null,
+              done: false,
+            };
+            runWand(WAND_DEFAULT_TOLERANCE_DB);
+          }
+          useTransientStore.getState().setSelectionDrag(null);
+          return;
+        }
+        const corner = getSelectionCorner(
+          event.clientX,
+          event.clientY,
+          event.currentTarget.getBoundingClientRect(),
+          fileId,
+          bpm,
+        );
+        if (!corner) return;
+        addToSelectionRef.current = event.shiftKey;
+        selectionStartRef.current = corner;
+        useTransientStore.getState().setSelectionDrag(null);
         return;
       }
 
@@ -564,42 +745,35 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const { beats, pitch } = aimToBeatsAndPitch(aim);
         useTransientStore.getState().setCursorPosition({ beats, pitch });
 
-        const { blX, blY } = aimToBrushBlUv(aim, fileId, bpm);
-
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const strokeStartSeconds = blX * totalDuration;
+        const strokeStartSeconds = aimToStrokeStartSeconds(aim, fileId, bpm);
         strokeTimeRangeRef.current = { min: strokeStartSeconds, max: strokeStartSeconds };
 
-        // Compute the locked offset for anchored source mode using the brush
-        // BL (the shader's stroke origin) so source sampling stays anchored to
-        // the onset corner in both anchor modes.
-        const { getActiveStep } = state;
-        const activeStep = getActiveStep();
-        const sourceFileValue = activeStep?.sourceFile ?? null;
-        if (sourceFileValue) {
-          const sourcePositionMode = activeStep?.sourcePositionMode ?? "anchored";
-          if (sourcePositionMode === "anchored") {
+        // Lock the source offset of every anchored step. Tracking, Source and
+        // the brush origin are all per-step, so each step measures its own
+        // offset from its own origin against its own source file.
+        const destBpm = state.filepathsBpm[file.filePath] || 120;
+        state.lockStepSourceOffsets(
+          state.getSteps().map((step, index) => {
+            const sourceFileValue = step?.sourceFile ?? null;
+            if (!sourceFileValue) return null;
+            if ((step?.sourcePositionMode ?? "anchored") !== "anchored") return null;
             const sourceOpenFile = Object.values(openFiles).find((f) => f.filePath === sourceFileValue.path);
-            if (sourceOpenFile?.spectrogramData && spectrogramData) {
-              const destBpm = state.filepathsBpm[file.filePath] || 120;
-              const destDur = spectrogramData.numFrames / spectrogramData.sampleRate;
-              const srcBpm = state.filepathsBpm[sourceOpenFile.filePath] || 120;
-              const srcDur = sourceOpenFile.spectrogramData.numFrames / sourceOpenFile.spectrogramData.sampleRate;
-              const tScale = (destBpm * destDur) / (srcBpm * srcDur);
-              const bScale = sourceBandUvSlope(spectrogramData, sourceOpenFile.spectrogramData);
-
-              const offsetX = -blX * tScale;
-              const offsetY = -blY * bScale;
-              state.updateActiveStepLockedOffset({ beats: offsetX, pitch: offsetY });
-            }
-          }
-        }
+            if (!sourceOpenFile?.spectrogramData) return null;
+            const srcBpm = state.filepathsBpm[sourceOpenFile.filePath] || 120;
+            const srcDur = sourceOpenFile.spectrogramData.numFrames / sourceOpenFile.spectrogramData.sampleRate;
+            const tScale = (destBpm * totalDuration) / (srcBpm * srcDur);
+            const bScale = sourceBandUvSlope(spectrogramData, sourceOpenFile.spectrogramData);
+            const { blX, blY } = aimToBrushBlUv(aim, fileId, bpm, index);
+            return { beats: -blX * tScale, pitch: -blY * bScale };
+          }),
+        );
 
         rendererRef.current.renderStroke(false);
         startRepeatClock();
       }
     },
-    [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock],
+    [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock, runWand],
   );
 
   const handleCanvasMouseUp: PointerEventHandler<HTMLDivElement> = useCallback(
@@ -648,7 +822,136 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       lastSnappedPositionRef.current = null;
     };
 
+    const updateSelectionDrag = (event: MouseEvent): void => {
+      const from = selectionStartRef.current;
+      const rect = viewRef.current?.getBoundingClientRect();
+      const spectrogramData = openFiles[fileId]?.spectrogramData;
+      if (!from || !rect || !spectrogramData) return;
+      const bpm = useStore.getState().filepathsBpm[openFiles[fileId].filePath];
+      const to = getSelectionCorner(event.clientX, event.clientY, rect, fileId, bpm);
+      if (!to) return;
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const selection = normaliseSelection(from, to, totalDuration);
+      useTransientStore
+        .getState()
+        .setSelectionDrag(selection ? { fileId, selection, add: addToSelectionRef.current } : null);
+    };
+
+    const finishSelectionDrag = (): void => {
+      const from = selectionStartRef.current;
+      if (!from) return;
+      selectionStartRef.current = null;
+      const drag = useTransientStore.getState().selectionDrag;
+      useTransientStore.getState().setSelectionDrag(null);
+      const store = useStore.getState();
+      if (drag?.fileId === fileId) {
+        const spectrogramData = openFiles[fileId]?.spectrogramData;
+        const base = addToSelectionRef.current ? (store.filesSelection[fileId] ?? null) : null;
+        store.setFileSelection(
+          fileId,
+          base && spectrogramData ? unionSelections(base, drag.selection, spectrogramData) : drag.selection,
+        );
+        return;
+      }
+      // A click with no drag clears the selection and puts the play start
+      // marker where it landed, on the same snap the selection corner uses.
+      // With Shift down nothing was asked to go.
+      if (addToSelectionRef.current) return;
+      store.setFileSelection(fileId, null);
+      const spectrogramData = openFiles[fileId]?.spectrogramData;
+      if (!spectrogramData) return;
+      const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const time = Math.max(0, Math.min(duration, from.timeUv * duration));
+      store.setFilePlaybackStartTime(fileId, time);
+      if (store.activeFileId === fileId && store.isPlaying) store.setPlaybackTime(time);
+    };
+
+    const updateLassoDrag = (event: MouseEvent): void => {
+      const points = lassoPointsRef.current;
+      const rect = viewRef.current?.getBoundingClientRect();
+      const spectrogramData = openFiles[fileId]?.spectrogramData;
+      if (!points || !rect || !spectrogramData) return;
+      const bpm = useStore.getState().filepathsBpm[openFiles[fileId].filePath];
+      const corner = getFreehandCorner(event.clientX, event.clientY, rect, fileId, bpm);
+      if (!corner) return;
+      const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const point = { time: corner.timeUv * duration, pitchUv: corner.pitchUv };
+      const last = points[points.length - 1];
+      if (last && last.time === point.time && last.pitchUv === point.pitchUv) return;
+      points.push(point);
+      let start = Number.POSITIVE_INFINITY;
+      let end = Number.NEGATIVE_INFINITY;
+      let pitchLo = Number.POSITIVE_INFINITY;
+      let pitchHi = Number.NEGATIVE_INFINITY;
+      for (const p of points) {
+        start = Math.min(start, p.time);
+        end = Math.max(end, p.time);
+        pitchLo = Math.min(pitchLo, p.pitchUv);
+        pitchHi = Math.max(pitchHi, p.pitchUv);
+      }
+      if (end <= start || pitchHi <= pitchLo) return;
+      useTransientStore.getState().setSelectionDrag({
+        fileId,
+        selection: { start, end, pitchLo, pitchHi },
+        path: points,
+        add: addToSelectionRef.current,
+      });
+    };
+
+    const finishLassoDrag = (): void => {
+      const points = lassoPointsRef.current;
+      if (!points) return;
+      lassoPointsRef.current = null;
+      useTransientStore.getState().setSelectionDrag(null);
+      const store = useStore.getState();
+      const spectrogramData = openFiles[fileId]?.spectrogramData;
+      if (!spectrogramData) return;
+      const selection = lassoSelection(points, spectrogramData);
+      if (selection) {
+        const base = addToSelectionRef.current ? (store.filesSelection[fileId] ?? null) : null;
+        store.setFileSelection(fileId, base ? unionSelections(base, selection, spectrogramData) : selection);
+        return;
+      }
+      // A path that encloses nothing is a click: clear, and put the play start
+      // marker where it landed. With Shift down nothing was asked to go.
+      if (addToSelectionRef.current) return;
+      store.setFileSelection(fileId, null);
+      const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const time = Math.max(0, Math.min(duration, points[0]?.time ?? 0));
+      store.setFilePlaybackStartTime(fileId, time);
+      if (store.activeFileId === fileId && store.isPlaying) store.setPlaybackTime(time);
+    };
+
     const handleWindowMouseMove = (event: MouseEvent) => {
+      if (lassoPointsRef.current) {
+        if (event.buttons === 0) {
+          finishLassoDrag();
+          return;
+        }
+        updateLassoDrag(event);
+        return;
+      }
+      if (wandRef.current) {
+        if (event.buttons === 0) {
+          finishWand();
+          return;
+        }
+        // Dragging upward reaches further down from the seed level.
+        const tol = Math.max(
+          WAND_MIN_TOLERANCE_DB,
+          Math.min(WAND_MAX_TOLERANCE_DB, WAND_DEFAULT_TOLERANCE_DB + (wandRef.current.startY - event.clientY) * 0.25),
+        );
+        runWand(tol);
+        return;
+      }
+      if (selectionStartRef.current) {
+        if (event.buttons === 0) {
+          finishSelectionDrag();
+          return;
+        }
+        updateSelectionDrag(event);
+        return;
+      }
       if (!isStrokingRef.current) return;
       // A release outside the window sends no mouseup here, so the first move
       // back inside is where the stroke learns the button is no longer held.
@@ -669,12 +972,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const aim = getSnappedCoordinates(event.clientX, event.clientY, rect, fileId, bpm);
       if (!aim) return;
 
-      const { blX } = aimToBrushBlUv(aim, fileId, bpm);
-
       // Track time range using brush BL (stroke start), so autoplay duration
       // lines up with the painted region regardless of anchor mode.
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const currentBrushTime = blX * totalDuration;
+      const currentBrushTime = aimToStrokeStartSeconds(aim, fileId, bpm);
       if (strokeTimeRangeRef.current.min !== null) {
         strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min, currentBrushTime);
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushTime);
@@ -696,6 +996,18 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     };
 
     const handleWindowMouseUp = async (event: MouseEvent) => {
+      if (event.button === 0 && lassoPointsRef.current) {
+        finishLassoDrag();
+        return;
+      }
+      if (event.button === 0 && wandRef.current) {
+        finishWand();
+        return;
+      }
+      if (event.button === 0 && selectionStartRef.current) {
+        finishSelectionDrag();
+        return;
+      }
       if (event.button === 0 && isStrokingRef.current) {
         await finishStroke();
         // Clean up cursor state since we're outside the element
@@ -707,6 +1019,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     };
 
     const handleWindowBlur = () => {
+      finishLassoDrag();
+      finishWand();
+      finishSelectionDrag();
       void endStrokeOutsideWindow();
     };
 
@@ -718,7 +1033,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       window.removeEventListener("mouseup", handleWindowMouseUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [fileId, finishStroke, aimToBeatsAndPitch]);
+  }, [fileId, finishStroke, aimToBeatsAndPitch, runWand, finishWand]);
 
   if (!file) return null;
 
@@ -808,6 +1123,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
                 }}
               />
               {isActive && <LoopRegion fileId={fileId} />}
+              <SelectionRegion fileId={fileId} />
               {isActive && <PlaybackLine fileId={fileId} />}
             </Box>
           </Box>
@@ -817,6 +1133,39 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         </>
       )}
       {isSynthesizing && <Loader size="xs" pos="absolute" bottom={25} right={10} />}
+      {/* The view stays visible under a splice; this layer just badges it and
+          soaks up pointer input until the rebuild lands. */}
+      {busyMessage && (
+        <Box
+          pos="absolute"
+          style={{
+            inset: 0,
+            zIndex: 3,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "wait",
+          }}
+        >
+          <Box
+            bg="dark.7"
+            px={10}
+            py={6}
+            style={{
+              borderRadius: 6,
+              border: "1px solid var(--mantine-color-dark-4)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <Loader size="xs" />
+            <Text size="xs" c="dimmed">
+              {busyMessage}
+            </Text>
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 });

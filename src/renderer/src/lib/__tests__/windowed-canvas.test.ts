@@ -50,7 +50,7 @@ async function until(check: () => boolean, what: string): Promise<void> {
 }
 
 // A dab that reads no other file: no source window, no impulse window.
-const NO_OTHER_FILES = { source: null, impulses: [] };
+const NO_OTHER_FILES = { sources: [], impulses: [] };
 
 describe("a canvas that holds a window of the file", () => {
   let gl: WebGLRenderer;

@@ -47,6 +47,11 @@ type NumboxControlProps = {
   rightIcon?: React.ReactNode;
   /** Text shown in place of the value while not editing, e.g. the value a macro resolves to. */
   displayValue?: string;
+  /**
+   * The span the parameter's modulation reaches, shown in place of the value that a modulated
+   * parameter never settles on. `displayValue` overrides it.
+   */
+  reachLabel?: string;
   /** Draws the box greyed out while it stays live, for a value that has no effect right now. */
   dimmed?: boolean;
   toNormalized: (value: number) => number;
@@ -70,6 +75,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
     rightValue,
     rightIcon,
     displayValue: displayValueOverride,
+    reachLabel,
     dimmed = false,
     toNormalized,
     fromNormalized,
@@ -274,8 +280,11 @@ export const NumboxControl = (props: NumboxControlProps) => {
   // Mark labels that start with a letter (e.g. "Grid", "Full", "Off", "Scale")
   // aren't values in the parameter's unit — render them bare.
   const markLabelIsNumeric = activeMark ? /^-?[\d.]/.test(activeMark.label) : false;
+  // A modulated value never lands anywhere on its own, so the reach replaces it.
+  const showReach = !displayValueOverride && !!reachLabel;
   const displayValue =
     displayValueOverride ??
+    reachLabel ??
     (activeMark
       ? markLabelIsNumeric
         ? `${activeMark.label}${unit || ""}`
@@ -329,7 +338,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: "0 4px",
+          // The reach text runs long, so it gives the dropdown chevron its own room.
+          padding: showReach ? (marks ? "0 8px 0 2px" : "0 2px") : "0 4px",
         }}
       >
         {isEditing ? (
@@ -382,7 +392,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
           <Text
             size="xs"
             style={{
-              fontSize: "var(--ui-font-xs)",
+              fontSize: showReach ? "var(--ui-font-2xs)" : "var(--ui-font-xs)",
               lineHeight: 1,
               color: muted ? "#666" : "#fff",
               pointerEvents: "none",

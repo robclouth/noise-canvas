@@ -4,6 +4,7 @@ import { openFiles } from "@renderer/store/files";
 import { memo, useCallback, useEffect, useRef } from "react";
 import { Vector2 } from "three";
 import { shallow } from "zustand/shallow";
+import { fullHeightSelection } from "../lib/selection";
 import { computeTimeMarkers } from "../lib/time-markers";
 import { screenToZoomed, snapToSwungGridRound, zoomedToScreen } from "../lib/utils";
 import { LOOP_DRAG_COLOUR } from "./loop-region";
@@ -20,7 +21,6 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const gridSwing = useStore((state) => state.gridSwing);
   const snapTime = useStore((state) => state.snapTime);
   const setFilePlaybackStartTime = useStore((state) => state.setFilePlaybackStartTime);
-  const togglePlayback = useStore((state) => state.togglePlayback);
   const isPlaying = useStore((state) => state.isPlaying);
   const activeFileId = useStore((state) => state.activeFileId);
   const setPlaybackTime = useStore((state) => state.setPlaybackTime);
@@ -88,7 +88,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       }
     };
 
-    const handleWindowMouseUp = async (event: MouseEvent) => {
+    const handleWindowMouseUp = (event: MouseEvent) => {
       if (dragStartTimeRef.current === null) return;
       const startTime = dragStartTimeRef.current;
       dragStartTimeRef.current = null;
@@ -112,19 +112,19 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
         const endTime = getTimeFromX(event.clientX, rect);
         const loopStart = Math.min(startTime, endTime);
         const loopEnd = Math.max(startTime, endTime);
-        if (loopEnd > loopStart) {
+        const selection = fullHeightSelection(loopStart, loopEnd);
+        if (selection) {
+          useStore.getState().setFileSelection(fileId, selection);
           writeLoopRegion({ start: loopStart, end: loopEnd });
           setFilePlaybackStartTime(fileId, loopStart);
         }
       } else {
-        // It was a plain click — set playback position
+        // A plain click moves the play marker and never changes the play
+        // state: playing skips there and keeps going, stopped stays stopped.
         writeLoopRegion(null);
+        useStore.getState().setFileSelection(fileId, null);
         setFilePlaybackStartTime(fileId, startTime);
-        if (activeFileId === fileId && isPlaying) {
-          setPlaybackTime(startTime);
-        } else if (activeFileId === fileId) {
-          await togglePlayback();
-        }
+        if (activeFileId === fileId && isPlaying) setPlaybackTime(startTime);
       }
     };
 
@@ -134,7 +134,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
     };
-  }, [file, fileId, getTimeFromX, setFilePlaybackStartTime, activeFileId, isPlaying, setPlaybackTime, togglePlayback]);
+  }, [file, fileId, getTimeFromX, setFilePlaybackStartTime, activeFileId, isPlaying, setPlaybackTime]);
 
   useEffect(() => {
     const draw = () => {
@@ -193,6 +193,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
         bpm: legendFile && state.filepathsBpm[legendFile.filePath],
         gridSizeBeats: state.gridSizeBeats,
         loading: state.filesLoading[fileId],
+        busy: state.filesBusy[fileId],
       }),
       draw,
       { equalityFn: shallow, fireImmediately: true },
@@ -212,6 +213,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   return (
     <Box
       ref={legendRef}
+      data-time-legend
       style={{
         width: "100%",
         height: 15,

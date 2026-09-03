@@ -49,6 +49,16 @@ export type AnalysisParams = {
 /** Flat [time0, salience0, time1, salience1, …]; times in seconds. */
 export type PackedOnsets = Float32Array;
 
+/**
+ * One range of a spliced file's new audio that is sample-identical to a range
+ * of its old audio, in samples. What the pieces do not cover is re-analysed.
+ */
+export interface SplicePiece {
+  newStart: number;
+  oldStart: number;
+  length: number;
+}
+
 /** Band layout of a packed spectrogram, as every coefficient pass wants it. */
 export interface PackedLayout {
   numFrames: number;
@@ -187,7 +197,19 @@ export interface IpcRendererEvents {
   "close-active-file": () => void;
   "double-active-file-length": () => void;
   "halve-active-file-length": () => void;
+  "group-files": () => void;
+  "ungroup-files": () => void;
+  "set-file-length": () => void;
   "insert-silence": () => void;
+  "copy-selection": () => void;
+  "cut-selection": () => void;
+  "paste-selection": () => void;
+  "silence-selection": () => void;
+  "invert-selection": () => void;
+  "duplicate-selection": () => void;
+  "cut-time-selection": () => void;
+  "paste-time-selection": () => void;
+  "duplicate-time-selection": () => void;
   "update-available": (info: UpdateInfo) => void;
   "update-not-available": () => void;
   "update-downloaded": (info: UpdateInfo) => void;

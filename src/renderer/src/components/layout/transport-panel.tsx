@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { Box, Divider, Group, Popover, Stack, Text } from "@mantine/core";
+import { ActionIcon, Box, Divider, Group, Menu, Popover, Stack, Text } from "@mantine/core";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import {
   TRANSPORT_GAP,
@@ -8,7 +8,7 @@ import {
   TRANSPORT_TIME_WIDTH,
   useUiSize,
 } from "@renderer/lib/ui-density";
-import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
+import { BoxSelect, ChevronDown, Ear, Lasso, Link2, Paintbrush, Play, Repeat, Square, Wand2 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { HelpActionIcon } from "../controls/help-control";
 import { ParameterControl } from "../controls/parameter-control";
@@ -34,6 +34,10 @@ export const TransportPanel = memo(() => {
   const autoPlayStroke = useStore((state) => state.autoPlayStroke);
   const setAutoPlayStroke = useStore((state) => state.setAutoPlayStroke);
   const togglePlayback = useStore((state) => state.togglePlayback);
+  const editMode = useStore((state) => state.editMode);
+  const setEditMode = useStore((state) => state.setEditMode);
+  const selectShape = useStore((state) => state.selectShape);
+  const setSelectShape = useStore((state) => state.setSelectShape);
   const linkEnabled = useStore((state) => state.linkEnabled);
   const setLinkEnabled = useStore((state) => state.setLinkEnabled);
   const linkNumPeers = useStore((state) => state.linkNumPeers);
@@ -74,12 +78,13 @@ export const TransportPanel = memo(() => {
   return (
     <Group
       align="center"
-      justify="center"
+      justify="safe center"
       gap={TRANSPORT_GAP}
       p={TRANSPORT_PAD}
       bg="dark.7"
       wrap="nowrap"
-      style={{ zIndex: 1000 }}
+      // A window too narrow for the whole bar scrolls the bar, not the app.
+      style={{ zIndex: 1000, overflowX: "auto", overflowY: "hidden" }}
       {...anchorProps("transport")}
     >
       <Group gap="xs" wrap="nowrap">
@@ -87,7 +92,6 @@ export const TransportPanel = memo(() => {
           opened={linkPopoverOpened}
           onChange={setLinkPopoverOpened}
           withArrow
-          withinPortal={false}
           zIndex={10001}
           position="top"
           clickOutsideEvents={["click", "mousedown", "touchstart"]}
@@ -137,13 +141,61 @@ export const TransportPanel = memo(() => {
         >
           <Repeat size={18} />
         </HelpActionIcon>
+        <ActionIcon.Group>
+          <HelpActionIcon
+            help="transport-brush-mode"
+            onClick={() => setEditMode("brush")}
+            size={uiSize}
+            color={editMode === "brush" ? "orange" : "dark.5"}
+          >
+            <Paintbrush size={18} />
+          </HelpActionIcon>
+          <HelpActionIcon
+            help="transport-select-mode"
+            onClick={() => setEditMode("select")}
+            size={uiSize}
+            color={editMode === "select" ? "orange" : "dark.5"}
+          >
+            {selectShape === "lasso" ? (
+              <Lasso size={18} />
+            ) : selectShape === "wand" ? (
+              <Wand2 size={18} />
+            ) : (
+              <BoxSelect size={18} />
+            )}
+          </HelpActionIcon>
+          <Menu position="bottom-start" withinPortal zIndex={10001}>
+            <Menu.Target>
+              <HelpActionIcon
+                help="transport-select-shape"
+                size={uiSize}
+                w={14}
+                miw={14}
+                color={editMode === "select" ? "orange" : "dark.5"}
+              >
+                <ChevronDown size={12} />
+              </HelpActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<BoxSelect size={14} />} onClick={() => setSelectShape("rectangle")}>
+                Rectangle
+              </Menu.Item>
+              <Menu.Item leftSection={<Lasso size={14} />} onClick={() => setSelectShape("lasso")}>
+                Lasso
+              </Menu.Item>
+              <Menu.Item leftSection={<Wand2 size={14} />} onClick={() => setSelectShape("wand")}>
+                Magic wand
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+        </ActionIcon.Group>
         <HelpActionIcon
           help="transport-audition"
           onClick={() => setAutoPlayStroke(!autoPlayStroke)}
           size={uiSize}
           color={autoPlayStroke ? "orange" : "dark.5"}
         >
-          <Brush size={18} />
+          <Ear size={18} />
         </HelpActionIcon>
         <Text ff="monospace" size="lg" ref={timeRef} w={TRANSPORT_TIME_WIDTH}>
           {formatTime(0)}

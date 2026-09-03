@@ -8,6 +8,10 @@ import { Canvas, RootState, useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
+import { trackPointer } from "./lib/last-pointer";
+import { pointerFileAim } from "./lib/view-aim";
+import { fullHeightSelection } from "./lib/selection";
+import { invertSelection } from "./lib/selection-mask";
 import { openImageExportModal } from "./components/image-export-modal";
 import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
 import { AppMenuBar } from "./components/layout/menu-bar";
@@ -21,6 +25,7 @@ import { ANALYSIS_MAX_TEXTURE_SIZE } from "./lib/constants";
 import { diag } from "./lib/diag-log";
 import { recordDiagFrame, startDiagSampler } from "./lib/diag-sampler";
 import { host } from "./lib/host";
+import { serializeEditCommand } from "./lib/file-task-queue";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { watchAudioOutputs } from "./lib/audio-devices";
 import { anchorProps } from "./lib/ui-anchors";
@@ -179,6 +184,14 @@ function App(): React.JSX.Element {
     document.documentElement.dataset.uiSize = uiSize;
   }, [uiSize]);
 
+  // A paste from the keyboard aims at the pointer, so its position has to be
+  // known outside any one component's handlers.
+  useEffect(() => {
+    const track = (event: PointerEvent): void => trackPointer(event.clientX, event.clientY);
+    window.addEventListener("pointermove", track, { passive: true });
+    return () => window.removeEventListener("pointermove", track);
+  }, []);
+
   useEffect(() => {
     useStore.getState().init();
     void useStore.getState().initSectionPresets();
@@ -299,6 +312,70 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubFillGrid);
 
+    const unsubCopySelection = ipcOn("copy-selection", () => {
+      void useStore.getState().copySelection();
+    });
+    unsubscribers.push(unsubCopySelection);
+
+    const unsubCutSelection = ipcOn("cut-selection", () => {
+      void useStore.getState().cutSelection();
+    });
+    unsubscribers.push(unsubCutSelection);
+
+    const unsubPasteSelection = ipcOn("paste-selection", () => {
+      // The paste lands in the file under the pointer; over none of them it
+      // falls back to the active file's own selection. The aim is the pointer
+      // at the press; the pick-up itself waits its turn behind pending edits.
+      const aim = pointerFileAim() ?? undefined;
+      void serializeEditCommand(async () => {
+        useStore.getState().beginPaste(aim);
+      });
+    });
+    unsubscribers.push(unsubPasteSelection);
+
+    const unsubSilenceSelection = ipcOn("silence-selection", () => {
+      void useStore.getState().silenceSelection();
+    });
+    unsubscribers.push(unsubSilenceSelection);
+
+    const unsubInvertSelection = ipcOn("invert-selection", () => {
+      const state = useStore.getState();
+      const fileId = state.activeFileId;
+      const spec = fileId ? openFiles[fileId]?.spectrogramData : undefined;
+      if (!fileId || !spec) return;
+      const selection = state.filesSelection[fileId] ?? null;
+      // With nothing selected the whole file is what the selection leaves out.
+      const inverted = selection
+        ? invertSelection(selection, spec)
+        : fullHeightSelection(0, spec.numFrames / spec.sampleRate);
+      state.setFileSelection(fileId, inverted);
+    });
+    unsubscribers.push(unsubInvertSelection);
+
+    const unsubDuplicateSelection = ipcOn("duplicate-selection", () => {
+      const state = useStore.getState();
+      const selection = state.activeFileId ? state.filesSelection[state.activeFileId] : null;
+      // With nothing selected the key keeps its old meaning: duplicate the file.
+      if (selection) void state.duplicateSelection();
+      else if (state.activeFileId && !host.env.isExtension) state.duplicateFile(state.activeFileId);
+    });
+    unsubscribers.push(unsubDuplicateSelection);
+
+    const unsubCutTime = ipcOn("cut-time-selection", () => {
+      void useStore.getState().cutTimeSelection();
+    });
+    unsubscribers.push(unsubCutTime);
+
+    const unsubPasteTime = ipcOn("paste-time-selection", () => {
+      void useStore.getState().pasteTimeSelection();
+    });
+    unsubscribers.push(unsubPasteTime);
+
+    const unsubDuplicateTime = ipcOn("duplicate-time-selection", () => {
+      void useStore.getState().duplicateTimeSelection();
+    });
+    unsubscribers.push(unsubDuplicateTime);
+
     const unsubUndo = ipcOn("undo", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
@@ -340,6 +417,21 @@ function App(): React.JSX.Element {
       useStore.getState().resizeActiveFileLength(0.5);
     });
     unsubscribers.push(unsubHalveActiveFileLength);
+
+    const unsubGroupFiles = ipcOn("group-files", () => {
+      void useStore.getState().promptGroupFiles();
+    });
+    unsubscribers.push(unsubGroupFiles);
+
+    const unsubUngroupFiles = ipcOn("ungroup-files", () => {
+      useStore.getState().ungroupActiveFile();
+    });
+    unsubscribers.push(unsubUngroupFiles);
+
+    const unsubSetFileLength = ipcOn("set-file-length", () => {
+      void useStore.getState().setActiveFileLength();
+    });
+    unsubscribers.push(unsubSetFileLength);
 
     const unsubInsertSilence = ipcOn("insert-silence", () => {
       void useStore.getState().insertSilenceIntoActiveFile();
@@ -448,7 +540,7 @@ function App(): React.JSX.Element {
         >
           <BrushPanel />
         </ScrollArea>
-        <Stack pos="relative" flex={1} h="100%" gap={0}>
+        <Stack pos="relative" flex={1} miw={0} h="100%" gap={0}>
           <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
           {openFileIds.length === 0 ? (
             <EmptyState />

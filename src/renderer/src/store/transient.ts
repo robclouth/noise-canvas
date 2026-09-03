@@ -1,3 +1,4 @@
+import type { Selection } from "@renderer/lib/selection";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
@@ -26,6 +27,24 @@ export interface TransientState {
   // throttled snapshots mid-gesture.
   axisDragFile: string | null;
   setAxisDragFile: (fileId: string | null) => void;
+  // The selection being dragged, before the pointer is released. Held here so
+  // a drag redraws the overlay without writing the loop region on every
+  // pointer move. A lasso drag carries its path, in seconds and pitch UV, for
+  // the overlay to draw instead of the bounding rectangle. `add` marks a
+  // Shift gesture: the overlay keeps the committed selection visible under it.
+  selectionDrag: {
+    fileId: string;
+    selection: Selection;
+    path?: { time: number; pitchUv: number }[];
+    add?: boolean;
+  } | null;
+  setSelectionDrag: (
+    drag: { fileId: string; selection: Selection; path?: { time: number; pitchUv: number }[]; add?: boolean } | null,
+  ) => void;
+  // True while Shift is held: in select mode it means add-to-selection, and
+  // the canvas cursor shows the plus.
+  shiftHeld: boolean;
+  setShiftHeld: (held: boolean) => void;
 }
 
 export const useTransientStore = create<TransientState>()(
@@ -40,5 +59,9 @@ export const useTransientStore = create<TransientState>()(
     setControlDragging: (dragging) => set({ controlDragging: dragging }),
     axisDragFile: null,
     setAxisDragFile: (fileId) => set({ axisDragFile: fileId }),
+    selectionDrag: null,
+    setSelectionDrag: (drag) => set({ selectionDrag: drag }),
+    shiftHeld: false,
+    setShiftHeld: (held) => set({ shiftHeld: held }),
   })),
 );

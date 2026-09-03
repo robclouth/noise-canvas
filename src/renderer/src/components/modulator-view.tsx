@@ -179,6 +179,7 @@ const getModulatorParamKeys = (modulatorIndex: number): ParameterKey[] => {
     `modulator${idx}PhaseX`,
     `modulator${idx}PhaseY`,
     `modulator${idx}Strength`,
+    `modulator${idx}Steps`,
     `modulator${idx}StereoSpread`,
     `modulator${idx}EnvelopeSmoothingBeats`,
     `modulator${idx}EnvelopeSource`,
@@ -358,6 +359,7 @@ export const ModulatorView = () => {
           </>
         )}
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
+        <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Steps` as ParameterKey} />
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}StereoSpread` as ParameterKey} />
       </SimpleGrid>
       {isSequencerMode && <SequencerGrid modulatorIndex={parseInt(viewedModulatorIndex) + 1} />}

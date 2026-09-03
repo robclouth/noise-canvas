@@ -1,4 +1,10 @@
-import { openConfirm, openInsertSilencePrompt, openNewFilePrompt } from "../lib/modals";
+import {
+  openConfirm,
+  openGroupFilesPrompt,
+  openInsertSilencePrompt,
+  openNewFilePrompt,
+  openSetLengthPrompt,
+} from "../lib/modals";
 import { notifications } from "@mantine/notifications";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { EffectItem } from "@renderer/effects/types";
@@ -20,7 +26,13 @@ import { needsCanvasWindow } from "../lib/canvas-window";
 import { viewCoversFile } from "../lib/canvas-view";
 import { synthesiseInChunks, type SynthesiseView } from "../../../main/lib/synthesis-chunks";
 import { toChannelCount } from "../lib/channel-mix";
-import { insertSilence, type InsertSilenceValues } from "../lib/insert-silence";
+import { mixdown } from "../lib/mixdown";
+import { resampleChannels } from "../lib/resample";
+import { insertSilence, silenceCutSample } from "../lib/insert-silence";
+import { lengthToSeconds, type LengthValues } from "../lib/length-values";
+import { setChannelsLength } from "../lib/set-length";
+import { insertOnsetSpan, insertSpanPieces, removeOnsetSpan } from "../../../main/lib/ripple-edits";
+import { fullHeightSelection, type Selection } from "../lib/selection";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type {
   AnalysisParams,
@@ -28,6 +40,7 @@ import type {
   CommitStrokeResult,
   PackedLayout,
   PackedOnsets,
+  SplicePiece,
 } from "../../../main/lib/types";
 import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
 import { commitViewOf, composeViewBuffer, scatterCommitPatch, type CommitView } from "../lib/commit-view";
@@ -43,10 +56,10 @@ import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type Aud
 import { bandLayoutOf, bandLengthsTexels, type BandLayout } from "../lib/band-layout";
 import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
-import { reorderFileIds } from "../lib/file-reorder";
+import { gatherFileIds, gatherFileGroups, reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
-import { serializeFileTask } from "../lib/file-task-queue";
+import { serializeEditCommand, serializeFileTask } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
 import { commitStrokeOf, commitWindowOf, projectsWholeFile, type StrokeCommitSnapshot } from "../lib/stroke-commit";
@@ -73,7 +86,7 @@ interface SynthesisAudioResult {
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
 }
-import { selectStemGroupOfFile, stemMemberColor, type StemGroupMethod } from "./stem-groups";
+import { selectFileGroup, groupMemberColor, type FileGroupMethod } from "./file-groups";
 import { hasSupportedAudioExtension } from "../../../main/lib/audio-extensions";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
@@ -104,10 +117,16 @@ export interface FilesState {
   aiSeparateFile: (fileId: string) => Promise<void>;
   nmfFile: (fileId: string, numComponents: number) => Promise<void>;
   /** Sum the given files into a new one, leaving the originals open. */
-  mergeStems: (fileIds: string[]) => Promise<void>;
-  mergeStemGroup: (groupId: string) => Promise<void>;
+  /** Asks which open files to bracket together, then brackets them. */
+  promptGroupFiles: () => Promise<void>;
+  /** Brackets the given open files together, moving them into one run of lanes. */
+  groupFiles: (fileIds: string[]) => void;
+  /** Drops the bracket around the active file's group, if it is in one. */
+  ungroupActiveFile: () => void;
+  mergeFiles: (fileIds: string[]) => Promise<void>;
+  mergeFileGroup: (groupId: string) => Promise<void>;
   /** Close every member of a group, after one confirmation covering all of them. */
-  closeStemGroup: (groupId: string) => Promise<void>;
+  closeFileGroup: (groupId: string) => Promise<void>;
   saveActiveFile: () => Promise<void>;
   saveActiveFileAs: () => Promise<void>;
   saveActiveFileVersion: () => Promise<void>;
@@ -117,6 +136,8 @@ export interface FilesState {
   reanalyzeFile: (fileId: string, bandsPerOctave: number) => Promise<void>;
   resizeActiveFileLength: (factor: 2 | 0.5) => Promise<void>;
   /** Ask for a length and a place, then splice that much silence into the active file. */
+  /** Asks for a length, then cuts the active file to it or pads it with silence. */
+  setActiveFileLength: () => Promise<void>;
   insertSilenceIntoActiveFile: () => Promise<void>;
   /** Analyse a file again as mono or stereo, keeping its paint and history. */
   setFileChannelCount: (fileId: string, channelCount: number) => Promise<void>;
@@ -204,23 +225,34 @@ export interface FilesState {
   // one file's seconds against another's buffer.
   filesLoopRegion: Record<string, LoopRegion | null>;
   setFileLoopRegion: (fileId: string, region: LoopRegion | null) => void;
+  // Selection rectangle per file. Setting one also writes its time span to the
+  // loop region, so the transport always plays what the selection covers.
+  // Clearing one leaves the loop region alone.
+  filesSelection: Record<string, Selection | null>;
+  setFileSelection: (fileId: string, selection: Selection | null) => void;
   filesDirty: Record<string, boolean>;
   setFileDirty: (fileId: string, dirty: boolean) => void;
   filesSynthesizing: Record<string, boolean>;
   setFileSynthesizing: (fileId: string, synthesizing: boolean) => void;
   filesLoading: Record<string, string>;
   setFileLoading: (fileId: string, message: string | undefined) => void;
+  /**
+   * Like `filesLoading`, but the file's view stays mounted and visible: the
+   * message shows in a badge over it while pointer input is held off.
+   */
+  filesBusy: Record<string, string>;
   activeFileId: string | null;
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
   fullscreenFileId: string | null;
   setFullscreenFileId: (fileId: string | null) => void;
   minimizedFileIds: string[];
   setFileMinimized: (fileId: string, minimized: boolean) => void;
-  /** Moves a file so it sits directly before `beforeFileId`, or last when null. */
-  moveFileBefore: (fileId: string, beforeFileId: string | null) => void;
+  /**
+   * Settles a dragged file: before `beforeFileId` (or last when null), in
+   * `groupId` (or in no group when null).
+   */
+  dropFile: (fileId: string, beforeFileId: string | null, groupId: string | null) => void;
   openFileMinimized: (filePath: string) => Promise<void>;
-  switchToNextFile: () => void;
-  switchToPreviousFile: () => void;
 }
 
 // Open files keyed by file ID
@@ -238,6 +270,11 @@ const fileSynthesisSettled = new Map<string, Promise<void>>();
 /** Waits for `fileId`'s in-flight synthesis, if one is running. */
 export async function awaitFileSynthesis(fileId: string): Promise<void> {
   await fileSynthesisSettled.get(fileId);
+}
+
+/** How many audio rebuilds a file has seen; a cache keyed on it goes stale with the canvas. */
+export function getFileSynthesisGeneration(fileId: string): number {
+  return fileSynthesisGeneration.get(fileId) ?? 0;
 }
 
 /**
@@ -725,9 +762,9 @@ export function getFileColor(filePath: string): string {
 }
 
 /** The colour a file wears everywhere: a shade of its group's hue if it is a stem, else its own. */
-export function selectFileColor(state: Pick<State, "stemGroups" | "stemGroupOfFile">, fileId: string): string {
-  const group = selectStemGroupOfFile(state, fileId);
-  if (group) return stemMemberColor(group.hue, group.memberIds.indexOf(fileId), group.memberIds.length);
+export function selectFileColor(state: Pick<State, "fileGroups" | "fileGroupOfFile">, fileId: string): string {
+  const group = selectFileGroup(state, fileId);
+  if (group) return groupMemberColor(group.hue, group.memberIds.indexOf(fileId), group.memberIds.length);
   const file = openFiles[fileId];
   return getFileColor(file?.filePath ?? fileId);
 }
@@ -880,26 +917,120 @@ function bandLayout(data: SpectrogramData) {
   };
 }
 
+// The metadata shape the synthesis entry points expect.
+function synthesisLayout(data: SpectrogramData) {
+  return {
+    numFrames: data.numFrames,
+    numChannels: data.numChannels,
+    numBands: data.numBands,
+    bandOffsets: data.synthesisMetadata.bandOffsets,
+    bandStepLog2s: data.synthesisMetadata.bandStepLog2s,
+    bandLengths: data.synthesisMetadata.bandLengths,
+  };
+}
+
+/** A file's audio as it currently sounds, synthesising it when it has no buffer. */
+async function currentFileChannels(fileId: string): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
+  const snapshot = await snapshotFileAudio(fileId);
+  if (snapshot) return { channels: snapshot.channels, sampleRate: snapshot.sampleRate };
+
+  const file = openFiles[fileId];
+  const spectrogramData = file?.spectrogramData;
+  if (!file || !spectrogramData) return null;
+  const packedData = await readCurrentPackedData(file);
+  if (!packedData) return null;
+
+  const result = await host.analysis.synthesize(
+    packedData,
+    synthesisLayout(spectrogramData),
+    spectrogramData.sampleRate,
+    { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq },
+    false,
+  );
+  return { channels: result.channels, sampleRate: spectrogramData.sampleRate };
+}
+
 /**
- * Rebuild a file from the audio `packedData` synthesises to, with `transform`
- * rewriting the channels in between. Replaces the file's spectrogram, audio
- * and peak, and adds the result to its history. The renderer is optional
- * throughout: a file showing a loading message has none mounted, and picks the
- * new analysis up from its spectrogram when it comes back.
+ * Sums the files' audio and analyses the result, for files whose grids do not
+ * line up. Everything is resampled to the highest rate among them and the mix
+ * runs as long as the longest, so files of any length or rate still add up.
+ * `base` sets the resolution the sum is analysed at.
  */
-async function rebuildFileFromAudio(
+async function mixFilesDown(fileIds: string[], base: SpectrogramData): Promise<SpectrogramData> {
+  const sources = await Promise.all(fileIds.map((id) => currentFileChannels(id)));
+  const parts = sources.filter((source): source is NonNullable<(typeof sources)[number]> => source !== null);
+  if (parts.length !== fileIds.length) throw new Error("Could not read the current audio of every file");
+
+  const sampleRate = Math.max(...parts.map((part) => part.sampleRate));
+  const resampled = await Promise.all(
+    parts.map((part) => resampleChannels(part.channels, part.sampleRate, sampleRate)),
+  );
+  const channels = mixdown(resampled);
+  if (channels.length === 0 || channels[0].length === 0) throw new Error("There is no audio to merge.");
+
+  const analysisParams: AnalysisParams = {
+    bandsPerOctave: base.bandsPerOctave,
+    minFreq: base.minFreq,
+    maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
+  };
+  const audioBuffer = Tone.getContext().rawContext.createBuffer(channels.length, channels[0].length, sampleRate);
+  for (let ch = 0; ch < channels.length; ch++) audioBuffer.getChannelData(ch).set(channels[ch]);
+
+  return await spectrogramFromAnalysis(await host.analysis.analyseBuffer(audioBuffer, analysisParams), analysisParams);
+}
+
+/**
+ * Rebuild a file from the audio it already plays, with `transform` rewriting
+ * the channels. The audio buffer is the synthesis of the canvas — every commit
+ * and navigation keeps it so — which makes it a starting point that needs no
+ * resynthesis and no FBO read. A file with no buffer yet takes the synthesis
+ * road instead. Replaces the file's spectrogram, audio and peak, and adds the
+ * result to its history; the renderer is optional throughout.
+ */
+/**
+ * A splice length rounded to the analysis splice grid (~1.5 ms), so the tail
+ * rigid-moves in the splice analysis. A length that rounds to nothing comes
+ * back unrounded: the edit stays exact and takes the slow road.
+ */
+export function quantizeSpliceLength(samples: number, sampleRate: number): number {
+  const quant = host.analysis.spliceQuantSamples?.(sampleRate) ?? 1;
+  const rounded = Math.round(samples / quant) * quant;
+  return rounded > 0 ? rounded : Math.round(samples);
+}
+
+/** Onsets a caller already knows for the rebuilt file, in place of detection. */
+export type PrecomputedOnsets = {
+  onsets: Float32Array;
+  reference: { odfMax: number; bandMax: Float32Array } | undefined;
+};
+
+export async function rebuildFileFromCurrentAudio(
   set: ZustandSet,
   fileId: string,
-  readPackedData: () => Promise<Float32Array | undefined>,
   transform: (channels: Float32Array[]) => Float32Array[],
   snapshot: { kind: "resize" | "reanalyze"; label: string },
+  onVisible?: () => void,
+  precomputedOnsets?: PrecomputedOnsets,
+  pieces?: (oldFrames: number) => SplicePiece[],
 ): Promise<void> {
-  // The read and the rebuild share one queue slot: a stroke commit landing
-  // between them would be encoded against dimensions this rebuild then replaces.
   return serializeFileTask(fileId, async () => {
-    const packedData = await readPackedData();
-    if (!packedData) throw new Error("Could not read the current spectrogram state.");
-    await rebuildFileFromAudioNow(set, fileId, packedData, transform, snapshot);
+    // Navigation moves the current node and then starts synthesis off the
+    // queue, so the buffer is the current state only once that has landed.
+    await awaitFileSynthesis(fileId);
+    const file = openFiles[fileId];
+    if (!file?.spectrogramData) return;
+    const buffer = file.audioBuffer;
+    if (!buffer) {
+      const packedData = await readCurrentPackedData(file);
+      if (!packedData) throw new Error("Could not read the current spectrogram state.");
+      await rebuildFileFromAudioNow(set, fileId, packedData, transform, snapshot, onVisible);
+      return;
+    }
+    const channels: Float32Array[] = [];
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      channels.push(buffer.getChannelData(ch));
+    }
+    await rebuildFileWithChannels(set, fileId, transform(channels), snapshot, onVisible, precomputedOnsets, pieces);
   });
 }
 
@@ -909,6 +1040,7 @@ async function rebuildFileFromAudioNow(
   packedData: Float32Array,
   transform: (channels: Float32Array[]) => Float32Array[],
   snapshot: { kind: "resize" | "reanalyze"; label: string },
+  onVisible?: () => void,
 ): Promise<void> {
   const file = openFiles[fileId];
   if (!file?.spectrogramData) return;
@@ -922,14 +1054,7 @@ async function rebuildFileFromAudioNow(
 
   const synthResult = await host.analysis.synthesize(
     packedData,
-    {
-      numFrames: spectrogramData.numFrames,
-      numChannels: spectrogramData.numChannels,
-      numBands: spectrogramData.numBands,
-      bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
-      bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
-      bandLengths: spectrogramData.synthesisMetadata.bandLengths,
-    },
+    synthesisLayout(spectrogramData),
     spectrogramData.sampleRate,
     analysisParams,
     false,
@@ -937,7 +1062,36 @@ async function rebuildFileFromAudioNow(
 
   if (!openFiles[fileId]) return;
 
-  const channels = transform(synthResult.channels);
+  await rebuildFileWithChannels(set, fileId, transform(synthResult.channels), snapshot, onVisible);
+}
+
+/**
+ * The tail every rebuild shares: analyse `channels`, swap the file's
+ * spectrogram, audio, peak and onsets, and add the result to its history.
+ * `onVisible` fires once the new state is on screen and interactive; the
+ * history snapshot is written after it, still inside the caller's queue slot,
+ * so anything queued behind — another edit, an undo — waits for the node.
+ */
+async function rebuildFileWithChannels(
+  set: ZustandSet,
+  fileId: string,
+  channels: Float32Array[],
+  snapshot: { kind: "resize" | "reanalyze"; label: string },
+  onVisible?: () => void,
+  precomputedOnsets?: PrecomputedOnsets,
+  pieces?: (oldFrames: number) => SplicePiece[],
+): Promise<void> {
+  const file = openFiles[fileId];
+  if (!file?.spectrogramData) return;
+
+  const { spectrogramData } = file;
+  const analysisParams: AnalysisParams = {
+    bandsPerOctave: spectrogramData.bandsPerOctave,
+    minFreq: spectrogramData.minFreq,
+    maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
+    ...(precomputedOnsets ? { detectOnsets: false } : {}),
+  };
+
   const length = channels[0]?.length ?? 0;
   if (length <= 0) throw new Error("There is no audio left to analyse.");
 
@@ -947,21 +1101,41 @@ async function rebuildFileFromAudioNow(
     audioBuffer.getChannelData(ch).set(channels[ch]);
   }
 
-  const result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
+  // A splice-shaped rebuild reuses the old coefficients wherever the pieces
+  // say the audio is unchanged; anything that cannot splice takes the full
+  // analysis road below.
+  let result: Awaited<ReturnType<typeof host.analysis.analyseBuffer>> | undefined;
+  const splices = Boolean(pieces && precomputedOnsets && host.analysis.spliceAnalyseChannels);
+  // The unchanged ranges copy across as they stand now, paint and all, so the
+  // splice reads the painted state rather than the coefficients analysis left.
+  const oldPacked = splices ? await readCurrentPackedData(file) : undefined;
+  if (pieces && oldPacked && host.analysis.spliceAnalyseChannels) {
+    try {
+      result = await host.analysis.spliceAnalyseChannels(
+        channels,
+        spectrogramData.sampleRate,
+        analysisParams,
+        oldPacked,
+        synthesisLayout(spectrogramData),
+        pieces(spectrogramData.numFrames),
+      );
+    } catch (error) {
+      console.warn("Splice analysis fell back to a full analysis:", error);
+    }
+  }
+  if (!result) result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
 
   if (!openFiles[fileId]) return;
 
-  file.spectrogramData = await spectrogramFromAnalysis(result, {
-    minFreq: analysisParams.minFreq,
-    bandsPerOctave: analysisParams.bandsPerOctave,
-  });
+  file.spectrogramData = await spectrogramFromAnalysis(result, analysisParams);
   file.audioBuffer = audioBuffer;
   file.unprojectedPaint = false;
-  // The rebuild moves every frame, so the onsets this analysis found replace
-  // the ones detected against the old length.
-  file.onsets = result.onsets;
-  file.onsetReference =
-    result.onsetOdfMax !== undefined && result.onsetBandMax
+  // The rebuild moves every frame, so the onsets come from the caller when it
+  // knows how they moved, else from the detection this analysis ran.
+  file.onsets = precomputedOnsets ? precomputedOnsets.onsets : result.onsets;
+  file.onsetReference = precomputedOnsets
+    ? precomputedOnsets.reference
+    : result.onsetOdfMax !== undefined && result.onsetBandMax
       ? { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax }
       : undefined;
 
@@ -979,6 +1153,31 @@ async function rebuildFileFromAudioNow(
 
   const reshaped = file.spectrogramData.packedData;
   if (!reshaped) throw new Error("the snapshot result carries no packed state");
+
+  const newDuration = length / spectrogramData.sampleRate;
+  set(
+    produce((state: State) => {
+      state.filesDirty[fileId] = true;
+      // The rebuild moves every frame, so a selection, loop region or play
+      // marker measured against the old length no longer points at what it
+      // covered — and a loop end past the new duration cannot start playback.
+      state.filesSelection[fileId] = null;
+      const marker = state.filesPlaybackStartTime[fileId];
+      if (marker !== undefined && marker > newDuration) {
+        state.filesPlaybackStartTime[fileId] = newDuration;
+      }
+      const region = state.filesLoopRegion[fileId];
+      if (region) {
+        if (region.start >= newDuration) {
+          state.filesLoopRegion[fileId] = null;
+        } else if (region.end > newDuration) {
+          state.filesLoopRegion[fileId] = { ...region, end: newDuration };
+        }
+      }
+    }),
+  );
+  onVisible?.();
+
   const nodeId = await getHistoryManager(fileId).addSnapshot({
     data: reshaped,
     kind: snapshot.kind,
@@ -993,18 +1192,12 @@ async function rebuildFileFromAudioNow(
       packOnsetState({ onsets: file.onsets, reference: file.onsetReference }),
     );
   }
-
-  set(
-    produce((state: State) => {
-      state.filesDirty[fileId] = true;
-    }),
-  );
 }
 
 // The current painted state of a file. Without a mounted renderer to read an
 // FBO from, the block store's current tier serves it, and a transient rebuild
 // from the on-disk history is the last resort.
-async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
+export async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
   const fboData = await file.rendererRef?.current?.getFBOData();
   if (fboData) return fboData;
   const manager = getHistoryManager(file.id);
@@ -1106,6 +1299,7 @@ function discardFiles(set: ZustandSet, ids: string[]): void {
         delete state.filesOffsetY[id];
         delete state.filesPlaybackStartTime[id];
         delete state.filesLoopRegion[id];
+        delete state.filesSelection[id];
         delete state.filesDirty[id];
         delete state.filesLoading[id];
         delete state.persistedFilePaths[id];
@@ -1123,24 +1317,25 @@ function clearLoading(set: ZustandSet, ids: string[]): void {
   );
 }
 
-// Register a completed split so its parts stay visibly connected and can be
-// summed back together. The hue comes from the source file, so a group reads as
-// a shade of the file it came from. The members take that hue too, which keeps
-// the whole split to one hue of the wheel however many parts it has.
-function registerStemGroup(
+// Register a group so its members stay visibly connected. The hue comes from
+// the file a split came from, or from the first member of a hand-made group, and
+// every member takes it, which keeps a group to one hue of the wheel however
+// many members it has.
+function registerFileGroup(
   get: ZustandGet,
-  method: StemGroupMethod,
-  sourceFileId: string,
+  method: FileGroupMethod,
+  originId: string | null,
   memberIds: string[],
   label: string,
 ): void {
-  const sourceFile = openFiles[sourceFileId];
-  const hue = sourceFile ? getFileHue(sourceFile.filePath) : hashHue(sourceFileId);
+  const hueSourceId = originId ?? memberIds[0];
+  const hueSource = openFiles[hueSourceId];
+  const hue = hueSource ? getFileHue(hueSource.filePath) : hashHue(hueSourceId);
   for (const memberId of memberIds) {
     const member = openFiles[memberId];
     if (member) fileHues.set(member.filePath, hue);
   }
-  get().createStemGroup({ method, label, originId: sourceFileId, memberIds, hue });
+  get().createFileGroup({ method, label, originId, memberIds, hue });
 }
 
 /** The active file's loop region, or null when there is no file or no region. */
@@ -1148,13 +1343,18 @@ export function activeLoopRegion(state: Pick<State, "activeFileId" | "filesLoopR
   return state.activeFileId ? (state.filesLoopRegion[state.activeFileId] ?? null) : null;
 }
 
+/** The active file's selection, or null when there is no file or no selection. */
+export function activeSelection(state: Pick<State, "activeFileId" | "filesSelection">): Selection | null {
+  return state.activeFileId ? (state.filesSelection[state.activeFileId] ?? null) : null;
+}
+
 /**
  * Files whose view a change to `fileId` should also move: itself, plus the rest
  * of its stem group while that group has view sync switched on.
  */
-export function viewSyncTargets(state: Pick<State, "stemGroupOfFile" | "stemGroups">, fileId: string): string[] {
-  const groupId = state.stemGroupOfFile[fileId];
-  const group = groupId ? state.stemGroups[groupId] : undefined;
+export function viewSyncTargets(state: Pick<State, "fileGroupOfFile" | "fileGroups">, fileId: string): string[] {
+  const groupId = state.fileGroupOfFile[fileId];
+  const group = groupId ? state.fileGroups[groupId] : undefined;
   if (!group?.syncView) return [fileId];
   return group.memberIds.includes(fileId) ? group.memberIds : [fileId, ...group.memberIds];
 }
@@ -1214,16 +1414,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         sampleRate,
         numberOfChannels: 2,
       });
+      const analysisParams = { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq };
       const result = await host.analysis.analyseBuffer(audioBuffer, {
-        bandsPerOctave: state.bandsPerOctave,
-        minFreq: state.minFreq,
+        ...analysisParams,
         maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
       });
 
-      const spectrogramData = await spectrogramFromAnalysis(result, {
-        minFreq: state.minFreq,
-        bandsPerOctave: state.bandsPerOctave,
-      });
+      const spectrogramData = await spectrogramFromAnalysis(result, analysisParams);
 
       const fileId = generateFileId();
       const filepath = makeManagedFilePath(fileId);
@@ -1339,6 +1536,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesLoopRegion[fileId];
+          delete state.filesSelection[fileId];
           delete state.persistedFilePaths[fileId];
           delete state.fileDisplayNames[fileId];
         }),
@@ -1432,7 +1630,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, ids);
-    registerStemGroup(get, "hpss", fileId, ids, `${baseLabel}: harmonic / percussive`);
+    registerFileGroup(get, "hpss", fileId, ids, `${baseLabel}: harmonic / percussive`);
   },
   nmfFile: async (fileId: string, numComponents: number) => {
     const originalFile = openFiles[fileId];
@@ -1469,9 +1667,58 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, ids);
-    registerStemGroup(get, "nmf", fileId, ids, `${baseLabel}: ${parts} parts`);
+    registerFileGroup(get, "nmf", fileId, ids, `${baseLabel}: ${parts} parts`);
   },
-  mergeStems: async (fileIds: string[]) => {
+  promptGroupFiles: async () => {
+    const openIds = get().openFileIds;
+    if (openIds.length === 0) {
+      notifications.show({ title: "Nothing to group", message: "Open a file first.", color: "yellow" });
+      return;
+    }
+
+    const options = openIds.map((id) => ({ id, label: openFiles[id]?.displayName ?? id }));
+    const activeFileId = get().activeFileId;
+    const picked = await new Promise<string[] | null>((resolve) => {
+      let confirmed = false;
+      openGroupFilesPrompt({
+        options,
+        initial: activeFileId ? [activeFileId] : [],
+        onConfirm: (fileIds) => {
+          confirmed = true;
+          resolve(fileIds);
+        },
+        onClose: () => {
+          if (!confirmed) resolve(null);
+        },
+      });
+    });
+    if (picked) get().groupFiles(picked);
+  },
+  ungroupActiveFile: () => {
+    const fileId = get().activeFileId;
+    const groupId = fileId ? get().fileGroupOfFile[fileId] : undefined;
+    if (groupId) get().ungroupFiles(groupId);
+  },
+  groupFiles: (fileIds: string[]) => {
+    const openIds = get().openFileIds;
+    const wanted = new Set(fileIds);
+    // In canvas order, not the order they were ticked, so the bracket runs down
+    // the lanes the way they already read.
+    const memberIds = openIds.filter((id) => wanted.has(id));
+    if (memberIds.length === 0) return;
+
+    for (const id of memberIds) get().removeFileFromGroup(id);
+    set(
+      produce((state: State) => {
+        state.openFileIds = gatherFileIds(state.openFileIds, memberIds);
+      }),
+    );
+
+    const first = stripExtensionForLabel(openFiles[memberIds[0]]?.displayName ?? "Group");
+    const label = memberIds.length > 1 ? `${first} + ${memberIds.length - 1} more` : first;
+    registerFileGroup(get, "user", null, memberIds, label);
+  },
+  mergeFiles: async (fileIds: string[]) => {
     if (fileIds.length < 2) return;
     const files = fileIds.map((id) => openFiles[id]);
     // Merging a subset of what was asked for would quietly drop energy, so a
@@ -1486,30 +1733,24 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const base = files[0].spectrogramData as SpectrogramData;
-    // Summing only means anything while every part still describes the same
-    // grid; a length- or resolution-changing edit on one of them breaks that.
-    const mismatched = files.find((f) => {
+    // Adding coefficients only means anything while every part describes the
+    // same grid, which is what a split leaves behind. Anything else is summed
+    // as audio instead.
+    const sameGrid = files.every((f) => {
       const data = f.spectrogramData as SpectrogramData;
       return (
-        data.numBands !== base.numBands ||
-        data.numChannels !== base.numChannels ||
-        data.numFrames !== base.numFrames ||
-        data.sampleRate !== base.sampleRate ||
-        data.bandsPerOctave !== base.bandsPerOctave
+        data.numBands === base.numBands &&
+        data.numChannels === base.numChannels &&
+        data.numFrames === base.numFrames &&
+        data.sampleRate === base.sampleRate &&
+        data.bandsPerOctave === base.bandsPerOctave &&
+        data.minFreq === base.minFreq
       );
     });
-    if (mismatched) {
-      notifications.show({
-        title: "Can't merge these files",
-        message: `'${truncateMiddle(mismatched.displayName, 40)}' no longer lines up with the others. Its length or resolution has changed.`,
-        color: "red",
-      });
-      return;
-    }
 
-    const groupId = get().stemGroupOfFile[fileIds[0]];
-    const group = groupId ? get().stemGroups[groupId] : undefined;
-    const originFile = group ? openFiles[group.originId] : undefined;
+    const groupId = get().fileGroupOfFile[fileIds[0]];
+    const group = groupId ? get().fileGroups[groupId] : undefined;
+    const originFile = group?.originId ? openFiles[group.originId] : undefined;
     const displayName = `${stripExtensionForLabel(originFile?.displayName ?? files[0].displayName)} merged`;
 
     const newFileId = generateFileId();
@@ -1538,22 +1779,26 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
-      const packed = await Promise.all(files.map((f) => readCurrentPackedData(f)));
-      const parts = packed.filter((p): p is Float32Array => Boolean(p));
-      if (parts.length !== files.length) throw new Error("Could not read the current state of every file");
+      if (sameGrid) {
+        const packed = await Promise.all(files.map((f) => readCurrentPackedData(f)));
+        const parts = packed.filter((p): p is Float32Array => Boolean(p));
+        if (parts.length !== files.length) throw new Error("Could not read the current state of every file");
 
-      const { merged } = await host.analysis.mergeSpectrograms(parts, bandLayout(base));
+        const { merged } = await host.analysis.mergeSpectrograms(parts, bandLayout(base));
 
-      updateOpenFile(newFileId, {
-        spectrogramData: {
-          ...(await deriveSpectrogramData(base, merged)),
-          // The parts each carry a slice of the original's energy, so none of
-          // their totals describes the sum. Take the figure the split came
-          // from when it's still around; the Convolve effect normalises its
-          // impulse response against it.
-          magnitudeEnergy: originFile?.spectrogramData?.magnitudeEnergy ?? base.magnitudeEnergy,
-        },
-      });
+        updateOpenFile(newFileId, {
+          spectrogramData: {
+            ...(await deriveSpectrogramData(base, merged)),
+            // The parts each carry a slice of the original's energy, so none of
+            // their totals describes the sum. Take the figure the split came
+            // from when it's still around; the Convolve effect normalises its
+            // impulse response against it.
+            magnitudeEnergy: originFile?.spectrogramData?.magnitudeEnergy ?? base.magnitudeEnergy,
+          },
+        });
+      } else {
+        updateOpenFile(newFileId, { spectrogramData: await mixFilesDown(fileIds, base) });
+      }
     } catch (error) {
       console.error("Merge failed:", error);
       notifications.show({
@@ -1568,13 +1813,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     clearLoading(set, [newFileId]);
     await get().setActiveFileId(newFileId);
   },
-  mergeStemGroup: async (groupId: string) => {
-    const group = get().stemGroups[groupId];
+  mergeFileGroup: async (groupId: string) => {
+    const group = get().fileGroups[groupId];
     if (!group) return;
-    await get().mergeStems(group.memberIds);
+    await get().mergeFiles(group.memberIds);
   },
-  closeStemGroup: async (groupId: string) => {
-    const group = get().stemGroups[groupId];
+  closeFileGroup: async (groupId: string) => {
+    const group = get().fileGroups[groupId];
     if (!group) return;
     // Closing a member dissolves the group once it drops below two, so the list
     // is snapshotted before anything is removed.
@@ -1707,10 +1952,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           // From analysisParams, not the current global setting — a stem has to
           // record the resolution it was actually analysed at, or it stops
           // lining up with the file it was split from.
-          spectrogramData: await spectrogramFromAnalysis(result, {
-            minFreq: analysisParams.minFreq,
-            bandsPerOctave: analysisParams.bandsPerOctave,
-          }),
+          spectrogramData: await spectrogramFromAnalysis(result, analysisParams),
         });
       }
 
@@ -1730,7 +1972,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, stemIds);
-    registerStemGroup(get, "ai", fileId, stemIds, `${baseLabel}: drums / bass / other / vocals`);
+    registerFileGroup(get, "ai", fileId, stemIds, `${baseLabel}: drums / bass / other / vocals`);
     aiSeparatingFileIds.delete(fileId);
   },
   saveActiveFile: async () => {
@@ -2036,7 +2278,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     destroyHistoryManager(fileId).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
     fileSynthesisGeneration.delete(fileId);
 
-    state.removeFileFromStemGroup(fileId);
+    state.removeFileFromGroup(fileId);
 
     return set(
       produce((state: State) => {
@@ -2049,6 +2291,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesLoopRegion[fileId];
+          delete state.filesSelection[fileId];
           delete state.filesDirty[fileId];
           delete state.filesLoading[fileId];
           delete state.filesSynthesizing[fileId];
@@ -2880,49 +3123,77 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
     }
   },
-  resizeActiveFileLength: async (factor: 2 | 0.5) => {
-    const fileId = get().activeFileId;
-    const file = fileId ? openFiles[fileId] : undefined;
-    if (!fileId || !file) return;
+  resizeActiveFileLength: (factor: 2 | 0.5) =>
+    serializeEditCommand(async () => {
+      const fileId = get().activeFileId;
+      const file = fileId ? openFiles[fileId] : undefined;
+      if (!fileId || !file) return;
 
-    try {
-      await rebuildFileFromAudio(
-        set,
-        fileId,
-        () => readCurrentPackedData(file),
-        (channels) =>
-          channels.map((src) => {
-            const newLength = factor === 2 ? src.length * 2 : Math.floor(src.length / 2);
-            if (newLength <= 0) throw new Error("The file is too short to halve.");
-            const dst = new Float32Array(newLength);
-            if (factor === 2) {
-              dst.set(src, 0);
-              dst.set(src, src.length);
-            } else {
-              dst.set(src.subarray(0, newLength), 0);
+      // The resize moves the onsets rigidly: doubling repeats the map a file
+      // length later, halving keeps the first half.
+      const spec = file.spectrogramData;
+      const fileOnsets = file.onsets;
+      const duration = spec ? spec.numFrames / spec.sampleRate : 0;
+      const precomputedOnsets =
+        spec && fileOnsets
+          ? {
+              onsets:
+                factor === 2
+                  ? insertOnsetSpan(fileOnsets, duration, duration, fileOnsets)
+                  : removeOnsetSpan(fileOnsets, duration / 2, duration),
+              reference: file.onsetReference,
             }
-            return dst;
-          }),
-        { kind: "resize", label: "Resize" },
-      );
-    } catch (error) {
-      console.error("Resize failed:", error);
-      notifications.show({
-        title: "Resize failed",
-        message: error instanceof Error ? error.message : "Unknown error",
-        color: "red",
-      });
-    }
-  },
-  insertSilenceIntoActiveFile: async () => {
+          : undefined;
+
+      try {
+        await rebuildFileFromCurrentAudio(
+          set,
+          fileId,
+          (channels) =>
+            channels.map((src) => {
+              const newLength = factor === 2 ? src.length * 2 : Math.floor(src.length / 2);
+              if (newLength <= 0) throw new Error("The file is too short to halve.");
+              const dst = new Float32Array(newLength);
+              if (factor === 2) {
+                dst.set(src, 0);
+                dst.set(src, src.length);
+              } else {
+                dst.set(src.subarray(0, newLength), 0);
+              }
+              return dst;
+            }),
+          { kind: "resize", label: "Resize" },
+          undefined,
+          precomputedOnsets,
+          (oldFrames) =>
+            factor === 2
+              ? [
+                  { newStart: 0, oldStart: 0, length: oldFrames },
+                  { newStart: oldFrames, oldStart: 0, length: oldFrames },
+                ]
+              : [{ newStart: 0, oldStart: 0, length: Math.floor(oldFrames / 2) }],
+        );
+      } catch (error) {
+        console.error("Resize failed:", error);
+        notifications.show({
+          title: "Resize failed",
+          message: error instanceof Error ? error.message : "Unknown error",
+          color: "red",
+        });
+      }
+    }),
+  setActiveFileLength: async () => {
     const fileId = get().activeFileId;
     const file = fileId ? openFiles[fileId] : undefined;
     if (!fileId || !file?.spectrogramData) return;
-    if (get().filesLoading[fileId]) return;
+    if (get().filesLoading[fileId] || get().filesBusy[fileId]) return;
 
-    const values = await new Promise<InsertSilenceValues | null>((resolve) => {
+    const spec = file.spectrogramData;
+    const values = await new Promise<LengthValues | null>((resolve) => {
       let confirmed = false;
-      openInsertSilencePrompt({
+      openSetLengthPrompt({
+        seconds: spec.numFrames / spec.sampleRate,
+        bpm: get().filepathsBpm[file.filePath] || 120,
         onConfirm: (v) => {
           confirmed = true;
           resolve(v);
@@ -2934,56 +3205,164 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     });
     if (!values) return;
 
-    const current = openFiles[fileId];
-    if (!current?.spectrogramData) return;
-    const { sampleRate } = current.spectrogramData;
-    const bpm = get().filepathsBpm[current.filePath] || 120;
-    const seconds = values.unit === "beats" ? (60 / bpm) * values.length : values.length;
-    const padSamples = Math.round(seconds * sampleRate);
-    if (padSamples <= 0) return;
-    const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
+    await serializeEditCommand(async () => {
+      const current = openFiles[fileId];
+      if (!current?.spectrogramData) return;
+      const { sampleRate, numFrames } = current.spectrogramData;
+      const seconds = lengthToSeconds(values, get().filepathsBpm[current.filePath] || 120);
+      const target = quantizeSpliceLength(Math.round(seconds * sampleRate), sampleRate);
+      if (target <= 0 || target === numFrames) return;
 
-    // Read the painted state first: the loading message below takes the
-    // renderer, and with it the FBO, off the screen.
-    const packedData = await readCurrentPackedData(current);
+      // Cutting drops the onsets past the new end; padding leaves every one of
+      // them where it was, so the map is spliced rather than detected again.
+      const fileOnsets = current.onsets;
+      const precomputedOnsets = fileOnsets
+        ? {
+            onsets:
+              target < numFrames
+                ? removeOnsetSpan(fileOnsets, target / sampleRate, numFrames / sampleRate)
+                : fileOnsets,
+            reference: current.onsetReference,
+          }
+        : undefined;
 
-    set(
-      produce((state: State) => {
-        state.filesLoading[fileId] = "Inserting silence...";
-      }),
-    );
-
-    try {
-      await rebuildFileFromAudio(
-        set,
-        fileId,
-        async () => packedData,
-        (channels) => insertSilence(channels, values.position, padSamples, playStartSample),
-        { kind: "resize", label: "Insert silence" },
-      );
-    } catch (error) {
-      console.error("Insert silence failed:", error);
-      notifications.show({
-        title: "Insert silence failed",
-        message: error instanceof Error ? error.message : "Unknown error",
-        color: "red",
-      });
-    } finally {
+      const clearBusy = () =>
+        set(
+          produce((state: State) => {
+            delete state.filesBusy[fileId];
+          }),
+        );
       set(
         produce((state: State) => {
-          delete state.filesLoading[fileId];
+          state.filesBusy[fileId] = target < numFrames ? "Trimming..." : "Padding...";
         }),
       );
+
+      try {
+        await rebuildFileFromCurrentAudio(
+          set,
+          fileId,
+          (channels) => setChannelsLength(channels, target),
+          { kind: "resize", label: "Set length" },
+          clearBusy,
+          precomputedOnsets,
+          (oldFrames) => [{ newStart: 0, oldStart: 0, length: Math.min(oldFrames, target) }],
+        );
+      } catch (error) {
+        console.error("Set length failed:", error);
+        notifications.show({
+          title: "Set length failed",
+          message: error instanceof Error ? error.message : "Unknown error",
+          color: "red",
+        });
+      } finally {
+        clearBusy();
+      }
+    });
+  },
+  insertSilenceIntoActiveFile: async () => {
+    const fileId = get().activeFileId;
+    const file = fileId ? openFiles[fileId] : undefined;
+    if (!fileId || !file?.spectrogramData) return;
+    if (get().filesLoading[fileId] || get().filesBusy[fileId]) return;
+
+    // With a selection, the silence takes the selection's own place and
+    // length; the dialog only asks when there is nothing to measure.
+    let values: LengthValues | null = null;
+    if (!get().filesSelection[fileId]) {
+      values = await new Promise<LengthValues | null>((resolve) => {
+        let confirmed = false;
+        openInsertSilencePrompt({
+          bpm: get().filepathsBpm[file.filePath] || 120,
+          onConfirm: (v) => {
+            confirmed = true;
+            resolve(v);
+          },
+          onClose: () => {
+            if (!confirmed) resolve(null);
+          },
+        });
+      });
+      if (!values) return;
     }
+
+    await serializeEditCommand(async () => {
+      const current = openFiles[fileId];
+      if (!current?.spectrogramData) return;
+      const { sampleRate, numFrames } = current.spectrogramData;
+      const selection = get().filesSelection[fileId];
+
+      let requestedPad: number;
+      let cutSample: number;
+      if (selection) {
+        requestedPad = Math.round((selection.end - selection.start) * sampleRate);
+        cutSample = silenceCutSample(numFrames, selection.start * sampleRate);
+      } else if (values) {
+        const seconds = lengthToSeconds(values, get().filepathsBpm[current.filePath] || 120);
+        requestedPad = Math.round(seconds * sampleRate);
+        cutSample = silenceCutSample(numFrames, (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate);
+      } else {
+        return;
+      }
+      if (requestedPad <= 0) return;
+      const padSamples = quantizeSpliceLength(requestedPad, sampleRate);
+
+      // The silence moves the onsets rigidly, so the rebuild splices the map
+      // instead of detecting it again.
+      const fileOnsets = current.onsets;
+      const precomputedOnsets = fileOnsets
+        ? {
+            onsets: insertOnsetSpan(fileOnsets, cutSample / sampleRate, padSamples / sampleRate, new Float32Array(0)),
+            reference: current.onsetReference,
+          }
+        : undefined;
+
+      const clearBusy = () =>
+        set(
+          produce((state: State) => {
+            delete state.filesBusy[fileId];
+          }),
+        );
+      set(
+        produce((state: State) => {
+          state.filesBusy[fileId] = "Inserting silence...";
+        }),
+      );
+
+      try {
+        await rebuildFileFromCurrentAudio(
+          set,
+          fileId,
+          (channels) => insertSilence(channels, cutSample, padSamples),
+          { kind: "resize", label: "Insert silence" },
+          () => {
+            clearBusy();
+            // The silence is what the edit made, so it is what stays selected.
+            if (selection) {
+              const startSec = cutSample / sampleRate;
+              get().setFileSelection(fileId, fullHeightSelection(startSec, startSec + padSamples / sampleRate));
+              get().setFilePlaybackStartTime(fileId, startSec);
+            }
+          },
+          precomputedOnsets,
+          (oldFrames) => insertSpanPieces(oldFrames, cutSample, padSamples, 0),
+        );
+      } catch (error) {
+        console.error("Insert silence failed:", error);
+        notifications.show({
+          title: "Insert silence failed",
+          message: error instanceof Error ? error.message : "Unknown error",
+          color: "red",
+        });
+      } finally {
+        clearBusy();
+      }
+    });
   },
   setFileChannelCount: async (fileId, channelCount) => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData || file.spectrogramData.numChannels === channelCount) return;
     if (get().filesLoading[fileId]) return;
-
-    // Read the painted state first: the loading message below takes the
-    // renderer, and with it the FBO, off the screen.
-    const packedData = await readCurrentPackedData(file);
 
     set(
       produce((state: State) => {
@@ -2992,13 +3371,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
-      await rebuildFileFromAudio(
-        set,
-        fileId,
-        async () => packedData,
-        (channels) => toChannelCount(channels, channelCount),
-        { kind: "reanalyze", label: channelCount === 1 ? "To mono" : "To stereo" },
-      );
+      await rebuildFileFromCurrentAudio(set, fileId, (channels) => toChannelCount(channels, channelCount), {
+        kind: "reanalyze",
+        label: channelCount === 1 ? "To mono" : "To stereo",
+      });
     } catch (error) {
       console.error("Channel change failed:", error);
       notifications.show({
@@ -3258,6 +3634,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesLoopRegion[fileId] = region;
       }),
     ),
+  filesSelection: {},
+  // The selection never writes the loop region; the time legend is the only
+  // gesture that does.
+  setFileSelection: (fileId, selection) => {
+    set(
+      produce((state: State) => {
+        state.filesSelection[fileId] = selection;
+      }),
+    );
+    get().retargetSelectionAudition(fileId);
+  },
   filesDirty: {},
   setFileDirty: (fileId: string, dirty: boolean) => {
     set((state) => ({
@@ -3271,6 +3658,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }));
   },
   filesLoading: {},
+  filesBusy: {},
   setFileLoading: (fileId: string, message: string | undefined) => {
     set(
       produce((state: State) => {
@@ -3323,8 +3711,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }),
     );
   },
-  moveFileBefore: (fileId, beforeFileId) => {
+  dropFile: (fileId, beforeFileId, groupId) => {
     set((state) => ({ openFileIds: reorderFileIds(state.openFileIds, fileId, beforeFileId) }));
+    get().setFileGroup(fileId, groupId, get().openFileIds);
+    // Membership just changed, so a group can have been left straddling another
+    // file; each one closes back up into the single run its bracket draws over.
+    set((state) => ({ openFileIds: gatherFileGroups(state.openFileIds, state.fileGroupOfFile) }));
   },
   openFileMinimized: async (filePath) => {
     // Check if already open
@@ -3377,19 +3769,5 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         }),
       );
     }
-  },
-  switchToNextFile: () => {
-    const { openFileIds, activeFileId, setActiveFileId } = get();
-    if (openFileIds.length <= 1 || !activeFileId) return;
-    const currentIndex = openFileIds.indexOf(activeFileId);
-    const nextIndex = (currentIndex + 1) % openFileIds.length;
-    setActiveFileId(openFileIds[nextIndex]);
-  },
-  switchToPreviousFile: () => {
-    const { openFileIds, activeFileId, setActiveFileId } = get();
-    if (openFileIds.length <= 1 || !activeFileId) return;
-    const currentIndex = openFileIds.indexOf(activeFileId);
-    const prevIndex = (currentIndex - 1 + openFileIds.length) % openFileIds.length;
-    setActiveFileId(openFileIds[prevIndex]);
   },
 });

@@ -33,6 +33,9 @@ export const Tooltip = ({ label, help, detail, children, ...props }: TooltipProp
       multiline
       maw={300}
       position="bottom"
+      // Above the transport bar (z 1000) and the menu bar (z 1001); Mantine's
+      // default floating layer of 300 sits behind both.
+      zIndex={10002}
       withArrow
       {...props}
     >

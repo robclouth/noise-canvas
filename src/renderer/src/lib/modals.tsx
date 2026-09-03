@@ -1,8 +1,9 @@
 import { NumberInput, SimpleGrid, Stack, Text, TextInput, type ModalProps } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
 import { type ReactNode, type RefObject } from "react";
-import { InsertSilenceFields } from "../components/insert-silence-fields";
-import type { InsertSilenceValues } from "./insert-silence";
+import { GroupFilesFields, type GroupFileOption } from "../components/group-files-fields";
+import { LengthFields } from "../components/length-fields";
+import { secondsToLength, type LengthValues } from "./length-values";
 
 export { openContextModal };
 
@@ -317,21 +318,22 @@ export function openSplitPartsPrompt({
 }
 
 // Last-used settings, so reopening the dialog picks up where it left off.
-let lastSilenceValues: InsertSilenceValues = { length: 4, unit: "beats", position: "play-start" };
+let lastSilenceValues: LengthValues = { length: 4, unit: "beats" };
 
 type OpenInsertSilencePromptOptions = {
-  onConfirm: (values: InsertSilenceValues) => void | Promise<void>;
+  bpm: number;
+  onConfirm: (values: LengthValues) => void | Promise<void>;
   onCancel?: () => void;
   onClose?: () => void;
 };
 
-export function openInsertSilencePrompt({ onConfirm, onCancel, onClose }: OpenInsertSilencePromptOptions): string {
-  const values: RefObject<InsertSilenceValues> = { current: lastSilenceValues };
+export function openInsertSilencePrompt({ bpm, onConfirm, onCancel, onClose }: OpenInsertSilencePromptOptions): string {
+  const values: RefObject<LengthValues> = { current: lastSilenceValues };
 
   return openConfirmModal({
     title: "Insert Silence",
     size: "sm",
-    children: <InsertSilenceFields values={values} />,
+    children: <LengthFields values={values} bpm={bpm} />,
     labels: { confirm: "Insert", cancel: "Cancel" },
     confirmProps: { size: "xs" },
     cancelProps: { size: "xs" },
@@ -343,4 +345,111 @@ export function openInsertSilencePrompt({ onConfirm, onCancel, onClose }: OpenIn
     onCancel,
     onClose,
   });
+}
+
+let lastSetLengthUnit: LengthValues["unit"] = "beats";
+
+type OpenSetLengthPromptOptions = {
+  /** What the file measures now, which the field opens on. */
+  seconds: number;
+  bpm: number;
+  onConfirm: (values: LengthValues) => void | Promise<void>;
+  onCancel?: () => void;
+  onClose?: () => void;
+};
+
+export function openSetLengthPrompt({
+  seconds,
+  bpm,
+  onConfirm,
+  onCancel,
+  onClose,
+}: OpenSetLengthPromptOptions): string {
+  const unit = lastSetLengthUnit;
+  const values: RefObject<LengthValues> = {
+    current: { length: Math.round(secondsToLength(seconds, unit, bpm) * 1000) / 1000, unit },
+  };
+
+  return openConfirmModal({
+    title: "Set Length",
+    size: "sm",
+    children: (
+      <Stack gap="xs">
+        <Text size="sm" c="dimmed">
+          Cuts the file short, or pads it with silence, to the length you give.
+        </Text>
+        <LengthFields values={values} bpm={bpm} />
+      </Stack>
+    ),
+    labels: { confirm: "Set", cancel: "Cancel" },
+    confirmProps: { size: "xs" },
+    cancelProps: { size: "xs" },
+    onConfirm: async () => {
+      if (!Number.isFinite(values.current.length) || values.current.length <= 0) return;
+      lastSetLengthUnit = values.current.unit;
+      await onConfirm(values.current);
+    },
+    onCancel,
+    onClose,
+  });
+}
+
+type OpenGroupFilesPromptOptions = {
+  options: GroupFileOption[];
+  /** Files ticked when the dialog opens. */
+  initial: string[];
+  onConfirm: (fileIds: string[]) => void | Promise<void>;
+  onCancel?: () => void;
+  onClose?: () => void;
+};
+
+export function openGroupFilesPrompt({
+  options,
+  initial,
+  onConfirm,
+  onCancel,
+  onClose,
+}: OpenGroupFilesPromptOptions): string {
+  const selection: RefObject<string[]> = { current: initial };
+  const modalId: RefObject<string> = { current: "" };
+  // Nothing ticked has nothing to group, so the button says so rather than
+  // swallowing a click.
+  const tooFew: RefObject<boolean> = { current: initial.length === 0 };
+  const confirmProps = { size: "xs" } as const;
+
+  modalId.current = openConfirmModal({
+    title: "Group Files",
+    size: "sm",
+    children: (
+      <Stack gap="xs">
+        <Text size="sm" c="dimmed">
+          Brackets the files you pick, so they move their views together and can be merged into one.
+        </Text>
+        <GroupFilesFields
+          options={options}
+          selection={selection}
+          onChange={(picked) => {
+            const nowTooFew = picked.length === 0;
+            if (nowTooFew === tooFew.current) return;
+            tooFew.current = nowTooFew;
+            modals.updateModal({
+              modalId: modalId.current,
+              confirmProps: { ...confirmProps, disabled: nowTooFew },
+            });
+          }}
+        />
+      </Stack>
+    ),
+    labels: { confirm: "Group", cancel: "Cancel" },
+    confirmProps: { ...confirmProps, disabled: tooFew.current },
+    cancelProps: { size: "xs" },
+    onConfirm: async () => {
+      if (selection.current.length === 0) return;
+      await onConfirm(selection.current);
+    },
+    onCancel,
+    onClose,
+  });
+
+  return modalId.current;
 }

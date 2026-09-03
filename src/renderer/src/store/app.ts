@@ -1,7 +1,6 @@
-import { BEAT_VALUES, ONSETS_GRID_VALUE, PITCH_VALUES } from "@renderer/lib/constants";
 import { getParameterDef } from "@renderer/parameters";
 import { Vector2 } from "three";
-import type { ZustandGet, ZustandSet } from "./types";
+import type { ZustandSet } from "./types";
 
 // Global UI density token. Doubles as the Mantine `size` token for components
 // whose size prop should track density (e.g. "md" = normal, "sm" = compact).
@@ -13,7 +12,13 @@ export type UiSize = "md" | "sm";
 const envUiSize = import.meta.env.VITE_DEFAULT_UI_SIZE;
 export const DEFAULT_UI_SIZE: UiSize = envUiSize === "sm" || envUiSize === "md" ? envUiSize : "md";
 
-export const APP_PERSISTED_KEYS = ["uiSize", "walkthroughSeen"] as const;
+export const APP_PERSISTED_KEYS = ["uiSize", "walkthroughSeen", "editMode", "selectShape"] as const;
+
+/** Which tool a left drag on the canvas runs: the brush, or a selection. */
+export type EditMode = "brush" | "select";
+
+/** The shape select mode draws: a rectangle, a freehand lasso, or the magic wand. */
+export type SelectShape = "rectangle" | "lasso" | "wand";
 
 export interface AppState {
   uiSize: UiSize;
@@ -35,6 +40,13 @@ export interface AppState {
   helpOverlayOpen: boolean;
   setHelpOverlayOpen: (open: boolean) => void;
 
+  editMode: EditMode;
+  setEditMode: (mode: EditMode) => void;
+  toggleEditMode: () => void;
+  selectShape: SelectShape;
+  /** Picks the selection shape and puts the canvas in select mode. */
+  setSelectShape: (shape: SelectShape) => void;
+
   displayMinDb: number;
   displayMaxDb: number;
   magnitudeLimit: number;
@@ -52,13 +64,11 @@ export interface AppState {
   setMousePos: (mousePos: Vector2 | null) => void;
   sectionCollapsed: Record<string, boolean>;
   setSectionCollapsed: (label: string, collapsed: boolean) => void;
-  cycleHorizontalGrid: (direction: 1 | -1) => void;
-  cycleVerticalGrid: (direction: 1 | -1) => void;
   isZooming: boolean;
   setIsZooming: (isZooming: boolean) => void;
 }
 
-export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
+export const createAppSlice = (set: ZustandSet): AppState => {
   return {
     uiSize: DEFAULT_UI_SIZE,
     setUiSize: (uiSize) => set({ uiSize }),
@@ -71,6 +81,11 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     closeManual: () => set({ manualSection: null }),
     helpOverlayOpen: false,
     setHelpOverlayOpen: (helpOverlayOpen) => set({ helpOverlayOpen }),
+    editMode: "brush",
+    setEditMode: (editMode) => set({ editMode }),
+    toggleEditMode: () => set((state) => ({ editMode: state.editMode === "brush" ? "select" : "brush" })),
+    selectShape: "rectangle",
+    setSelectShape: (selectShape) => set({ selectShape, editMode: "select" }),
     displayMinDb: getParameterDef("displayMinDb").default,
     displayMaxDb: getParameterDef("displayMaxDb").default,
     magnitudeLimit: getParameterDef("magnitudeLimit").default,
@@ -91,24 +106,6 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
       set((state) => ({
         sectionCollapsed: { ...state.sectionCollapsed, [label]: collapsed },
       })),
-    cycleHorizontalGrid: (direction) => {
-      // Onsets sits below the smallest beat value as the grid's bottom stop.
-      const values = [ONSETS_GRID_VALUE, ...BEAT_VALUES.map((v) => v.value)];
-      const { gridSizeBeats } = get();
-      const currentIndex = values.findIndex((v) => Math.abs(v - gridSizeBeats) < 0.0001);
-      let nextIndex = currentIndex + direction;
-      if (nextIndex < 0) nextIndex = values.length - 1;
-      if (nextIndex >= values.length) nextIndex = 0;
-      set({ gridSizeBeats: values[nextIndex] });
-    },
-    cycleVerticalGrid: (direction) => {
-      const { gridSizeSemis } = get();
-      const currentIndex = PITCH_VALUES.findIndex((v) => Math.abs(v.value - gridSizeSemis) < 0.0001);
-      let nextIndex = currentIndex + direction;
-      if (nextIndex < 0) nextIndex = PITCH_VALUES.length - 1;
-      if (nextIndex >= PITCH_VALUES.length) nextIndex = 0;
-      set({ gridSizeSemis: PITCH_VALUES[nextIndex].value });
-    },
     isZooming: false,
     setIsZooming: (isZooming) => set({ isZooming }),
   };

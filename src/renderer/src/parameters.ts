@@ -43,6 +43,8 @@ export interface ParameterBase {
   descriptionBy?: { param: ParameterKey; descriptions: Record<number, string> };
   includeInStep?: boolean;
   effectType?: EffectType;
+  /** Keeps the dice and section randomisation from ever touching this parameter. */
+  excludeFromRandomization?: boolean;
 }
 
 export interface NumberParameter extends ParameterBase {
@@ -159,6 +161,21 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: "%",
     includeInStep: true,
     modulatable: true,
+  };
+  modulatorDefs[`modulator${idx}Steps`] = {
+    kind: "number",
+    name: `Modulator Steps ${idx}`,
+    label: "Steps",
+    description: "Locks the output to this many even levels, so it jumps between them instead of gliding.",
+    default: 0,
+    // With no marks to drag through, the control walks the slider position, and
+    // the Off sentinel owns position 0 along with `min`. The lowest value it can
+    // settle on is one step above that, so a min of 1 puts the floor on 2.
+    min: 1,
+    max: 64,
+    step: 1,
+    leftValue: { value: 0, label: "Off" },
+    includeInStep: true,
   };
   modulatorDefs[`modulator${idx}PatternRateBeats`] = {
     kind: "number",
@@ -597,10 +614,11 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "options",
     name: "Source Data Mode",
     label: "Read From",
-    description: "Reads the source file's edited state, or its original unedited analysis.",
+    description: "Picks how far back this step reads.",
     default: "current" as const,
     options: [
       { value: "current", label: "Current" },
+      { value: "start", label: "Start" },
       { value: "original", label: "Original" },
     ],
     includeInStep: true,
@@ -1895,10 +1913,31 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         };
       }
     }
+
+    // Generate the modulation quantise toggle. Modulator-own parameters resolve
+    // through the nested path, which has no quantise support, so they get none.
+    if (!contextualOnly && !/^modulator\d/.test(key)) {
+      finalParameterDefs[`${key}ModQuantize` as ParameterKey] = {
+        kind: "boolean",
+        name: `${def.name} Quantise`,
+        label: "Quantise",
+        description: `Locks ${def.name} modulation to the control's own values.`,
+        default: false,
+        includeInStep: true,
+        effectType: def.effectType,
+        excludeFromRandomization: true,
+      };
+    }
   }
 }
 
 export const parameterDefs = finalParameterDefs;
+
+/** The quantise-toggle key for `key`, or null where its modulation cannot be quantised. */
+export const getQuantizeParamKey = (key: ParameterKey): ParameterKey | null => {
+  const quantizeKey = `${key}ModQuantize` as ParameterKey;
+  return finalParameterDefs[quantizeKey] ? quantizeKey : null;
+};
 
 export const getParameterDef = (key: ParameterKey): ParameterDef => {
   const parameterDef = parameterDefs[key];
@@ -1975,6 +2014,8 @@ export const getStepParameterKeys = (): ParameterKey[] => {
 export type BrushStep = {
   id: string;
   name: string;
+  // An absent flag counts as enabled, so brushes saved before it existed stay on.
+  enabled?: boolean;
   color?: BrushColor;
   lockedOffset?: { beats: number; pitch: number } | null;
   sourceFile?: FileParameterValue;

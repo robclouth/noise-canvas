@@ -13,6 +13,8 @@ vi.mock("../modals", () => ({
   openConfirm: vi.fn(),
   openNewFilePrompt: vi.fn(),
   openInsertSilencePrompt: vi.fn(),
+  openSetLengthPrompt: vi.fn(),
+  openGroupFilesPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),

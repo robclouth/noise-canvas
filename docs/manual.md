@@ -45,10 +45,12 @@ Every control has a tooltip and an entry in the `?` overlay.
 9. [Working with Files](#working-with-files)
    - [Mono and Stereo](#mono-and-stereo)
    - [Splitting a File](#splitting-a-file)
-   - [Stem Groups](#stem-groups)
+   - [Grouping Files](#grouping-files)
    - [Onsets](#onsets)
    - [The Level Strip](#the-level-strip)
    - [Navigating the Canvas](#navigating-the-canvas)
+   - [Selecting a Region](#selecting-a-region)
+   - [Moving Sound Around](#moving-sound-around)
 10. [History](#history)
 11. [Transport and Output](#transport-and-output)
     - [Which Device the Sound Plays Through](#which-device-the-sound-plays-through)
@@ -241,7 +243,7 @@ Brushes live inside a palette. Each is an independent set of steps, effects, mod
 
 A brush can have up to **5 steps**, shown as a tab strip. Each step is a complete, independent set of brush parameters and effects, and a single stroke runs through **all** of them in order. This is how you build multi-stage moves: step 1 synthesises a tone, step 2 blurs it, step 3 places it in space.
 
-- **Drag** to reorder, **Duplicate** and **Delete** from the buttons on the right.
+- **Drag** to reorder. The buttons on the right switch the current step **on or off**, **Duplicate** it, or **Delete** it. A step switched off is skipped when you paint and keeps its settings.
 - The strip is fixed-width, so adding or removing a step never rescales the others.
 - Switching tabs switches the whole brush panel. To hold one value the same in every step, link it from its label menu. See [Linking Parameters Across Steps](#linking-parameters-across-steps).
 
@@ -266,7 +268,7 @@ By default a brush reads from the file it is painting on. The **Source** section
 - **Source** – hold **Shift**, or click the Source control to arm it, then click any open file's canvas to pick a source file and position. A brush-sized rectangle previews where you are sampling from.
 - **Tracking** – how the source position is used. See the table below.
 - **Time ↔ / Pitch ↕** – the source position, as a percentage of the source file. Disabled in Follow mode, and both are modulatable.
-- **Read From** – **Current** paints from the source file's edited state, **Original** paints from its unedited analysis.
+- **Read From** – which state of the source to paint from. See the table below.
 
 | Tracking     | What it does                                        |
 | ------------ | --------------------------------------------------- |
@@ -274,11 +276,18 @@ By default a brush reads from the file it is painting on. The **Source** section
 | **Fixed**    | Always samples that exact position.                 |
 | **Anchored** | Keeps a fixed offset from where the stroke started. |
 
+| Read From    | What it paints from                           |
+| ------------ | --------------------------------------------- |
+| **Current**  | The source file's edited state, as it stands. |
+| **Start**    | The canvas as it was when the stroke began.   |
+| **Original** | The source file's unedited analysis.          |
+
 Source and destination do not have to match. They can differ in tempo, length and analysis resolution, and positions are mapped so that frequencies line up.
 
 **Hints**
 
 - Set **Read From** to **Original** and painting becomes a local undo: the region you paint comes back and nothing else moves. This is all the Restore brush is.
+- Give a later step **Start** and Blend Mode **Add** to lay the untouched audio back over whatever the steps before it did.
 
 ### Envelope
 
@@ -640,6 +649,7 @@ They appear in the shape picker under a "User" group.
 ### Modulator Controls
 
 - **Depth** – how far the modulator swings. Negative inverts it.
+- **Steps** – how many even levels the output is held to, so a smooth shape climbs in stages instead of gliding. The lowest and highest levels are still the ends of the swing, so the average stays where it was. At **Off** the output is continuous.
 - **Rate ↔** – how many beats one cycle of the pattern spans. Bigger is slower. Two linked settings sit below the shortest span: **Grid** covers one cell of the time grid, **Brush** covers the width of the brush, and each follows that size as you change it. At the bottom, **Off**, the pattern stops varying along time.
 - **Rate ↕** – how many semitones one cycle spans, with the same **Grid**, **Brush** and **Off** settings against the pitch grid and the height of the brush.
 - **Rotation** – turns the pattern on the canvas, so it cuts diagonally.
@@ -685,7 +695,7 @@ Modulator parameters are themselves modulatable. You can modulate modulator 2's 
 
 ## Fill Grid
 
-**Fill Grid** paints the current brush on every cell of the grid at once, instead of you dragging out each stroke by hand. The grid icon on a file's header runs it, as does **Edit → Fill Grid with Brush** (`Cmd/Ctrl+G`). The whole pass commits as one stroke, so one undo takes it back.
+**Fill Grid** paints the current brush on every cell of the grid at once, instead of you dragging out each stroke by hand. The grid icon on a file's header runs it, as does **Edit → Fill Grid with Brush** (`Cmd/Ctrl+F`). The whole pass commits as one stroke, so one undo takes it back.
 
 It has no settings of its own. The rhythm comes from the grid set in the transport, and the size and shape of each stroke comes from the brush. Change the grid and you change the pattern; change the brush and you change the sound.
 
@@ -695,6 +705,7 @@ Drag on the time legend to set a loop region and the fill covers only that span.
 
 - Turn **Snap Time** or **Snap Pitch** off and that axis stops being divided, so one stroke spans it. With both off, a single stroke covers the whole file, which is how you apply a brush to everything at once.
 - Every stroke uses the same brush, so a bare fill repeats one sound. A Random pattern on **Strength** gives each stroke its own level, and a sequencer on it draws a rhythm outright.
+- The **Randomise** source draws a fresh set of values each time you run the fill, so running it again over the same grid gives a different result rather than the same one back.
 
 ---
 
@@ -707,7 +718,7 @@ Drag on the time legend to set a loop region and the fill covers only that span.
 - **Right-click** a value to pick from its list of preset values. A small chevron marks the values that have one.
 - **Click** a value to type a number in.
 - **Double-click the label** to reset a parameter to its default. This also clears every modulation amount on it.
-- **Click the label** to open the parameter menu: modulation amounts, reset, exclusion from randomisation, step linking, and a **book icon** that opens this manual at the section explaining that parameter.
+- **Click the label** to open the parameter menu: modulation amounts, a **Quantise** switch that locks modulation to the control's preset values, reset, exclusion from randomisation, step linking, and a **book icon** that opens this manual at the section explaining that parameter.
 
 ### Section Presets
 
@@ -726,6 +737,8 @@ Every section header has a **⋮ menu** with a Randomise block:
 - **Randomise** – do it.
 
 The Effects section also shuffles effect order and enabled states.
+
+`\` re-rolls Envelope, Options and Effects in one press, each at the amount its own menu holds. `Shift+\` shuffles the effect chain with them. Modulators and Macros are left alone, so a patch keeps its wiring.
 
 **Hints**
 
@@ -755,7 +768,7 @@ Open files stack vertically in the canvas column. Each header gives you:
 - **Fullscreen** – expands it to fill the canvas area.
 - **Close**.
 
-The active file has an orange border. Click any file to make it active, or use `Tab` and `Shift+Tab` to cycle through them.
+The active file has an orange border. Click any file to make it active.
 
 Files you create in the app (New File, duplicates, stems) get a real path when you Save As.
 
@@ -776,13 +789,32 @@ The split menu on each file header:
 - **Split into N Parts (NMF)…** – separates it into any number of components, learned from the file itself.
 - **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation. Not available on Intel Macs.
 
-### Stem Groups
+### Grouping Files
 
-Every split produces a **stem group**. The parts stay ordinary files, and every brush and effect works on them unchanged, but they are bracketed together in the UI and share a colour.
+A **group** brackets a run of lanes together: they share a colour, and the header above them acts on all of them at once. The members stay ordinary files, and every brush and effect works on them unchanged.
 
-- **Sync view** – zoom and scroll follow each other across all members.
-- **Merge** – sums the group back into a new file. The parts stay open, and the round trip is lossless, so you can split, work heavily on one part, and merge back.
+Every split makes a group of its parts. To group files yourself, use **Edit → Group Files…** (`Cmd/Ctrl+G`) and tick the ones you want. They move together on the canvas, since a group is one bracket down a run of neighbouring lanes. **Edit → Ungroup** (`Cmd/Ctrl+Shift+G`) drops the bracket around the active file's group.
+
+A group holds any number of files, down to one, so a group you have emptied out to a single lane is still there to drag files back into. Merge needs two.
+
+Dragging a file by its grip also moves it in and out of groups, and the group it would land in lights up while you drag:
+
+- Drop it **over any member's lane** to join that group, at the point the line shows.
+- Drop it **on the group's header row** to leave it above the group, outside it.
+- Drop a member **anywhere outside its group** to take it out. A group left with one file stops being a group, and that file stays where it is.
+- Drop a member **straight onto another group** to move it across.
+
+- **Link views** – zoom and scroll follow each other across all members.
+- **Merge** – adds every member together into one new file, which opens below the group. The members stay open.
+- **Ungroup** – drops the bracket and leaves the files where they are.
 - **Close group** – closes every member with one confirmation.
+
+Merging the parts of a split is exact: they add back up to the file they came from, so you can split, work heavily on one part, and merge back. Merging files that do not share a length, sample rate or resolution mixes their audio instead. Each one starts at the beginning, the mix runs as long as the longest, and mono material is copied into both sides of a stereo mix.
+
+**Hints**
+
+- Set the members to one length with **Edit → Set Length…** before merging, and the mix ends where you want rather than where the longest file happens to stop.
+- Merging is a plain sum, so bring levels down on the members first if the result overloads.
 
 ### Onsets
 
@@ -834,10 +866,67 @@ When zoomed in far enough, the pitch legend turns into a piano keyboard so you c
 
 On the **time legend** along the bottom:
 
-- **Click** – set the playback start position, snapped to the grid.
-- **Drag** – set a loop region, which also moves the playback start to its beginning.
+- **Click** – set the playback start position, snapped to the grid. The play state stays as it is: while playing, playback skips there and carries on.
+- **Drag** – select that stretch of time across every frequency, which sets the loop region and moves the playback start to its beginning.
 
-Zoom and scroll are remembered per file across restarts, and files in a [stem group](#stem-groups) with **Sync view** on share all four: time zoom, time scroll, pitch zoom, pitch scroll.
+Zoom and scroll are remembered per file across restarts, and files in a [group](#grouping-files) with **Link views** on share all four: time zoom, time scroll, pitch zoom, pitch scroll.
+
+### Selecting a Region
+
+The canvas has two modes, shown side by side on the joined control in the transport bar. The lit half is the one you are in — click either half, or press `Tab` to hop between them.
+
+- **Brush** – a drag paints.
+- **Select** – a drag draws a selection.
+
+Select mode draws one of three shapes. The small arrow beside the mode button picks the shape, and the button's icon follows it. `Tab` keeps switching between Brush and Select, and comes back to the shape you last picked.
+
+- **Rectangle** – a drag spans a stretch of time and a range of pitch. Both edges snap to the grid, following the same **Snap** settings the brush uses.
+- **Lasso** – a drag draws a freehand outline, and what it encloses becomes the selection. Nothing snaps: the shape is exactly what you drew.
+- **Magic wand** – a click selects the connected patch of sound under the pointer: everything touching it whose level reaches within a window below the point you clicked. Keep the button held and drag upward to widen the window and let the selection spread; drag back down to tighten it again.
+
+A selection covers a stretch of time **and** a range of pitch, so you can pick out one part of the frequency range rather than the whole height of the file.
+
+Hold `Shift` and draw — with any shape — to **add** to the selection instead of replacing it. The pointer gains a plus while `Shift` is down. A wand click adds its patch, a lasso adds what it encloses, and a rectangle adds its area, so a selection can be built from as many pieces as you need.
+
+Dragging along the time legend selects the full frequency range, whichever mode you are in.
+
+`Cmd/Ctrl+I` inverts the selection: everything outside it becomes the selection, and what was inside is let go. With nothing selected it takes the whole file. Select one part, invert, and the stroke lands on all the rest.
+
+A selection on the canvas leaves the loop region alone — only a [drag on the time legend](#navigating-the-canvas) sets that. So you can loop one part of the file and cut, copy and paste in another without losing your place. `Esc` clears the selection.
+
+With a selection set, `Space` plays the selection alone: its stretch of time, and only the bands inside it. Everything outside stays silent, so you hear exactly what a cut would take. **Loop** loops it, and painting inside the selection while it loops lands in your ears on the next pass. Clear the selection and `Space` plays the whole file again.
+
+In Select mode a plain click, without a drag, clears the selection and puts the playback start position where you clicked, snapped to the grid — the same thing a click on the time legend does, aimed anywhere on the canvas. The wand is the exception: its click is the selection.
+
+**A selection confines the brush.** While one is set, a stroke only lands inside it, in Brush mode and in [Fill Grid](#fill-grid) alike. Everything outside is protected. Paint a wash over the whole file with the top octave selected and only the top octave changes.
+
+The edges land on whole bins and whole bands, because those are the smallest things the file stores. A band the selection touches at all is painted in full.
+
+A lasso or wand selection works everywhere a rectangle does. The brush is confined to the shape, `Space` plays only what is inside it, and Copy, Cut, Paste, Duplicate and `Backspace` all follow the outline — a pasted lasso lands as the same shape, and what falls outside it is left alone. Only the time edits below still take whole columns, from the shape's start to its end.
+
+### Moving Sound Around
+
+With a selection set, the Edit menu works on it.
+
+- **Copy** (`Cmd/Ctrl+C`) – picks the selected sound up. A ghost of it follows the pointer, and the original stays where it was.
+- **Cut** (`Cmd/Ctrl+X`) – the same, except the original goes when the ghost lands.
+- **Paste** (`Cmd/Ctrl+V`) – picks up whatever was last copied, so you can drop it again, as many times as you like.
+- **Duplicate** (`Cmd/Ctrl+D`) – stamps a copy of the selection directly after it, no ghost involved, and moves the selection onto the copy — so pressing it again lays the next one along.
+- **Silence Selection** (`Backspace` or `Delete`) – wipes the selection without taking anything.
+
+Click to put the ghost down. The drop is a single edit in the history, so one undo brings everything back.
+
+The ghost moves in pitch as well as time: drop it higher or lower and the sound is transposed to match. Hold `Shift` to keep it at its original pitch while you place it. `Esc` puts everything back without painting anything — what you copied is kept, so a later paste still works.
+
+The ghost also crosses files: carry it over another open file and drop it there. It keeps its frequencies on the way over, whatever resolution the other file was analysed at, and a cut leaves silence behind in the file it came from. `Cmd/Ctrl+V` pastes into whichever file is under the pointer.
+
+All of the above work in place: the file keeps its length, nothing slides along to make room, and what was already at the destination is written over.
+
+The `Shift` variants work on **time itself**. They change the file's length, so they always take the full height of the file with them, whatever height you selected:
+
+- **Cut Time** (`Cmd/Ctrl+Shift+X`) – takes the selection's stretch of time out and closes the gap. What it takes lands in the clipboard.
+- **Paste Time** (`Cmd/Ctrl+Shift+V`) – splices the clipboard's stretch in at the selection — or at the play start marker with nothing selected — and pushes everything after it later.
+- **Duplicate Time** (`Cmd/Ctrl+Shift+D`) – splices a copy of the selection's stretch in, directly after it, and selects the copy.
 
 ---
 
@@ -918,11 +1007,18 @@ Memory climbs with the length and resolution of everything you have open, not wi
 **Edit**
 
 - **Undo / Redo** (`Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z`).
-- **Fill Grid with Brush** (`Cmd/Ctrl+G`) – see [Fill Grid](#fill-grid).
+- **Cut / Copy / Paste** (`Cmd/Ctrl+X`, `Cmd/Ctrl+C`, `Cmd/Ctrl+V`) – work on the selection. See [Selecting a Region](#selecting-a-region).
+- **Duplicate** (`Cmd/Ctrl+D`) – stamps a copy of the selection directly after it. With nothing selected it duplicates the file.
+- **Silence Selection** (`Backspace`) – empties the selection without copying it.
+- **Invert Selection** (`Cmd/Ctrl+I`) – selects everything the selection leaves out. With nothing selected it selects the whole file.
+- **Fill Grid with Brush** (`Cmd/Ctrl+F`) – see [Fill Grid](#fill-grid).
 - **Restore Original** – reloads the unedited file.
-- **Duplicate File** (`Cmd/Ctrl+D`).
+- **Duplicate File**.
+- **Group Files…** (`Cmd/Ctrl+G`) – brackets open files together. See [Grouping Files](#grouping-files).
+- **Ungroup** (`Cmd/Ctrl+Shift+G`) – drops the bracket around the active file's group.
 - **Double Length / Half Length** – stretches or shrinks the file's length.
-- **Insert Silence…** – pushes the file apart and drops empty time in. **Length** is in beats or seconds, and **At** puts it at the file start, at the play start on the time legend, or at the file end.
+- **Set Length…** – cuts the file short at a length you give, or pads it with silence to reach it. The dialog opens on what the file measures now, in beats or seconds.
+- **Insert Silence…** (`Cmd/Ctrl+Shift+I`) – pushes the file apart and drops empty time in. With a selection, the selection's own stretch opens up: its length of silence lands at its start, what was selected moves later, and the silence stays selected. With nothing selected, a dialog asks for a **Length** in beats or seconds, and the silence lands at the play start marker.
 
 **View**
 
@@ -943,24 +1039,38 @@ Re-analysing a file is not in these menus. The resolution badge in each file's h
 
 File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed under [Menus](#menus).
 
-| Key                   | Action                                                 |
-| --------------------- | ------------------------------------------------------ |
-| `Space`               | Play / stop                                            |
-| `Arrow keys`          | Move the brush by one grid cell                        |
-| `Enter`               | Apply the brush at the current position                |
-| `-` / `=`             | Decrease / increase the time grid                      |
-| `Shift` + `-` / `=`   | Decrease / increase the pitch grid                     |
-| `Tab` / `Shift+Tab`   | Next / previous file                                   |
-| `1`–`9`, `0`          | Select the top palette's first ten brushes             |
-| `a`–`z`               | Select the brush bound to that key                     |
-| Hold `Shift` + click  | Pick a source file and position                        |
-| `Cmd`/`Ctrl` + scroll | Zoom                                                   |
-| Right-click drag      | Pan                                                    |
-| `Cmd/Ctrl+Z`          | Undo                                                   |
-| `Shift+Cmd/Ctrl+Z`    | Redo                                                   |
-| `Cmd/Ctrl+Shift+C`    | Toggle compact UI                                      |
-| `?`                   | Outline every area (see [Getting Help](#getting-help)) |
-| `Cmd/Ctrl+/`          | Open this manual                                       |
+The keys below are the ones your keyboard prints. On a layout that prints something else, the shortcut stays on the key in the same place on the board.
+
+| Key                    | Action                                                 |
+| ---------------------- | ------------------------------------------------------ |
+| `Space`                | Play / stop                                            |
+| `Arrow keys`           | Move the brush by one grid cell                        |
+| `Enter`                | Apply the brush at the current position                |
+| `-` / `=`              | Decrease / increase the time grid                      |
+| `Shift` + `-` / `=`    | Decrease / increase the pitch grid                     |
+| `[` / `]`              | Shrink / grow the brush, in time                       |
+| `Shift` + `[` / `]`    | Shrink / grow the brush, in pitch                      |
+| `;` / `'`              | Snap to the time grid / to the pitch grid              |
+| `\`                    | Randomise the brush                                    |
+| `Shift+\`              | Randomise the brush and shuffle the effect chain       |
+| `,` / `.`              | Loop / auto-play stroke                                |
+| `Tab`                  | Switch between the brush and selection                 |
+| `Esc`                  | Put a picked-up region back, or clear the selection    |
+| `Cmd/Ctrl+X/C/V`       | Cut / copy / paste the selection                       |
+| `Cmd/Ctrl+D`           | Duplicate the selection in place                       |
+| `Backspace` / `Delete` | Silence the selection                                  |
+| `Cmd/Ctrl+I`           | Invert the selection                                   |
+| `Cmd/Ctrl+Shift+X/V/D` | Cut, paste or duplicate a stretch of time              |
+| `1`–`9`, `0`           | Select the top palette's first ten brushes             |
+| `a`–`z`                | Select the brush bound to that key                     |
+| Hold `Shift` + click   | Pick a source file and position                        |
+| `Cmd`/`Ctrl` + scroll  | Zoom                                                   |
+| Right-click drag       | Pan                                                    |
+| `Cmd/Ctrl+Z`           | Undo                                                   |
+| `Shift+Cmd/Ctrl+Z`     | Redo                                                   |
+| `Cmd/Ctrl+Shift+C`     | Toggle compact UI                                      |
+| `?`                    | Outline every area (see [Getting Help](#getting-help)) |
+| `Cmd/Ctrl+/`           | Open this manual                                       |
 
 ---
 

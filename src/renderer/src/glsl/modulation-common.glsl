@@ -14,6 +14,7 @@ struct Modulator {
   ModulatorParameter modulatorPatternRateX;
   ModulatorParameter modulatorPatternRateY;
   ModulatorParameter modulatorStrength;
+  int modulatorSteps; // even output levels; 0 or 1 leaves the output continuous
   ModulatorParameter modulatorRotation;
   ModulatorParameter modulatorStereoSpread; // read-position offset applied as ∓spread/2 per channel
   float modulatorEnvelopeSmoothing; // UV half-width of the averaging window
@@ -111,11 +112,34 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
 #ifndef MODULATOR_FILE_UV_X
 #define MODULATOR_FILE_UV_X(x) (x)
 #endif
+#ifndef MODULATOR_FILE_UV_DX
+#define MODULATOR_FILE_UV_DX(x) (x)
+#endif
 
-// Brush-space UV for phaseMode == 1: 0..1 across the brush footprint, following
-// the brush around the canvas edge when that axis wraps.
+// The brush footprint on the axes the patterns are measured in.
+vec2 brushSizePatternUv() {
+  return vec2(MODULATOR_FILE_UV_DX(brushSizeUv.x), brushSizeUv.y);
+}
+
+// Brush-space UV for phaseMode == 1: the offset from the brush's bottom-left
+// corner, following the brush around the canvas edge when that axis wraps. The
+// offset keeps the file's scale, so a rate or a loop measures the same span in
+// either phase mode and the brush only moves the origin.
 vec2 brushSpaceUv(vec2 uv) {
-  return getEffectiveBrushOffset(uv) / max(brushSizeUv, vec2(0.0001));
+  vec2 offset = getEffectiveBrushOffset(uv);
+  return vec2(MODULATOR_FILE_UV_DX(offset.x), offset.y);
+}
+
+// Snaps a modulator's raw 0..1 output to `steps` evenly spaced levels, then
+// scales it by depth. The levels reach both ends and the rounding is symmetric
+// about the middle, so switching steps on leaves the modulator's average where
+// it was.
+float finishModulator(float v, int steps, float strength) {
+  if (steps > 1) {
+    float levels = float(steps - 1);
+    v = round(clamp(v, 0.0, 1.0) * levels) / levels;
+  }
+  return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
 }
 
 // Scalar evaluator used by both the stereo wrapper and by nested modulation.
@@ -149,7 +173,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     } else {
       v = sampleEnvelopeAtUv(src, envUv, audioLevelDb, minDb, maxDb);
     }
-    return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+    return finishModulator(v, modulator.modulatorSteps, strength);
   }
 
   // Handle sequencer mode
@@ -183,8 +207,8 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     
     // Sample from data texture
     v = getSeqDataValue(modulatorIndex, stepX, stepY);
-    
-    return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+
+    return finishModulator(v, modulator.modulatorSteps, strength);
   }
 
   // Pattern mode (mode 0) - continue with pattern generation
@@ -204,7 +228,10 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   float s = sin(rot);
   float c = cos(rot);
   mat2 m = mat2(c, -s, s, c);
-  vec2 rotatedUv = m * (adjustedUv - 0.5) + 0.5;
+  // Rotate about the middle of whatever the pattern is pinned to: the canvas,
+  // or the brush footprint in brush phase mode.
+  vec2 pivot = modulator.modulatorPhaseMode == 1 ? brushSizePatternUv() * 0.5 : vec2(0.5);
+  vec2 rotatedUv = m * (adjustedUv - pivot) + pivot;
 
   vec2 pos = rotatedUv * rates;
 
@@ -307,7 +334,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     }
   }
 
-  return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+  return finishModulator(v, modulator.modulatorSteps, strength);
 }
 
 // Stereo-aware wrapper. Reads the modulator at ∓stereoSpread/4 and returns
@@ -513,16 +540,51 @@ bool isParameterModulated(Parameter p) {
   return false;
 }
 
+// One row of valid values per quantised parameter, shared by every Parameter.
+uniform sampler2D quantizeLutTex;
+
+// Nearest entry of a parameter's valid-value list.
+float snapToQuantizeList(float v, int offset, int count) {
+  float best = texelFetch(quantizeLutTex, ivec2(offset, 0), 0).x;
+  float bestDist = abs(v - best);
+  for (int i = 1; i < count; i++) {
+    float cand = texelFetch(quantizeLutTex, ivec2(offset + i, 0), 0).x;
+    float dist = abs(v - cand);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = cand;
+    }
+  }
+  return best;
+}
+
+// Snaps a modulated value to the parameter's valid values. The CPU zeroes both
+// quantise fields when the toggle is off or nothing modulates the parameter, so
+// an exact hand-set value always passes through untouched.
+vec2 applyParameterQuantize(Parameter p, vec2 v) {
+  if (p.quantizeCount > 0) {
+    return vec2(
+      snapToQuantizeList(v.x, p.quantizeOffset, p.quantizeCount),
+      snapToQuantizeList(v.y, p.quantizeOffset, p.quantizeCount));
+  }
+  if (p.quantizeStep > 0.0) {
+    vec2 snapped = p.minValue + round((v - p.minValue) / p.quantizeStep) * p.quantizeStep;
+    return clamp(snapped, min(p.minValue, p.maxValue), max(p.minValue, p.maxValue));
+  }
+  return v;
+}
+
 // A parameter's modulated (L, R) value in its own units, from precomputed
 // modulator outputs. A log slider is swept in knob position and mapped back;
 // unmodulated, the exact value passes through.
 vec2 resolveParameter(Parameter p, vec2 mods[NUM_MODULATORS]) {
   if (p.scaleKind == 0) {
-    return applyModulationCached(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, mods);
+    vec2 v = applyModulationCached(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, mods);
+    return applyParameterQuantize(p, v);
   }
   if (!isParameterModulated(p)) return vec2(p.value);
   vec2 pos = applyModulationCached(p.position, 0.0, 1.0, p.modulationAmounts, p.staticSum, p.staticWeight, mods);
-  return fromKnobPosition(pos, p.scaleKind, p.logEnds);
+  return applyParameterQuantize(p, fromKnobPosition(pos, p.scaleKind, p.logEnds));
 }
 
 float resolveParameterMono(Parameter p, vec2 mods[NUM_MODULATORS]) {
@@ -532,11 +594,12 @@ float resolveParameterMono(Parameter p, vec2 mods[NUM_MODULATORS]) {
 // As resolveParameter, evaluating the modulators at uv.
 vec2 resolveParameterAt(Parameter p, vec2 uv, int depth, float audioLevelDb) {
   if (p.scaleKind == 0) {
-    return applyModulation(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, uv, depth, audioLevelDb);
+    vec2 v = applyModulation(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, uv, depth, audioLevelDb);
+    return applyParameterQuantize(p, v);
   }
   if (!isParameterModulated(p)) return vec2(p.value);
   vec2 pos = applyModulation(p.position, 0.0, 1.0, p.modulationAmounts, p.staticSum, p.staticWeight, uv, depth, audioLevelDb);
-  return fromKnobPosition(pos, p.scaleKind, p.logEnds);
+  return applyParameterQuantize(p, fromKnobPosition(pos, p.scaleKind, p.logEnds));
 }
 
 float resolveParameterMonoAt(Parameter p, vec2 uv, int depth, float audioLevelDb) {

@@ -16,11 +16,10 @@ import {
 } from "@renderer/lib/pixel-ranges";
 import { applyCanvasTurns, type CanvasTurn, type PackedGather } from "@renderer/lib/canvas-phase-turns";
 import { applyPhaseTurns, hasPhaseTurns, phaseTurnRanges } from "../../../main/lib/history-delta";
-import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
+import { brushUnionForAim } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
 import {
-  resolveBrushFootprint,
   snapToSwungGridCenter,
   snapToSwungGridFloor,
   stepSwungGrid,
@@ -148,8 +147,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       // Without a provided strokeTimeRange (e.g. keyboard Enter on a single
       // point), autoplay uses the brush BL time so the loop starts at the
-      // stroke onset in either anchor mode.
-      const { blX } = aimUvToBrushBlUv(
+      // stroke onset in either anchor mode. Brush size and anchor mode are
+      // per-step, so the loop covers the steps' rectangles together.
+      const brushUnion = brushUnionForAim(
         state,
         aim.x,
         aim.y,
@@ -158,7 +158,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         spectrogramData.bandsPerOctave,
         spectrogramData.numBands,
       );
-      const fallbackTimeSeconds = blX * totalDuration;
+      const fallbackTimeSeconds = brushUnion.blX * totalDuration;
 
       // Use provided time range or fall back to single point
       const clampedStart = Math.max(0, strokeTimeRange?.min ?? fallbackTimeSeconds);
@@ -166,28 +166,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
       if (autoPlayStroke && autoPlay) {
-        // Active-step brush size overrides the global — match what the stroke
-        // actually paints, so the loop region covers the true brush footprint
-        // (and not just the grid when the global is in Grid mode but the step
-        // overrides to a wider size).
-        const activeStep = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
-          | Record<string, unknown>
-          | undefined;
-        const stepBrushSizeTime = (activeStep?.brushSizeTime as number | undefined) ?? state.brushSizeTime;
-        const stepBrushSizePitch = (activeStep?.brushSizePitch as number | undefined) ?? state.brushSizePitch;
-        const autoplayFootprint = resolveBrushFootprint({
-          brushSizeTime: stepBrushSizeTime,
-          brushSizePitch: stepBrushSizePitch,
-          gridSizeBeats: state.gridSizeBeats,
-          gridSizeSemis: state.gridSizeSemis,
-          bpm,
-          totalDuration,
-          bandsPerOctave: spectrogramData.bandsPerOctave,
-          numBands: spectrogramData.numBands,
-        });
-        const brushDurationSeconds = autoplayFootprint.fullTime
-          ? totalDuration
-          : autoplayFootprint.sizeUv.x * totalDuration;
+        const brushDurationSeconds = brushUnion.fullTime ? totalDuration : brushUnion.sizeUvX * totalDuration;
 
         // Extend time range by brush footprint for autoplay
         const autoPlayStart = clampedStart;
@@ -454,9 +433,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       let currentPos = cursorPosition;
 
       const swingNorm = gridSwing / 100;
-      const step = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
-        | Record<string, unknown>
-        | undefined;
+      // Snapping follows the brush's first step, not the selected one, so
+      // selecting a step never moves where the arrow keys land.
+      const step = state.brushes[state.activeBrushIndex]?.steps?.[0] as Record<string, unknown> | undefined;
       const anchorMode = (step?.brushAnchorMode as number | undefined) ?? state.brushAnchorMode;
       const isCenter = anchorMode === BRUSH_ANCHOR_MODE_CENTER;
 

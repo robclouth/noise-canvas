@@ -46,6 +46,11 @@ export type ParameterUniform = {
   scaleKind: ParameterScaleKind;
   /** Log: natural logs of the slider's ends. LogBipolar and Log1p: log1p of the largest magnitude, then 0. */
   logEnds: Vector2;
+  // Valid-value snapping for the modulated value: a texel range in the shared
+  // quantise LUT, or a value-space step. Zero count and zero step means off.
+  quantizeOffset: number;
+  quantizeCount: number;
+  quantizeStep: number;
 };
 
 export type ModulatorParameterUniform = {

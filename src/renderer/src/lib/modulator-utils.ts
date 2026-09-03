@@ -61,6 +61,7 @@ export interface ModulatorUniform {
   modulatorPatternRateX: ModulatableParam;
   modulatorPatternRateY: ModulatableParam;
   modulatorStrength: ModulatableParam;
+  modulatorSteps: number;
   modulatorRotation: ModulatableParam;
   modulatorStereoSpread: ModulatableParam;
   modulatorEnvelopeSmoothing: number;
@@ -291,6 +292,7 @@ export const buildModulatorUniforms = (
           staticScale: 1,
           staticOffset: 0,
         },
+        modulatorSteps: Math.round((state[`modulator${i + 1}Steps`] as number) || 0),
         modulatorRotation: {
           value: rotation,
           minValue: rotationDef.min,
