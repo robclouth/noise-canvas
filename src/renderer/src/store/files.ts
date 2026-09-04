@@ -1651,6 +1651,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       displayName,
       unprojectedPaint: originalFile.unprojectedPaint,
       spectrogramData: await deriveSpectrogramData(originalSpec, packedData),
+      onsets: originalFile.onsets?.slice(),
+      onsetReference: originalFile.onsetReference
+        ? {
+            odfMax: originalFile.onsetReference.odfMax,
+            bandMax: originalFile.onsetReference.bandMax.slice(),
+          }
+        : undefined,
     };
 
     openFiles[newFileId] = newFile;
