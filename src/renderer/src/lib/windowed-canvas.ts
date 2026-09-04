@@ -237,7 +237,7 @@ export class WindowedCanvas {
     const renderer = this.deps.renderer();
     if (!window || !renderer?.getIsInitialized()) return;
     if (this.stroking && this.held.length > 0) {
-      const span = this.heldSpan(window);
+      const span = this.heldSpan();
       startFrame = span.startFrame;
       endFrame = span.endFrame;
     }
@@ -290,6 +290,24 @@ export class WindowedCanvas {
       if (this.fill === tracked) this.fill = null;
     });
     this.fill = tracked;
+  }
+
+  /** True when one window can hold [startFrame, endFrame). */
+  fitsWindow(startFrame: number, endFrame: number): boolean {
+    const window = this.blocks;
+    if (!window) return true;
+    const first = blockOfFrame(window.grid, startFrame);
+    const last = blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1));
+    return last - first + 1 <= window.windowBlocks;
+  }
+
+  /** True while the canvas holds content for every block of its view. */
+  holdsView(): boolean {
+    const window = this.blocks;
+    if (!window) return true;
+    const view = this.view();
+    if (!view) return false;
+    return window.canvasLacks(view).length === 0;
   }
 
   /**
@@ -615,16 +633,13 @@ export class WindowedCanvas {
    * The frames of the oldest held dab, widened over the dabs behind it while
    * one window still holds them all, so one read serves a run of them.
    */
-  private heldSpan(window: CanvasWindow): { startFrame: number; endFrame: number } {
-    const grid = window.grid;
+  private heldSpan(): { startFrame: number; endFrame: number } {
     let startFrame = this.held[0].startFrame;
     let endFrame = this.held[0].endFrame;
     for (let i = 1; i < this.held.length; i++) {
       const start = Math.min(startFrame, this.held[i].startFrame);
       const end = Math.max(endFrame, this.held[i].endFrame);
-      const first = blockOfFrame(grid, start);
-      const last = blockOfFrame(grid, Math.max(start, end - 1));
-      if (last - first + 1 > window.windowBlocks) break;
+      if (!this.fitsWindow(start, end)) break;
       startFrame = start;
       endFrame = end;
     }

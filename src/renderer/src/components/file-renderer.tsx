@@ -476,6 +476,7 @@ const FileRendererInner = memo(
           displayCoarseMetaTex: { value: null as Texture | null },
           displayLevelBlend: { value: 0.0 },
           displayPyramidActive: { value: false },
+          displayCanvasFirst: { value: false },
           displayTileTex: { value: null as Texture | null },
           displayTileMetaTex: { value: null as Texture | null },
           displayTileFirst: { value: 0.0 },
@@ -771,6 +772,7 @@ const FileRendererInner = memo(
       const pyramid = strokeRendererRef.current?.getDisplayPyramid();
       if (!pyramid || !pyramid.texture(0)) {
         uniforms.displayPyramidActive.value = false;
+        uniforms.displayCanvasFirst.value = false;
         uniforms.displayTileCount.value = 0;
         return;
       }
@@ -778,11 +780,13 @@ const FileRendererInner = memo(
       const finestStepLog2 = pyramid.levels[0].stepLog2;
       applyDisplayTileUniforms(finestStepLog2, framesPerPixel, viewZoomPower, viewOffset, viewportWidth);
 
-      if (2 ** finestStepLog2 > Math.max(framesPerPixel, 1)) {
-        uniforms.displayPyramidActive.value = false;
-        return;
-      }
-      const choice = displayLevelChoice(pyramid.levels, framesPerPixel);
+      // Past the pyramid's finest level the canvas is the sharp picture, and
+      // the finest level stands in wherever the canvas does not reach yet.
+      const finerThanPyramid = 2 ** finestStepLog2 > Math.max(framesPerPixel, 1);
+      uniforms.displayCanvasFirst.value = finerThanPyramid && (canvasRef.current?.holdsView() ?? true);
+      const choice = finerThanPyramid
+        ? { fine: 0, coarse: 0, blend: 0 }
+        : displayLevelChoice(pyramid.levels, framesPerPixel);
       uniforms.displayFineTex.value = pyramid.texture(choice.fine);
       uniforms.displayFineMetaTex.value = pyramid.metadataTexture(choice.fine);
       uniforms.displayCoarseTex.value = pyramid.texture(choice.coarse);
@@ -1631,8 +1635,24 @@ const FileRendererInner = memo(
       if (!canvas.wholeFile) {
         const { numFrames } = spectrogramData;
         const visible = visibleFrameRange(state);
-        const start = cursorPos.x >= 0 ? cursorPos.x * numFrames - reach.before : visible.start;
-        const end = cursorPos.x >= 0 ? (cursorPos.x + brushSizeUv.x) * numFrames + reach.after : visible.end;
+        // The window holds the view and the dab under the pointer when it can,
+        // so the picture is sharp across the view and a dab lands anywhere in
+        // it; a view wider than the window centres on the dab instead.
+        let start = visible.start;
+        let end = visible.end;
+        if (cursorPos.x >= 0) {
+          const dabStart = cursorPos.x * numFrames - reach.before;
+          const dabEnd = (cursorPos.x + brushSizeUv.x) * numFrames + reach.after;
+          const bothStart = Math.min(visible.start, dabStart);
+          const bothEnd = Math.max(visible.end, dabEnd);
+          if (canvas.fitsWindow(bothStart, bothEnd)) {
+            start = bothStart;
+            end = bothEnd;
+          } else {
+            start = dabStart;
+            end = dabEnd;
+          }
+        }
         // A stroke pages ahead of the brush every frame. Everything else — a
         // pointer crossing the file, a pan under way — waits until the aim
         // stops, and takes a frame at the moment it does.

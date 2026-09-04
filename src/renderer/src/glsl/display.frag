@@ -65,6 +65,9 @@ uniform sampler2D displayCoarseTex;
 uniform sampler2D displayCoarseMetaTex;
 uniform float displayLevelBlend;
 uniform bool displayPyramidActive;
+// True when the canvas is finer than the pyramid and holds every block of its
+// view, so a texel inside the view reads the canvas before the pyramid.
+uniform bool displayCanvasFirst;
 
 // The tile ring: the committed picture around the view, in dB, at a level fine
 // enough for the screen. Tile `t` lives in slot `t mod displayTileSlots`, and
@@ -189,10 +192,23 @@ bool samplePyramidDb(vec2 uv, out vec2 db) {
     return true;
 }
 
-// Left and right magnitudes of the picture at an unpacked UV.
+// True when the canvas view spans this unpacked UV.
+bool canvasSpans(vec2 uv) {
+    vec2 viewUv = canvasViewUv(uv);
+    return viewUv.x >= 0.0 && viewUv.x <= 1.0;
+}
+
+// Left and right magnitudes of the picture at an unpacked UV: a resident
+// tile, else the canvas where it is the finest picture there, else the
+// pyramid, else the canvas.
 vec2 sampleDisplayMags(vec2 uv) {
     vec2 db;
-    if (!sampleRingDb(uv, db) && !samplePyramidDb(uv, db)) {
+    bool have = sampleRingDb(uv, db);
+    if (!have && displayCanvasFirst && canvasSpans(uv)) {
+        vec4 packedValue = sampleDisplayInterp(uv);
+        return vec2(packedValue.r, packedValue.b);
+    }
+    if (!have && !samplePyramidDb(uv, db)) {
         vec4 packedValue = sampleDisplayInterp(uv);
         return vec2(packedValue.r, packedValue.b);
     }
