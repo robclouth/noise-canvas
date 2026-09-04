@@ -1679,10 +1679,12 @@ const FileRendererInner = memo(
           // shows the committed picture and stays asked for, so the brush keeps
           // following the pointer and the preview appears once the window
           // holds the frames.
-          if (!canvas.holdsFrames(dabStart, dabEnd)) {
+          // A preview the renderer refuses, for a brush the window cannot
+          // serve or a source window still on its way, shows the committed
+          // picture and stays asked for as well.
+          if (!canvas.holdsFrames(dabStart, dabEnd) || !dispatchStroke(state, cursorPos, true)) {
             displayMode.current = "committed";
           } else {
-            if (!dispatchStroke(state, cursorPos, true)) return;
             applyStroke.current = false;
           }
         } else {
@@ -1690,9 +1692,11 @@ const FileRendererInner = memo(
           // canvas has no content for would paint silence and commit it. The
           // dab waits for its block, and for the source window it reads
           // through, and then paints where it was asked to.
+          // A dab the renderer refuses is dropped: the frame still draws the
+          // committed picture where the view is now.
           const dabState = state;
           const dabPos = cursorPos.clone();
-          if (!canvas.paintWhenHeld(dabStart, dabEnd, needs, () => dispatchStroke(dabState, dabPos, false))) return;
+          canvas.paintWhenHeld(dabStart, dabEnd, needs, () => dispatchStroke(dabState, dabPos, false));
           displayMode.current = "committed";
           applyStroke.current = false;
         }
