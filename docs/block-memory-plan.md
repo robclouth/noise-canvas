@@ -773,8 +773,8 @@ the destination's own:
   paint back while the entering window holds its own; nothing copies back into
   the original or the source window. `window:check` resident went 603 → 545 MB.
 - The window serves the source file's COMMITTED state, so it re-reads when that
-  state moves (`WindowedCanvas.stateRevision`, watched through the file
-  handle). Reading another file's half-painted stroke, which the live-canvas
+  state moves (`HistoryManager.revision`, read through the source file's
+  history manager, so a parked source still invalidates the window). Reading another file's half-painted stroke, which the live-canvas
   path allowed, is gone.
 - Not covered by a test: the wiring in `file-renderer.tsx` that decides a
   source window is needed. `window:check` paints one file only, so a cross-file
@@ -1433,6 +1433,17 @@ read one, a merge read one per part and built the sum as a third.
 - **Onsets with nothing to go on.** A chunk asked for band maxima reports what
   its own span holds, so a round over the file arrives at the file's. A pass
   that had no reference used to leave the onsets it found alone.
+- **The picture lands in a static view.** A block patched into the display
+  marks the lane's snapshot stale and schedules its refresh, so a lane with no
+  cursor over it fills in as the blocks are read rather than on the next hover.
+- **A derive reads one state.** The seed loop runs under the source file's task
+  queue, so a stroke committed on the source mid-copy waits for the copy; the
+  copy is one state, not two halves of two.
+- **A reopen keeps no run.** A windowed file whose tier holds its current node
+  reopens without `reconstruct`; the display, the onsets and the audio all read
+  the tier a block or a chunk at a time. A minimized lane parks its renderer,
+  gives the graphics budget back, and rebuilds through the same path when it
+  is restored.
 
 ### Measured (M4 Pro, 90 s mono, an eight-block window)
 

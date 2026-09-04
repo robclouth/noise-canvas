@@ -174,7 +174,9 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     block at a time; a block's own packed layout is `blockBandLayout`. Only the
     passes that cannot be cut into blocks still read a whole run: HPSS and NMF,
     which factorise over the file, and the splice re-analysis, which takes the
-    old coefficients as one array.
+    old coefficients as one array. The seed loop runs under the source file's
+    task queue, so a stroke committed on the source while its blocks are read
+    waits, and the copy is one state.
 
     A store cannot answer until the root snapshot naming its seed is written,
     which is long after the canvas is built. So the picture the owner asked for
