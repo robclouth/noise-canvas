@@ -434,6 +434,59 @@ function installPatchRenderer(
   return { patches, full, turns, canvas, file };
 }
 
+describe("HistoryManager stroke chain", () => {
+  it("tells strokes committed after a node from any other move of the state", async () => {
+    installManagerEnv();
+    clearAllHistoryManagers();
+    const w = 6,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const dimensions = {
+      texels: w * h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+    const mgr = getHistoryManager("f1");
+    const rootId = await mgr.addRootSnapshot({
+      data: root,
+      kind: "root",
+      label: "root",
+      spectrogram: makeSpectrogram(root, w, h),
+    });
+    expect(mgr.movedOnlyByStrokes(rootId)).toBe(true);
+
+    // Two strokes queued behind each other: the second was painted over the
+    // first's canvas, and lands after the first's commit moved the node.
+    const a = await mgr.addStroke({ data: lossyFill(w, h, 1), label: "A", dimensions });
+    const b = await mgr.addStroke({ data: lossyFill(w, h, 2), label: "B", dimensions });
+    expect(mgr.movedOnlyByStrokes(rootId)).toBe(true);
+    expect(mgr.movedOnlyByStrokes(a.id)).toBe(true);
+    expect(mgr.movedOnlyByStrokes(b.id)).toBe(true);
+
+    // An undo leaves the node the stroke was painted on behind.
+    await mgr.navigateToParent();
+    expect(mgr.movedOnlyByStrokes(b.id)).toBe(false);
+    expect(mgr.movedOnlyByStrokes(a.id)).toBe(true);
+
+    // A re-analysis is a move of the whole state, whatever follows it.
+    const reanalysed = makeSpectrogram(lossyFill(w, h, 5), w, h);
+    await mgr.addSnapshot({
+      data: reanalysed.packedData,
+      kind: "reanalyze",
+      label: "Re-analyse",
+      spectrogram: reanalysed,
+    });
+    await mgr.addStroke({ data: lossyFill(w, h, 3), label: "C", dimensions });
+    expect(mgr.movedOnlyByStrokes(a.id)).toBe(false);
+    expect(mgr.movedOnlyByStrokes(rootId)).toBe(false);
+    clearAllHistoryManagers();
+  });
+});
+
 describe("HistoryManager undo/redo round-trip", () => {
   it("restores the exact painted state across repeated undo/redo (lossless)", async () => {
     const { fbo } = installManagerEnv();

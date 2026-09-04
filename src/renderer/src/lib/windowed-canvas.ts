@@ -17,7 +17,13 @@ import { canvasWindowBlocks } from "./gpu-budget";
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
 import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
-import { composePixelRangeValues, gatherPixelRanges, mergePixelRanges, pixelRangeCount } from "./pixel-ranges";
+import {
+  composePixelRangeValues,
+  gatherPixelRanges,
+  intersectPixelRanges,
+  mergePixelRanges,
+  pixelRangeCount,
+} from "./pixel-ranges";
 import { SourceWindowSlot, type SourceFileBlocks, type SourceNeed, type SourceWindowTextures } from "./source-window";
 import type { StrokeRenderer } from "./stroke-renderer";
 
@@ -31,6 +37,9 @@ export type OtherFileNeeds = { sources: readonly SourceNeed[]; impulses: readonl
 
 /** Paint waiting for the canvas to hold the frames it lands on. */
 type HeldPaint = { startFrame: number; endFrame: number; needs: OtherFileNeeds; paint: () => boolean };
+
+/** A stroke's paint by file range, held while its commit has still to store it. */
+type PendingPaint = { ranges: Uint32Array; values: Float32Array | null; landed: Promise<void> };
 
 /** Fills `settle` waits through before it gives up on the paint still held. */
 const HELD_PAINT_FILLS = 8;
@@ -104,6 +113,7 @@ export class WindowedCanvas {
   private drawingStore: Promise<void> | null = null;
   private readonly held: HeldPaint[] = [];
   private carried = new CarriedPaint();
+  private readonly pending: PendingPaint[] = [];
   private stroking = false;
 
   constructor(deps: WindowedCanvasDeps) {
@@ -256,6 +266,7 @@ export class WindowedCanvas {
       window.acquire(next),
       original ? original.hold(next) : Promise.resolve(true),
       this.carried.settled(),
+      ...this.pending.map((paint) => paint.landed),
     ]);
     const filling = reads.then(([filled, originalFilled]) => {
       if (this.request !== next) return;
@@ -274,11 +285,19 @@ export class WindowedCanvas {
         this.aimHeld();
         return;
       }
+      const entering: number[] = [];
       if (moving) {
+        // The slots take every block that leaves, so a block coming back
+        // shows what the canvas last held of it, a commit's upload included.
+        const leaving = window.blocksOf(held).filter((block) => block < next.firstBlock || block > next.lastBlock);
+        window.copyBack(held, leaving, live.committedSource().texture, window.blocksOf(next));
         if (this.stroking) this.carryPaintOff(live, next);
         live.slideView(next, (target, blocks) => window.compose(next, blocks, target), { midStroke: this.stroking });
         window.markSlid(next, held);
         if (this.stroking) dropReturningPaint(this.carried, window, next, held);
+        for (const block of window.blocksOf(next)) {
+          if (block < held.firstBlock || block > held.lastBlock) entering.push(block);
+        }
       }
       // Whatever the canvas still lacks: the blocks a slide did not bring in,
       // and the ones an abandoned fill left empty. Nothing painted is drawn
@@ -288,7 +307,9 @@ export class WindowedCanvas {
       if (lacking.length > 0) {
         live.fillCanvas((target) => window.compose(view, lacking, target));
         window.markOnCanvas(lacking);
+        entering.push(...lacking);
       }
+      this.applyPendingPaint(live, view, entering);
       if (this.stroking) this.restoreReturningPaint(live, view);
       this.releaseHeld();
       this.aimHeld();
@@ -298,6 +319,36 @@ export class WindowedCanvas {
       if (this.fill === tracked) this.fill = null;
     });
     this.fill = tracked;
+  }
+
+  /**
+   * Keeps a stroke's paint on the canvas after its pen-up until the function
+   * returned is called: a block the window brings in meanwhile is read from a
+   * store that does not hold the stroke yet, so its pixels of `values`, which
+   * hold exactly the pixels of `ranges` in range order, go back on top.
+   */
+  holdPaint(ranges: Uint32Array, values: Promise<Float32Array>): () => void {
+    const paint: PendingPaint = {
+      ranges,
+      values: null,
+      landed: values.then(
+        (landed) => {
+          paint.values = landed;
+        },
+        () => {},
+      ),
+    };
+    this.pending.push(paint);
+    return () => {
+      const at = this.pending.indexOf(paint);
+      if (at >= 0) this.pending.splice(at, 1);
+    };
+  }
+
+  /** Drops the slots of the blocks over the named file pixels, so the store serves them next. */
+  forgetBlocks(ranges: Uint32Array): void {
+    const window = this.blocks;
+    if (window) window.invalidate(blocksForPixelRanges(window.grid, ranges));
   }
 
   /** True when one window can hold [startFrame, endFrame). */
@@ -347,7 +398,9 @@ export class WindowedCanvas {
    * waits with it. Returns false only when `paint` itself refused.
    */
   paintWhenHeld(startFrame: number, endFrame: number, needs: OtherFileNeeds, paint: () => boolean): boolean {
-    if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame) && this.othersHold(needs)) return paint();
+    if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame) && this.othersHold(needs)) {
+      return paint();
+    }
     this.held.push({ startFrame, endFrame, needs, paint });
     return true;
   }
@@ -407,9 +460,12 @@ export class WindowedCanvas {
       this.releaseHeld();
       stalls = this.held.length < before ? 0 : stalls + 1;
     }
-    if (this.held.length === 0) return;
-    diag.warn("gl", "held paint dropped", { dabs: this.held.length });
-    this.held.length = 0;
+    if (this.held.length > 0) {
+      diag.warn("gl", "held paint dropped", { dabs: this.held.length });
+      this.held.length = 0;
+    }
+    // The last slide's carry may still be reading; the commit reads after it.
+    await this.carried.settled();
   }
 
   /** The brush origin in the canvas's own UV. */
@@ -469,12 +525,16 @@ export class WindowedCanvas {
     if (this.coversFile()) return await renderer.readPixelRanges(pixelRanges);
     // Taken before the first await: a stroke starting now installs its own.
     const carried = this.carried;
+    while (!carried.settledNow) await carried.settled();
+    // The canvas read and the carry's snapshot are taken in one go, so no
+    // slide can move pixels between the two while the read is on its way.
     const clipped = clipRangesToView(renderer.committedSource().view, this.layout(), pixelRanges);
-    const inView = await renderer.readPixelRanges(clipped.viewRanges);
-    if (clipped.covered) return inView;
+    const reading = renderer.readPixelRanges(clipped.viewRanges);
+    const carriedNow = clipped.covered ? null : carried.snapshot();
+    const inView = await reading;
+    if (!carriedNow) return inView;
     // What the canvas no longer holds was carried off it as the window slid.
-    await carried.settled();
-    return composePixelRangeValues(pixelRanges, [carried.snapshot(), { ranges: clipped.fileRanges, values: inView }]);
+    return composePixelRangeValues(pixelRanges, [carriedNow, { ranges: clipped.fileRanges, values: inView }]);
   }
 
   /** The stroke's committed footprint as file pixel ranges, carry included. */
@@ -733,6 +793,32 @@ export class WindowedCanvas {
    * the display picture takes them so they stay on screen, and the carry holds
    * them for the commit.
    */
+  /**
+   * Puts the paint of strokes still committing back on the blocks that just
+   * entered the canvas, oldest stroke first. A block whose slot holds paint
+   * the canvas gave it came back with that paint and is left alone.
+   */
+  private applyPendingPaint(renderer: StrokeRenderer, view: CanvasView, entering: number[]): void {
+    const window = this.blocks;
+    if (!window || this.pending.length === 0) return;
+    let target: Uint32Array = new Uint32Array(0);
+    for (const block of entering) {
+      if (window.holdsPaint(block)) continue;
+      const list = blockPixelRanges(window.grid, block);
+      target = mergePixelRanges(target, list.ranges.subarray(0, list.count * 2));
+    }
+    if (target.length === 0) return;
+    for (const paint of this.pending) {
+      if (!paint.values) continue;
+      const within = intersectPixelRanges(paint.ranges, target);
+      if (pixelRangeCount(within) === 0) continue;
+      const viewRanges = fileRangesToView(view, this.layout(), within);
+      if (!viewRanges) continue;
+      const values = composePixelRangeValues(within, [{ ranges: paint.ranges, values: paint.values }]);
+      renderer.patchFBODataCompact(values, viewRanges);
+    }
+  }
+
   /**
    * Puts the carried paint of the view's blocks back on the canvas. A block
    * whose slot lost its paint to the store came back composed from the

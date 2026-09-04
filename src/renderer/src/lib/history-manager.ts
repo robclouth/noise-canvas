@@ -814,6 +814,54 @@ export class HistoryManager {
    * half the texture, otherwise as a full packed snapshot.
    */
   async addStroke(opts: AddStrokeOpts): Promise<AddStrokeOutcome> {
+    const release = this.holdStore();
+    try {
+      return await this.addStrokeHeld(opts);
+    } finally {
+      release();
+    }
+  }
+
+  private storeHolds = 0;
+  private storeReleased: Promise<void> = Promise.resolve();
+  private releaseStore: (() => void) | null = null;
+
+  /**
+   * Keeps the store's readers waiting while a stroke moves the tier off the
+   * current node; the returned function lets them go.
+   */
+  private holdStore(): () => void {
+    if (this.storeHolds++ === 0) {
+      this.storeReleased = new Promise((resolve) => {
+        this.releaseStore = resolve;
+      });
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (--this.storeHolds === 0) this.releaseStore?.();
+    };
+  }
+
+  /**
+   * True when the state has not moved since `id` other than by strokes
+   * committed after it: the current node is `id`, or descends from it
+   * through stroke nodes alone, a checkpoint being a stroke stored whole.
+   */
+  movedOnlyByStrokes(id: string | null): boolean {
+    if (!this.manifest) return id === null;
+    let cursor: string | null = this.manifest.currentId;
+    while (cursor !== null) {
+      if (cursor === id) return true;
+      const node: HistoryNode | undefined = this.manifest.nodes[cursor];
+      if (!node || (node.kind !== "stroke" && node.kind !== "checkpoint")) return false;
+      cursor = node.parentId;
+    }
+    return false;
+  }
+
+  private async addStrokeHeld(opts: AddStrokeOpts): Promise<AddStrokeOutcome> {
     await this.initialize();
     if (!this.manifest) throw new Error("HistoryManager: cannot addStroke before root");
 
@@ -838,7 +886,7 @@ export class HistoryManager {
         opts.baseFootprint?.length === footprintPixels * 4
           ? opts.baseFootprint
           : opts.data
-            ? await this.currentRanges(ranges)
+            ? await this.currentRangesNow(ranges)
             : null;
       const after =
         opts.afterFootprint?.length === footprintPixels * 4
@@ -1576,6 +1624,16 @@ export class HistoryManager {
    */
   async currentRanges(ranges: Uint32Array): Promise<Float32Array | null> {
     await this.initialize();
+    // A stroke moving the tier leaves the store off the current node until
+    // it is done; the read waits for it rather than fail.
+    while (this.storeHolds > 0 && this.manifest && this.manifest.overlayNodeId !== this.manifest.currentId) {
+      await this.storeReleased;
+    }
+    return await this.currentRangesNow(ranges);
+  }
+
+  /** The named pixels as the store stands now, or null while it is off the current node. */
+  private async currentRangesNow(ranges: Uint32Array): Promise<Float32Array | null> {
     const manifest = this.manifest;
     if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
     const holder = this.seedHolder();

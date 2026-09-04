@@ -20,6 +20,7 @@ vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
   getHistoryManager: vi.fn(() => ({
     getCurrentId: () => "n1",
+    movedOnlyByStrokes: (id: string | null) => id === "n1",
     awaitPackedReaders: vi.fn(async () => {}),
     currentRanges: vi.fn(async () => null),
     currentBlockState: vi.fn(async () => (gate.stored ? Float32Array.from(gate.stored) : null)),
@@ -152,6 +153,8 @@ function openWindowedFile(renderer: Record<string, unknown> = {}) {
       current: {
         getFBOData: async () => null,
         readPixelRanges: async () => Float32Array.from(PAINTED_VALUES),
+        holdPaint: () => () => {},
+        forgetBlocks: () => {},
         ...renderer,
       },
     },

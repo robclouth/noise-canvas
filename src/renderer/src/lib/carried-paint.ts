@@ -23,6 +23,7 @@ const NO_RANGES = new Uint32Array(0);
 export class CarriedPaint {
   private carries: Carry[] = [];
   private reads: Promise<unknown> = Promise.resolve();
+  private inFlight = 0;
   private box: PaintBox | null = null;
 
   /** Pixels carried. */
@@ -44,12 +45,22 @@ export class CarriedPaint {
       values: new Float32Array(pixelRangeCount(ranges) * 4),
     };
     this.carries.push(carry);
+    this.inFlight++;
     this.reads = Promise.all([
       this.reads,
-      read.then((values) => {
-        carry.values.set(values.subarray(0, carry.values.length));
-      }),
+      read
+        .then((values) => {
+          carry.values.set(values.subarray(0, carry.values.length));
+        })
+        .finally(() => {
+          this.inFlight--;
+        }),
     ]);
+  }
+
+  /** True while no carried read is still on its way. */
+  get settledNow(): boolean {
+    return this.inFlight === 0;
   }
 
   /** Forgets the ranges' pixels — the canvas holds them again. */

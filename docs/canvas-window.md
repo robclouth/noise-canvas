@@ -100,12 +100,22 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
 3. **A slide keeps the overlap and composes what enters — so the overlap has
    to be real.** If a fill was abandoned, those blocks are still empty; the
    window tracks what the canvas holds and composes whatever it lacks.
-4. **Paint on a block that leaves mid-stroke is carried.** The slots take it so
-   a returning window shows it, the display takes it so it stays on screen, and
-   the carry holds it so the commit stores it. A block whose slot went while it
+4. **A block that leaves goes back to its slot as the canvas last held it,
+   and paint on a block that leaves mid-stroke is carried.** The slot copy
+   means a returning block shows the canvas's latest values, not the store's
+   values from when the slot was filled; the display takes the paint so it
+   stays on screen, and the carry holds it so the commit stores it. A block whose slot went while it
    was away comes back with the store's values, so the canvas takes its paint
    out of the carry as it lands: the stroke sees what it painted there, paints
    over it, and the commit reads the canvas rather than a stale carry.
+   A stroke's paint stays on the canvas after the pen lifts, too: the commit
+   holds the pixels it read until the store has them, and a block the window
+   brings in before then, from a slot or a store that predates the stroke,
+   takes those pixels back on top. Without that, a quick next stroke reads
+   the old state where the window moved and commits it over the last one.
+   The stroke ends the moment the commit has read it, not when the commit
+   lands: a commit takes seconds, and a stroke begun meanwhile would
+   otherwise be ended mid-way, its slides carrying nothing.
 5. **Any whole-state move installs a fresh carry.** After a history hop, a
    restore or phase turns, the old carry no longer speaks for the file. A
    commit already reading the old one keeps the object it took.

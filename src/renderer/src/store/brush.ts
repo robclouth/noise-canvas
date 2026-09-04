@@ -205,13 +205,18 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         footprintRanges.length > 0 &&
         pixelRangeCount(footprintRanges) < texels * 0.5;
       const painted = footprintRanges != null && footprintRanges.length > 0 ? footprintRanges : null;
-      const readPromise = footprintOnly ? renderer.readPixelRanges(footprintRanges) : renderer.getFBOData();
+      const footprintRead = footprintOnly && footprintRanges ? renderer.readPixelRanges(footprintRanges) : null;
+      const readPromise = footprintRead ?? renderer.getFBOData();
       // Both reads are issued before the queue so they see this stroke's end.
       // A whole-state commit needs the stroke's own pixels separately, because
       // a canvas holding a window cannot hand over the whole state.
       const paintedPromise = !footprintOnly && painted ? renderer.readPixelRanges(painted) : null;
+      // The store does not hold this stroke until the commit lands, so the
+      // canvas keeps the paint on any block it brings in meanwhile.
+      const paintedRead = footprintRead ?? paintedPromise;
+      const releasePaint = painted && paintedRead ? renderer.holdPaint(painted, paintedRead) : null;
 
-      await serializeFileTask(activeFileId, async () => {
+      const commitTask = serializeFileTask(activeFileId, async () => {
         let read = await readPromise;
         const paintedValues = paintedPromise ? await paintedPromise : null;
         // A navigation's synthesis may still be landing — the commit measures
@@ -219,7 +224,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         // state this commit writes into.
         await historyManager.awaitPackedReaders();
         if (!openFiles[activeFileId]) return;
-        if (!read && !footprintOnly && historyManager.getCurrentId() === currentIdBefore) {
+        if (!read && !footprintOnly && historyManager.movedOnlyByStrokes(currentIdBefore)) {
           // The store holds the committed state the canvas cannot show, and
           // the canvas holds what this stroke painted over it.
           const stored = await historyManager.currentBlockState();
@@ -241,7 +246,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         let data: Float32Array | null = null;
         let baseFootprint: Float32Array | undefined;
         let footprint: { ranges: Uint32Array; values: Float32Array } | null = null;
-        if (footprintOnly && footprintRanges && historyManager.getCurrentId() === currentIdBefore) {
+        if (footprintOnly && footprintRanges && historyManager.movedOnlyByStrokes(currentIdBefore)) {
           // The store holds the pre-stroke state, stashed pixels included.
           baseFootprint = (await historyManager.currentRanges(footprintRanges)) ?? undefined;
           if (baseFootprint) footprint = { ranges: footprintRanges, values: read };
@@ -361,6 +366,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
                     else renderer.patchFBODataCompact(await gather(uploadRanges), uploadRanges);
                   } else {
                     setCanvasPatchStash(activeFileId, { ranges: uploadRanges, turns: [] });
+                    renderer.forgetBlocks(
+                      historyDirtyRanges ? mergePixelRanges(uploadRanges, historyDirtyRanges) : uploadRanges,
+                    );
                   }
                 }
                 diag.timing("timing", "commit FBO upload", performance.now() - uploadStart);
@@ -379,6 +387,10 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
                 ranges: uploadRanges ?? new Uint32Array(0),
                 turns: canvasTurns.map((t) => t.turns),
               });
+              // The canvas's cached blocks over the stroke are older than the
+              // store now, so they are read again rather than composed.
+              const stale = uploadRanges ?? new Uint32Array(0);
+              renderer.forgetBlocks(historyDirtyRanges ? mergePixelRanges(stale, historyDirtyRanges) : stale);
             }
           }
 
@@ -408,6 +420,11 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           getHistoryManager(activeFileId).markFboOutOfSync();
         }
       });
+      try {
+        await commitTask;
+      } finally {
+        releasePaint?.();
+      }
     },
 
     // Helper: move brush and preview

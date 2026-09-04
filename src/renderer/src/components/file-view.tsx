@@ -801,15 +801,16 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: Fil
     // commit reads the stroke.
     await rendererRef.current?.settleStroke();
 
-    // Use unified action with time range
-    if (finalRange.min !== null && finalRange.max !== null) {
-      await state.applyStrokeAtPosition(undefined, { min: finalRange.min, max: finalRange.max });
-    } else {
-      await state.applyStrokeAtPosition();
-    }
+    // The commit reads the stroke before its first await, and the stroke ends
+    // right after that read: a commit takes seconds, and a stroke that starts
+    // meanwhile must not be ended by this one.
+    const commit =
+      finalRange.min !== null && finalRange.max !== null
+        ? state.applyStrokeAtPosition(undefined, { min: finalRange.min, max: finalRange.max })
+        : state.applyStrokeAtPosition();
     rendererRef.current?.endStroke();
-
     strokeTimeRangeRef.current = { min: null, max: null };
+    await commit;
   }, [stopRepeatClock]);
 
   // Window-level event listeners to handle mouse movements and releases outside the file view

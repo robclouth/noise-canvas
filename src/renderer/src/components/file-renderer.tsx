@@ -208,6 +208,13 @@ export interface FileRendererHandle {
   endStroke: () => void;
   /** Resolves once every dab of the stroke has landed. Call it before committing. */
   settleStroke: () => Promise<void>;
+  /**
+   * Keeps a stroke's paint, `values` over the file pixels of `ranges`, on the
+   * canvas until the function returned is called, however the window moves.
+   */
+  holdPaint: (ranges: Uint32Array, values: Promise<Float32Array>) => () => void;
+  /** Drops the canvas's cached copies of the blocks over the named file pixels. */
+  forgetBlocks: (ranges: Uint32Array) => void;
   /** Gets the dirty region (UV range modified since last clear). Returns null if no modifications. */
   getDirtyRegion: () => { startX: number; endX: number; startY: number; endY: number } | null;
   /** Clears the dirty region tracking (call after synthesis). */
@@ -2092,6 +2099,8 @@ const FileRendererInner = memo(
       releaseAnalysisData,
       beginStroke,
       endStroke,
+      holdPaint: (ranges, values) => canvasRef.current?.holdPaint(ranges, values) ?? (() => {}),
+      forgetBlocks: (ranges) => canvasRef.current?.forgetBlocks(ranges),
       settleStroke: async () => {
         await canvasRef.current?.settle();
       },
