@@ -2898,6 +2898,37 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       const spectrogramData = file.spectrogramData;
+      const grid = blockGrid(
+        { numBands: spectrogramData.numBands, metadata: spectrogramData.metadata },
+        spectrogramData.numFrames,
+        spectrogramData.sampleRate,
+      );
+      const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
+      if (windowed && host.analysis.scanFileOnsets) {
+        const scan = host.analysis.scanFileOnsets;
+        const packedLayout: PackedLayout = {
+          numBands: spectrogramData.numBands,
+          numChannels: spectrogramData.numChannels,
+          numFrames: spectrogramData.numFrames,
+          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
+        };
+        const result = await scan(
+          spanReader((ranges) => historyManager.currentRanges(ranges)),
+          packedLayout,
+          spectrogramData.sampleRate,
+          new Float32Array(0),
+        );
+        file.onsets = result.onsets;
+        file.onsetReference = { odfMax: result.odfMax, bandMax: result.bandMax };
+        await historyManager.setNodeOnsets(
+          nodeId,
+          packOnsetState({ onsets: result.onsets, reference: file.onsetReference }),
+        );
+        return;
+      }
+
       // Without stored onsets the coefficients are walked in full, from
       // whichever whole copy is cheapest to come by.
       const packed =

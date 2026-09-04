@@ -47,7 +47,7 @@ vi.mock("@renderer/store/files", () => ({
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
 import { clearAllHistoryManagers, destroyHistoryManager, getHistoryManager } from "../history-manager";
-import { getBlockStore } from "../block-stores";
+import { getBlockStore, openBlockStore } from "../block-stores";
 import { historyCacheBudgets } from "../history-cache-budgets";
 import { serializeFileTask } from "../file-task-queue";
 import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stash";
@@ -1521,6 +1521,132 @@ describe("HistoryManager side data", () => {
     expect(Array.from(restored!.metadata)).toEqual(Array.from(spectrogram.metadata));
     expect(restored!.inverseMap!.length).toBe(spectrogram.inverseMap!.length);
     expect(Array.from(restored!.packedData!)).toEqual(Array.from(root));
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+});
+
+describe("HistoryManager windowed reopen", () => {
+  const wide = 100000;
+  const bands = 2;
+  const wideDims = {
+    texels: wide * bands,
+    numFrames: wide,
+    numBands: bands,
+    numChannels: 1,
+    sampleRate: 8000,
+    minFreq: 20,
+    bandsPerOctave: 12,
+  };
+
+  function paint(base: Float32Array, start: number, count: number, salt: number): Float32Array {
+    const out = new Float32Array(base);
+    for (let p = start; p < start + count; p++) {
+      for (let c = 0; c < 4; c++) out[p * 4 + c] = ((p * 7 + c + salt) % 89) / 89 + salt * 0.011;
+    }
+    return out;
+  }
+
+  function firstDifference(a: Float32Array, b: Float32Array): number {
+    if (a.length !== b.length) return Math.min(a.length, b.length);
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return i;
+    return -1;
+  }
+
+  it("reopens a windowed manifest with a current tier without reconstructing", async () => {
+    installManagerEnv();
+    const root = lossyFill(wide, bands, 0);
+    const a = paint(root, 2, 3, 1);
+    const spectrogram = { ...makeSpectrogram(root, wide, bands), sampleRate: 8000 };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram });
+    await mgr.addStroke({ data: a, label: "A", dimensions: wideDims, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.awaitTierFlush();
+
+    clearAllHistoryManagers();
+    const store = await openBlockStore(
+      "f1",
+      { numBands: bands, metadata: spectrogram.metadata },
+      { numFrames: wide, sampleRate: 8000, texelCount: wideDims.texels },
+    );
+    await store.seed(root);
+
+    const fresh = getHistoryManager("f1");
+    const reconstructSpy = vi.spyOn(fresh, "reconstruct");
+    const restored = await fresh.loadSpectrogramAtCurrent();
+
+    expect(reconstructSpy).not.toHaveBeenCalled();
+    expect(restored).not.toBeNull();
+    expect(restored!.packedData).toBeUndefined();
+    expect(restored!.inverseMap).toBeUndefined();
+    expect(restored!.texels).toBe(wideDims.texels);
+    expect(restored!.numFrames).toBe(wideDims.numFrames);
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("reconstructs once when overlayNodeId equals the current id but the store is not seeded", async () => {
+    installManagerEnv();
+    const root = lossyFill(wide, bands, 0);
+    const a = paint(root, 2, 3, 1);
+    const spectrogram = { ...makeSpectrogram(root, wide, bands), sampleRate: 8000 };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram });
+    await mgr.addStroke({ data: a, label: "A", dimensions: wideDims, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.awaitTierFlush();
+
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f1");
+    const reconstructSpy = vi.spyOn(fresh, "reconstruct");
+    const restored = await fresh.loadSpectrogramAtCurrent();
+
+    expect(reconstructSpy).toHaveBeenCalledTimes(1);
+    expect(restored).not.toBeNull();
+    expect(restored!.packedData).toBeUndefined();
+    expect(fresh.getManifest()?.overlayNodeId).toBe(fresh.getManifest()?.currentId);
+    const currentBlocks = await fresh.currentBlockState();
+    expect(currentBlocks).not.toBeNull();
+    expect(firstDifference(currentBlocks!, a)).toBe(-1);
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("reconstructs once when overlayNodeId is undefined and seeds the tier", async () => {
+    const { files } = installManagerEnv();
+    const root = lossyFill(wide, bands, 0);
+    const a = paint(root, 2, 3, 1);
+    const spectrogram = { ...makeSpectrogram(root, wide, bands), sampleRate: 8000 };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram });
+    await mgr.addStroke({ data: a, label: "A", dimensions: wideDims, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.awaitTierFlush();
+
+    const treePath = "/userdata/history/f1/tree.json";
+    const manifest = JSON.parse(files.get(treePath) as string);
+    delete manifest.overlayNodeId;
+    files.set(treePath, JSON.stringify(manifest));
+
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f1");
+    const reconstructSpy = vi.spyOn(fresh, "reconstruct");
+    const restored = await fresh.loadSpectrogramAtCurrent();
+
+    expect(reconstructSpy).toHaveBeenCalledTimes(1);
+    expect(restored).not.toBeNull();
+    expect(restored!.packedData).toBeUndefined();
+    expect(fresh.getManifest()?.overlayNodeId).toBe(fresh.getManifest()?.currentId);
+    const currentBlocks = await fresh.currentBlockState();
+    expect(currentBlocks).not.toBeNull();
+    expect(firstDifference(currentBlocks!, a)).toBe(-1);
 
     clearAllHistoryManagers();
     delete fakeOpenFiles["f1"];

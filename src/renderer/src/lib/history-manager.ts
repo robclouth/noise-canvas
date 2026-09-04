@@ -1260,15 +1260,31 @@ export class HistoryManager {
     const targetId = this.manifest.currentId;
     if (!this.manifest.nodes[targetId]) return null;
 
-    // reconstruct() walks back to the nearest full anchor and reads its packed
-    // data once, then applies deltas forward. We piggyback on that walk to know
-    // the anchor identity, and rebuild its side data (inverseMap + metadata) —
-    // which reconstruct doesn't need but spectrogramData does.
-    const { packedData, fullAnchor } = await this.reconstruct(targetId);
+    const fullAnchor = this.nearestFullAnchor(targetId);
     if (!fullAnchor || !fullAnchor.synthesisMetadata) return null;
 
     const { inverseMap, metadata } = await deriveSideData(fullAnchor);
     const dims = fullAnchor.dimensions;
+    const grid = blockGrid({ numBands: dims.numBands, metadata }, dims.numFrames, dims.sampleRate);
+    const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
+
+    let packedData: Float32Array | undefined;
+    if (windowed) {
+      const holder = this.seedHolder() ?? fullAnchor;
+      const store = await this.seedBlockStore(holder);
+      if (this.manifest.overlayNodeId !== targetId || !store.isSeeded) {
+        const reconstructed = await this.reconstruct(targetId);
+        await store.seedCurrent(reconstructed.packedData);
+        if (this.manifest) {
+          this.manifest.overlayNodeId = targetId;
+          await this.writeManifest();
+        }
+      }
+    } else {
+      const reconstructed = await this.reconstruct(targetId);
+      packedData = reconstructed.packedData;
+    }
+
     return {
       packedData,
       inverseMap,
@@ -1315,7 +1331,7 @@ export class HistoryManager {
       target.audioCached = false;
     }
     const { synthesizeFile } = useStore.getState();
-    void synthesizeFile(this.fileId, undefined, (await this.currentBlockState()) ?? undefined);
+    void synthesizeFile(this.fileId);
   }
 
   // ---------- Navigation ----------

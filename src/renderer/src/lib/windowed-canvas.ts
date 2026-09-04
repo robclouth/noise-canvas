@@ -100,7 +100,7 @@ export class WindowedCanvas {
   private readonly windowBlocks: number;
   private request: CanvasView | null = null;
   private fill: Promise<void> | null = null;
-  private drawingRoot: Promise<void> | null = null;
+  private drawingStore: Promise<void> | null = null;
   private readonly held: HeldPaint[] = [];
   private carried = new CarriedPaint();
   private stroking = false;
@@ -178,7 +178,7 @@ export class WindowedCanvas {
     // comes from the analysed state rather than from the canvas. A store with
     // no root to read yet is drawn from once the owner has written one.
     if (seed) renderer.seedDisplayFromPacked(seed);
-    else void this.drawDisplayFromRoot();
+    else void this.drawDisplayFromStore();
     this.aim(view.startFrame, view.endFrame);
   }
 
@@ -190,7 +190,7 @@ export class WindowedCanvas {
    * stays blank until something else aims the canvas.
    */
   async storeReady(): Promise<void> {
-    await this.drawDisplayFromRoot();
+    await this.drawDisplayFromStore();
     const renderer = this.deps.renderer();
     if (!renderer?.getIsInitialized()) return;
     const view = renderer.committedSource().view;
@@ -202,15 +202,15 @@ export class WindowedCanvas {
    * whose owner holds no run of it to seed from. The picture fills in as the
    * blocks are read.
    */
-  private drawDisplayFromRoot(): Promise<void> {
-    if (this.drawingRoot) return this.drawingRoot;
+  private drawDisplayFromStore(): Promise<void> {
+    if (this.drawingStore) return this.drawingStore;
     if (!this.blocks) return Promise.resolve();
     const draw = async (): Promise<void> => {
       let seeded = false;
       for (let index = 0; index < this.grid.blockCount; index++) {
         const list = blockPixelRanges(this.grid, index);
         const ranges = list.ranges.slice(0, list.count * 2);
-        const values = await this.deps.readRoot(ranges);
+        const values = (await this.deps.readCurrent(ranges)) ?? (await this.deps.readRoot(ranges));
         const renderer = this.deps.renderer();
         if (!values || !renderer?.getIsInitialized()) return;
         if (!seeded) {
@@ -222,9 +222,9 @@ export class WindowedCanvas {
       }
     };
     const tracked = draw().finally(() => {
-      if (this.drawingRoot === tracked) this.drawingRoot = null;
+      if (this.drawingStore === tracked) this.drawingStore = null;
     });
-    this.drawingRoot = tracked;
+    this.drawingStore = tracked;
     return tracked;
   }
 
