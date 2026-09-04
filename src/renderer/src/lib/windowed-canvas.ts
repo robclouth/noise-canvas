@@ -347,12 +347,15 @@ export class WindowedCanvas {
 
   /**
    * Resolves once nothing is held back, so a commit reads a finished stroke.
-   * Paint the canvas still cannot take after `HELD_PAINT_FILLS` fills is
-   * dropped, because a read that never lands must not stall the commit.
+   * Each fill points the window at the oldest held dab and runs what it can
+   * take. Paint still held after `HELD_PAINT_FILLS` fills in a row that
+   * release nothing is dropped, because a read that never lands must not
+   * stall the commit.
    */
   async settle(): Promise<void> {
     this.releaseHeld();
-    for (let fills = 0; this.held.length > 0 && fills < HELD_PAINT_FILLS; fills++) {
+    for (let stalls = 0; this.held.length > 0 && stalls < HELD_PAINT_FILLS; ) {
+      const before = this.held.length;
       const next = this.held[0];
       this.aim(next.startFrame, next.endFrame);
       for (const need of next.needs.sources) this.aimSource(need);
@@ -365,6 +368,7 @@ export class WindowedCanvas {
       if (reads.length === 0) break;
       await Promise.all(reads);
       this.releaseHeld();
+      stalls = this.held.length < before ? 0 : stalls + 1;
     }
     if (this.held.length === 0) return;
     diag.warn("gl", "held paint dropped", { dabs: this.held.length });

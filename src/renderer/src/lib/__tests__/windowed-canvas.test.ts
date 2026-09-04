@@ -322,6 +322,29 @@ describe("a canvas that holds a window of the file", () => {
     expect(box!.timeMin).toBeGreaterThan(0.85);
   });
 
+  it("lands every held dab of a stroke that swept the file, however many windows it takes", async () => {
+    const rig = harness(2);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
+    rig.canvas.beginStroke();
+
+    // Each dab sits at the opposite end of the file from the one before it, so
+    // every one needs a slide of its own: more fills than the stall cap allows.
+    const dabs = 12;
+    const landed: number[] = [];
+    for (let i = 0; i < dabs; i++) {
+      const at = i % 2 === 0 ? 0.9 : 0.05;
+      const frames = dabFrames(at);
+      rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => {
+        landed.push(i);
+        return rig.dab(at);
+      });
+    }
+    expect(landed.length).toBeLessThan(dabs);
+
+    await rig.canvas.settle();
+    expect(landed).toEqual([...Array(dabs).keys()]);
+  });
+
   it("drops paint the canvas can never take rather than stalling the commit", async () => {
     let renderer: StrokeRenderer | null = null;
     const canvas = new WindowedCanvas({
