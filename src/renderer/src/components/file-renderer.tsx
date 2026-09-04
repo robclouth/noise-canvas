@@ -1360,6 +1360,9 @@ const FileRendererInner = memo(
             }
             return id;
           });
+          // A windowed file fills its canvas and draws its picture out of the
+          // store, which could not answer until the root snapshot named its seed.
+          if (!packed) void canvasRef.current?.storeReady();
           // The GPU and the store hold the state now, so the analysed array
           // is released; the local copy still feeds this first synthesis.
           releaseAnalysisData();

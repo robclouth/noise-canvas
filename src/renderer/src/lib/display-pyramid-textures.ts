@@ -123,6 +123,15 @@ export class DisplayPyramid {
   }
 
   /**
+   * Declares the pyramid to hold a picture, for an owner about to draw one in
+   * with `patchFromCompact` a block at a time. Those patches are the picture,
+   * and a patch into a pyramid holding nothing is skipped.
+   */
+  seedingFromCompact(): void {
+    this.seeded = true;
+  }
+
+  /**
    * Re-encodes the bins `pixelRanges` covers from the ranges' own pixels,
    * compact and in order, as the block store hands them over. A level bin
    * whose source tap falls outside the ranges keeps its value: the caller

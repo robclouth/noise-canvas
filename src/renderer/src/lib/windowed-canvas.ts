@@ -174,10 +174,22 @@ export class WindowedCanvas {
       window.markOnCanvas(window.blocksOf(view).filter((block) => !cold.has(block)));
     });
     // The canvas holds one window, so the picture of the rest of the file
-    // comes from the analysed state rather than from the canvas.
+    // comes from the analysed state rather than from the canvas. A store with
+    // no root to read yet is drawn from once the owner has written one.
     if (seed) renderer.seedDisplayFromPacked(seed);
-    else void this.drawDisplayFromStore();
+    else void this.drawDisplayFromRoot();
     this.aim(view.startFrame, view.endFrame);
+  }
+
+  /**
+   * Fills the canvas and draws the file's picture, for a canvas built before
+   * its store could answer. The store cannot serve a range until the root
+   * snapshot naming its seed is written, so the fill and the picture the
+   * constructor asked for both come back empty; without this the window's span
+   * stays blank until something else aims the canvas.
+   */
+  async storeReady(): Promise<void> {
+    await this.drawDisplayFromRoot();
   }
 
   /**
@@ -185,7 +197,11 @@ export class WindowedCanvas {
    * whose owner holds no run of it to seed from. The picture fills in as the
    * blocks are read.
    */
-  private async drawDisplayFromStore(): Promise<void> {
+  private async drawDisplayFromRoot(): Promise<void> {
+    if (!this.blocks) return;
+    // The blocks are the picture, and a patch into a display holding none is
+    // skipped, so the display is told one is coming before the first lands.
+    this.deps.renderer()?.beginDisplaySeedFromStore();
     for (let index = 0; index < this.grid.blockCount; index++) {
       const list = blockPixelRanges(this.grid, index);
       const ranges = list.ranges.slice(0, list.count * 2);

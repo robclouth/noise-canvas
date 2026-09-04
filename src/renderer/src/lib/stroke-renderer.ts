@@ -1965,6 +1965,11 @@ export class StrokeRenderer {
     this.displayPyramid?.patchFromCompact(this.gl, values, ranges);
   }
 
+  /** Declares the display's levels about to be drawn block by block. */
+  beginDisplaySeedFromStore(): void {
+    this.displayPyramid?.seedingFromCompact();
+  }
+
   /** The display's committed levels, built once the canvas holds the file. */
   getDisplayPyramid(): DisplayPyramid | null {
     return this.displayPyramid;
