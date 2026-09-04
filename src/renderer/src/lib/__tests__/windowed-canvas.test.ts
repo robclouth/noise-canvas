@@ -14,7 +14,8 @@ import type { SpectrogramData } from "../../store/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockOfFrame, blockPixelRanges, type BlockGrid } from "../block-grid";
-import { gatherPixelRanges } from "../pixel-ranges";
+import { fileRangesToView } from "../canvas-view";
+import { float32BitsEqual, gatherPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { WindowedCanvas } from "../windowed-canvas";
 import { packedFold, padToFold } from "../constants";
@@ -149,6 +150,8 @@ describe("a canvas that holds a window of the file", () => {
 
   type Harness = {
     canvas: WindowedCanvas;
+    /** The renderer behind the canvas. */
+    renderer: () => StrokeRenderer;
     /** Paints one dab at a file-UV time, through the canvas's own translation. */
     dab: (fileUvX: number) => boolean;
     /** True once no read is outstanding. */
@@ -212,6 +215,7 @@ describe("a canvas that holds a window of the file", () => {
 
     return {
       canvas,
+      renderer: () => renderer!,
       dab: (fileUvX) => {
         renderer!.renderStroke(
           strokeParams(canvas.dabCursor(new Vector2(fileUvX, 0.35)), canvas.dabDuration(fileDuration())),
@@ -372,6 +376,47 @@ describe("a canvas that holds a window of the file", () => {
     rig.open();
     await until(() => landed.length === positions.length, "every held dab to land before the commit");
     expect(landed).toEqual([0, 1, 2]);
+  });
+
+  it("shows the paint on a block that comes back after its slot went, and paints over it", async () => {
+    // One block to a window: two windows plus the spares hold fewer slots
+    // than the file has blocks, so a long stroke evicts the first block's.
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.02)).toBe(true);
+
+    const block0 = blockPixelRanges(grid, 0);
+    const block0Ranges = block0.ranges.slice(0, block0.count * 2);
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    const original = gatherPixelRanges(data.packedData, block0Ranges);
+    const canvasBlock0 = async (): Promise<Float32Array> => {
+      const view = rig.renderer().committedSource().view;
+      const viewRanges = fileRangesToView(view, layout, block0Ranges);
+      if (!viewRanges) throw new Error("block 0 is not on the canvas");
+      return await rig.renderer().readPixelRanges(viewRanges);
+    };
+    const firstPass = await canvasBlock0();
+    expect(float32BitsEqual(firstPass, original)).toBe(false);
+
+    // The stroke walks to the far end of the file and back: every block on
+    // the way claims a slot, and the first block's goes to one of them.
+    const blockAt = (block: number): number => block * grid.blockFrames;
+    for (let block = 1; block < grid.blockCount; block++) {
+      rig.canvas.aim(blockAt(block), blockAt(block) + 1);
+      await until(() => rig.canvas.holdsFrames(blockAt(block), blockAt(block) + 1), `block ${block}`);
+    }
+    rig.canvas.aim(0, 1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first block again");
+
+    // The canvas shows the paint, not the store's values.
+    expect(float32BitsEqual(await canvasBlock0(), firstPass)).toBe(true);
+
+    // A dab over it paints on top of it, and the commit reads that.
+    expect(rig.dab(0.02)).toBe(true);
+    const secondPass = await canvasBlock0();
+    expect(float32BitsEqual(secondPass, firstPass)).toBe(false);
+    expect(float32BitsEqual(await rig.canvas.readPixelRanges(block0Ranges), secondPass)).toBe(true);
   });
 
   it("keeps every dab of a stroke that outran the window, live ones and held ones alike", async () => {

@@ -102,7 +102,10 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    window tracks what the canvas holds and composes whatever it lacks.
 4. **Paint on a block that leaves mid-stroke is carried.** The slots take it so
    a returning window shows it, the display takes it so it stays on screen, and
-   the carry holds it so the commit stores it.
+   the carry holds it so the commit stores it. A block whose slot went while it
+   was away comes back with the store's values, so the canvas takes its paint
+   out of the carry as it lands: the stroke sees what it painted there, paints
+   over it, and the commit reads the canvas rather than a stale carry.
 5. **Any whole-state move installs a fresh carry.** After a history hop, a
    restore or phase turns, the old carry no longer speaks for the file. A
    commit already reading the old one keeps the object it took.

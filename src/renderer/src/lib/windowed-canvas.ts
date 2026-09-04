@@ -5,6 +5,7 @@ import { blockGrid, blockOfFrame, blockPixelRanges, blocksForPixelRanges, type B
 import {
   clipRangesToView,
   composeViewContent,
+  fileRangesToView,
   fileUvToViewUv,
   viewCoversFile,
   viewRangesToFile,
@@ -16,7 +17,7 @@ import { canvasWindowBlocks } from "./gpu-budget";
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
 import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
-import { composePixelRangeValues, gatherPixelRanges, mergePixelRanges } from "./pixel-ranges";
+import { composePixelRangeValues, gatherPixelRanges, mergePixelRanges, pixelRangeCount } from "./pixel-ranges";
 import { SourceWindowSlot, type SourceFileBlocks, type SourceNeed, type SourceWindowTextures } from "./source-window";
 import type { StrokeRenderer } from "./stroke-renderer";
 
@@ -249,7 +250,13 @@ export class WindowedCanvas {
     if (pending && pending.firstBlock === next.firstBlock && pending.lastBlock === next.lastBlock) return;
     this.request = next;
     const original = this.original;
-    const reads = Promise.all([window.acquire(next), original ? original.hold(next) : Promise.resolve(true)]);
+    // The carry's reads settle first, so a block coming back can take its
+    // paint out of the carry as soon as it is composed.
+    const reads = Promise.all([
+      window.acquire(next),
+      original ? original.hold(next) : Promise.resolve(true),
+      this.carried.settled(),
+    ]);
     const filling = reads.then(([filled, originalFilled]) => {
       if (this.request !== next) return;
       this.request = null;
@@ -282,6 +289,7 @@ export class WindowedCanvas {
         live.fillCanvas((target) => window.compose(view, lacking, target));
         window.markOnCanvas(lacking);
       }
+      if (this.stroking) this.restoreReturningPaint(live, view);
       this.releaseHeld();
       this.aimHeld();
       this.deps.onChanged();
@@ -725,6 +733,22 @@ export class WindowedCanvas {
    * the display picture takes them so they stay on screen, and the carry holds
    * them for the commit.
    */
+  /**
+   * Puts the carried paint of the view's blocks back on the canvas. A block
+   * whose slot lost its paint to the store came back composed from the
+   * store's values, and the carry is the only place the stroke's paint on it
+   * survives: the canvas takes it, so the stroke shows it and paints over it,
+   * and the carry lets it go, so the commit reads the canvas there.
+   */
+  private restoreReturningPaint(renderer: StrokeRenderer, view: CanvasView): void {
+    if (this.carried.size === 0) return;
+    const { ranges, values } = this.carried.take(mergePixelRanges(view.ranges, new Uint32Array(0)));
+    if (pixelRangeCount(ranges) === 0) return;
+    const viewRanges = fileRangesToView(view, this.layout(), ranges);
+    if (!viewRanges) return;
+    renderer.patchFBODataCompact(values, viewRanges);
+  }
+
   private carryPaintOff(renderer: StrokeRenderer, next: CanvasView): void {
     const window = this.blocks;
     if (!window) return;

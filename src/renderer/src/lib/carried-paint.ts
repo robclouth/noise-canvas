@@ -96,6 +96,22 @@ export class CarriedPaint {
   /** What it carries: ascending file ranges and their pixels in range order. */
   snapshot(): { ranges: Uint32Array; values: Float32Array } {
     const ranges = this.ranges();
+    return { ranges, values: this.valuesOf(ranges) };
+  }
+
+  /**
+   * Takes the carried pixels within `ranges` out of the carry: ascending file
+   * ranges and their pixels in range order. Call once the reads have settled.
+   */
+  take(ranges: Uint32Array): { ranges: Uint32Array; values: Float32Array } {
+    const within = intersectPixelRanges(this.ranges(), ranges);
+    const values = this.valuesOf(within);
+    this.drop(within);
+    return { ranges: within, values };
+  }
+
+  /** The carried pixels of `ranges`, an ascending list every carry covers, in range order. */
+  private valuesOf(ranges: Uint32Array): Float32Array {
     const values = new Float32Array(pixelRangeCount(ranges) * 4);
     const starts: number[] = [];
     const offsets: number[] = [];
@@ -117,10 +133,11 @@ export class CarriedPaint {
     };
     for (const carry of this.carries) {
       const booked = bookedRuns(carry.ranges);
+      const live = intersectPixelRanges(carry.live, ranges);
       let k = 0;
-      for (let i = 0; i + 1 < carry.live.length; i += 2) {
-        const end = carry.live[i] + carry.live[i + 1];
-        let pixel = carry.live[i];
+      for (let i = 0; i + 1 < live.length; i += 2) {
+        const end = live[i] + live[i + 1];
+        let pixel = live[i];
         while (pixel < end) {
           while (k < booked.length && booked[k].end <= pixel) k++;
           const run = booked[k];
@@ -132,7 +149,7 @@ export class CarriedPaint {
         }
       }
     }
-    return { ranges, values };
+    return values;
   }
 
   /** Takes the ranges' pixels out of every carry, and lets go of carries left empty. */
