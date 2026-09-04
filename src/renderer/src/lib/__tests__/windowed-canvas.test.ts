@@ -19,7 +19,6 @@ import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTe
 import { WindowedCanvas } from "../windowed-canvas";
 import { packedFold, padToFold } from "../constants";
 import { metadataTextureRows } from "../band-layout";
-import { destroyHistoryManager, getHistoryManager } from "../history-manager";
 import type { SourceNeed } from "../source-window";
 
 const SAMPLE_RATE = 8000;
@@ -421,10 +420,9 @@ describe("a canvas that holds a window of the file", () => {
     expect(canvas.holdsFrames(view!.startFrame, view!.endFrame)).toBe(true);
   });
 
-  it("a source with revision from the manager and no renderer serves a stroke's source window", async () => {
+  it("a source with no renderer serves a stroke's source window and re-reads when its revision moves", async () => {
     const sourceFileId = "source-file";
-    const sourceMgr = getHistoryManager(sourceFileId);
-    disposers.push(() => destroyHistoryManager(sourceFileId));
+    let sourceRevision = 0;
 
     const sourceData = createConstantQMockSpectrogramData({
       durationSeconds: DURATION_SECONDS,
@@ -458,7 +456,7 @@ describe("a canvas that holds a window of the file", () => {
           spectrogram: sourceData,
           readCurrent: async (ranges) => gatherPixelRanges(sourceData.packedData, ranges),
           readRoot: async (ranges) => gatherPixelRanges(sourceData.packedData, ranges),
-          revision: () => sourceMgr.revision,
+          revision: () => sourceRevision,
         };
       },
       windowBlocks: 2,
@@ -468,8 +466,6 @@ describe("a canvas that holds a window of the file", () => {
     disposers.push(() => renderer?.dispose());
     disposers.push(() => canvas.dispose());
     canvas.initialize(null);
-
-    expect(sourceMgr.revision).toBe(0);
 
     const need: SourceNeed = {
       fileId: sourceFileId,
@@ -519,8 +515,7 @@ describe("a canvas that holds a window of the file", () => {
     const windowTextures = canvas.aimSource(need);
     expect(windowTextures).not.toBeNull();
 
-    sourceMgr.bumpRevision();
-    expect(sourceMgr.revision).toBe(1);
+    sourceRevision++;
 
     expect(canvas.aimSource(need)).toBeNull();
 

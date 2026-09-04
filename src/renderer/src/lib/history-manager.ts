@@ -617,11 +617,6 @@ export class HistoryManager {
     return this.revisionCounter;
   }
 
-  /** Advances the revision counter so another file's window re-reads. */
-  bumpRevision(): void {
-    this.revisionCounter++;
-  }
-
   /** True when the current node has its audio cached on disk. */
   isCurrentAudioCached(): boolean {
     if (!this.manifest) return false;

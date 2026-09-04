@@ -191,8 +191,6 @@ export interface FileRendererHandle {
   } | null;
   /** The span the canvas textures lay out, or null before the renderer exists. */
   getCanvasView: () => CanvasView | null;
-  /** Changes whenever the committed state moves, so another file's source window re-reads. */
-  getStateRevision: () => number;
   /**
    * Why the brush cannot paint on a canvas holding a window of the file, in the
    * words the user reads. Null when the stroke can paint.
@@ -635,6 +633,7 @@ const FileRendererInner = memo(
         setInverseMapTex(null);
         setMetadataTex(null);
       };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [createTextures, installTextures, disposeLiveTextures]);
 
     // Request a frame once the textures are actually ready. With frameloop="demand"
@@ -1025,13 +1024,11 @@ const FileRendererInner = memo(
         isParkedRef.current = false;
         let cancelled = false;
         void serializeFileTask(fileId, async () => {
-          if (cancelled) return;
-          if (openFiles[fileId]) {
-            openFiles[fileId].parked = false;
-          }
-          const historyManager = getHistoryManager(fileId);
           const file = openFiles[fileId];
-          const specData = file?.spectrogramData ?? spectrogramData;
+          if (cancelled || !file?.parked) return;
+          file.parked = false;
+          const historyManager = getHistoryManager(fileId);
+          const specData = file.spectrogramData ?? spectrogramData;
           if (!specData) return;
 
           const { metadata, numBands, numFrames, sampleRate } = specData;
@@ -1060,7 +1057,7 @@ const FileRendererInner = memo(
           snapshotStaleRef.current = true;
           scheduleSnapshotRefresh();
 
-          await historyManager.restoreCurrentAudio();
+          if (historyHookedRef.current && !file.audioBuffer) await historyManager.restoreCurrentAudio();
         });
         return () => {
           cancelled = true;
@@ -1913,8 +1910,6 @@ const FileRendererInner = memo(
     /** The span those textures lay out. */
     const getCanvasView = (): CanvasView | null => strokeRendererRef.current?.committedSource().view ?? null;
 
-    const getStateRevision = (): number => getHistoryManager(fileId).revision;
-
     /**
      * Restores the spectrogram to its original, unmodified state.
      */
@@ -2066,7 +2061,6 @@ const FileRendererInner = memo(
       patchFBODataCompact,
       getTextures,
       getCanvasView,
-      getStateRevision,
       strokeRefusal,
       restoreOriginal,
       clearPreview,

@@ -3819,6 +3819,20 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       if (state.isPlaying && state.activeFileId === fileId) {
         state.stopAudio();
       }
+    } else {
+      // Restoring a parked file is an admission, like opening it.
+      const file = openFiles[fileId];
+      if (file?.parked && file.spectrogramData) {
+        const allowed = remainingCoefficientBudget(openFileTexelCounts(fileId));
+        if (allowed !== undefined && file.spectrogramData.texels > allowed) {
+          notifications.show({
+            title: "Not enough graphics memory",
+            message: "Close another file to free graphics memory, then restore this one.",
+            color: "red",
+          });
+          return;
+        }
+      }
     }
     set(
       produce((state: State) => {
