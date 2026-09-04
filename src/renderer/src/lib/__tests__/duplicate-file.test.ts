@@ -181,7 +181,9 @@ function makeStore() {
     removeFileFromGroup: vi.fn(),
     fileGroups: {},
     fileGroupOfFile: {},
-    setActiveFileId: vi.fn(async () => {}),
+    setActiveFileId: vi.fn(async (activeFileId: string | null) => {
+      set({ activeFileId });
+    }),
   } as unknown as State;
 
   return { get, files, set };

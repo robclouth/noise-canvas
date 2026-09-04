@@ -606,10 +606,15 @@ async function currentStateRanges(file: OpenFile): Promise<(ranges: Uint32Array)
   const manager = getHistoryManager(file.id);
   await manager.awaitPackedReaders();
   if ((await manager.currentRanges(new Uint32Array())) !== null) {
+    let fallback: Float32Array | null = null;
     return async (ranges) => {
+      if (fallback) return gatherPixelRanges(fallback, ranges);
       const values = await manager.currentRanges(ranges);
-      if (!values) throw new Error("the file's painted state moved while it was being read");
-      return values;
+      if (values) return values;
+      console.warn("Block store unreadable, falling back to full painted state");
+      fallback = (await readCurrentPackedData(file)) ?? null;
+      if (!fallback) throw new Error("could not read the file's painted state");
+      return gatherPixelRanges(fallback, ranges);
     };
   }
   const whole = await readCurrentPackedData(file);
@@ -652,7 +657,9 @@ async function copyStateIntoBlocks(
   spec: SpectrogramData,
 ): Promise<Float32Array | undefined> {
   const read = await currentStateRanges(from);
-  return await seedFileBlocks(toFileId, spec, (_grid, _index, ranges) => read(ranges));
+  return await serializeFileTask(from.id, () =>
+    seedFileBlocks(toFileId, spec, (_grid, _index, ranges) => read(ranges)),
+  );
 }
 
 /**
@@ -665,15 +672,18 @@ async function mergeStatesIntoBlocks(
   spec: SpectrogramData,
 ): Promise<Float32Array | undefined> {
   const readers = await Promise.all(files.map((file) => currentStateRanges(file)));
-  return await seedFileBlocks(toFileId, spec, async (grid, index, ranges) => {
-    const parts: Float32Array[] = [];
-    for (const read of readers) parts.push(await read(ranges));
-    const { merged } = await host.analysis.mergeSpectrograms(parts, {
-      ...blockBandLayout(grid, index),
-      numChannels: spec.numChannels,
+  const sortedIds = [...new Set(files.map((file) => file.id))].sort();
+  const runSeed = (): Promise<Float32Array | undefined> =>
+    seedFileBlocks(toFileId, spec, async (grid, index, ranges) => {
+      const parts: Float32Array[] = [];
+      for (const read of readers) parts.push(await read(ranges));
+      const { merged } = await host.analysis.mergeSpectrograms(parts, {
+        ...blockBandLayout(grid, index),
+        numChannels: spec.numChannels,
+      });
+      return merged;
     });
-    return merged;
-  });
+  return await sortedIds.reduceRight((next, fileId) => () => serializeFileTask(fileId, next), runSeed)();
 }
 
 /**
@@ -1633,24 +1643,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!originalFile || !originalSpec) return;
 
     const newFileId = generateFileId();
-    let packedData: Float32Array | undefined;
-    try {
-      packedData = await copyStateIntoBlocks(originalFile, newFileId, originalSpec);
-    } catch (error) {
-      console.error("Failed to duplicate file: could not read the painted state", error);
-      await destroyBlockStore(newFileId);
-      return;
-    }
-
     const newFilePath = makeManagedFilePath(newFileId);
     const displayName = `${stripExtensionForLabel(originalFile.displayName)} copy`;
 
-    const newFile: OpenFile = {
+    openFiles[newFileId] = {
       id: newFileId,
       filePath: newFilePath,
       displayName,
       unprojectedPaint: originalFile.unprojectedPaint,
-      spectrogramData: await deriveSpectrogramData(originalSpec, packedData),
       onsets: originalFile.onsets?.slice(),
       onsetReference: originalFile.onsetReference
         ? {
@@ -1660,14 +1660,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         : undefined,
     };
 
-    openFiles[newFileId] = newFile;
-
     const sourceBpm = get().filepathsBpm[originalFile.filePath];
 
     set(
       produce((state: State) => {
         state.openFileIds.push(newFileId);
-        state.activeFileId = newFileId;
         state.filesBandsPerOctave[newFileId] = state.filesBandsPerOctave[fileId];
         state.filesZoom[newFileId] = state.filesZoom[fileId];
         state.filesOffset[newFileId] = state.filesOffset[fileId];
@@ -1680,8 +1677,29 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         if (sourceBpm !== undefined) {
           state.filepathsBpm[newFilePath] = sourceBpm;
         }
+        state.filesLoading[newFileId] = "Duplicating...";
       }),
     );
+
+    try {
+      const packedData = await copyStateIntoBlocks(originalFile, newFileId, originalSpec);
+      updateOpenFile(newFileId, {
+        spectrogramData: await deriveSpectrogramData(originalSpec, packedData),
+      });
+    } catch (error) {
+      console.error("Failed to duplicate file: could not read the painted state", error);
+      notifications.show({
+        title: "Duplicate failed",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+      await destroyBlockStore(newFileId);
+      discardFiles(set, [newFileId]);
+      return;
+    }
+
+    clearLoading(set, [newFileId]);
+    await get().setActiveFileId(newFileId);
   },
   hpssFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
