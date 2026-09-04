@@ -86,6 +86,30 @@ export function blockPixelRanges(grid: BlockGrid, index: number): PixelRangeList
   return { ranges, count };
 }
 
+/**
+ * One block's own packed layout: each band's run of the block, laid out back to
+ * back in band order — the order `blockPixelRanges` gathers them in. A pass
+ * over one block reads this where a pass over the file reads the file's.
+ */
+export function blockBandLayout(
+  grid: BlockGrid,
+  index: number,
+): { numBands: number; bandOffsets: Uint32Array; bandLengths: Uint32Array } {
+  const { layout } = grid;
+  const bandOffsets = new Uint32Array(layout.numBands);
+  const bandLengths = new Uint32Array(layout.numBands);
+  let at = 0;
+  for (let band = 0; band < layout.numBands; band++) {
+    const bins = grid.binsPerBlock[band];
+    const first = index * bins;
+    const length = layout.metadata[band * 4 + 1];
+    bandOffsets[band] = at;
+    bandLengths[band] = first >= length ? 0 : Math.min(bins, length - first);
+    at += bandLengths[band];
+  }
+  return { numBands: layout.numBands, bandOffsets, bandLengths };
+}
+
 /** Packed texels one block holds. */
 export function blockTexels(grid: BlockGrid, index: number): number {
   const list = blockPixelRanges(grid, index);

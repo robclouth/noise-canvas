@@ -74,7 +74,8 @@ export async function scanOnsetChunk(
  *
  * Two rounds, because the silence gate is a share of the loudest moment of the
  * detection function anywhere in the file. The first round only reports that
- * moment; the second judges every chunk against it.
+ * moment; the second judges every chunk against it. A caller with no band
+ * maxima to hand takes a round before both, since whitening reads them.
  */
 export async function scanOnsets(
   detect: DetectRegional,
@@ -85,18 +86,30 @@ export async function scanOnsets(
   chunkSeconds = ONSET_CHUNK_SECONDS,
 ): Promise<OnsetDetection> {
   const spans = chunkSpans(layout.numFrames, Math.max(1, Math.round(chunkSeconds * sampleRate)));
-  const chunk = (start: number, end: number, gate: number, gateOnly: boolean) =>
-    scanOnsetChunk(detect, read, layout, sampleRate, bandMax, gate, start, end, gateOnly);
+  const chunk = (start: number, end: number, maxima: Float32Array, gate: number, gateOnly: boolean) =>
+    scanOnsetChunk(detect, read, layout, sampleRate, maxima, gate, start, end, gateOnly);
+
+  // A pass handed no maxima reports the ones its own span holds, so the file's
+  // are the largest each band reaches over the chunks.
+  let maxima = bandMax;
+  if (maxima.length < layout.numBands) {
+    maxima = new Float32Array(layout.numBands);
+    const none = new Float32Array(0);
+    for (const [startFrame, endFrame] of spans) {
+      const found = (await chunk(startFrame, endFrame, none, 0, true)).bandMax;
+      for (let b = 0; b < maxima.length; b++) maxima[b] = Math.max(maxima[b], found[b]);
+    }
+  }
 
   let gate = 0;
   for (const [startFrame, endFrame] of spans) {
-    gate = Math.max(gate, (await chunk(startFrame, endFrame, 0, true)).odfMax);
+    gate = Math.max(gate, (await chunk(startFrame, endFrame, maxima, 0, true)).odfMax);
   }
 
   const parts: Float32Array[] = [];
   let total = 0;
   for (const [startFrame, endFrame] of spans) {
-    const part = (await chunk(startFrame, endFrame, gate, false)).onsets;
+    const part = (await chunk(startFrame, endFrame, maxima, gate, false)).onsets;
     parts.push(part);
     total += part.length;
   }
@@ -106,5 +119,5 @@ export async function scanOnsets(
     onsets.set(part, at);
     at += part.length;
   }
-  return { onsets, odfMax: gate, bandMax };
+  return { onsets, odfMax: gate, bandMax: maxima };
 }

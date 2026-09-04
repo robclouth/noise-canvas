@@ -103,6 +103,63 @@ async function analysed(seconds: number, times: Hit[], params = COARSE) {
   return { result, layout, whole, read };
 }
 
+/** Four loud hits, then thirty-two seconds of near-silent noise. */
+async function analysedTail() {
+  const seconds = 40;
+  const data = hits(8, [
+    [0.5, 0.95],
+    [2.1, 0.9],
+    [4.4, 0.8],
+    [6.7, 0.85],
+  ]);
+  const channel = new Float32Array(Math.round(seconds * SAMPLE_RATE));
+  channel.set(data);
+  let noise = 12345;
+  for (let i = data.length; i < channel.length; i++) {
+    noise = (noise * 1103515245 + 12345) & 0x7fffffff;
+    channel[i] = (noise / 0x7fffffff - 0.5) * 2e-4;
+  }
+  const result = await addon.analyze([channel], 1, SAMPLE_RATE, COARSE);
+  const layout = layoutOf(result);
+  const whole = await addon.detectOnsets(result.data, layout, SAMPLE_RATE);
+  const read = async (ranges: Uint32Array) => gatherPixelRanges(result.data, ranges);
+  return { result, layout, whole, read };
+}
+
+/**
+ * Loud low hits at the head, then a pair of bright ones far later over noise:
+ * the top bands' loudest moment is nowhere near the loudest chunk, so a chunk
+ * judging those bands by its own span whitens its noise up to full.
+ */
+async function analysedLateBright() {
+  const seconds = 24;
+  const channel = new Float32Array(Math.round(seconds * SAMPLE_RATE));
+  let noise = 987654321;
+  for (let i = 0; i < channel.length; i++) {
+    noise = (noise * 1103515245 + 12345) & 0x7fffffff;
+    channel[i] = (noise / 0x7fffffff - 0.5) * 4e-4;
+  }
+  for (const at of [0.4, 1.3, 2.2]) {
+    const start = Math.round(at * SAMPLE_RATE);
+    for (let i = 0; i < SAMPLE_RATE * 0.3 && start + i < channel.length; i++) {
+      const t = i / SAMPLE_RATE;
+      channel[start + i] += 0.95 * Math.exp(-14 * t) * Math.sin(2 * Math.PI * 90 * t);
+    }
+  }
+  for (const at of [15.4, 18.9]) {
+    const start = Math.round(at * SAMPLE_RATE);
+    for (let i = 0; i < SAMPLE_RATE * 0.05 && start + i < channel.length; i++) {
+      const t = i / SAMPLE_RATE;
+      channel[start + i] += 0.6 * Math.exp(-90 * t) * Math.sin(2 * Math.PI * 9000 * t);
+    }
+  }
+  const result = await addon.analyze([channel], 1, SAMPLE_RATE, COARSE);
+  const layout = layoutOf(result);
+  const whole = await addon.detectOnsets(result.data, layout, SAMPLE_RATE);
+  const read = async (ranges: Uint32Array) => gatherPixelRanges(result.data, ranges);
+  return { result, layout, whole, read };
+}
+
 /** Onsets as [time, salience] pairs, for reporting a mismatch legibly. */
 function pairs(flat: Float32Array): Hit[] {
   const out: Hit[] = [];
@@ -175,30 +232,32 @@ describe("onsets found a chunk at a time", () => {
   it("keeps the file's own terms over a chunk that holds nothing", async () => {
     // The tail is near silence. Judged by what that chunk alone holds, its
     // noise is the loudest thing in it and reads as a run of events.
-    const seconds = 40;
-    const data = hits(8, [
-      [0.5, 0.95],
-      [2.1, 0.9],
-      [4.4, 0.8],
-      [6.7, 0.85],
-    ]);
-    const channel = new Float32Array(Math.round(seconds * SAMPLE_RATE));
-    channel.set(data);
-    let noise = 12345;
-    for (let i = data.length; i < channel.length; i++) {
-      noise = (noise * 1103515245 + 12345) & 0x7fffffff;
-      channel[i] = (noise / 0x7fffffff - 0.5) * 2e-4;
-    }
-    const result = await addon.analyze([channel], 1, SAMPLE_RATE, COARSE);
-    const layout = layoutOf(result);
-    const whole = await addon.detectOnsets(result.data, layout, SAMPLE_RATE);
-    const read = async (ranges: Uint32Array) => gatherPixelRanges(result.data, ranges);
+    const { layout, whole, read } = await analysedTail();
 
     const scanned = await scanOnsets(detect, read, layout, SAMPLE_RATE, whole.bandMax, 4);
     // Detection is permissive by design, so the noise gives events of its own;
     // what matters is that a chunk reports the ones the whole file reports.
     expect(pairs(whole.onsets).filter(([at]) => at > 12).length).toBeGreaterThan(20);
     expectSameEvents(scanned.onsets, whole.onsets);
+  });
+
+  it("works the band maxima out for itself when it is given none", async () => {
+    // Each band's loudest moment is the file's, and the whitening reads it. A
+    // caller with none to hand — a file whose reference was lost — must still
+    // arrive at the events the whole-file pass reports, not at the ones each
+    // chunk would report judged against itself. The near-silent tail is where
+    // those two answers part, and so is a file whose top bands peak far from
+    // its loudest chunk.
+    for (const material of [await analysed(12, HITS), await analysedTail(), await analysedLateBright()]) {
+      const { layout, whole, read } = material;
+      const scanned = await scanOnsets(detect, read, layout, SAMPLE_RATE, new Float32Array(0), 3);
+
+      expect(scanned.bandMax.length).toBe(layout.numBands);
+      for (let b = 0; b < layout.numBands; b++) {
+        expect(scanned.bandMax[b], `band ${b}`).toBeCloseTo(whole.bandMax[b], 5);
+      }
+      expectSameEvents(scanned.onsets, whole.onsets);
+    }
   });
 
   it("never reads the whole run at once", async () => {

@@ -20,8 +20,8 @@ import {
   usedBudgetFraction,
   type OpenFileTexels,
 } from "../lib/gpu-budget";
-import { blockGrid, blockTexels, frameRangeOfBlock } from "../lib/block-grid";
-import { openBlockStore } from "../lib/block-stores";
+import { blockBandLayout, blockGrid, blockTexels, frameRangeOfBlock, type BlockGrid } from "../lib/block-grid";
+import { destroyBlockStore, openBlockStore } from "../lib/block-stores";
 import { needsCanvasWindow } from "../lib/canvas-window";
 import { viewCoversFile } from "../lib/canvas-view";
 import { synthesiseInChunks, type SynthesiseView } from "../../../main/lib/synthesis-chunks";
@@ -490,8 +490,9 @@ function spanReader(read: (ranges: Uint32Array) => Promise<Float32Array | null>)
 
 /**
  * The onsets a chunked synthesis owes, read from the store rather than from a
- * run of the file. Null when the pass has no reference to judge a span by, so
- * the caller keeps the onsets it has.
+ * run of the file. Null when the host answers whole passes only. A pass with
+ * no reference to judge a span by covers the file and works one out, which is
+ * what a whole-file pass would have done.
  */
 async function scanOnsetsFromSpans(
   read: (ranges: Uint32Array) => Promise<Float32Array | null>,
@@ -501,13 +502,14 @@ async function scanOnsetsFromSpans(
   params: AnalysisParams,
 ): Promise<{ onsets: PackedOnsets; onsetOdfMax: number; onsetBandMax: Float32Array } | null> {
   const scan = host.analysis.scanFileOnsets;
+  if (!scan) return null;
   const reference = file.onsetReference;
-  if (!scan || !reference) return null;
   const region =
-    params.onsetStartSec !== undefined && params.onsetEndSec !== undefined
+    reference && params.onsetStartSec !== undefined && params.onsetEndSec !== undefined
       ? { startSec: params.onsetStartSec, endSec: params.onsetEndSec, odfReference: reference.odfMax }
       : undefined;
-  const found = await scan(spanReader(read), layout, sampleRate, reference.bandMax, region);
+  const bandMax = reference?.bandMax ?? new Float32Array(0);
+  const found = await scan(spanReader(read), layout, sampleRate, bandMax, region);
   return { onsets: found.onsets, onsetOdfMax: found.odfMax, onsetBandMax: found.bandMax };
 }
 
@@ -593,6 +595,85 @@ async function analyseIntoBlocks(
     onsets: detected.onsets,
     onsetReference: { odfMax: detected.odfMax, bandMax: detected.bandMax },
   };
+}
+
+/**
+ * A file's current painted state, by pixel range. The block store serves it
+ * where it holds that state; otherwise one run of the whole file is read and
+ * gathered from, which is what a host with no block state has to do.
+ */
+async function currentStateRanges(file: OpenFile): Promise<(ranges: Uint32Array) => Promise<Float32Array>> {
+  const manager = getHistoryManager(file.id);
+  await manager.awaitPackedReaders();
+  if ((await manager.currentRanges(new Uint32Array())) !== null) {
+    return async (ranges) => {
+      const values = await manager.currentRanges(ranges);
+      if (!values) throw new Error("the file's painted state moved while it was being read");
+      return values;
+    };
+  }
+  const whole = await readCurrentPackedData(file);
+  if (!whole) throw new Error("could not read the file's painted state");
+  return async (ranges) => gatherPixelRanges(whole, ranges);
+}
+
+/**
+ * Seeds `toFileId`'s block store a block at a time, so no file's run is ever
+ * held. `blockOf` turns the block's pixel ranges into the values to write —
+ * one file's state, or several files summed. Returns the whole run only when
+ * the canvas can hold it: everything downstream of a short file works on one.
+ */
+async function seedFileBlocks(
+  toFileId: string,
+  spec: SpectrogramData,
+  blockOf: (grid: BlockGrid, index: number, ranges: Uint32Array) => Promise<Float32Array>,
+): Promise<Float32Array | undefined> {
+  const layout = { numBands: spec.numBands, metadata: spec.metadata };
+  const grid = blockGrid(layout, spec.numFrames, spec.sampleRate);
+  const store = await openBlockStore(toFileId, layout, {
+    numFrames: spec.numFrames,
+    sampleRate: spec.sampleRate,
+    texelCount: spec.texels,
+  });
+  const whole = needsCanvasWindow(grid, canvasWindowBlocks(grid)) ? null : new Float32Array(spec.texels * 4);
+  await store.seedFrom(async (index) => {
+    const ranges = store.blockRanges(index);
+    const values = await blockOf(grid, index, ranges);
+    if (whole) scatterCompactPixelRanges(whole, values, ranges);
+    return values;
+  });
+  return whole ?? undefined;
+}
+
+/** Seeds `toFileId`'s store from another file's current painted state. */
+async function copyStateIntoBlocks(
+  from: OpenFile,
+  toFileId: string,
+  spec: SpectrogramData,
+): Promise<Float32Array | undefined> {
+  const read = await currentStateRanges(from);
+  return await seedFileBlocks(toFileId, spec, (_grid, _index, ranges) => read(ranges));
+}
+
+/**
+ * Seeds `toFileId`'s store with the files' coefficients summed. The sum is
+ * per texel, so a block of the sum is the sum of that block.
+ */
+async function mergeStatesIntoBlocks(
+  files: OpenFile[],
+  toFileId: string,
+  spec: SpectrogramData,
+): Promise<Float32Array | undefined> {
+  const readers = await Promise.all(files.map((file) => currentStateRanges(file)));
+  return await seedFileBlocks(toFileId, spec, async (grid, index, ranges) => {
+    const parts: Float32Array[] = [];
+    for (const read of readers) parts.push(await read(ranges));
+    const { merged } = await host.analysis.mergeSpectrograms(parts, {
+      ...blockBandLayout(grid, index),
+      numChannels: spec.numChannels,
+    });
+    return merged;
+  });
 }
 
 /**
@@ -889,7 +970,10 @@ export function getFileIdByPath(filePath: string): string | undefined {
  * child never writes through to its source; the file-sized inverse map is
  * shared, because nothing writes it — a re-analysis builds a fresh one.
  */
-export async function deriveSpectrogramData(base: SpectrogramData, packedData: Float32Array): Promise<SpectrogramData> {
+export async function deriveSpectrogramData(
+  base: SpectrogramData,
+  packedData?: Float32Array,
+): Promise<SpectrogramData> {
   const inverseMap =
     base.inverseMap ??
     (await wholeFileInverseMap(base, base.numFrames, base.sampleRate, base.synthesisMetadata, base.texels));
@@ -929,6 +1013,25 @@ function synthesisLayout(data: SpectrogramData) {
   };
 }
 
+/**
+ * A file's sound as its canvas currently holds it, synthesised from the store
+ * a chunk of coefficients at a time so the run of the whole file is never
+ * held. A host that answers whole passes only takes the run.
+ */
+async function currentFileAudio(file: OpenFile): Promise<Float32Array[] | null> {
+  const spec = file.spectrogramData;
+  if (!spec) return null;
+  const params: AnalysisParams = { bandsPerOctave: spec.bandsPerOctave, minFreq: spec.minFreq };
+  const layout = synthesisLayout(spec);
+  if (host.analysis.openAnalysisStream) {
+    const read = await currentStateRanges(file);
+    return (await synthesiseFromSpans(read, layout, spec.sampleRate, params)).channels;
+  }
+  const whole = await readCurrentPackedData(file);
+  if (!whole) return null;
+  return (await host.analysis.synthesize(whole, layout, spec.sampleRate, params, false)).channels;
+}
+
 /** A file's audio as it currently sounds, synthesising it when it has no buffer. */
 async function currentFileChannels(fileId: string): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
   const snapshot = await snapshotFileAudio(fileId);
@@ -937,17 +1040,8 @@ async function currentFileChannels(fileId: string): Promise<{ channels: Float32A
   const file = openFiles[fileId];
   const spectrogramData = file?.spectrogramData;
   if (!file || !spectrogramData) return null;
-  const packedData = await readCurrentPackedData(file);
-  if (!packedData) return null;
-
-  const result = await host.analysis.synthesize(
-    packedData,
-    synthesisLayout(spectrogramData),
-    spectrogramData.sampleRate,
-    { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq },
-    false,
-  );
-  return { channels: result.channels, sampleRate: spectrogramData.sampleRate };
+  const channels = await currentFileAudio(file);
+  return channels ? { channels, sampleRate: spectrogramData.sampleRate } : null;
 }
 
 /**
@@ -1021,9 +1115,7 @@ export async function rebuildFileFromCurrentAudio(
     if (!file?.spectrogramData) return;
     const buffer = file.audioBuffer;
     if (!buffer) {
-      const packedData = await readCurrentPackedData(file);
-      if (!packedData) throw new Error("Could not read the current spectrogram state.");
-      await rebuildFileFromAudioNow(set, fileId, packedData, transform, snapshot, onVisible);
+      await rebuildFileFromAudioNow(set, fileId, transform, snapshot, onVisible);
       return;
     }
     const channels: Float32Array[] = [];
@@ -1037,7 +1129,6 @@ export async function rebuildFileFromCurrentAudio(
 async function rebuildFileFromAudioNow(
   set: ZustandSet,
   fileId: string,
-  packedData: Float32Array,
   transform: (channels: Float32Array[]) => Float32Array[],
   snapshot: { kind: "resize" | "reanalyze"; label: string },
   onVisible?: () => void,
@@ -1045,24 +1136,11 @@ async function rebuildFileFromAudioNow(
   const file = openFiles[fileId];
   if (!file?.spectrogramData) return;
 
-  const { spectrogramData } = file;
-  const analysisParams: AnalysisParams = {
-    bandsPerOctave: spectrogramData.bandsPerOctave,
-    minFreq: spectrogramData.minFreq,
-    maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
-  };
-
-  const synthResult = await host.analysis.synthesize(
-    packedData,
-    synthesisLayout(spectrogramData),
-    spectrogramData.sampleRate,
-    analysisParams,
-    false,
-  );
-
+  const channels = await currentFileAudio(file);
+  if (!channels) throw new Error("Could not read the current spectrogram state.");
   if (!openFiles[fileId]) return;
 
-  await rebuildFileWithChannels(set, fileId, transform(synthResult.channels), snapshot, onVisible);
+  await rebuildFileWithChannels(set, fileId, transform(channels), snapshot, onVisible);
 }
 
 /**
@@ -1551,15 +1629,19 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   duplicateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
-    if (!originalFile?.spectrogramData) return;
+    const originalSpec = originalFile?.spectrogramData;
+    if (!originalFile || !originalSpec) return;
 
-    const fboData = await readCurrentPackedData(originalFile);
-    if (!fboData) {
-      console.error("Failed to duplicate file: could not read the painted state");
+    const newFileId = generateFileId();
+    let packedData: Float32Array | undefined;
+    try {
+      packedData = await copyStateIntoBlocks(originalFile, newFileId, originalSpec);
+    } catch (error) {
+      console.error("Failed to duplicate file: could not read the painted state", error);
+      await destroyBlockStore(newFileId);
       return;
     }
 
-    const newFileId = generateFileId();
     const newFilePath = makeManagedFilePath(newFileId);
     const displayName = `${stripExtensionForLabel(originalFile.displayName)} copy`;
 
@@ -1568,7 +1650,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       filePath: newFilePath,
       displayName,
       unprojectedPaint: originalFile.unprojectedPaint,
-      spectrogramData: await deriveSpectrogramData(originalFile.spectrogramData, fboData),
+      spectrogramData: await deriveSpectrogramData(originalSpec, packedData),
     };
 
     openFiles[newFileId] = newFile;
@@ -1780,11 +1862,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     try {
       if (sameGrid) {
-        const packed = await Promise.all(files.map((f) => readCurrentPackedData(f)));
-        const parts = packed.filter((p): p is Float32Array => Boolean(p));
-        if (parts.length !== files.length) throw new Error("Could not read the current state of every file");
-
-        const { merged } = await host.analysis.mergeSpectrograms(parts, bandLayout(base));
+        const merged = await mergeStatesIntoBlocks(files, newFileId, base);
 
         updateOpenFile(newFileId, {
           spectrogramData: {
@@ -1908,26 +1986,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     let audioContext: AudioContext | null = null;
     try {
       // Step 1: Synthesize the current painted state via Gaborator → get audio channels
-      const fboData = await readCurrentPackedData(originalFile);
-      if (!fboData) throw new Error("Could not read current spectrogram state");
-
-      const synthesisResult = await host.analysis.synthesize(
-        fboData,
-        {
-          numFrames: spectrogramData.numFrames,
-          numChannels: spectrogramData.numChannels,
-          numBands: spectrogramData.numBands,
-          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
-          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
-          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
-        },
-        spectrogramData.sampleRate,
-        { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq },
-        false, // don't limit — preserve relative levels for separation
-      );
+      const channels = await currentFileAudio(originalFile);
+      if (!channels) throw new Error("Could not read current spectrogram state");
 
       // Step 2: AI-separate the synthesized audio into stems
-      const stems = await host.analysis.aiSeparate(synthesisResult.channels, spectrogramData.sampleRate);
+      const stems = await host.analysis.aiSeparate(channels, spectrogramData.sampleRate);
 
       // Step 3: Re-analyse each stem with Gaborator → SpectrogramData → new file entry
       const analysisParams = { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq };
