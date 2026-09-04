@@ -1404,21 +1404,68 @@ polled every 300 ms; `peak` is the largest reading during the gesture.
   chunked synthesis takes 8.7 s where the whole-file one took 2.4 s plus 5.1 s
   to read the run out.
 
-### What still takes the whole run
-
-Each is user-initiated and transient, and each would spike by 16 bytes a texel
-on a long file:
-
-- duplicating a file, and the merge and stem paths, which derive a new
-  spectrogram from `readCurrentPackedData`;
-- a synthesis with onsets asked for and no reference to judge a span by, which
-  falls back to the whole-run path rather than guess a gate.
-
 ### Untested
 
 Every figure here is from the M4 Pro. The plan targets an 8 GB Iris 655, where
 the caches are narrower and the window smaller; the flat 441 MB charged there is
 more than that machine holds.
+
+---
+
+## Phase 6 — deriving one file from another (2026-09-04)
+
+Phase 5 left the passes over a file's own coefficients chunked, and the paths
+that derive a new file from an old one still reading whole runs: a duplicate
+read one, a merge read one per part and built the sum as a third.
+
+### What was built
+
+- **One block-wise seeder.** A new file's store takes its blocks one at a time
+  from a reader of the old files' current state. A duplicate's reader is the one
+  file it copies; a merge's sums the parts. The sum is per texel, so a block of
+  the sum is the sum of that block, and a block's own packed layout is each
+  band's run of it laid back to back — `blockBandLayout`, pinned against a
+  whole-run merge texel for texel in `block-merge.test.ts`.
+- **One reader of a file's sound.** Everything that wanted the audio a canvas
+  currently holds — the mixdown a merge falls back to when the grids differ, a
+  rebuild with no audio buffer to start from, the AI stem split — synthesises
+  from the store a chunk at a time through it.
+- **Onsets with nothing to go on.** A chunk asked for band maxima reports what
+  its own span holds, so a round over the file arrives at the file's. A pass
+  that had no reference used to leave the onsets it found alone.
+
+### Measured (M4 Pro, 90 s mono, an eight-block window)
+
+| step      | before  | after   |
+| --------- | ------- | ------- |
+| duplicate | 1331 MB | 1120 MB |
+| merge     | 2230 MB | 1379 MB |
+
+### What still takes the whole run
+
+- HPSS and NMF, which are addon passes over the whole coefficient set. HPSS
+  would chunk with a margin; NMF learns its basis over the file and cannot.
+- The splice re-analysis, which takes the old coefficients as one array.
+
+### The commit, measured
+
+The commit was thought to cost several times what it did before the window,
+from decoding each block twice. It does not. With the same stroke — twenty
+seconds of painting, not the same fraction of the view, which is what made the
+earlier reading — the store read is a tenth of the commit and the native pass
+is the rest:
+
+| build      | file  | commit | native | store read |
+| ---------- | ----- | ------ | ------ | ---------- |
+| whole file | 90 s  | 528 ms | 435 ms | 91 ms      |
+| 8 blocks   | 90 s  | 425 ms | 388 ms | 33 ms      |
+| 8 blocks   | 300 s | 547 ms | 482 ms | 60 ms      |
+
+The windowed commit is faster than the whole-file one, and the view it reads is
+the same size whatever the file's length. What is left of the length-dependence
+— 122 ms between 90 s and 300 s — is the audio: the commit copies the whole
+buffer, splices the window into it, scans every sample for the peak and hands
+the whole thing back, and the caller rebuilds the playback buffer from it.
 
 ---
 

@@ -166,8 +166,20 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     read the store back a chunk at a time, each through a view. Both need what
     only the whole file can give — every band's loudest moment, and the loudest
     moment of the detection function — so the analysis carries the first and a
-    round of its own finds the second. A host that answers whole passes only
-    keeps the whole-run path.
+    round of its own finds the second, and a pass handed neither takes a round
+    for each. A host that answers whole passes only keeps the whole-run path.
+
+    Deriving a file from another is the same rule again. A duplicate seeds its
+    store from the old file's a block at a time, and a merge sums the parts a
+    block at a time; a block's own packed layout is `blockBandLayout`. Only the
+    passes that cannot be cut into blocks still read a whole run: HPSS and NMF,
+    which factorise over the file, and the splice re-analysis, which takes the
+    old coefficients as one array.
+
+    A store cannot answer until the root snapshot naming its seed is written,
+    which is long after the canvas is built. So the picture the owner asked for
+    at construction comes back empty and has to be asked for again once the
+    root is there — `WindowedCanvas.storeReady`.
 
 13. **The band layout is doubles, and the metadata texture is a conversion of
     it.** A float counts integers exactly only to 2^24, and a ten-minute file
