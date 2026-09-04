@@ -2,57 +2,60 @@ import type { Texture } from "three";
 
 import { blockPixelRanges, type BlockGrid } from "./block-grid";
 import { viewRangesLeaving, viewRangesToFile, viewUvToFileUv, type CanvasView } from "./canvas-view";
-import { intersectPixelRanges } from "./pixel-ranges";
+import { intersectPixelRanges, mergePixelRanges, pixelRangeCount, subtractPixelRanges } from "./pixel-ranges";
 
 /** The unpacked-UV box of a painted region. */
 export type PaintBox = { timeMin: number; timeMax: number; pitchMin: number; pitchMax: number };
 
+/** One carry: the file ranges it was booked with, the pixels of them still carried, and their values in booking order. */
+type Carry = { ranges: Uint32Array; live: Uint32Array; values: Float32Array };
+
+const NO_RANGES = new Uint32Array(0);
+
 /**
  * Texels a stroke painted on blocks that then left the canvas window, held by
- * file pixel until the stroke commits. Each carry books its pixels straight
+ * file range until the stroke commits. Each carry books its ranges straight
  * away and fills them when the read lands, so a commit that starts before the
- * reads finish still knows which pixels it must wait for.
+ * reads finish still knows which pixels it must wait for. A range booked again
+ * leaves the earlier carry of it, so a read that lands out of order cannot
+ * overwrite a later carry.
  */
 export class CarriedPaint {
-  private readonly slotOf = new Map<number, number>();
-  private values = new Float32Array(0);
-  private used = 0;
+  private carries: Carry[] = [];
   private reads: Promise<unknown> = Promise.resolve();
   private box: PaintBox | null = null;
 
   /** Pixels carried. */
   get size(): number {
-    return this.slotOf.size;
+    let count = 0;
+    for (const carry of this.carries) count += pixelRangeCount(carry.live);
+    return count;
   }
 
   /**
    * Books the ranges' pixels and fills them from `read`, which holds exactly
-   * those pixels in range order. A pixel booked again takes a fresh slot, so a
-   * read that lands out of order cannot overwrite a later carry of it.
+   * those pixels in range order.
    */
   carry(ranges: Uint32Array, read: Promise<Float32Array>): void {
-    const slots: number[] = [];
-    for (let i = 0; i + 1 < ranges.length; i += 2) {
-      for (let pixel = ranges[i]; pixel < ranges[i] + ranges[i + 1]; pixel++) {
-        slots.push(this.claim(pixel));
-      }
-    }
+    this.forget(ranges);
+    const carry: Carry = {
+      ranges,
+      live: mergePixelRanges(ranges, NO_RANGES),
+      values: new Float32Array(pixelRangeCount(ranges) * 4),
+    };
+    this.carries.push(carry);
     this.reads = Promise.all([
       this.reads,
       read.then((values) => {
-        for (let i = 0; i < slots.length; i++) {
-          this.values.set(values.subarray(i * 4, i * 4 + 4), slots[i] * 4);
-        }
+        carry.values.set(values.subarray(0, carry.values.length));
       }),
     ]);
   }
 
   /** Forgets the ranges' pixels — the canvas holds them again. */
   drop(ranges: Uint32Array): void {
-    for (let i = 0; i + 1 < ranges.length; i += 2) {
-      for (let pixel = ranges[i]; pixel < ranges[i] + ranges[i + 1]; pixel++) this.slotOf.delete(pixel);
-    }
-    if (this.slotOf.size === 0) this.box = null;
+    this.forget(ranges);
+    if (this.carries.length === 0) this.box = null;
   }
 
   /** Widens the unpacked-UV box the carried paint covers. */
@@ -79,42 +82,80 @@ export class CarriedPaint {
 
   /** The carried pixels as an ascending [start, count, ...] file range list. */
   ranges(): Uint32Array {
-    const pixels = [...this.slotOf.keys()].sort((a, b) => a - b);
-    const out: number[] = [];
-    for (let i = 0; i < pixels.length; ) {
-      let end = i + 1;
-      while (end < pixels.length && pixels[end] === pixels[end - 1] + 1) end++;
-      out.push(pixels[i], end - i);
-      i = end;
+    let length = 0;
+    for (const carry of this.carries) length += carry.live.length;
+    const all = new Uint32Array(length);
+    let at = 0;
+    for (const carry of this.carries) {
+      all.set(carry.live, at);
+      at += carry.live.length;
     }
-    return Uint32Array.from(out);
+    return mergePixelRanges(all, NO_RANGES);
   }
 
   /** What it carries: ascending file ranges and their pixels in range order. */
   snapshot(): { ranges: Uint32Array; values: Float32Array } {
     const ranges = this.ranges();
-    const values = new Float32Array(this.slotOf.size * 4);
+    const values = new Float32Array(pixelRangeCount(ranges) * 4);
+    const starts: number[] = [];
+    const offsets: number[] = [];
     let at = 0;
     for (let i = 0; i + 1 < ranges.length; i += 2) {
-      for (let pixel = ranges[i]; pixel < ranges[i] + ranges[i + 1]; pixel++) {
-        const slot = this.slotOf.get(pixel)!;
-        values.set(this.values.subarray(slot * 4, slot * 4 + 4), at * 4);
-        at++;
+      starts.push(ranges[i]);
+      offsets.push(at);
+      at += ranges[i + 1] * 4;
+    }
+    const outOffset = (pixel: number): number => {
+      let lo = 0;
+      let hi = starts.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (starts[mid] <= pixel) lo = mid;
+        else hi = mid - 1;
+      }
+      return offsets[lo] + (pixel - starts[lo]) * 4;
+    };
+    for (const carry of this.carries) {
+      const booked = bookedRuns(carry.ranges);
+      let k = 0;
+      for (let i = 0; i + 1 < carry.live.length; i += 2) {
+        const end = carry.live[i] + carry.live[i + 1];
+        let pixel = carry.live[i];
+        while (pixel < end) {
+          while (k < booked.length && booked[k].end <= pixel) k++;
+          const run = booked[k];
+          if (!run) break;
+          const take = Math.min(end, run.end) - pixel;
+          const from = run.offset + (pixel - run.start) * 4;
+          values.set(carry.values.subarray(from, from + take * 4), outOffset(pixel));
+          pixel += take;
+        }
       }
     }
     return { ranges, values };
   }
 
-  private claim(pixel: number): number {
-    if (this.used === this.values.length >> 2) {
-      const grown = new Float32Array(Math.max(1024, this.values.length * 2));
-      grown.set(this.values);
-      this.values = grown;
+  /** Takes the ranges' pixels out of every carry, and lets go of carries left empty. */
+  private forget(ranges: Uint32Array): void {
+    const kept: Carry[] = [];
+    for (const carry of this.carries) {
+      carry.live = subtractPixelRanges(carry.live, ranges);
+      if (carry.live.length > 0) kept.push(carry);
     }
-    const slot = this.used++;
-    this.slotOf.set(pixel, slot);
-    return slot;
+    this.carries = kept;
   }
+}
+
+/** A carry's booked ranges as ascending runs with the value offset each starts at. */
+function bookedRuns(ranges: Uint32Array): { start: number; end: number; offset: number }[] {
+  const runs: { start: number; end: number; offset: number }[] = [];
+  let at = 0;
+  for (let i = 0; i + 1 < ranges.length; i += 2) {
+    runs.push({ start: ranges[i], end: ranges[i] + ranges[i + 1], offset: at });
+    at += ranges[i + 1] * 4;
+  }
+  runs.sort((a, b) => a.start - b.start);
+  return runs;
 }
 
 /** What carrying paint off the canvas needs from it. */

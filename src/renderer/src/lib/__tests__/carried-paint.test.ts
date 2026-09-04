@@ -46,6 +46,21 @@ describe("CarriedPaint", () => {
     expect([...carried.snapshot().values]).toEqual([...pixels(7, 1, 2)]);
   });
 
+  it("keeps the pixels a later carry does not cover", async () => {
+    const carried = new CarriedPaint();
+    carried.carry(Uint32Array.from([10, 6]), Promise.resolve(pixels(10, 6, 1)));
+    carried.carry(
+      Uint32Array.from([12, 2, 20, 1]),
+      Promise.resolve(Float32Array.from([...pixels(12, 2, 2), ...pixels(20, 1, 2)])),
+    );
+    await carried.settled();
+
+    const { ranges, values } = carried.snapshot();
+    expect([...ranges]).toEqual([10, 6, 20, 1]);
+    expect([...values]).toEqual([...pixels(10, 2, 1), ...pixels(12, 2, 2), ...pixels(14, 2, 1), ...pixels(20, 1, 2)]);
+    expect(carried.size).toBe(7);
+  });
+
   it("forgets dropped pixels, values and all", async () => {
     const carried = new CarriedPaint();
     carried.carry(Uint32Array.from([10, 4]), Promise.resolve(pixels(10, 4, 0)));
