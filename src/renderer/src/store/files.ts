@@ -1884,6 +1884,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         message: `${error instanceof Error ? error.message : "Unknown error"}`,
         color: "red",
       });
+      await destroyBlockStore(newFileId);
       discardFiles(set, [newFileId]);
       return;
     }
