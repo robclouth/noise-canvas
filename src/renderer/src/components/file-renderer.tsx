@@ -47,7 +47,7 @@ import {
   WebGLRenderTarget,
 } from "three";
 import { effects } from "../effects";
-import { getHistoryManager } from "@renderer/lib/history-manager";
+import { deriveSideData, getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -96,6 +96,7 @@ import {
 interface FileRendererProps {
   fileId: string;
   isLive: boolean;
+  parked: boolean;
   snapshotCanvasRef: RefObject<HTMLCanvasElement | null>;
   onLiveFrame?: () => void;
 }
@@ -257,7 +258,8 @@ export const FileRenderer = memo(
 );
 
 const FileRendererInner = memo(
-  forwardRef<FileRendererHandle, FileRendererProps>(({ fileId, isLive, snapshotCanvasRef, onLiveFrame }, ref) => {
+  forwardRef<FileRendererHandle, FileRendererProps>((props, ref) => {
+    const { fileId, isLive, parked, snapshotCanvasRef, onLiveFrame } = props;
     const spectrogramData = openFiles[fileId].spectrogramData!;
 
     // Don't subscribe to these during render - access them via refs or useFrame instead
@@ -615,6 +617,7 @@ const FileRendererInner = memo(
 
     // Effect to create and manage spectrogram textures
     useEffect(() => {
+      if (parked) return;
       installTextures(createTextures());
 
       // Reset StrokeRenderer when textures change
@@ -974,7 +977,7 @@ const FileRendererInner = memo(
               spectrogram,
               readCurrent: (ranges) => getHistoryManager(sourceId).currentRanges(ranges),
               readRoot: (ranges) => getHistoryManager(sourceId).rootRanges(ranges),
-              revision: () => source.rendererRef?.current?.getStateRevision() ?? 0,
+              revision: () => getHistoryManager(sourceId).revision,
             };
           },
         });
@@ -987,6 +990,91 @@ const FileRendererInner = memo(
       canvasRef.current = null;
     };
     disposeCanvasRef.current = disposeCanvas;
+
+    const isParkedRef = useRef(parked);
+
+    useEffect(() => {
+      if (parked) {
+        isParkedRef.current = true;
+        let cancelled = false;
+        void serializeFileTask(fileId, async () => {
+          if (cancelled) return;
+          const historyManager = getHistoryManager(fileId);
+          if (historyManager.isCurrentAudioCached()) {
+            const file = openFiles[fileId];
+            if (file) file.audioBuffer = undefined;
+          }
+          disposeLiveTextures();
+          if (strokeRendererRef.current) {
+            strokeRendererRef.current.dispose();
+            strokeRendererRef.current = null;
+          }
+          disposeCanvas();
+          setOriginalPackedDataTex(null);
+          setInverseMapTex(null);
+          setMetadataTex(null);
+          if (openFiles[fileId]) {
+            openFiles[fileId].parked = true;
+          }
+        });
+        return () => {
+          cancelled = true;
+        };
+      } else {
+        if (!isParkedRef.current) return;
+        isParkedRef.current = false;
+        let cancelled = false;
+        void serializeFileTask(fileId, async () => {
+          if (cancelled) return;
+          if (openFiles[fileId]) {
+            openFiles[fileId].parked = false;
+          }
+          const historyManager = getHistoryManager(fileId);
+          const file = openFiles[fileId];
+          const specData = file?.spectrogramData ?? spectrogramData;
+          if (!specData) return;
+
+          const { metadata, numBands, numFrames, sampleRate } = specData;
+          const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
+          const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
+
+          if (windowed) {
+            packedSeedRef.current = null;
+            inverseSeedRef.current = null;
+          } else {
+            const seed = await historyManager.currentBlockState();
+            if (cancelled) return;
+            packedSeedRef.current = seed;
+            const manifest = historyManager.getManifest();
+            const anchor = manifest ? historyManager.nearestFullAnchor(manifest.currentId) : null;
+            if (anchor) {
+              const { inverseMap } = await deriveSideData(anchor);
+              inverseSeedRef.current = inverseMap ?? null;
+            }
+          }
+
+          installTextures(createTextures());
+
+          hasDrawnDisplayRef.current = false;
+          invalidateRef.current?.();
+          snapshotStaleRef.current = true;
+          scheduleSnapshotRefresh();
+
+          await historyManager.restoreCurrentAudio();
+        });
+        return () => {
+          cancelled = true;
+        };
+      }
+    }, [
+      parked,
+      fileId,
+      spectrogramData,
+      createTextures,
+      installTextures,
+      disposeLiveTextures,
+      scheduleSnapshotRefresh,
+    ]);
 
     /**
      * The file and frames a dab at `cursorPos` reads through a window of this
@@ -1011,7 +1099,7 @@ const FileRendererInner = memo(
         const sourceSpectrogram = source?.spectrogramData;
         if (!source || !sourceSpectrogram || source.id === fileId) continue;
         const sourceView = source.rendererRef?.current?.getCanvasView();
-        if (!sourceView || viewCoversFile(sourceView, sourceSpectrogram.numFrames)) continue;
+        if (sourceView && viewCoversFile(sourceView, sourceSpectrogram.numFrames)) continue;
 
         const read = strokeRenderer.sourceReadFrames(
           state,
@@ -1046,7 +1134,7 @@ const FileRendererInner = memo(
     const responseIsWindowed = (id: string): boolean => {
       const response = openFiles[id];
       const view = response?.rendererRef?.current?.getCanvasView();
-      if (!view || !response?.spectrogramData) return false;
+      if (!view || !response?.spectrogramData) return true;
       return !viewCoversFile(view, response.spectrogramData.numFrames);
     };
 
@@ -1132,11 +1220,12 @@ const FileRendererInner = memo(
       // through one path. Sensitivity is per file — each side of a cross-file
       // paint uses its own.
       const toSourceInfo = (openFile: OpenFile | undefined): SourceFileInfo | undefined => {
-        const textures = openFile?.rendererRef?.current?.getTextures();
-        if (!textures || !openFile?.spectrogramData) return undefined;
+        if (!openFile?.spectrogramData) return undefined;
         // Source UVs address whatever span the textures hold: this canvas's own
         // window over the file, or the span that file's own canvas sits on.
         const window = sourceWindows.get(openFile.id);
+        const textures = window ?? openFile.rendererRef?.current?.getTextures();
+        if (!textures) return undefined;
         const ownView = openFile.rendererRef?.current?.getCanvasView();
         const span = ownView && !viewCoversFile(ownView, openFile.spectrogramData.numFrames) ? ownView : undefined;
         return {
@@ -1144,7 +1233,7 @@ const FileRendererInner = memo(
           filePath: openFile.filePath,
           displayName: openFile.displayName,
           spectrogramData: openFile.spectrogramData,
-          textures: window ?? textures,
+          textures,
           view: window ? window.view : span,
           onsetTexture: getOnsetTexture(
             openFile.id,
@@ -1243,6 +1332,8 @@ const FileRendererInner = memo(
       glRef.current = gl;
       cameraRef.current = camera;
 
+      if (parked) return;
+
       if (!spectrogramData || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
 
       const frameT0 = perfEnabled() ? performance.now() : 0;
@@ -1318,6 +1409,9 @@ const FileRendererInner = memo(
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
         canvasFor(gl).initialize(packedSeedRef.current);
+        if (historyHookedRef.current) {
+          releaseAnalysisData();
+        }
       }
 
       // Hook up the history manager exactly once per component lifetime.
@@ -1819,7 +1913,7 @@ const FileRendererInner = memo(
     /** The span those textures lay out. */
     const getCanvasView = (): CanvasView | null => strokeRendererRef.current?.committedSource().view ?? null;
 
-    const getStateRevision = (): number => canvasRef.current?.stateRevision ?? 0;
+    const getStateRevision = (): number => getHistoryManager(fileId).revision;
 
     /**
      * Restores the spectrogram to its original, unmodified state.

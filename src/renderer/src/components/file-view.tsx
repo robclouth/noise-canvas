@@ -45,6 +45,7 @@ const ADD_TO_SELECTION_CURSOR =
 export interface FileViewProps {
   fileId: string;
   isFullscreen?: boolean;
+  isMinimized: boolean;
 }
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
@@ -106,7 +107,7 @@ function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): numbe
   return aimToBrushRectBlUv(aim, fileId, bpm).blX * totalDuration;
 }
 
-export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
+export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: FileViewProps) => {
   const file = openFiles[fileId];
   const filePath = file?.filePath || "";
 
@@ -1105,6 +1106,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
                   fileId={fileId}
                   ref={refCallback}
                   isLive={phase !== "static"}
+                  parked={isMinimized}
                   snapshotCanvasRef={snapshotCanvasRef}
                   onLiveFrame={handleLiveFrame}
                 />

@@ -104,7 +104,6 @@ export class WindowedCanvas {
   private readonly held: HeldPaint[] = [];
   private carried = new CarriedPaint();
   private stroking = false;
-  private revision = 0;
 
   constructor(deps: WindowedCanvasDeps) {
     this.deps = deps;
@@ -126,11 +125,6 @@ export class WindowedCanvas {
   /** True when this file is short enough for the canvas to hold all of it. */
   get wholeFile(): boolean {
     return this.blocks === null;
-  }
-
-  /** Changes whenever the committed state moves, so another file's window re-reads. */
-  get stateRevision(): number {
-    return this.revision;
   }
 
   /** True between `beginStroke` and `endStroke`, while dabs are landing. */
@@ -504,7 +498,6 @@ export class WindowedCanvas {
   setFBOData(data: Float32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
-    this.revision++;
     if (this.coversFile()) {
       renderer.setFBOData(data);
       return true;
@@ -525,7 +518,6 @@ export class WindowedCanvas {
   patchFBOData(data: Float32Array, pixelRanges: Uint32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
-    this.revision++;
     if (this.coversFile()) {
       renderer.patchFBOData(data, pixelRanges);
       return true;
@@ -540,7 +532,6 @@ export class WindowedCanvas {
   patchFBODataCompact(values: Float32Array, pixelRanges: Uint32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
-    this.revision++;
     if (this.coversFile()) {
       renderer.patchFBODataCompact(values, pixelRanges);
       return true;
@@ -555,7 +546,6 @@ export class WindowedCanvas {
   applyPhaseTurns(turns: ArrayLike<number>): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
-    this.revision++;
     if (this.coversFile()) {
       renderer.applyPhaseTurns(turns);
       return true;

@@ -114,6 +114,8 @@ export type OpenFile = {
   // painted rather than as the audio analyses. The next projecting stroke
   // rebuilds the whole file to clear it, so the picture holds together.
   unprojectedPaint?: boolean;
+  // The lane is minimized and the renderer's GPU state is released.
+  parked?: boolean;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

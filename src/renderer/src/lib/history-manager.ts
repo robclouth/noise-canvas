@@ -610,7 +610,27 @@ export class HistoryManager {
     return current?.lastChildId != null;
   }
 
+  private revisionCounter = 0;
+
+  /** Changes whenever the committed state moves, so another file's window re-reads. */
+  get revision(): number {
+    return this.revisionCounter;
+  }
+
+  /** Advances the revision counter so another file's window re-reads. */
+  bumpRevision(): void {
+    this.revisionCounter++;
+  }
+
+  /** True when the current node has its audio cached on disk. */
+  isCurrentAudioCached(): boolean {
+    if (!this.manifest) return false;
+    const current = this.manifest.nodes[this.manifest.currentId];
+    return current?.audioCached === true;
+  }
+
   private notifyStateChange(): void {
+    this.revisionCounter++;
     this.syncDirty();
     this.emit();
   }
@@ -1237,7 +1257,7 @@ export class HistoryManager {
    * ancestor's side-data. Used to decide whether navigation crossed a dimension
    * boundary and so needs reloadTextures.
    */
-  private nearestFullAnchor(nodeId: string): HistoryNode | null {
+  nearestFullAnchor(nodeId: string): HistoryNode | null {
     if (!this.manifest) return null;
     let cursor: HistoryNode | null = this.manifest.nodes[nodeId] ?? null;
     while (cursor && cursor.storage !== "full") {

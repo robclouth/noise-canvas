@@ -408,6 +408,10 @@ export function openFileTexelCounts(excludeFileId?: string): OpenFileTexels[] {
     const data = file.spectrogramData;
     if (!data) continue;
     const texels = data.texels;
+    if (file.parked) {
+      counts.push({ file: texels, canvas: 0, block: 0 });
+      continue;
+    }
     const grid = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate);
     const blocks = canvasWindowBlocks(grid);
     if (needsCanvasWindow(grid, blocks)) {

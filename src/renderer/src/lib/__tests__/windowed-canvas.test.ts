@@ -19,6 +19,8 @@ import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTe
 import { WindowedCanvas } from "../windowed-canvas";
 import { packedFold, padToFold } from "../constants";
 import { metadataTextureRows } from "../band-layout";
+import { destroyHistoryManager, getHistoryManager } from "../history-manager";
+import type { SourceNeed } from "../source-window";
 
 const SAMPLE_RATE = 8000;
 // Long enough for the two-second block grid to cut the file into eight blocks.
@@ -67,6 +69,24 @@ describe("a canvas that holds a window of the file", () => {
     ]);
     effects = { transform: transformEffect, passthrough: passThroughEffect };
     gl = new WebGLRenderer({ antialias: false });
+
+    const w = window as unknown as Record<string, unknown>;
+    const prevNodeOs = w.nodeOs;
+    const prevIpcRenderer = w.ipcRenderer;
+    const prevNodePath = w.nodePath;
+    w.nodeOs = {
+      homedir: () => "/home",
+      totalmem: () => 16 * 1024 ** 3,
+    };
+    w.ipcRenderer = {
+      invoke: vi.fn(async (channel: string) => (channel === "get-user-data-path" ? "/userdata" : undefined)),
+    };
+    w.nodePath = { join: (...parts: string[]) => parts.join("/") };
+    disposers.push(() => {
+      w.nodeOs = prevNodeOs;
+      w.ipcRenderer = prevIpcRenderer;
+      w.nodePath = prevNodePath;
+    });
 
     data = createConstantQMockSpectrogramData({
       durationSeconds: DURATION_SECONDS,
@@ -399,5 +419,120 @@ describe("a canvas that holds a window of the file", () => {
     await until(() => fillSpy.mock.calls.length > 0, "a fill request after storeReady");
     expect(fillSpy).toHaveBeenCalled();
     expect(canvas.holdsFrames(view!.startFrame, view!.endFrame)).toBe(true);
+  });
+
+  it("a source with revision from the manager and no renderer serves a stroke's source window", async () => {
+    const sourceFileId = "source-file";
+    const sourceMgr = getHistoryManager(sourceFileId);
+    disposers.push(() => destroyHistoryManager(sourceFileId));
+
+    const sourceData = createConstantQMockSpectrogramData({
+      durationSeconds: DURATION_SECONDS,
+      sampleRate: SAMPLE_RATE,
+      bandsPerOctave: 4,
+    });
+    const sourcePacked = sourceData.packedData;
+    for (let i = 0; i < sourcePacked.length / 4; i++) {
+      sourcePacked[i * 4] = 0.2 + 0.3 * (1 + Math.sin(i * 0.2 + 1));
+      sourcePacked[i * 4 + 1] = Math.sin(i * 0.5) * 2;
+      sourcePacked[i * 4 + 2] = 0.2 + 0.3 * (1 + Math.cos(i * 0.3 + 1));
+      sourcePacked[i * 4 + 3] = Math.cos(i * 0.4) * 2;
+    }
+    const sourceGrid = blockGrid(
+      { numBands: sourceData.numBands, metadata: sourceData.metadata },
+      sourceData.numFrames,
+      SAMPLE_RATE,
+    );
+
+    let renderer: StrokeRenderer | null = null;
+    const canvas = new WindowedCanvas({
+      gl,
+      spectrogram: data,
+      renderer: () => renderer,
+      readCurrent: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+      readRoot: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+      onChanged: () => {},
+      sourceBlocks: (fileId) => {
+        if (fileId !== sourceFileId) return null;
+        return {
+          spectrogram: sourceData,
+          readCurrent: async (ranges) => gatherPixelRanges(sourceData.packedData, ranges),
+          readRoot: async (ranges) => gatherPixelRanges(sourceData.packedData, ranges),
+          revision: () => sourceMgr.revision,
+        };
+      },
+      windowBlocks: 2,
+    });
+    const view = canvas.firstView(0, grid.blockFrames);
+    renderer = new StrokeRenderer(gl, data, strokeTextures, "dest", effects, view);
+    disposers.push(() => renderer?.dispose());
+    disposers.push(() => canvas.dispose());
+    canvas.initialize(null);
+
+    expect(sourceMgr.revision).toBe(0);
+
+    const need: SourceNeed = {
+      fileId: sourceFileId,
+      startFrame: 0,
+      endFrame: sourceGrid.blockFrames,
+      wantOriginal: false,
+    };
+
+    expect(canvas.aimSource(need)).toBeNull();
+
+    const state = createMockStateWithSteps([
+      {
+        name: "Cross",
+        overrides: {
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: {} }],
+        },
+      },
+    ]);
+
+    let painted = false;
+    canvas.beginStroke();
+    const canPaint = canvas.paintWhenHeld(0, 100, { sources: [need], impulses: [] }, () => {
+      const windowTextures = canvas.aimSource(need);
+      expect(windowTextures).not.toBeNull();
+      const sourceInfo: SourceFileInfo = {
+        id: sourceFileId,
+        filePath: "/source.wav",
+        displayName: "source.wav",
+        spectrogramData: sourceData,
+        textures: windowTextures!,
+        view: windowTextures!.view,
+      };
+      renderer!.renderStroke(
+        strokeParams(canvas.dabCursor(new Vector2(0.01, 0.35)), canvas.dabDuration(fileDuration())),
+        state,
+        sourceInfo,
+      );
+      painted = true;
+      return true;
+    });
+    expect(canPaint).toBe(true);
+    expect(painted).toBe(false);
+
+    await canvas.settle();
+    expect(painted).toBe(true);
+
+    const windowTextures = canvas.aimSource(need);
+    expect(windowTextures).not.toBeNull();
+
+    sourceMgr.bumpRevision();
+    expect(sourceMgr.revision).toBe(1);
+
+    expect(canvas.aimSource(need)).toBeNull();
+
+    let paintedAfterBump = false;
+    canvas.paintWhenHeld(0, 100, { sources: [need], impulses: [] }, () => {
+      paintedAfterBump = true;
+      return true;
+    });
+    expect(paintedAfterBump).toBe(false);
+
+    await canvas.settle();
+    expect(paintedAfterBump).toBe(true);
+    expect(canvas.aimSource(need)).not.toBeNull();
   });
 });
