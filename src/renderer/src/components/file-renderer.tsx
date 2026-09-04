@@ -961,7 +961,11 @@ const FileRendererInner = memo(
           renderer: () => strokeRendererRef.current,
           readCurrent: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
           readRoot: (ranges) => getHistoryManager(fileId).rootRanges(ranges),
-          onChanged: () => invalidateRef.current(),
+          onChanged: () => {
+            snapshotStaleRef.current = true;
+            scheduleSnapshotRefresh();
+            invalidateRef.current?.();
+          },
           sourceBlocks: (sourceId) => {
             const source = openFiles[sourceId];
             const spectrogram = source?.spectrogramData;

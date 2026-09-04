@@ -100,6 +100,7 @@ export class WindowedCanvas {
   private readonly windowBlocks: number;
   private request: CanvasView | null = null;
   private fill: Promise<void> | null = null;
+  private drawingRoot: Promise<void> | null = null;
   private readonly held: HeldPaint[] = [];
   private carried = new CarriedPaint();
   private stroking = false;
@@ -190,6 +191,10 @@ export class WindowedCanvas {
    */
   async storeReady(): Promise<void> {
     await this.drawDisplayFromRoot();
+    const renderer = this.deps.renderer();
+    if (!renderer?.getIsInitialized()) return;
+    const view = renderer.committedSource().view;
+    this.aim(view.startFrame, view.endFrame);
   }
 
   /**
@@ -197,20 +202,30 @@ export class WindowedCanvas {
    * whose owner holds no run of it to seed from. The picture fills in as the
    * blocks are read.
    */
-  private async drawDisplayFromRoot(): Promise<void> {
-    if (!this.blocks) return;
-    // The blocks are the picture, and a patch into a display holding none is
-    // skipped, so the display is told one is coming before the first lands.
-    this.deps.renderer()?.beginDisplaySeedFromStore();
-    for (let index = 0; index < this.grid.blockCount; index++) {
-      const list = blockPixelRanges(this.grid, index);
-      const ranges = list.ranges.slice(0, list.count * 2);
-      const values = await this.deps.readRoot(ranges);
-      const renderer = this.deps.renderer();
-      if (!values || !renderer?.getIsInitialized()) return;
-      renderer.patchDisplayFromCompact(values, ranges);
-      this.deps.onChanged();
-    }
+  private drawDisplayFromRoot(): Promise<void> {
+    if (this.drawingRoot) return this.drawingRoot;
+    if (!this.blocks) return Promise.resolve();
+    const draw = async (): Promise<void> => {
+      let seeded = false;
+      for (let index = 0; index < this.grid.blockCount; index++) {
+        const list = blockPixelRanges(this.grid, index);
+        const ranges = list.ranges.slice(0, list.count * 2);
+        const values = await this.deps.readRoot(ranges);
+        const renderer = this.deps.renderer();
+        if (!values || !renderer?.getIsInitialized()) return;
+        if (!seeded) {
+          renderer.beginDisplaySeedFromStore();
+          seeded = true;
+        }
+        renderer.patchDisplayFromCompact(values, ranges);
+        this.deps.onChanged();
+      }
+    };
+    const tracked = draw().finally(() => {
+      if (this.drawingRoot === tracked) this.drawingRoot = null;
+    });
+    this.drawingRoot = tracked;
+    return tracked;
   }
 
   /**

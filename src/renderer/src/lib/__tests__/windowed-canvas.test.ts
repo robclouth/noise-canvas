@@ -8,7 +8,7 @@ import {
   Vector2,
   WebGLRenderer,
 } from "three";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SpectrogramData } from "../../store/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
@@ -346,5 +346,58 @@ describe("a canvas that holds a window of the file", () => {
     expect(painted).toBe(true);
     await rig.canvas.settle();
     expect(rig.quiet()).toBe(true);
+  });
+
+  it("draws the display and requests a fill once its store is ready", async () => {
+    let storeIsReady = false;
+    let renderer: StrokeRenderer | null = null;
+    const readCurrent = async (ranges: Uint32Array): Promise<Float32Array | null> => {
+      if (!storeIsReady) return null;
+      return gatherPixelRanges(data.packedData, ranges);
+    };
+    const readRoot = async (ranges: Uint32Array): Promise<Float32Array | null> => {
+      if (!storeIsReady) return null;
+      return gatherPixelRanges(data.packedData, ranges);
+    };
+
+    const canvas = new WindowedCanvas({
+      gl,
+      spectrogram: data,
+      renderer: () => renderer,
+      readCurrent,
+      readRoot,
+      onChanged: () => {},
+      sourceBlocks: () => null,
+      windowBlocks: 2,
+    });
+    const view = canvas.firstView(0, grid.blockFrames);
+    renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, view);
+    disposers.push(() => renderer?.dispose());
+    disposers.push(() => canvas.dispose());
+
+    let seeded = false;
+    const seedSpy = vi.spyOn(renderer, "beginDisplaySeedFromStore").mockImplementation(() => {
+      seeded = true;
+      renderer?.getDisplayPyramid()?.seedingFromCompact();
+    });
+    const patchSpy = vi.spyOn(renderer, "patchDisplayFromCompact");
+    const fillSpy = vi.spyOn(renderer, "fillCanvas");
+
+    canvas.initialize(null);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(patchSpy).not.toHaveBeenCalled();
+    expect(seeded).toBe(false);
+    expect(canvas.holdsFrames(view!.startFrame, view!.endFrame)).toBe(false);
+
+    storeIsReady = true;
+    await canvas.storeReady();
+
+    expect(seeded).toBe(true);
+    expect(seedSpy).toHaveBeenCalledTimes(1);
+    expect(patchSpy).toHaveBeenCalledTimes(grid.blockCount);
+    await until(() => fillSpy.mock.calls.length > 0, "a fill request after storeReady");
+    expect(fillSpy).toHaveBeenCalled();
+    expect(canvas.holdsFrames(view!.startFrame, view!.endFrame)).toBe(true);
   });
 });
