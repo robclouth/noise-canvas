@@ -227,11 +227,20 @@ export class WindowedCanvas {
    * are read in the background and taken when they land, so a brush ahead of
    * the reads keeps painting on what the canvas already holds. The original
    * window reads alongside, so it never lays out a span the canvas has left.
+   * While a stroke has dabs waiting, the aim goes to the oldest of them and
+   * the ones behind it that fit the same window, not to the pointer: a target
+   * that moves every frame would supersede each read before it landed, and
+   * the held paint would only ever land at the commit.
    */
   aim(startFrame: number, endFrame: number): void {
     const window = this.blocks;
     const renderer = this.deps.renderer();
     if (!window || !renderer?.getIsInitialized()) return;
+    if (this.stroking && this.held.length > 0) {
+      const span = this.heldSpan(window);
+      startFrame = span.startFrame;
+      endFrame = span.endFrame;
+    }
     const current = renderer.committedSource().view;
     const next = window.plan(current, startFrame, endFrame);
     const originalHeld = this.original?.holds(next) ?? true;
@@ -255,6 +264,7 @@ export class WindowedCanvas {
       // so the move waits for the next aim, which reads them again.
       if (!window.ready(moving ? next : held)) {
         this.releaseHeld();
+        this.aimHeld();
         return;
       }
       if (moving) {
@@ -273,6 +283,7 @@ export class WindowedCanvas {
         window.markOnCanvas(lacking);
       }
       this.releaseHeld();
+      this.aimHeld();
       this.deps.onChanged();
     });
     const tracked = filling.then(() => {
@@ -591,6 +602,33 @@ export class WindowedCanvas {
 
   private view(): CanvasView | null {
     return this.deps.renderer()?.committedSource().view ?? null;
+  }
+
+  /** Points the canvas at the held paint still waiting, so the next read serves it. */
+  private aimHeld(): void {
+    if (!this.stroking || this.held.length === 0) return;
+    const next = this.held[0];
+    this.aim(next.startFrame, next.endFrame);
+  }
+
+  /**
+   * The frames of the oldest held dab, widened over the dabs behind it while
+   * one window still holds them all, so one read serves a run of them.
+   */
+  private heldSpan(window: CanvasWindow): { startFrame: number; endFrame: number } {
+    const grid = window.grid;
+    let startFrame = this.held[0].startFrame;
+    let endFrame = this.held[0].endFrame;
+    for (let i = 1; i < this.held.length; i++) {
+      const start = Math.min(startFrame, this.held[i].startFrame);
+      const end = Math.max(endFrame, this.held[i].endFrame);
+      const first = blockOfFrame(grid, start);
+      const last = blockOfFrame(grid, Math.max(start, end - 1));
+      if (last - first + 1 > window.windowBlocks) break;
+      startFrame = start;
+      endFrame = end;
+    }
+    return { startFrame, endFrame };
   }
 
   /** Runs the held paint the canvas can now take, oldest first. */

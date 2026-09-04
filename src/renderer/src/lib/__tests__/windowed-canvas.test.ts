@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpectrogramData } from "../../store/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockStateWithSteps } from "../../test/mock-state";
-import { blockGrid, type BlockGrid } from "../block-grid";
+import { blockGrid, blockOfFrame, blockPixelRanges, type BlockGrid } from "../block-grid";
 import { gatherPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { WindowedCanvas } from "../windowed-canvas";
@@ -343,6 +343,91 @@ describe("a canvas that holds a window of the file", () => {
 
     await rig.canvas.settle();
     expect(landed).toEqual([...Array(dabs).keys()]);
+  });
+
+  it("follows the oldest held dab while the brush runs ahead, not the pointer", async () => {
+    const rig = harness(2, true);
+    rig.open();
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
+    rig.canvas.beginStroke();
+    rig.close();
+
+    const landed: number[] = [];
+    const positions = [0.45, 0.6, 0.9];
+    for (const [i, at] of positions.entries()) {
+      const frames = dabFrames(at);
+      rig.canvas.aim(frames.start, frames.end);
+      rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => {
+        landed.push(i);
+        return rig.dab(at);
+      });
+    }
+    // The pointer keeps moving past the end of the file's last block.
+    const pointer = dabFrames(0.95);
+    rig.canvas.aim(pointer.start, pointer.end);
+    expect(landed).toEqual([]);
+
+    // The reads land: the first one serves the oldest held dab, and the
+    // window then works through the rest without a commit.
+    rig.open();
+    await until(() => landed.length === positions.length, "every held dab to land before the commit");
+    expect(landed).toEqual([0, 1, 2]);
+  });
+
+  it("keeps every dab of a stroke that outran the window, live ones and held ones alike", async () => {
+    const rig = harness(2, true);
+    rig.open();
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
+    rig.canvas.beginStroke();
+
+    // Two dabs land live on the first window, then the brush runs ahead of the
+    // reads: each later dab is held while the aim chases the pointer.
+    const positions = [0.02, 0.1, 0.45, 0.6, 0.75, 0.9];
+    const landed: number[] = [];
+    for (const [i, at] of positions.entries()) {
+      if (i === 2) rig.close();
+      const frames = dabFrames(at);
+      rig.canvas.aim(frames.start, frames.end);
+      rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => {
+        landed.push(i);
+        return rig.dab(at);
+      });
+    }
+    expect(landed).toEqual([0, 1]);
+
+    rig.open();
+    await rig.canvas.settle();
+    expect(landed).toEqual([0, 1, 2, 3, 4, 5]);
+
+    // The commit reads the whole footprint: every dab must differ from the
+    // original where it painted.
+    const dirty = rig.canvas.dirtyPixelRanges();
+    expect(dirty).not.toBeNull();
+    const painted = await rig.canvas.readPixelRanges(dirty!);
+    const original = gatherPixelRanges(data.packedData, dirty!);
+    const changedPixels = new Set<number>();
+    let at = 0;
+    for (let i = 0; i + 1 < dirty!.length; i += 2) {
+      for (let p = dirty![i]; p < dirty![i] + dirty![i + 1]; p++, at++) {
+        for (let c = 0; c < 4; c++) {
+          if (painted[at * 4 + c] !== original[at * 4 + c]) {
+            changedPixels.add(p);
+            break;
+          }
+        }
+      }
+    }
+    const missing: number[] = [];
+    for (const [i, position] of positions.entries()) {
+      const block = blockOfFrame(grid, position * data.numFrames);
+      const list = blockPixelRanges(grid, block);
+      let changed = 0;
+      for (let r = 0; r + 1 < list.count * 2; r += 2) {
+        for (let p = list.ranges[r]; p < list.ranges[r] + list.ranges[r + 1]; p++) if (changedPixels.has(p)) changed++;
+      }
+      if (changed === 0) missing.push(i);
+    }
+    expect(missing).toEqual([]);
   });
 
   it("drops paint the canvas can never take rather than stalling the commit", async () => {
