@@ -223,7 +223,7 @@ declare global {
       // Undo-history codec. Each of these walks a packed state, so they run in
       // the addon off the renderer thread.
       encodeHistorySnapshot: (packed: Float32Array) => Promise<Uint8Array>;
-      decodeHistorySnapshot: (bytes: Uint8Array) => Promise<Float32Array>;
+      decodeHistorySnapshot: (bytes: Uint8Array, decodedBytes?: number) => Promise<Float32Array>;
       historyFootprintChanged: (
         base: Float32Array,
         after: Float32Array,

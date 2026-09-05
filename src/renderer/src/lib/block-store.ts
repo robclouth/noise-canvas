@@ -8,6 +8,8 @@ import { copyCompactOverlap, gatherPixelRanges, pixelRangeCount, scatterCompactP
 /** Where a store keeps its encoded blocks between reads. */
 export interface BlockBackend {
   read(index: number): Promise<Uint8Array | null>;
+  /** True when the backend holds the block. Without it, a read stands in. */
+  has?(index: number): Promise<boolean>;
   write(index: number, bytes: Uint8Array): Promise<void>;
   clear(): Promise<void>;
 }
@@ -15,7 +17,8 @@ export interface BlockBackend {
 /** How a block's coefficients turn into stored bytes and back. */
 export interface BlockCodec {
   encode(block: Float32Array): Promise<Uint8Array>;
-  decode(bytes: Uint8Array): Promise<Float32Array>;
+  /** `decodedBytes`, when given, is the byte length the block decodes to. */
+  decode(bytes: Uint8Array, decodedBytes?: number): Promise<Float32Array>;
 }
 
 /** The addon's plane reorder plus zstd, both off the JS thread. */
@@ -24,8 +27,8 @@ export const packedBlockCodec: BlockCodec = {
     const blob = await host.analysis.encodeHistorySnapshot(block);
     return new Uint8Array(blob.buffer, blob.byteOffset, blob.byteLength);
   },
-  async decode(bytes) {
-    return await host.analysis.decodeHistorySnapshot(bytes);
+  async decode(bytes, decodedBytes) {
+    return await host.analysis.decodeHistorySnapshot(bytes, decodedBytes);
   },
 };
 
@@ -63,6 +66,14 @@ export class BlockStore {
   private readonly overlay: BlockBackend | null;
   private readonly codec: BlockCodec;
   private readonly clean: ByteBudgetCache<Float32Array>;
+  // Seeded copies of blocks, kept apart from the resident ones that patches
+  // mutate in place.
+  private readonly root: ByteBudgetCache<Float32Array>;
+  // Blocks a patch reached in this session, and whether the overlay held a
+  // block from an earlier one; together they say when a block's seeded state
+  // is its resident copy.
+  private readonly everPatched = new Set<number>();
+  private readonly overlayOnDisk = new Map<number, boolean>();
   private readonly dirty = new Map<number, Float32Array>();
   private readonly dirtyVersion = new Map<number, number>();
   private readonly inflight = new Map<number, Promise<Float32Array>>();
@@ -81,6 +92,7 @@ export class BlockStore {
     this.texelCount = Math.max(options.texelCount ?? 0, layoutTexels(grid.layout));
     this.maxResidentBytes = options.maxResidentBytes ?? DEFAULT_RESIDENT_BYTES;
     this.clean = new ByteBudgetCache<Float32Array>(this.maxResidentBytes, (block) => block.byteLength);
+    this.root = new ByteBudgetCache<Float32Array>(Math.floor(this.maxResidentBytes / 2), (block) => block.byteLength);
     this.ranges = new Array<Uint32Array | undefined>(grid.blockCount);
   }
 
@@ -133,6 +145,9 @@ export class BlockStore {
     this.dirty.clear();
     this.dirtyVersion.clear();
     this.clean.clear();
+    this.root.clear();
+    this.everPatched.clear();
+    this.overlayOnDisk.clear();
     await this.overlay?.clear();
     for (let index = 0; index < this.grid.blockCount; index++) {
       const block = this.checked(index, await source(index));
@@ -157,6 +172,7 @@ export class BlockStore {
     this.clean.clear();
     for (let index = 0; index < this.grid.blockCount; index++) {
       const block = gatherPixelRanges(packed, this.blockRanges(index));
+      this.everPatched.add(index);
       await (this.overlay ?? this.backend).write(index, await this.codec.encode(block));
       this.clean.set(String(index), block);
     }
@@ -176,33 +192,22 @@ export class BlockStore {
     return out;
   }
 
-  /**
-   * The packed state as it was seeded, straight from the seeded blocks. The
-   * resident copies hold patched state, so they are not consulted.
-   */
+  /** The packed state as it was seeded, one block at a time, padded as the texture is. */
   async readAllRoot(): Promise<Float32Array> {
     if (this.disposed) throw new Error("block store is disposed");
     const out = new Float32Array(this.texelCount * 4);
     for (let index = 0; index < this.grid.blockCount; index++) {
-      const bytes = await this.backend.read(index);
-      if (!bytes) throw new Error(`block ${index} was never written`);
-      scatterCompactPixelRanges(out, this.checked(index, await this.codec.decode(bytes)), this.blockRanges(index));
+      scatterCompactPixelRanges(out, await this.rootBlock(index), this.blockRanges(index));
     }
     return out;
   }
 
-  /**
-   * The pixels `ranges` names as they were seeded, laid end to end in range
-   * order. The resident copies hold patched state, so they are not consulted
-   * and the blocks read here are not kept.
-   */
+  /** The pixels `ranges` names as they were seeded, laid end to end in range order. */
   async readRootRanges(ranges: Uint32Array): Promise<Float32Array> {
     if (this.disposed) throw new Error("block store is disposed");
     const out = new Float32Array(pixelRangeCount(ranges) * 4);
     for (const index of blocksForPixelRanges(this.grid, ranges)) {
-      const bytes = await this.backend.read(index);
-      if (!bytes) throw new Error(`block ${index} was never written`);
-      copyCompactOverlap(out, ranges, this.checked(index, await this.codec.decode(bytes)), this.blockRanges(index));
+      copyCompactOverlap(out, ranges, await this.rootBlock(index), this.blockRanges(index));
     }
     return out;
   }
@@ -281,6 +286,7 @@ export class BlockStore {
   }
 
   private markDirty(index: number, block: Float32Array): void {
+    this.everPatched.add(index);
     this.clean.delete(String(index));
     this.dirty.set(index, block);
     this.dirtyVersion.set(index, (this.dirtyVersion.get(index) ?? 0) + 1);
@@ -318,9 +324,51 @@ export class BlockStore {
     this.dirty.clear();
     this.dirtyVersion.clear();
     this.clean.clear();
+    this.root.clear();
+    this.everPatched.clear();
+    this.overlayOnDisk.clear();
     this.inflight.clear();
     await this.overlay?.clear();
     await this.backend.clear();
+  }
+
+  /**
+   * One block as it was seeded. A block no patch has reached is a copy of
+   * its resident state, taken while nothing can have changed it; one a patch
+   * reached is decoded from the seeded bytes. Either copy is kept for the
+   * next read.
+   */
+  private async rootBlock(index: number): Promise<Float32Array> {
+    const kept = this.root.get(String(index));
+    if (kept) return kept;
+    if (!this.everPatched.has(index) && !(await this.overlayHeld(index))) {
+      const block = await this.block(index);
+      if (!this.everPatched.has(index)) {
+        const copy = block.slice();
+        this.root.set(String(index), copy);
+        return copy;
+      }
+    }
+    const bytes = await this.backend.read(index);
+    if (!bytes) throw new Error(`block ${index} was never written`);
+    const block = this.checked(index, await this.codec.decode(bytes, this.decodedBytes(index)));
+    this.root.set(String(index), block);
+    return block;
+  }
+
+  /** True when the overlay held the block before this session patched anything. */
+  private async overlayHeld(index: number): Promise<boolean> {
+    if (!this.overlay) return false;
+    const known = this.overlayOnDisk.get(index);
+    if (known !== undefined) return known;
+    const held = this.overlay.has ? await this.overlay.has(index) : (await this.overlay.read(index)) !== null;
+    this.overlayOnDisk.set(index, held);
+    return held;
+  }
+
+  /** The bytes a block holds once decoded. */
+  private decodedBytes(index: number): number {
+    return pixelRangeCount(this.blockRanges(index)) * 16;
   }
 
   /**
@@ -350,7 +398,7 @@ export class BlockStore {
   private async load(index: number): Promise<Float32Array> {
     const bytes = (await this.overlay?.read(index)) ?? (await this.backend.read(index));
     if (!bytes) throw new Error(`block ${index} was never written`);
-    const block = this.checked(index, await this.codec.decode(bytes));
+    const block = this.checked(index, await this.codec.decode(bytes, this.decodedBytes(index)));
     this.clean.set(String(index), block);
     return block;
   }
@@ -381,6 +429,14 @@ export function fileBlockBackend(directory: string): BlockBackend {
         return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
       } catch {
         return null;
+      }
+    },
+    async has(index) {
+      try {
+        await host.fs.access(pathOf(index));
+        return true;
+      } catch {
+        return false;
       }
     },
     async write(index, bytes) {

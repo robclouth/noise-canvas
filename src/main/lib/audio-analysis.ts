@@ -140,13 +140,25 @@ function historyCodec(): HistoryCodecAddon {
 const zstdCompressAsync = promisify(zstdCompress);
 const zstdDecompressAsync = promisify(zstdDecompress);
 
-/** Reorder a packed state for compression, then compress it. */
-export async function encodeHistorySnapshot(packed: Float32Array): Promise<Buffer> {
-  return await zstdCompressAsync(await historyCodec().historyEncodePlanes(packed));
+// zstd hands its output over one chunk at a time, each through the JS thread;
+// a chunk sized to the whole result keeps a block to one trip.
+const ZSTD_CHUNK_SLACK = 64 * 1024;
+const ZSTD_CHUNK_MAX = 64 * 1024 * 1024;
+
+function zstdChunkSize(expectedBytes: number): number {
+  return Math.min(ZSTD_CHUNK_MAX, Math.max(ZSTD_CHUNK_SLACK, expectedBytes + ZSTD_CHUNK_SLACK));
 }
 
-export async function decodeHistorySnapshot(bytes: Uint8Array): Promise<Float32Array> {
-  return await historyCodec().historyDecodePlanes(await zstdDecompressAsync(bytes));
+/** Reorder a packed state for compression, then compress it. */
+export async function encodeHistorySnapshot(packed: Float32Array): Promise<Buffer> {
+  const planes = await historyCodec().historyEncodePlanes(packed);
+  return await zstdCompressAsync(planes, { chunkSize: zstdChunkSize(planes.byteLength) });
+}
+
+/** Decompress a snapshot and restore its packed order. `decodedBytes`, when known, is its size. */
+export async function decodeHistorySnapshot(bytes: Uint8Array, decodedBytes?: number): Promise<Float32Array> {
+  const options = decodedBytes === undefined ? {} : { chunkSize: zstdChunkSize(decodedBytes) };
+  return await historyCodec().historyDecodePlanes(await zstdDecompressAsync(bytes, options));
 }
 
 /**

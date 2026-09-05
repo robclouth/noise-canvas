@@ -67,7 +67,11 @@ describe("historyCacheBudgets", () => {
       audioHops: 256 * MIB,
       blockResident: 256 * MIB,
     });
-    expect(historyCacheBudgets(64 * GIB)).toEqual(historyCacheBudgets(16 * GIB));
+    expect(historyCacheBudgets(64 * GIB)).toEqual({
+      deltas: 128 * MIB,
+      audioHops: 256 * MIB,
+      blockResident: 256 * MIB + 3 * GIB,
+    });
   });
 
   it("gives a quarter of the budgets at 8 GiB and below", () => {

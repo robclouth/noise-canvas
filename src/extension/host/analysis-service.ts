@@ -411,11 +411,18 @@ export async function runHistoryCodecFramed(request: ArrayBuffer): Promise<Uint8
         meta: {},
         arrays: { bytes: await encodeHistorySnapshot(asF32(arrays.packed, "packed")) },
       });
-    case "decodeSnapshot":
+    case "decodeSnapshot": {
+      const decodedBytes = Number(meta.decodedBytes);
       return encodeFrame({
         meta: {},
-        arrays: { packed: await decodeHistorySnapshot(asU8(arrays.bytes, "bytes")) },
+        arrays: {
+          packed: await decodeHistorySnapshot(
+            asU8(arrays.bytes, "bytes"),
+            Number.isFinite(decodedBytes) && decodedBytes > 0 ? decodedBytes : undefined,
+          ),
+        },
       });
+    }
     case "footprintChanged": {
       const changed = await historyFootprintChanged(
         asF32(arrays.base, "base"),

@@ -425,8 +425,12 @@ export function createExtensionAnalysis(): AnalysisApi {
     commitStroke,
     encodeHistorySnapshot: async (packed) =>
       u8((await historyCodec("encodeSnapshot", { packed })).arrays.bytes, "bytes"),
-    decodeHistorySnapshot: async (bytes) =>
-      f32((await historyCodec("decodeSnapshot", { bytes })).arrays.packed, "packed"),
+    decodeHistorySnapshot: async (bytes, decodedBytes) =>
+      f32(
+        (await historyCodec("decodeSnapshot", { bytes }, decodedBytes === undefined ? {} : { decodedBytes })).arrays
+          .packed,
+        "packed",
+      ),
     historyFootprintChanged: async (base, after, ranges, baseCompact = false, afterCompact = false) =>
       Number(
         (

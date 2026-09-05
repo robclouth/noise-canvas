@@ -248,6 +248,60 @@ describe("BlockStore", () => {
     expect(Array.from(await store.readRootRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
   });
 
+  it("answers the seeded state of an untouched block without a read", async () => {
+    const { backend, overlay, store } = await seeded();
+    const ranges = Uint32Array.of(...bandRange(2, 10, 300));
+    await store.readRootRanges(ranges);
+    const reads = backend.reads + overlay.reads;
+    expect(Array.from(await store.readRootRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+    expect(backend.reads + overlay.reads).toBe(reads);
+  });
+
+  it("keeps a seeded copy that a later patch cannot reach", async () => {
+    const { store } = await seeded();
+    const ranges = Uint32Array.of(...bandRange(2, 10, 300));
+    await store.readRootRanges(ranges);
+    await store.patch(
+      ranges,
+      gatherPixelRanges(packed, ranges).map((value) => value * -1),
+    );
+    expect(Array.from(await store.readRootRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+  });
+
+  it("decodes the seeded state of a flushed block once", async () => {
+    const { backend, store } = await seeded({ maxResidentBytes: 1 << 30 });
+    const ranges = Uint32Array.of(...bandRange(1, 40, 200));
+    await store.patch(
+      ranges,
+      gatherPixelRanges(packed, ranges).map((value) => value * -1),
+    );
+    await store.flush();
+    const before = backend.reads;
+    expect(Array.from(await store.readRootRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+    expect(backend.reads).toBe(before + 1);
+    expect(Array.from(await store.readRootRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+    expect(backend.reads).toBe(before + 1);
+  });
+
+  it("tells the codec how many bytes a block decodes to", async () => {
+    const sizes: Array<number | undefined> = [];
+    const codec: BlockCodec = {
+      encode: rawCodec.encode,
+      async decode(bytes, decodedBytes) {
+        sizes.push(decodedBytes);
+        return await rawCodec.decode(bytes);
+      },
+    };
+    const { grid, store } = await seeded({ codec, maxResidentBytes: 1 << 20 });
+    const list = blockPixelRanges(grid, 1);
+    const ranges = list.ranges.slice(0, list.count * 2);
+    let texels = 0;
+    for (let i = 1; i < ranges.length; i += 2) texels += ranges[i];
+    await store.readRanges(ranges);
+    expect(sizes.length).toBeGreaterThan(0);
+    expect(sizes.every((size) => size === texels * 16)).toBe(true);
+  });
+
   it("answers a patched block from RAM, not from the bytes it was written as", async () => {
     const { backend, store } = await seeded();
     const ranges = Uint32Array.of(...bandRange(1, 40, 200));
