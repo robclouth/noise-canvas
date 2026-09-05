@@ -18,6 +18,8 @@ import { fileRangesToView } from "../canvas-view";
 import { float32BitsEqual, gatherPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { WindowedCanvas } from "../windowed-canvas";
+import { CoarseStripBuilder } from "../coarse-strip";
+import { displayPyramidLevels } from "../display-pyramid";
 import { packedFold, padToFold } from "../constants";
 import { metadataTextureRows } from "../band-layout";
 import type { SourceNeed } from "../source-window";
@@ -704,6 +706,52 @@ describe("a canvas that holds a window of the file", () => {
     await until(() => fillSpy.mock.calls.length > 0, "a fill request after storeReady");
     expect(fillSpy).toHaveBeenCalled();
     expect(canvas.holdsFrames(view!.startFrame, view!.endFrame)).toBe(true);
+  });
+
+  it("shows a strip of the whole file at a coarser level until the store draw finishes", async () => {
+    let storeIsReady = false;
+    let renderer: StrokeRenderer | null = null;
+    const read = async (ranges: Uint32Array): Promise<Float32Array | null> =>
+      storeIsReady ? gatherPixelRanges(data.packedData, ranges) : null;
+    const canvas = new WindowedCanvas({
+      gl,
+      spectrogram: data,
+      renderer: () => renderer,
+      readCurrent: read,
+      readRoot: read,
+      onChanged: () => {},
+      sourceBlocks: () => null,
+      windowBlocks: 2,
+    });
+    const view = canvas.firstView(0, grid.blockFrames);
+    renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, view);
+    disposers.push(() => renderer?.dispose());
+    disposers.push(() => canvas.dispose());
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    const levels = displayPyramidLevels(layout);
+    const stripLevel = levels[Math.min(2, levels.length - 1)];
+    const builder = new CoarseStripBuilder(layout, stripLevel);
+    for (let index = 0; index < grid.blockCount; index++) {
+      const list = blockPixelRanges(grid, index);
+      const ranges = list.ranges.slice(0, list.count * 2);
+      builder.add(ranges, gatherPixelRanges(data.packedData, ranges));
+    }
+    const finishSpy = vi.spyOn(renderer, "finishDisplaySeed");
+
+    canvas.initialize(null, builder.strip());
+    const pyramid = renderer.getDisplayPyramid()!;
+    const stripIndex = pyramid.levels.findIndex((level) => level.stepLog2 === stripLevel.stepLog2);
+    expect(stripIndex).toBeGreaterThan(0);
+    expect(pyramid.texture(0)).not.toBeNull();
+    expect(pyramid.readyLevel).toBe(stripIndex);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(finishSpy).not.toHaveBeenCalled();
+    expect(pyramid.readyLevel).toBe(stripIndex);
+
+    storeIsReady = true;
+    await canvas.storeReady();
+    expect(finishSpy).toHaveBeenCalledTimes(1);
+    expect(pyramid.readyLevel).toBe(0);
   });
 
   it("a source with no renderer serves a stroke's source window and re-reads when its revision moves", async () => {

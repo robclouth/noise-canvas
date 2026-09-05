@@ -15,6 +15,7 @@ import {
 import { CanvasWindow, needsCanvasWindow, type BlockValueReader } from "./canvas-window";
 import { canvasWindowBlocks } from "./gpu-budget";
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
+import type { CoarseStrip } from "./coarse-strip";
 import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
 import {
@@ -26,6 +27,9 @@ import {
 } from "./pixel-ranges";
 import { SourceWindowSlot, type SourceFileBlocks, type SourceNeed, type SourceWindowTextures } from "./source-window";
 import type { StrokeRenderer } from "./stroke-renderer";
+
+// Block reads kept in flight ahead of the block being drawn into the display.
+const DISPLAY_DRAW_READ_AHEAD = 4;
 
 /** A rectangle of the file in unpacked UV, as the dirty region is kept. */
 export type UvRegion = { startX: number; endX: number; startY: number; endY: number };
@@ -163,9 +167,11 @@ export class WindowedCanvas {
   /**
    * Fills the canvas for the first time: the blocks already in slots go on
    * now, the picture of the rest of the file comes from `seed`, and the window
-   * reads whatever is still missing.
+   * reads whatever is still missing. Without a seed the picture is drawn out
+   * of the store a block at a time; `strip`, when the analysis kept one,
+   * shows the whole file at a coarser level while that draw runs.
    */
-  initialize(seed: Float32Array | null): void {
+  initialize(seed: Float32Array | null, strip: CoarseStrip | null = null): void {
     const renderer = this.deps.renderer();
     if (!renderer) return;
     const window = this.blocks;
@@ -182,8 +188,12 @@ export class WindowedCanvas {
     // The canvas holds one window, so the picture of the rest of the file
     // comes from the analysed state rather than from the canvas. A store with
     // no root to read yet is drawn from once the owner has written one.
-    if (seed) renderer.seedDisplayFromPacked(seed);
-    else void this.drawDisplayFromStore();
+    if (seed) {
+      renderer.seedDisplayFromPacked(seed);
+    } else {
+      if (strip) renderer.seedDisplayFromStrip(strip);
+      void this.drawDisplayFromStore();
+    }
     this.aim(view.startFrame, view.endFrame);
   }
 
@@ -205,17 +215,25 @@ export class WindowedCanvas {
   /**
    * Draws the file's picture into the display a block at a time, for a file
    * whose owner holds no run of it to seed from. The picture fills in as the
-   * blocks are read.
+   * blocks are read, a few reads in flight ahead of the block being drawn.
    */
   private drawDisplayFromStore(): Promise<void> {
     if (this.drawingStore) return this.drawingStore;
     if (!this.blocks) return Promise.resolve();
+    const read = async (index: number): Promise<{ ranges: Uint32Array; values: Float32Array | null }> => {
+      const list = blockPixelRanges(this.grid, index);
+      const ranges = list.ranges.slice(0, list.count * 2);
+      const values = (await this.deps.readCurrent(ranges)) ?? (await this.deps.readRoot(ranges));
+      return { ranges, values };
+    };
     const draw = async (): Promise<void> => {
+      const count = this.grid.blockCount;
+      const pending: Array<ReturnType<typeof read>> = [];
+      for (let index = 0; index < Math.min(DISPLAY_DRAW_READ_AHEAD, count); index++) pending.push(read(index));
       let seeded = false;
-      for (let index = 0; index < this.grid.blockCount; index++) {
-        const list = blockPixelRanges(this.grid, index);
-        const ranges = list.ranges.slice(0, list.count * 2);
-        const values = (await this.deps.readCurrent(ranges)) ?? (await this.deps.readRoot(ranges));
+      for (let index = 0; index < count; index++) {
+        const { ranges, values } = await pending.shift()!;
+        if (index + DISPLAY_DRAW_READ_AHEAD < count) pending.push(read(index + DISPLAY_DRAW_READ_AHEAD));
         const renderer = this.deps.renderer();
         if (!values || !renderer?.getIsInitialized()) return;
         if (!seeded) {
@@ -225,6 +243,7 @@ export class WindowedCanvas {
         renderer.patchDisplayFromCompact(values, ranges);
         this.deps.onChanged();
       }
+      this.deps.renderer()?.finishDisplaySeed();
     };
     const tracked = draw().finally(() => {
       if (this.drawingStore === tracked) this.drawingStore = null;

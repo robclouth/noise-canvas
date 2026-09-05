@@ -791,9 +791,10 @@ const FileRendererInner = memo(
       // the finest level stands in wherever the canvas does not reach yet.
       const finerThanPyramid = 2 ** finestStepLog2 > Math.max(framesPerPixel, 1);
       uniforms.displayCanvasFirst.value = finerThanPyramid && (canvasRef.current?.holdsView() ?? true);
+      const ready = pyramid.readyLevel;
       const choice = finerThanPyramid
-        ? { fine: 0, coarse: 0, blend: 0 }
-        : displayLevelChoice(pyramid.levels, framesPerPixel);
+        ? { fine: ready, coarse: ready, blend: 0 }
+        : displayLevelChoice(pyramid.levels, framesPerPixel, ready);
       uniforms.displayFineTex.value = pyramid.texture(choice.fine);
       uniforms.displayFineMetaTex.value = pyramid.metadataTexture(choice.fine);
       uniforms.displayCoarseTex.value = pyramid.texture(choice.coarse);
@@ -1416,7 +1417,7 @@ const FileRendererInner = memo(
 
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
-        canvasFor(gl).initialize(packedSeedRef.current);
+        canvasFor(gl).initialize(packedSeedRef.current, spectrogramData.coarseStrip ?? null);
         if (historyHookedRef.current) {
           releaseAnalysisData();
         }
@@ -1990,6 +1991,7 @@ const FileRendererInner = memo(
       live.packed.image.data = new Float32Array(0);
       packedSeedRef.current = null;
       spectrogramData.packedData = undefined;
+      spectrogramData.coarseStrip = undefined;
       gl.initTexture(live.inverse);
       live.inverse.image.data = new Float32Array(0);
       inverseSeedRef.current = null;

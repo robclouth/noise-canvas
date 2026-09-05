@@ -13,6 +13,7 @@ import {
 
 import { bandAtPixel, type BandLayout } from "./band-layout";
 import type { CanvasView } from "./canvas-view";
+import type { CoarseStrip } from "./coarse-strip";
 import {
   clampToSourceBins,
   DecimateDraw,
@@ -48,6 +49,7 @@ export class DisplayPyramid {
   private readonly layout: BandLayout;
   private readonly uploadChunkBins: number;
   private seeded = false;
+  private readyFrom = 0;
 
   constructor(layout: BandLayout, opts?: { maxTexels?: number; uploadChunkBins?: number }) {
     this.layout = layout;
@@ -80,6 +82,51 @@ export class DisplayPyramid {
   /** The dB magnitudes of one level; null until the pyramid is seeded. */
   texture(levelIndex: number): Texture | null {
     return this.seeded ? this.targets[levelIndex].texture : null;
+  }
+
+  /**
+   * The finest level that holds the whole picture. Above zero while a strip
+   * stands in for the finer levels that are still being drawn.
+   */
+  get readyLevel(): number {
+    return this.readyFrom;
+  }
+
+  /**
+   * Seeds the level a strip was cut for from the strip's magnitudes and
+   * decimates it up the stack, so the picture shows at once at that level and
+   * above. The finer levels count as not ready until `seedFinished`. Returns
+   * false when no level of this stack matches the strip's step.
+   */
+  seedLevelFromStrip(gl: WebGLRenderer, strip: CoarseStrip): boolean {
+    const index = this.levels.findIndex((level) => level.stepLog2 === strip.level.stepLog2);
+    if (index < 0) return false;
+    const bins = strip.values.length / 2;
+    for (let start = 0; start < bins; start += this.uploadChunkBins) {
+      const count = Math.min(this.uploadChunkBins, bins - start);
+      const width = Math.min(count, UPLOAD_CHUNK_WIDTH);
+      const height = Math.ceil(count / width);
+      const chunk = new Float32Array(width * height * 2);
+      chunk.set(strip.values.subarray(start * 2, (start + count) * 2));
+      const texture = new DataTexture(chunk, width, height, RGFormat, FloatType);
+      texture.internalFormat = "RG32F";
+      texture.minFilter = NearestFilter;
+      texture.magFilter = NearestFilter;
+      texture.needsUpdate = true;
+      this.run(gl, index, texture, width, "chunk", [
+        { destStart: start, destCount: count, srcStart: 0, decimation: 1 },
+      ]);
+      texture.dispose();
+    }
+    this.seeded = true;
+    this.readyFrom = index;
+    this.decimateUpward(gl, null, index + 1);
+    return true;
+  }
+
+  /** Declares every level drawn, so the finest ones serve the view again. */
+  seedFinished(): void {
+    this.readyFrom = 0;
   }
 
   /** The per-band layout of one level, for the display's metadata sampler. */
@@ -244,8 +291,8 @@ export class DisplayPyramid {
    * Rebuilds every level above the finest from the one below it, over the
    * bands `spans` names in source bins, or over all of them when it is null.
    */
-  private decimateUpward(gl: WebGLRenderer, spans: Uint32Array | null): void {
-    for (let index = 1; index < this.levels.length; index++) {
+  private decimateUpward(gl: WebGLRenderer, spans: Uint32Array | null, from = 1): void {
+    for (let index = from; index < this.levels.length; index++) {
       const source = this.levels[index - 1];
       const dest = this.levels[index];
       const instances: DecimateInstance[] = [];

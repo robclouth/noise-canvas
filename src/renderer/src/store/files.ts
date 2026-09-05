@@ -1,3 +1,4 @@
+import { CoarseStripBuilder, coarseStripLevel } from "../lib/coarse-strip";
 import {
   openConfirm,
   openGroupFilesPrompt,
@@ -555,10 +556,12 @@ async function analyseIntoBlocks(
   });
 
   const whole = windowed ? null : new Float32Array(size.texels * 4);
+  const strip = windowed ? new CoarseStripBuilder(layout, coarseStripLevel(layout)) : null;
   await store.seedFrom(async (index) => {
     const { start, end } = frameRangeOfBlock(grid, index);
     const block = await stream.span(start, end);
     if (whole) scatterCompactPixelRanges(whole, block, store.blockRanges(index));
+    strip?.add(store.blockRanges(index), block);
     return block;
   });
   const summary = stream.summary();
@@ -580,6 +583,7 @@ async function analyseIntoBlocks(
   return {
     spectrogramData: {
       packedData: whole ?? undefined,
+      coarseStrip: strip?.strip(),
       inverseMap: await wholeFileInverseMap(layout, shape.numFrames, shape.sampleRate, packedLayout, size.texels),
       metadata: layout.metadata,
       ...size,

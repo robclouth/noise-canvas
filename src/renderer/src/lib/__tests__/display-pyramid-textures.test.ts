@@ -16,8 +16,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { blockGrid, blockPixelRanges } from "../block-grid";
+import { CoarseStripBuilder } from "../coarse-strip";
 import { DisplayPyramid } from "../display-pyramid-textures";
-import { levelDecimation } from "../display-pyramid";
+import { displayPyramidLevels as displayPyramidLevelsOf, levelDecimation } from "../display-pyramid";
 import { gatherPixelRanges } from "../pixel-ranges";
 
 const RESOLVE_VERT = /* glsl */ `
@@ -125,6 +126,52 @@ describe("display pyramid textures", () => {
     }
     return out;
   }
+
+  it("seeds a level from a strip, then draws the finer levels in to match", () => {
+    const source = new Float32Array(data.packedData);
+    for (let bin = 0; bin < source.length / 4; bin++) {
+      source[bin * 4] = 0.01 + ((bin * 11) % 83) * 0.004;
+      source[bin * 4 + 2] = 0.03 + ((bin * 5) % 71) * 0.006;
+    }
+    const reference = seeded(source);
+    const stripIndex = 2;
+    expect(reference.levels.length).toBeGreaterThan(stripIndex + 1);
+    const grid = blockGrid(layout, data.numFrames, 8000, 0.25);
+    const builder = new CoarseStripBuilder(layout, reference.levels[stripIndex]);
+    const blocks: Array<{ ranges: Uint32Array; values: Float32Array }> = [];
+    for (let index = 0; index < grid.blockCount; index++) {
+      const list = blockPixelRanges(grid, index);
+      const ranges = list.ranges.slice(0, list.count * 2);
+      const values = gatherPixelRanges(source, ranges);
+      builder.add(ranges, values);
+      blocks.push({ ranges, values });
+    }
+
+    const pyramid = makePyramid();
+    expect(pyramid.seedLevelFromStrip(gl, builder.strip())).toBe(true);
+    expect(pyramid.readyLevel).toBe(stripIndex);
+    expect(pyramid.texture(0)).not.toBeNull();
+    for (let index = stripIndex; index < pyramid.levels.length; index++) {
+      expect(Array.from(readLevel(pyramid, index))).toEqual(Array.from(readLevel(reference, index)));
+    }
+
+    pyramid.seedingFromCompact();
+    for (const block of blocks) pyramid.patchFromCompact(gl, block.values, block.ranges);
+    pyramid.seedFinished();
+    expect(pyramid.readyLevel).toBe(0);
+    for (let index = 0; index < pyramid.levels.length; index++) {
+      expect(Array.from(readLevel(pyramid, index))).toEqual(Array.from(readLevel(reference, index)));
+    }
+  });
+
+  it("refuses a strip cut for a level the stack does not hold", () => {
+    const capped = makePyramid({ maxTexels: 4000 });
+    const full = displayPyramidLevelsOf(layout);
+    expect(capped.levels[0].stepLog2).toBeGreaterThan(full[0].stepLog2);
+    const builder = new CoarseStripBuilder(layout, full[0]);
+    expect(capped.seedLevelFromStrip(gl, builder.strip())).toBe(false);
+    expect(capped.texture(0)).toBeNull();
+  });
 
   it("holds no texture before it is seeded", () => {
     const pyramid = makePyramid();

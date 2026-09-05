@@ -160,6 +160,15 @@ describe("display level choice", () => {
     expect(choice.blend).toBeCloseTo(0.5, 6);
   });
 
+  it("never goes below the level declared ready", () => {
+    const step = levels[0].stepLog2;
+    expect(displayLevelChoice(levels, 2 ** step, 3)).toEqual({ fine: 3, coarse: 3, blend: 0 });
+    expect(displayLevelChoice(levels, 2 ** (step + 2) * Math.SQRT2, 3)).toEqual({ fine: 3, coarse: 3, blend: 0 });
+    const above = displayLevelChoice(levels, 2 ** (step + 4) * Math.SQRT2, 3);
+    expect(above).toEqual(displayLevelChoice(levels, 2 ** (step + 4) * Math.SQRT2));
+    expect(displayLevelChoice(levels, 2 ** step, levels.length + 5).fine).toBe(levels.length - 1);
+  });
+
   it("holds the finest level when the view is zoomed past it", () => {
     const choice = displayLevelChoice(levels, 0.25);
     expect(choice.fine).toBe(0);

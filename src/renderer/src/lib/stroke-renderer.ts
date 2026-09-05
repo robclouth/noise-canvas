@@ -52,6 +52,7 @@ import {
 } from "./canvas-view";
 import type { CommittedSource } from "./display-decimate";
 import { DisplayPyramid } from "./display-pyramid-textures";
+import type { CoarseStrip } from "./coarse-strip";
 import { DisplayTileRing } from "./display-tiles-textures";
 import { footprintAimToBlUv } from "./brush-anchor";
 import { ATTRACT_MODULATOR_MAP_START, padToFold } from "./constants";
@@ -1963,6 +1964,16 @@ export class StrokeRenderer {
   /** Encodes the pixels of `ranges` into the display's levels from their own values. */
   patchDisplayFromCompact(values: Float32Array, ranges: Uint32Array): void {
     this.displayPyramid?.patchFromCompact(this.gl, values, ranges);
+  }
+
+  /** Seeds the display's coarser levels from a strip of the whole file, ahead of the finer draw. */
+  seedDisplayFromStrip(strip: CoarseStrip): void {
+    this.displayPyramid?.seedLevelFromStrip(this.gl, strip);
+  }
+
+  /** Declares the display's levels all drawn. */
+  finishDisplaySeed(): void {
+    this.displayPyramid?.seedFinished();
   }
 
   /** Declares the display's levels about to be drawn block by block. */

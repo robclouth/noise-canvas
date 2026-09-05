@@ -1,3 +1,4 @@
+import type { CoarseStrip } from "../lib/coarse-strip";
 import type { FileRendererHandle } from "@renderer/components/file-renderer";
 import type { BrushStep } from "@renderer/parameters";
 import type { OutputLevels } from "@renderer/lib/output-levels";
@@ -55,6 +56,10 @@ export type SpectrogramData = {
   // texture upload: the renderer releases it once the GPU holds the state,
   // and from then on the FBO and the block store carry it.
   packedData?: Float32Array;
+  // The whole file at one coarser display level, kept by the analysis of a
+  // file the canvas cannot hold. Shows while the display is drawn from the
+  // store, and is released with `packedData`.
+  coarseStrip?: CoarseStrip;
   // The synthesis inverse map. Released with `packedData` once the GPU holds
   // it; rebuilt in milliseconds from the band layout when a derived file or a
   // reopen needs it again.

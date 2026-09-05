@@ -95,13 +95,22 @@ export function displayPyramidLevels(
 /**
  * The levels to sample for a view showing `framesPerPixel` input frames in
  * each screen pixel. Blending the pair keeps a zoom from stepping visibly as
- * the choice crosses a level.
+ * the choice crosses a level. Levels finer than `readyFrom` hold no whole
+ * picture yet, so the choice never goes below it.
  */
-export function displayLevelChoice(levels: DisplayPyramidLevel[], framesPerPixel: number): DisplayLevelChoice {
+export function displayLevelChoice(
+  levels: DisplayPyramidLevel[],
+  framesPerPixel: number,
+  readyFrom = 0,
+): DisplayLevelChoice {
   const wanted = Math.log2(Math.max(framesPerPixel, 1)) - levels[0].stepLog2;
   const fine = Math.min(Math.max(Math.floor(wanted), 0), levels.length - 1);
   const coarse = Math.min(fine + 1, levels.length - 1);
   const blend = coarse === fine ? 0 : Math.min(Math.max(wanted - fine, 0), 1);
+  if (fine < readyFrom) {
+    const ready = Math.min(readyFrom, levels.length - 1);
+    return { fine: ready, coarse: ready, blend: 0 };
+  }
   return { fine, coarse, blend };
 }
 

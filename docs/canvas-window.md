@@ -175,7 +175,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     Opening a file is the same rule. `AnalysisStream` works the band layout out
     before it reads any audio, so the analysis hands back one block of
     coefficients at a time and the store is seeded as they land; the display
-    then draws the file from those blocks. `scanOnsets` and `synthesiseInChunks`
+    then draws the file from those blocks. The analysis also keeps a strip of
+    the whole file at one coarser pyramid level (`lib/coarse-strip.ts`), the
+    taps that level's decimation would take, so the picture shows at that
+    level the moment the view mounts and the finer levels are drawn in
+    underneath it; the level choice never goes below the pyramid's
+    `readyLevel` until that draw finishes. `scanOnsets` and `synthesiseInChunks`
     read the store back a chunk at a time, each through a view. Both need what
     only the whole file can give — every band's loudest moment, and the loudest
     moment of the detection function — so the analysis carries the first and a
