@@ -1,7 +1,7 @@
 import { Color, FloatType, NearestFilter, RGBAFormat, type Texture, WebGLRenderer, WebGLRenderTarget } from "three";
 import type { BlockGrid } from "./block-grid";
 import type { CanvasView } from "./canvas-view";
-import { type BlockValueReader, CanvasWindow } from "./canvas-window";
+import { type BlockReader, type BlockValueReader, CanvasWindow } from "./canvas-window";
 
 /**
  * A read-only window of a file's packed state, as one texture. It pages the
@@ -21,7 +21,7 @@ export class PackedWindow {
   constructor(
     gl: WebGLRenderer,
     grid: BlockGrid,
-    opts: { windowBlocks: number; maxBytes?: number; read: BlockValueReader },
+    opts: { windowBlocks: number; maxBytes?: number; read: BlockValueReader; readBlock?: BlockReader },
   ) {
     this.gl = gl;
     this.blocks = new CanvasWindow(gl, grid, { ...opts, readOnly: true });

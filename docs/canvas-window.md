@@ -4,7 +4,10 @@
 pool. A file whose whole state fits keeps one canvas over all of it, exactly as
 it always did; a longer one paints through a window of K blocks. A build pins K
 with `VITE_CANVAS_WINDOW_BLOCKS`, where 0 keeps the whole file on the canvas.
-Everything below only happens for a file long enough to need a window.
+The same answer, `canvasHoldsWholeFile`, picks the file's store: a file the
+canvas holds whole keeps its painted state in one array in RAM and writes only
+its seed to disk; a longer one keeps both on disk in blocks. Everything below
+only happens for a file long enough to need a window.
 
 This page is the model. `block-memory-plan.md` is the work log — read that only
 when you want to know why something was done.
@@ -41,22 +44,23 @@ dab.
 
 ## Who owns what
 
-| File                      | Holds                                                                  |
-| ------------------------- | ---------------------------------------------------------------------- |
-| `lib/canvas-view.ts`      | what a view is, and every conversion between file space and view space |
-| `lib/block-grid.ts`       | where the block edges fall                                             |
-| `lib/block-store.ts`      | the file's packed state as blocks on disk, current and as seeded       |
-| `lib/block-slot-cache.ts` | the blocks that are on the GPU, in fixed slots, under a byte budget    |
-| `lib/canvas-window.ts`    | placing the window, filling it, and what the canvas holds              |
-| `lib/packed-window.ts`    | the same window over the file's original, as one texture               |
-| `lib/source-window.ts`    | a window over another file, for a brush painting or filtering from it  |
-| `lib/impulse-need.ts`     | the response each convolve step reads, and the frames its taps cover   |
-| `lib/effect-reach.ts`     | how far past the brush each effect reads                               |
-| `lib/export-window.ts`    | spans of the committed state for an image export                       |
-| `lib/whole-file-gate.ts`  | what a brush asks for that a window cannot serve                       |
-| `lib/carried-paint.ts`    | paint on blocks that left the window mid-stroke                        |
-| `lib/windowed-canvas.ts`  | **the boundary.** File coordinates in, view coordinates out            |
-| `lib/stroke-renderer.ts`  | painting, in view coordinates only                                     |
+| File                       | Holds                                                                      |
+| -------------------------- | -------------------------------------------------------------------------- |
+| `lib/canvas-view.ts`       | what a view is, and every conversion between file space and view space     |
+| `lib/block-grid.ts`        | where the block edges fall                                                 |
+| `lib/block-store.ts`       | the file's packed state as blocks on disk, current and as seeded           |
+| `lib/whole-state-store.ts` | the same for a file the canvas holds whole: current in RAM, seeded on disk |
+| `lib/block-slot-cache.ts`  | the blocks that are on the GPU, in fixed slots, under a byte budget        |
+| `lib/canvas-window.ts`     | placing the window, filling it, and what the canvas holds                  |
+| `lib/packed-window.ts`     | the same window over the file's original, as one texture                   |
+| `lib/source-window.ts`     | a window over another file, for a brush painting or filtering from it      |
+| `lib/impulse-need.ts`      | the response each convolve step reads, and the frames its taps cover       |
+| `lib/effect-reach.ts`      | how far past the brush each effect reads                                   |
+| `lib/export-window.ts`     | spans of the committed state for an image export                           |
+| `lib/whole-file-gate.ts`   | what a brush asks for that a window cannot serve                           |
+| `lib/carried-paint.ts`     | paint on blocks that left the window mid-stroke                            |
+| `lib/windowed-canvas.ts`   | **the boundary.** File coordinates in, view coordinates out                |
+| `lib/stroke-renderer.ts`   | painting, in view coordinates only                                         |
 
 The passes that read the file outside the renderer live beside the addon they
 drive, because the extension host runs them too:
@@ -94,9 +98,11 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    it. Held dabs run in the order they were given, so one the canvas could
    take does not overtake one still waiting. `settle` drains what is left
    before the commit reads the stroke.
-2. **The canvas and the original move together.** The canvas slides only once
-   both windows have their blocks, because the shaders address the original
-   through the canvas view's metadata.
+2. **The original is read only for a dab that samples it.** The window over
+   the original is built the first time a step in Original mode asks for it,
+   and such a dab lands only once that window holds the canvas's view, because
+   the shaders address the original through the canvas view's metadata. A
+   slide no dab asked the original for leaves it where it was.
 3. **A slide keeps the overlap and composes what enters — so the overlap has
    to be real.** If a fill was abandoned, those blocks are still empty; the
    window tracks what the canvas holds and composes whatever it lacks.
@@ -201,6 +207,19 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     at construction comes back empty and has to be asked for again once the
     root is there — `WindowedCanvas.storeReady`.
 
+    A block the window reads goes from the store to its slot as the store
+    holds it, with no copy in between (`readBlock`): the slot cache uploads
+    it at once through a texture it keeps, and the store's array may change
+    under a later commit. The range readers stay for everything that keeps
+    what it reads.
+
+    A file the canvas holds whole never pays for blocks. Its store keeps the
+    current state as one array, patched in place by every commit, and writes
+    the seeded blocks behind the open; the first patch waits for that write,
+    and until then the array answers for the seed too. The manifest on disk
+    never names a tier held in RAM, so a relaunch rebuilds the state from the
+    seed and the deltas and seeds the array again.
+
 13. **The band layout is doubles, and the metadata texture is a conversion of
     it.** A float counts integers exactly only to 2^24, and a ten-minute file
     has 119M coefficients, so offsets held as floats round to multiples of
@@ -239,7 +258,8 @@ Per open file, windowed, at K blocks:
 - canvas pair, sized to the window, not the file
 - block slots on the GPU: two windows plus four spare, because a slide holds
   the window it enters and the one whose paint it folds back
-- the original window: one window plus four spare, plus its composed texture
+- the original window, once a step in Original mode asks for it: one window
+  plus four spare, plus its composed texture
 - a source window per windowed file a step paints from, and its
   original once a step reads that
 - the display pyramid and tile ring, which are bounded by the viewport

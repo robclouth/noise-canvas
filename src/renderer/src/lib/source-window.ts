@@ -11,7 +11,7 @@ import {
 import type { SpectrogramData } from "../store/types";
 import { blockGrid, blockOfFrame, type BlockGrid } from "./block-grid";
 import type { CanvasView } from "./canvas-view";
-import { needsCanvasWindow, type BlockValueReader } from "./canvas-window";
+import { needsCanvasWindow, type BlockReader, type BlockValueReader } from "./canvas-window";
 import { canvasWindowBlocks } from "./gpu-budget";
 import { PackedWindow } from "./packed-window";
 import { metadataTextureRows } from "./band-layout";
@@ -23,6 +23,10 @@ export type SourceFileBlocks = {
   readCurrent: BlockValueReader;
   /** The file's original pixels — what its block store was seeded with. */
   readRoot: BlockValueReader;
+  /** The committed pixels of one block, without the range read's copy. */
+  readCurrentBlock?: BlockReader;
+  /** The original pixels of one block, without the range read's copy. */
+  readRootBlock?: BlockReader;
   /** Changes whenever the file's committed state moves, so a window re-reads. */
   revision: () => number;
 };
@@ -88,7 +92,11 @@ export class SourceWindow {
     this.blocks = blocks;
     this.grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
     this.windowBlocks = Math.min(windowBlocks ?? canvasWindowBlocks(this.grid), this.grid.blockCount);
-    this.current = new PackedWindow(gl, this.grid, { windowBlocks: this.windowBlocks, read: blocks.readCurrent });
+    this.current = new PackedWindow(gl, this.grid, {
+      windowBlocks: this.windowBlocks,
+      read: blocks.readCurrent,
+      readBlock: blocks.readCurrentBlock,
+    });
   }
 
   /** True when a window over the file serves less than all of it. */
@@ -189,6 +197,7 @@ export class SourceWindow {
       this.original = new PackedWindow(this.gl, this.grid, {
         windowBlocks: this.windowBlocks,
         read: this.blocks.readRoot,
+        readBlock: this.blocks.readRootBlock,
       });
     }
     return this.original;

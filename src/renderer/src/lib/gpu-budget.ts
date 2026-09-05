@@ -120,6 +120,11 @@ export function canvasWindowBlocks(grid: BlockGrid): number {
   return Math.min(CANVAS_WINDOW_MAX_BLOCKS, grid.blockCount, Math.max(CANVAS_WINDOW_MIN_BLOCKS, blocks));
 }
 
+/** True when the painting canvas holds every block of a file cut on `grid`, so none of it is paged. */
+export function canvasHoldsWholeFile(grid: BlockGrid): boolean {
+  return grid.blockCount <= canvasWindowBlocks(grid);
+}
+
 let cachedInfo: { bytes: number; unified: boolean } | null = null;
 let cachedHistoryBytes: number | null = null;
 

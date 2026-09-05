@@ -55,13 +55,45 @@ export type BlockStoreOptions = {
 };
 
 /**
+ * A file's packed state: the tier the strokes patch, and the seeded state
+ * the tier started from, both cut on one block grid. A block store keeps
+ * both on disk; a file the canvas holds whole keeps its tier in RAM.
+ */
+export interface PackedStateStore {
+  readonly grid: BlockGrid;
+  /** True once every block of the seeded state is held, so the store speaks for the file. */
+  readonly isSeeded: boolean;
+  /** True when the tier outlives the process, so a manifest on disk may name the node it holds. */
+  readonly tierOnDisk: boolean;
+  readonly residentBytes: number;
+  readonly dirtyCount: number;
+  blockRanges(index: number): Uint32Array;
+  seed(packed: Float32Array): Promise<void>;
+  seedFrom(source: (index: number) => Promise<Float32Array>): Promise<void>;
+  seedCurrent(packed: Float32Array): Promise<void>;
+  /** One block of the tier, compact in block order. */
+  readBlock(index: number): Promise<Float32Array>;
+  /** One block as it was seeded, compact in block order. */
+  readRootBlock(index: number): Promise<Float32Array>;
+  readAll(): Promise<Float32Array>;
+  readAllRoot(): Promise<Float32Array>;
+  readRanges(ranges: Uint32Array): Promise<Float32Array>;
+  readRootRanges(ranges: Uint32Array): Promise<Float32Array>;
+  patch(ranges: Uint32Array, values: Float32Array): Promise<void>;
+  applyTurnsCollecting(turns: PhaseTurns): Promise<Uint32Array>;
+  flush(): Promise<void>;
+  dispose(): Promise<void>;
+}
+
+/**
  * The packed coefficients of one file, held as blocks on disk with a bounded
  * set decoded in RAM. Readers ask for the pixels they need; only the blocks
  * those pixels fall in are decoded, so a longer file costs reads rather than
  * memory.
  */
-export class BlockStore {
+export class BlockStore implements PackedStateStore {
   readonly grid: BlockGrid;
+  readonly tierOnDisk = true;
   private readonly backend: BlockBackend;
   private readonly overlay: BlockBackend | null;
   private readonly codec: BlockCodec;
@@ -149,11 +181,15 @@ export class BlockStore {
     this.everPatched.clear();
     this.overlayOnDisk.clear();
     await this.overlay?.clear();
+    // One block's encode and write run while the next is read from the source.
+    let writing: Promise<void> = Promise.resolve();
     for (let index = 0; index < this.grid.blockCount; index++) {
       const block = this.checked(index, await source(index));
-      await this.backend.write(index, await this.codec.encode(block));
+      await writing;
+      writing = this.codec.encode(block).then((bytes) => this.backend.write(index, bytes));
       this.clean.set(String(index), block);
     }
+    await writing;
     this.seeded = true;
   }
 
@@ -181,6 +217,21 @@ export class BlockStore {
   /** The named blocks' coefficients, in the order asked for. */
   async read(blocks: number[]): Promise<Float32Array[]> {
     return await Promise.all(blocks.map((index) => this.block(index)));
+  }
+
+  /**
+   * One block of the tier, as the store holds it rather than a copy: a
+   * later patch changes the array handed out, so a reader takes what it
+   * needs from it at once and keeps no reference.
+   */
+  async readBlock(index: number): Promise<Float32Array> {
+    return await this.block(index);
+  }
+
+  /** One block as it was seeded. The store never changes the array handed out. */
+  async readRootBlock(index: number): Promise<Float32Array> {
+    if (this.disposed) throw new Error("block store is disposed");
+    return await this.rootBlock(index);
   }
 
   /** The whole packed array, one block at a time, padded as the texture is. */

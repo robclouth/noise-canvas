@@ -1,8 +1,10 @@
 import type { BandLayout } from "./band-layout";
 import { blockGrid } from "./block-grid";
-import { BlockStore, fileBlockBackend } from "./block-store";
+import { BlockStore, fileBlockBackend, type PackedStateStore } from "./block-store";
+import { canvasHoldsWholeFile } from "./gpu-budget";
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { host } from "./host";
+import { WholeStateStore } from "./whole-state-store";
 
 /** What a file's store needs beyond its band layout. */
 export type BlockStoreShape = {
@@ -11,7 +13,7 @@ export type BlockStoreShape = {
   texelCount: number;
 };
 
-const stores = new Map<string, Promise<BlockStore>>();
+const stores = new Map<string, Promise<PackedStateStore>>();
 
 async function blocksRootDir(): Promise<string> {
   return host.path.join(await host.dialogs.getUserDataPath(), "blocks");
@@ -23,29 +25,35 @@ export async function blockStoreDirectory(fileId: string): Promise<string> {
 }
 
 /** The open store for a file, or null when none has been opened. */
-export function getBlockStore(fileId: string): Promise<BlockStore> | null {
+export function getBlockStore(fileId: string): Promise<PackedStateStore> | null {
   return stores.get(fileId) ?? null;
 }
 
 /**
- * Opens the store holding a file's packed state as blocks on disk, creating
- * it over `<userData>/blocks/<fileId>` when the file has none open. The seed
- * stays in that directory untouched; patched blocks flush into its `current`
- * overlay, so the root state survives any torn write. The resident budget
- * scales with system memory: the blocks a stroke reads stay decoded for the
- * next one, while a file longer than the budget still cannot hold itself
- * decoded.
+ * Opens the store holding a file's packed state, creating it over
+ * `<userData>/blocks/<fileId>` when the file has none open. The seed lives in
+ * that directory as blocks, untouched after it is written. A file the canvas
+ * pages through a window keeps its tier on disk too: patched blocks flush
+ * into the `current` overlay, so the root state survives any torn write. A
+ * file the canvas holds whole keeps its tier in RAM and writes only the seed.
+ * The resident budget scales with system memory: the blocks a stroke reads
+ * stay decoded for the next one, while a file longer than the budget still
+ * cannot hold itself decoded.
  */
-export function openBlockStore(fileId: string, layout: BandLayout, shape: BlockStoreShape): Promise<BlockStore> {
+export function openBlockStore(fileId: string, layout: BandLayout, shape: BlockStoreShape): Promise<PackedStateStore> {
   let store = stores.get(fileId);
   if (!store) {
     store = (async () => {
       const grid = blockGrid(layout, shape.numFrames, shape.sampleRate);
       const dir = await blockStoreDirectory(fileId);
+      const maxResidentBytes = historyCacheBudgets(host.os.totalmem()).blockResident;
+      if (canvasHoldsWholeFile(grid)) {
+        return new WholeStateStore(grid, fileBlockBackend(dir), { texelCount: shape.texelCount, maxResidentBytes });
+      }
       return new BlockStore(grid, fileBlockBackend(dir), {
         overlay: fileBlockBackend(host.path.join(dir, "current")),
         texelCount: shape.texelCount,
-        maxResidentBytes: historyCacheBudgets(host.os.totalmem()).blockResident,
+        maxResidentBytes,
       });
     })();
     stores.set(fileId, store);

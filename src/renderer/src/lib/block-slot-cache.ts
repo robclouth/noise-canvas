@@ -47,6 +47,10 @@ export class BlockSlotCache {
   private readonly lastUse: Float64Array;
   private tick = 0;
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+  // One upload texture per patch shape, and the buffer a block whose texels
+  // do not fill the texture's last row is staged in.
+  private readonly uploads = new Map<string, DataTexture>();
+  private staging: Float32Array | null = null;
 
   constructor(gl: WebGLRenderer, grid: BlockGrid, maxBytes: number, pageBytes = DEFAULT_PAGE_BYTES) {
     this.gl = gl;
@@ -97,12 +101,15 @@ export class BlockSlotCache {
 
     const patchWidth = Math.min(ANALYSIS_MAX_TEXTURE_SIZE, texels);
     const patchHeight = Math.ceil(texels / patchWidth);
-    let padded = values;
-    if (values.length !== patchWidth * patchHeight * 4) {
-      padded = new Float32Array(patchWidth * patchHeight * 4);
-      padded.set(values);
+    const floats = patchWidth * patchHeight * 4;
+    let data = values;
+    if (values.length !== floats) {
+      if (!this.staging || this.staging.length < floats) this.staging = new Float32Array(floats);
+      data = this.staging.subarray(0, floats);
+      data.set(values);
     }
-    const patchTex = new DataTexture(padded, patchWidth, patchHeight, RGBAFormat, FloatType);
+    const patchTex = this.uploadTexture(patchWidth, patchHeight);
+    patchTex.image.data = data;
     patchTex.needsUpdate = true;
     this.gl.initTexture(patchTex);
 
@@ -112,7 +119,6 @@ export class BlockSlotCache {
     patchMaterial.uniforms.patchWidth.value = patchWidth;
     this.draw(patchMaterial, this.pageTarget(this.pageOf(slot)), [this.slotStart(slot), texels, 0]);
     patchMaterial.uniforms.patchTex.value = null;
-    patchTex.dispose();
   }
 
   /**
@@ -170,7 +176,24 @@ export class BlockSlotCache {
   dispose(): void {
     for (const page of this.pages) page?.dispose();
     this.pages.length = 0;
+    for (const texture of this.uploads.values()) texture.dispose();
+    this.uploads.clear();
+    this.staging = null;
     this.invalidate();
+  }
+
+  /** The texture blocks of `width` by `height` texels are uploaded through, made on first use. */
+  private uploadTexture(width: number, height: number): DataTexture {
+    const key = `${width}x${height}`;
+    let texture = this.uploads.get(key);
+    if (!texture) {
+      texture = new DataTexture(new Float32Array(width * height * 4), width, height, RGBAFormat, FloatType);
+      texture.minFilter = NearestFilter;
+      texture.magFilter = NearestFilter;
+      texture.generateMipmaps = false;
+      this.uploads.set(key, texture);
+    }
+    return texture;
   }
 
   /**

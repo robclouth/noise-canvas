@@ -7,9 +7,8 @@ import { hasPhaseTurns, phaseTurnRanges, phaseTurnResidualRanges } from "../../.
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
 import { bandLayoutOf, bandLengthsTexels } from "./band-layout";
 import { blockGrid } from "./block-grid";
-import { needsCanvasWindow } from "./canvas-window";
-import { canvasWindowBlocks } from "./gpu-budget";
-import type { BlockStore } from "./block-store";
+import { canvasHoldsWholeFile } from "./gpu-budget";
+import type { PackedStateStore } from "./block-store";
 import {
   blockStoreDirectory,
   destroyBlockStore,
@@ -243,7 +242,7 @@ export async function deriveSideData(node: HistoryNode): Promise<{
   // A canvas holding a window builds its own inverse map from the view, so the
   // file-sized one is not made for it.
   const grid = blockGrid({ numBands: node.dimensions.numBands, metadata }, numFrames, sampleRate);
-  if (needsCanvasWindow(grid, canvasWindowBlocks(grid))) return { inverseMap: undefined, metadata };
+  if (!canvasHoldsWholeFile(grid)) return { inverseMap: undefined, metadata };
 
   // The inverse map has an entry per packed pixel, so the addon fills it; the
   // metadata texture is four floats per band and stays here.
@@ -505,11 +504,12 @@ export class HistoryManager {
   private writeManifest(): Promise<void> {
     // Serialized synchronously so a flush triggered just before dispose() nulls
     // the manifest still persists the captured tree across the awaits below.
-    // The tier marker is masked while a tier flush is pending: the disk may
-    // only name a tier the overlay fully holds.
+    // The tier marker is masked while a tier flush is pending, and always for
+    // a tier held in RAM: the disk may only name a tier the disk fully holds.
     const manifest = this.manifest;
     if (!manifest) return Promise.resolve();
-    const json = JSON.stringify(this.tierFlushes > 0 ? { ...manifest, overlayNodeId: undefined } : manifest);
+    const masked = this.tierFlushes > 0 || !this.tierOnDisk;
+    const json = JSON.stringify(masked ? { ...manifest, overlayNodeId: undefined } : manifest);
     const run = this.manifestWriting.then(async () => {
       const dir = await this.ensureDir();
       await host.fs.writeFile(host.path.join(dir, MANIFEST_FILENAME), json);
@@ -754,15 +754,18 @@ export class HistoryManager {
       overlayNodeId: id,
       nodes: { [id]: node },
     };
-    // The root's packed state lives as the block store's seed rather than as
-    // its own snapshot file, so the state is not written to disk twice.
+    // The root's packed state lives as the store's seed rather than as its
+    // own snapshot file, so the state is not written to disk twice. A store
+    // the analysis seeded already holds it, so `data` is not written again.
     const s = opts.spectrogram;
-    const store = await openBlockStore(
-      this.fileId,
-      { numBands: s.numBands, metadata: s.metadata },
-      { numFrames: s.numFrames, sampleRate: s.sampleRate, texelCount: s.texels },
+    const store = this.noteStore(
+      await openBlockStore(
+        this.fileId,
+        { numBands: s.numBands, metadata: s.metadata },
+        { numFrames: s.numFrames, sampleRate: s.sampleRate, texelCount: s.texels },
+      ),
     );
-    if (opts.data) await store.seed(opts.data);
+    if (opts.data && !store.isSeeded) await store.seed(opts.data);
     else if (!store.isSeeded) throw new Error("HistoryManager: the root state was never written");
     await this.writeManifest();
     this.lastLoadedAnchorId = id;
@@ -824,6 +827,9 @@ export class HistoryManager {
 
   private storeHolds = 0;
   private storeReleased: Promise<void> = Promise.resolve();
+  // Whether the open store keeps its tier on disk; a tier in RAM is never
+  // named by the manifest on disk.
+  private tierOnDisk = true;
   private releaseStore: (() => void) | null = null;
 
   /**
@@ -1033,15 +1039,23 @@ export class HistoryManager {
     return this.manifest.nodes[this.manifest.seedNodeId ?? this.manifest.rootId] ?? null;
   }
 
-  private seedBlockStore(holder: HistoryNode): Promise<BlockStore> {
+  private async seedBlockStore(holder: HistoryNode): Promise<PackedStateStore> {
     const open = getBlockStore(this.fileId);
-    if (open) return open;
+    if (open) return this.noteStore(await open);
     const { texels, numFrames, numBands, sampleRate } = holder.dimensions;
-    return openBlockStore(
-      this.fileId,
-      { numBands, metadata: bandMetadataOf(holder) },
-      { numFrames, sampleRate, texelCount: texels },
+    return this.noteStore(
+      await openBlockStore(
+        this.fileId,
+        { numBands, metadata: bandMetadataOf(holder) },
+        { numFrames, sampleRate, texelCount: texels },
+      ),
     );
+  }
+
+  /** Records where the store keeps its tier, which decides what the manifest on disk may name. */
+  private noteStore(store: PackedStateStore): PackedStateStore {
+    this.tierOnDisk = store.tierOnDisk;
+    return store;
   }
 
   /**
@@ -1051,7 +1065,7 @@ export class HistoryManager {
    * names a tier the overlay does not hold; the resident blocks stay the
    * truth and the next flush retries the same dirty set.
    */
-  private scheduleTierFlush(store: BlockStore): void {
+  private scheduleTierFlush(store: PackedStateStore): void {
     this.tierFlushes++;
     this.tierFlushing = store.flush().then(
       async () => {
@@ -1096,10 +1110,12 @@ export class HistoryManager {
     }
     await destroyBlockStore(this.fileId);
     const dims = node.dimensions;
-    const store = await openBlockStore(
-      this.fileId,
-      { numBands: dims.numBands, metadata: bandMetadataRows(layout, dims.numBands) },
-      { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.texels },
+    const store = this.noteStore(
+      await openBlockStore(
+        this.fileId,
+        { numBands: dims.numBands, metadata: bandMetadataRows(layout, dims.numBands) },
+        { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.texels },
+      ),
     );
     await store.seed(packed);
     if (this.manifest !== manifest) return;
@@ -1329,7 +1345,7 @@ export class HistoryManager {
     const { inverseMap, metadata } = await deriveSideData(fullAnchor);
     const dims = fullAnchor.dimensions;
     const grid = blockGrid({ numBands: dims.numBands, metadata }, dims.numFrames, dims.sampleRate);
-    const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
+    const windowed = !canvasHoldsWholeFile(grid);
 
     let packedData: Float32Array | undefined;
     if (windowed) {
@@ -1346,6 +1362,17 @@ export class HistoryManager {
     } else {
       const reconstructed = await this.reconstruct(targetId);
       packedData = reconstructed.packedData;
+      // The tier takes the state as well, so the first stroke patches it
+      // and the first hop walks it, the way they do after a fresh analysis.
+      const holder = this.seedHolder() ?? fullAnchor;
+      if (sameStoreDimensions(holder.dimensions, fullAnchor.dimensions)) {
+        try {
+          await (await this.seedBlockStore(holder)).seedCurrent(packedData);
+          if (this.manifest) this.manifest.overlayNodeId = targetId;
+        } catch (error) {
+          console.warn("history: the tier could not take the reopened state", error);
+        }
+      }
     }
 
     return {
@@ -1646,6 +1673,27 @@ export class HistoryManager {
   }
 
   /**
+   * One block of the current node's packed state, as the store holds it —
+   * not a copy, so a later commit changes the array — or null when the store
+   * does not carry that state. Waits the way `currentRanges` does.
+   */
+  async currentBlock(index: number): Promise<Float32Array | null> {
+    await this.initialize();
+    while (this.storeHolds > 0 && this.manifest && this.manifest.overlayNodeId !== this.manifest.currentId) {
+      await this.storeReleased;
+    }
+    const manifest = this.manifest;
+    if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
+    const holder = this.seedHolder();
+    if (!holder) return null;
+    try {
+      return await (await this.seedBlockStore(holder)).readBlock(index);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * The named pixels of the file's original packed state — the anchor the
    * block store holds as its seed, which is what the pristine texture holds —
    * or null when the store cannot serve it.
@@ -1656,6 +1704,18 @@ export class HistoryManager {
     if (!holder) return null;
     try {
       return await (await this.seedBlockStore(holder)).readRootRanges(ranges);
+    } catch {
+      return null;
+    }
+  }
+
+  /** One block of the file's original packed state, or null when the store cannot serve it. */
+  async rootBlock(index: number): Promise<Float32Array | null> {
+    await this.initialize();
+    const holder = this.seedHolder();
+    if (!holder) return null;
+    try {
+      return await (await this.seedBlockStore(holder)).readRootBlock(index);
     } catch {
       return null;
     }
@@ -2233,10 +2293,12 @@ export class HistoryManager {
     await this.tierFlushing;
     await destroyBlockStore(this.fileId);
     const dims = current.dimensions;
-    const store = await openBlockStore(
-      this.fileId,
-      { numBands: dims.numBands, metadata: bandMetadataRows(layout, dims.numBands) },
-      { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.texels },
+    const store = this.noteStore(
+      await openBlockStore(
+        this.fileId,
+        { numBands: dims.numBands, metadata: bandMetadataRows(layout, dims.numBands) },
+        { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.texels },
+      ),
     );
     await store.seed(packed);
     if (!this.manifest) return;

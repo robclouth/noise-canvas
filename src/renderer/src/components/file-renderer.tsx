@@ -937,6 +937,7 @@ const FileRendererInner = memo(
         ? new ExportSourceWindow(gl, exportGrid, {
             windowBlocks: canvasWindowBlocks(exportGrid),
             read: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
+            readBlock: (index) => getHistoryManager(fileId).currentBlock(index),
           })
         : null;
       try {
@@ -975,6 +976,8 @@ const FileRendererInner = memo(
           renderer: () => strokeRendererRef.current,
           readCurrent: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
           readRoot: (ranges) => getHistoryManager(fileId).rootRanges(ranges),
+          readCurrentBlock: (index) => getHistoryManager(fileId).currentBlock(index),
+          readRootBlock: (index) => getHistoryManager(fileId).rootBlock(index),
           onChanged: () => {
             snapshotStaleRef.current = true;
             scheduleSnapshotRefresh();
@@ -988,6 +991,8 @@ const FileRendererInner = memo(
               spectrogram,
               readCurrent: (ranges) => getHistoryManager(sourceId).currentRanges(ranges),
               readRoot: (ranges) => getHistoryManager(sourceId).rootRanges(ranges),
+              readCurrentBlock: (index) => getHistoryManager(sourceId).currentBlock(index),
+              readRootBlock: (index) => getHistoryManager(sourceId).rootBlock(index),
               revision: () => getHistoryManager(sourceId).revision,
             };
           },
@@ -1134,6 +1139,16 @@ const FileRendererInner = memo(
         );
       }
       return [...needs.values()];
+    };
+
+    /** True while an enabled step reads a file's original state, which a windowed canvas holds only on request. */
+    const wantsOriginal = (state: State): boolean => {
+      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+      for (let index = 0; index < steps.length; index++) {
+        if (steps[index].enabled === false) continue;
+        if (createStepStateView(state, index).sourceDataMode === "original") return true;
+      }
+      return false;
     };
 
     /** The file a convolve step filters through, by the path it names or this file. */
@@ -1640,6 +1655,7 @@ const FileRendererInner = memo(
       // An effect reads around the dab, so the canvas has to hold that reach as
       // well as the dab itself.
       const reach = canvas.wholeFile ? { before: 0, after: 0 } : reachFrames(state);
+      const original = !canvas.wholeFile && wantsOriginal(state);
       if (!canvas.wholeFile) {
         const { numFrames } = spectrogramData;
         const visible = visibleFrameRange(state);
@@ -1665,7 +1681,7 @@ const FileRendererInner = memo(
         // pointer crossing the file, a pan under way — waits until the aim
         // stops, and takes a frame at the moment it does.
         const wait = canvas.isStroking ? 0 : aimRest.current.wait(start, end, performance.now());
-        if (wait === 0) canvas.aim(start, end);
+        if (wait === 0) canvas.aim(start, end, original);
         else scheduleAimRest(wait);
       }
 
@@ -1677,6 +1693,7 @@ const FileRendererInner = memo(
         const needs = {
           sources: sourceNeedsFor(state, cursorPos),
           impulses: windowedImpulseNeeds(state),
+          original,
         };
         for (const need of needs.sources) canvas.aimSource(need);
         for (const need of needs.impulses) canvas.aimImpulse(need);
@@ -1690,7 +1707,7 @@ const FileRendererInner = memo(
           // A preview the renderer refuses, for a brush the window cannot
           // serve or a source window still on its way, shows the committed
           // picture and stays asked for as well.
-          if (!canvas.holdsFrames(dabStart, dabEnd) || !dispatchStroke(state, cursorPos, true)) {
+          if (!canvas.holdsFrames(dabStart, dabEnd, original) || !dispatchStroke(state, cursorPos, true)) {
             displayMode.current = "committed";
           } else {
             applyStroke.current = false;

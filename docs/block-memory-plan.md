@@ -1478,6 +1478,64 @@ the same size whatever the file's length. What is left of the length-dependence
 buffer, splices the window into it, scans every sample for the peak and hands
 the whole thing back, and the caller rebuilds the playback buffer from it.
 
+## Phase 7 — the three costs dev never paid (2026-09-05)
+
+Against dev, the window cost a short file an extra second at open and every
+file some latency: the store encoded and wrote the whole file at open even
+when the canvas held it whole, every fill held a window over the original
+whether or not the brush read it, and each block went from the store to its
+slot through two copies on the main thread.
+
+### What was built
+
+- **A file the canvas holds whole keeps its state in RAM.** `openBlockStore`
+  asks `canvasHoldsWholeFile` — the same answer that sizes the canvas — and
+  gives such a file a `WholeStateStore`: one array, patched in place by every
+  commit, no encode and no overlay write on the stroke path. The seeded blocks
+  are written behind the open, the first patch waits for them, and until then
+  the array answers for the seed too. The manifest on disk never names a tier
+  held in RAM; a relaunch rebuilds the state and seeds the array again.
+  `addRootSnapshot` no longer re-seeds a store the analysis already seeded,
+  which was a second encode and write of every block at open.
+- **The seed overlaps its writes.** A block store's `seedFrom` encodes and
+  writes one block while the source reads the next.
+- **The original window is built on first use.** `WindowedCanvas` holds the
+  original only for a dab whose steps read it (`DabNeeds.original`), the way a
+  source window already did; the aim, the held-dab release and the preview
+  gate all carry the flag.
+- **A block reaches its slot uncopied.** `readBlock` hands the store's own
+  array to the slot cache, which uploads it at once through a texture it keeps
+  and a staging buffer it reuses. The range readers stay for every caller that
+  keeps what it reads.
+
+### Measured (M4 Pro, stereo, built app, drivers in the session scratchpad)
+
+Paint latency is the time from the pointer passing a column, flicking across
+the whole file zoomed out, to that column showing the erase; the sampler's
+gap says how often the compositor could be captured, which is bounded by how
+busy the process was.
+
+| measure                                    | before (ed002b8)   | after            |
+| ------------------------------------------ | ------------------ | ---------------- |
+| 60 s paint latency median / p90 / max      | 112 / 169 / 296 ms | 12 / 54 / 124 ms |
+| 60 s sampler gap                           | 168 ms             | 19 ms            |
+| 280 s + 3 files latency median / p90 / max | 138 / 220 / 257 ms | 22 / 72 / 170 ms |
+| 280 s + 3 files sampler gap                | 170 ms             | 22 ms            |
+| 60 s open, message to view                 | 3.15 s             | 3.0 s            |
+| 280 s open, message to view                | —                  | 26.5 s           |
+
+The open did not move, because the store was never its cost. A phase probe
+put the 60 s open at 0.24 s decode, 1.48 s of spans, 1.0 s of onset
+detection and 0.04 s of inverse map; the 280 s open at 1.1 s decode, 10.4 s
+of spans and 14.5 s of onset scan. Without the seed overlap the 280 s spans
+took 7.8 s plus 5.7 s of encodes and writes, so the overlap saves 2.6 s.
+
+The onset scan is the next lever: it takes two rounds over the store, in
+chunk order, and a 280 s file has 151 blocks where the resident budget holds
+about 130, so every block of both rounds is decoded again from disk. Walking
+the rounds in alternate directions would keep all but about 20 blocks per
+round resident.
+
 ---
 
 ## Risks

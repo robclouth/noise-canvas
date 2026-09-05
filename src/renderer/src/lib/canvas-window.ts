@@ -42,6 +42,13 @@ export type BlockSpan = { firstBlock: number; lastBlock: number };
 /** Reads the packed values of file-absolute pixel ranges, compact and in order. */
 export type BlockValueReader = (ranges: Uint32Array) => Promise<Float32Array | null>;
 
+/**
+ * Reads one block's packed values, compact in block order. The array may be
+ * the store's own, changed by a later patch, so a reader takes what it needs
+ * at once and keeps no reference.
+ */
+export type BlockReader = (index: number) => Promise<Float32Array | null>;
+
 /** True when the file has more blocks than the canvas can hold. */
 export function needsCanvasWindow(grid: BlockGrid, windowBlocks: number): boolean {
   return grid.blockCount > windowBlocks;
@@ -100,6 +107,7 @@ export class CanvasWindow {
   readonly windowBlocks: number;
   private readonly cache: BlockSlotCache;
   private readonly read: BlockValueReader;
+  private readonly readBlock: BlockReader | null;
   private readonly loading = new Map<number, Promise<boolean>>();
   // Blocks whose slots hold paint the canvas gave them, not the store's values.
   private readonly painted = new Set<number>();
@@ -116,10 +124,18 @@ export class CanvasWindow {
   constructor(
     gl: WebGLRenderer,
     grid: BlockGrid,
-    opts: { windowBlocks: number; maxBytes?: number; readOnly?: boolean; read: BlockValueReader },
+    opts: {
+      windowBlocks: number;
+      maxBytes?: number;
+      readOnly?: boolean;
+      read: BlockValueReader;
+      /** Serves a whole block without the range read's copy, when the store can. */
+      readBlock?: BlockReader;
+    },
   ) {
     this.grid = grid;
     this.read = opts.read;
+    this.readBlock = opts.readBlock ?? null;
     this.windowBlocks = Math.min(Math.max(1, Math.floor(opts.windowBlocks)), grid.blockCount);
     const slotBytes = blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL;
     // A slide that carries paint holds two windows at once: the one it enters,
@@ -277,9 +293,7 @@ export class CanvasWindow {
   private loadBlock(block: number): Promise<boolean> {
     const pending = this.loading.get(block);
     if (pending) return pending;
-    const list = blockPixelRanges(this.grid, block);
-    const ranges = list.ranges.slice(0, list.count * 2);
-    const load = this.read(ranges)
+    const load = this.readValues(block)
       .then((values) => {
         if (this.disposed || !values) return false;
         // Read as the value lands, not as the read started: the window asked
@@ -294,5 +308,11 @@ export class CanvasWindow {
       });
     this.loading.set(block, load);
     return load;
+  }
+
+  private readValues(block: number): Promise<Float32Array | null> {
+    if (this.readBlock) return this.readBlock(block);
+    const list = blockPixelRanges(this.grid, block);
+    return this.read(list.ranges.slice(0, list.count * 2));
   }
 }

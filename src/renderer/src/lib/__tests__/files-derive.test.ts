@@ -222,14 +222,14 @@ describe("deriving file state", () => {
     const copyStore = await getBlockStore(newFileId)!;
     expect(copyStore).not.toBeNull();
 
-    const copyBlocks = await copyStore!.read([0, 1, 2]);
+    const copyBlocks = await Promise.all([0, 1, 2].map((index) => copyStore!.readBlock(index)));
     for (let i = 0; i < 3; i++) {
       const copyBlock = copyBlocks[i];
       const expectedValue = 10 * (i + 1);
       expect(copyBlock.every((v) => v === expectedValue)).toBe(true);
     }
 
-    const [sourceBlock1] = await sourceStore.read([1]);
+    const sourceBlock1 = await sourceStore.readBlock(1);
     expect(sourceBlock1[0]).toBe(999);
   });
 
@@ -274,7 +274,7 @@ describe("deriving file state", () => {
     const copyStore = await getBlockStore(newFileId)!;
     expect(copyStore).not.toBeNull();
 
-    const [block0, block1, block2] = await copyStore!.read([0, 1, 2]);
+    const [block0, block1, block2] = await Promise.all([0, 1, 2].map((index) => copyStore!.readBlock(index)));
     expect(block0[0]).toBe(5);
     expect(block1[0]).toBe(7);
     expect(block2[0]).toBe(7);

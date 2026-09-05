@@ -54,7 +54,7 @@ async function until(check: () => boolean, what: string): Promise<void> {
 }
 
 // A dab that reads no other file: no source window, no impulse window.
-const NO_OTHER_FILES = { sources: [], impulses: [] };
+const NO_OTHER_FILES = { sources: [], impulses: [], original: false };
 
 describe("a canvas that holds a window of the file", () => {
   let gl: WebGLRenderer;
@@ -655,6 +655,51 @@ describe("a canvas that holds a window of the file", () => {
     expect(rig.quiet()).toBe(true);
   });
 
+  it("reads the original only for a dab that samples it", async () => {
+    let renderer: StrokeRenderer | null = null;
+    let rootReads = 0;
+    const canvas = new WindowedCanvas({
+      gl,
+      spectrogram: data,
+      renderer: () => renderer,
+      readCurrent: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+      readRoot: async (ranges) => {
+        rootReads++;
+        return gatherPixelRanges(data.packedData, ranges);
+      },
+      onChanged: () => {},
+      sourceBlocks: () => null,
+      windowBlocks: 2,
+    });
+    const view = canvas.firstView(0, grid.blockFrames);
+    renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, view);
+    disposers.push(() => renderer?.dispose());
+    disposers.push(() => canvas.dispose());
+    const setOriginal = vi.spyOn(renderer, "setOriginalTexture");
+    canvas.initialize(null);
+
+    await until(() => canvas.holdsFrames(0, 1), "the first window");
+    expect(rootReads).toBe(0);
+    expect(setOriginal).not.toHaveBeenCalled();
+    expect(canvas.holdsFrames(0, 1, true)).toBe(false);
+
+    // A dab that reads the original waits for it, and the fill it asks for
+    // brings it in.
+    canvas.beginStroke();
+    let painted = false;
+    canvas.paintWhenHeld(0, 1, { ...NO_OTHER_FILES, original: true }, () => {
+      painted = true;
+      return true;
+    });
+    expect(painted).toBe(false);
+    await canvas.settle();
+    expect(painted).toBe(true);
+    expect(rootReads).toBeGreaterThan(0);
+    expect(setOriginal).toHaveBeenCalled();
+    expect(canvas.holdsFrames(0, 1, true)).toBe(true);
+    canvas.endStroke();
+  });
+
   it("draws the display and requests a fill once its store is ready", async () => {
     let storeIsReady = false;
     let renderer: StrokeRenderer | null = null;
@@ -821,7 +866,7 @@ describe("a canvas that holds a window of the file", () => {
 
     let painted = false;
     canvas.beginStroke();
-    const canPaint = canvas.paintWhenHeld(0, 100, { sources: [need], impulses: [] }, () => {
+    const canPaint = canvas.paintWhenHeld(0, 100, { sources: [need], impulses: [], original: false }, () => {
       const windowTextures = canvas.aimSource(need);
       expect(windowTextures).not.toBeNull();
       const sourceInfo: SourceFileInfo = {
@@ -854,7 +899,7 @@ describe("a canvas that holds a window of the file", () => {
     expect(canvas.aimSource(need)).toBeNull();
 
     let paintedAfterBump = false;
-    canvas.paintWhenHeld(0, 100, { sources: [need], impulses: [] }, () => {
+    canvas.paintWhenHeld(0, 100, { sources: [need], impulses: [], original: false }, () => {
       paintedAfterBump = true;
       return true;
     });

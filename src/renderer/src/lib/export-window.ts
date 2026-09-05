@@ -1,7 +1,7 @@
 import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat, type WebGLRenderer } from "three";
 import { blockGrid, type BlockGrid } from "./block-grid";
 import type { CanvasView } from "./canvas-view";
-import type { BlockValueReader } from "./canvas-window";
+import type { BlockReader, BlockValueReader } from "./canvas-window";
 import type { ExportSpan, ExportWindow } from "./image-export";
 import { PackedWindow } from "./packed-window";
 import type { SpectrogramData } from "@renderer/store/types";
@@ -19,7 +19,11 @@ export class ExportSourceWindow implements ExportWindow {
   private metadata: DataTexture | null = null;
   private laidOut: CanvasView | null = null;
 
-  constructor(gl: WebGLRenderer, grid: BlockGrid, opts: { windowBlocks: number; read: BlockValueReader }) {
+  constructor(
+    gl: WebGLRenderer,
+    grid: BlockGrid,
+    opts: { windowBlocks: number; read: BlockValueReader; readBlock?: BlockReader },
+  ) {
     this.window = new PackedWindow(gl, grid, opts);
     const blocks = Math.min(Math.max(1, opts.windowBlocks), grid.blockCount);
     // A span this long falls inside `blocks` blocks wherever it starts. A whole

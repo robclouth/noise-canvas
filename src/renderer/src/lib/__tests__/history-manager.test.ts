@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mirror the mocks used by managed-files.test.ts so importing history-manager
 // doesn't pull the full zustand store (circular init deps outside Electron).
@@ -46,8 +46,20 @@ vi.mock("@renderer/store/files", () => ({
 // Silence the renderer→main menu-state IPC the manager fires on every change.
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
+// The store kind follows whether the canvas holds the file whole. Null keeps
+// the real budget's answer; a tier test pins one kind or the other.
+const budget = vi.hoisted(() => ({ wholeFile: null as boolean | null }));
+vi.mock("../gpu-budget", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../gpu-budget")>();
+  return {
+    ...actual,
+    canvasHoldsWholeFile: (grid: BlockGrid) => budget.wholeFile ?? actual.canvasHoldsWholeFile(grid),
+  };
+});
+
 import { clearAllHistoryManagers, destroyHistoryManager, getHistoryManager } from "../history-manager";
 import { getBlockStore, openBlockStore } from "../block-stores";
+import type { BlockGrid } from "../block-grid";
 import { historyCacheBudgets } from "../history-cache-budgets";
 import { serializeFileTask } from "../file-task-queue";
 import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stash";
@@ -56,6 +68,10 @@ import type { AudioHop } from "../audio-hop";
 import type { PhaseTurns } from "../../../../main/lib/types";
 import { applyPhaseTurns, applyPhaseTurnsCollecting } from "../../../../main/lib/history-delta";
 import type { SpectrogramData } from "../../store/types";
+
+afterEach(() => {
+  budget.wholeFile = null;
+});
 
 describe("historyCacheBudgets", () => {
   const GIB = 1024 ** 3;
@@ -783,6 +799,9 @@ describe("HistoryManager undo/redo round-trip", () => {
 });
 
 describe("HistoryManager hops", () => {
+  beforeEach(() => {
+    budget.wholeFile = false;
+  });
   const w = 8;
   const h = 4;
   const dimensions = {
@@ -1761,6 +1780,9 @@ describe("HistoryManager pruneAudioCache", () => {
 });
 
 describe("HistoryManager resetToCurrent (purge history)", () => {
+  beforeEach(() => {
+    budget.wholeFile = false;
+  });
   it("collapses to a single root at the current state and keeps undo working", async () => {
     const { fbo, files } = installManagerEnv();
     const w = 6,
@@ -2150,6 +2172,9 @@ describe("HistoryManager under concurrent work", () => {
 });
 
 describe("HistoryManager reshaped store", () => {
+  beforeEach(() => {
+    budget.wholeFile = false;
+  });
   const w = 8;
   const h = 4;
   const w2 = 10;
@@ -2280,5 +2305,112 @@ describe("HistoryManager reshaped store", () => {
 
     mgr.dispose();
     delete fakeOpenFiles["f1"];
+  });
+});
+
+describe("HistoryManager whole-file store", () => {
+  beforeEach(() => {
+    budget.wholeFile = true;
+  });
+  const w = 8;
+  const h = 4;
+  const dimensions = {
+    texels: w * h,
+    numFrames: w,
+    numBands: h,
+    numChannels: 1,
+    sampleRate: 44100,
+    minFreq: 20,
+    bandsPerOctave: 12,
+  };
+
+  /** Paints pixels `start..start+count` of `base` with a lossy fill keyed by `salt`. */
+  function paint(base: Float32Array, start: number, count: number, salt: number): Float32Array {
+    const out = new Float32Array(base);
+    for (let p = start; p < start + count; p++) {
+      for (let c = 0; c < 4; c++) out[p * 4 + c] = (p * 4 + c + 1) / (97 + salt);
+    }
+    return out;
+  }
+
+  /** Files written under `prefix` since the environment was installed. */
+  function writesUnder(prefix: string): number {
+    const fs = (window as unknown as { nodeFs: { writeFile: { mock: { calls: [string][] } } } }).nodeFs;
+    return fs.writeFile.mock.calls.filter(([path]) => path.startsWith(prefix)).length;
+  }
+
+  it("keeps the tier in RAM, writes only the seed, and never names the tier on disk", async () => {
+    const { files } = installManagerEnv();
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const { id } = await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.awaitTierFlush();
+
+    const store = await getBlockStore("f1")!;
+    expect(store.tierOnDisk).toBe(false);
+    expect(Array.from(await store.readAll())).toEqual(Array.from(a));
+    expect(Array.from(await store.readAllRoot())).toEqual(Array.from(root));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
+    expect(writesUnder("/userdata/blocks/f1/current/")).toBe(0);
+    expect(writesUnder("/userdata/blocks/f1/")).toBe(store.grid.blockCount);
+    expect(mgr.getManifest()?.overlayNodeId).toBe(id);
+    const manifest = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as { overlayNodeId?: string };
+    expect(manifest.overlayNodeId).toBeUndefined();
+    clearAllHistoryManagers();
+  });
+
+  it("writes the seed once when the analysis seeded the store before the root snapshot", async () => {
+    installManagerEnv();
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const spectrogram = makeSpectrogram(root, w, h);
+    const store = await openBlockStore(
+      "f1",
+      { numBands: h, metadata: spectrogram.metadata },
+      { numFrames: w, sampleRate: spectrogram.sampleRate, texelCount: w * h },
+    );
+    await store.seed(root);
+    await store.flush();
+    const before = writesUnder("/userdata/blocks/f1/");
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram });
+    await store.flush();
+    expect(writesUnder("/userdata/blocks/f1/")).toBe(before);
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(root));
+    clearAllHistoryManagers();
+  });
+
+  it("takes the reopened state into the tier, so the next stroke patches it", async () => {
+    installManagerEnv();
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.awaitTierFlush();
+    clearAllHistoryManagers();
+
+    const fresh = getHistoryManager("f1");
+    const restored = await fresh.loadSpectrogramAtCurrent();
+    expect(restored?.packedData).toBeDefined();
+    expect(Array.from(restored!.packedData!)).toEqual(Array.from(a));
+    expect(Array.from((await fresh.currentBlockState())!)).toEqual(Array.from(a));
+
+    const reconstructSpy = vi.spyOn(fresh, "reconstruct");
+    const b = paint(a, 5, 2, 2);
+    await fresh.addStroke({ data: b, label: "B", dimensions, dirtyRanges: new Uint32Array([5, 2]) });
+    expect(reconstructSpy).not.toHaveBeenCalled();
+    const store = await getBlockStore("f1")!;
+    expect(Array.from(await store.readAll())).toEqual(Array.from(b));
+    expect(Array.from(await store.readAllRoot())).toEqual(Array.from(root));
+    expect(writesUnder("/userdata/blocks/f1/current/")).toBe(0);
+    clearAllHistoryManagers();
   });
 });
