@@ -14,6 +14,9 @@
 #include <iostream> // For std::cerr
 #include <fstream>  // For file logging
 #include <cstdint>
+#include <exception>
+#include <functional>
+#include <thread>
 #include "gaborator/gaborator.h"
 
 #ifdef _WIN32
@@ -585,6 +588,52 @@ static void downsampleByTwo(const std::vector<float> &x, const std::vector<doubl
     }
 }
 
+/**
+ * Runs `work` for every channel at once, on a thread of its own for each
+ * channel past the first. Returns the message of the first failure, or an
+ * empty string when every channel finished.
+ */
+static std::string forEachChannel(int channels, const std::function<void(int)> &work)
+{
+    std::vector<std::exception_ptr> failures((size_t)std::max(channels, 0));
+    auto guarded = [&](int ch)
+    {
+        try
+        {
+            work(ch);
+        }
+        catch (...)
+        {
+            failures[(size_t)ch] = std::current_exception();
+        }
+    };
+    std::vector<std::thread> others;
+    for (int ch = 1; ch < channels; ++ch)
+        others.emplace_back(guarded, ch);
+    if (channels > 0)
+        guarded(0);
+    for (auto &thread : others)
+        thread.join();
+    for (const auto &failure : failures)
+    {
+        if (!failure)
+            continue;
+        try
+        {
+            std::rethrow_exception(failure);
+        }
+        catch (const std::exception &e)
+        {
+            return std::string(e.what());
+        }
+        catch (...)
+        {
+            return std::string("analysis failed");
+        }
+    }
+    return std::string();
+}
+
 class AnalyzeWorker : public Napi::AsyncWorker
 {
 public:
@@ -705,9 +754,13 @@ public:
         const int64_t support = static_cast<int64_t>(std::ceil(analyzer->analysis_support())) + 1;
         const int64_t spanFrames = std::max<int64_t>(1, static_cast<int64_t>(sampleRate * spanSeconds));
 
-        for (int ch = 0; ch < channels; ++ch)
+        // The channels share the analyzer, which analysis never changes, and
+        // write their own two floats of every texel.
+        std::vector<double> channelEnergy((size_t)channels, 0.0);
+        const std::string failed = forEachChannel(channels, [&](int ch)
         {
             gaborator::coefs<float> coefs(*analyzer);
+            double energy = 0.0;
             auto write =
                 [&](int b, int64_t t, std::complex<float> &coef)
                 {
@@ -728,7 +781,7 @@ public:
                     // Accumulate total stored magnitude energy (sum of squares
                     // over every stored coefficient, all bands and channels) so
                     // the renderer can derive a single IR-normalization scalar.
-                    magnitudeEnergy += (double)magnitude * (double)magnitude;
+                    energy += (double)magnitude * (double)magnitude;
 
                     // The principal phase, unwrapped along each band once
                     // every span has been written.
@@ -754,7 +807,15 @@ public:
                     gaborator::forget_before(*analyzer, coefs, written - support);
                 }
             }
+            channelEnergy[(size_t)ch] = energy;
+        });
+        if (!failed.empty())
+        {
+            SetError(failed);
+            return;
         }
+        for (double energy : channelEnergy)
+            magnitudeEnergy += energy;
 
         unwrapAlongBands();
     }
@@ -1163,7 +1224,11 @@ void AnalysisStream::fillSpan(int64_t startFrame, int64_t endFrame, float *out, 
     // `t1 - support` cannot change once the samples up to t1 are in.
     const int64_t need = std::min(endFrame + support, numFrames);
     const int64_t feed = std::max<int64_t>(1, (int64_t)(sampleRate * ANALYSIS_SPAN_SECONDS));
-    for (int ch = 0; ch < channels; ++ch)
+    // The channels share the analyzer, which analysis never changes, and each
+    // owns its coefficient tree, its phase carry and its two floats of every
+    // texel.
+    std::vector<double> channelEnergy((size_t)channels, 0.0);
+    const std::string failed = forEachChannel(channels, [&](int ch)
     {
         while (analysedTo[(size_t)ch] < need)
         {
@@ -1174,6 +1239,7 @@ void AnalysisStream::fillSpan(int64_t startFrame, int64_t endFrame, float *out, 
             analysedTo[(size_t)ch] = t1;
         }
 
+        double energy = 0.0;
         auto write = [&](int b, int64_t t, std::complex<float> &coef)
         {
             const int band = b - bandBegin;
@@ -1184,13 +1250,14 @@ void AnalysisStream::fillSpan(int64_t startFrame, int64_t endFrame, float *out, 
                 return;
             const size_t at = (spanOffset[(size_t)band] + (size_t)rel) * 4;
             const float magnitude = std::abs(coef);
-            magnitudeEnergy += (double)magnitude * (double)magnitude;
+            energy += (double)magnitude * (double)magnitude;
             out[at + ch * 2 + 0] = magnitude;
             out[at + ch * 2 + 1] = std::arg(coef);
         };
         gaborator::process(write, bandBegin, analyzer->bandpass_bands_end(), startFrame, endFrame,
                            *coefs[(size_t)ch]);
         gaborator::forget_before(*analyzer, *coefs[(size_t)ch], endFrame - support);
+        channelEnergy[(size_t)ch] = energy;
 
         // Each band's phase carries on from where the span before it left off,
         // so the stored sequence accumulates over the file rather than folding
@@ -1214,7 +1281,14 @@ void AnalysisStream::fillSpan(int64_t startFrame, int64_t endFrame, float *out, 
             previousPhase[carry] = previous;
             phaseStarted[carry] = 1;
         }
+    });
+    if (!failed.empty())
+    {
+        error = failed;
+        return;
     }
+    for (double energy : channelEnergy)
+        magnitudeEnergy += energy;
 
     // Each band's loudest moment, on the channel-averaged magnitude the onset
     // pass whitens against.
