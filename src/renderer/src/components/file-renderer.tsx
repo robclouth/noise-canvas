@@ -1710,6 +1710,7 @@ const FileRendererInner = memo(
           if (!canvas.holdsFrames(dabStart, dabEnd, original) || !dispatchStroke(state, cursorPos, true)) {
             displayMode.current = "committed";
           } else {
+            displayMode.current = "preview";
             applyStroke.current = false;
           }
         } else {
@@ -2146,6 +2147,7 @@ const FileRendererInner = memo(
      */
     const clearPreview = () => {
       displayMode.current = "committed";
+      if (strokePreview.current) applyStroke.current = false;
       clearingPreview.current = true;
       invalidateRef.current();
     };
