@@ -89,33 +89,44 @@ export async function scanOnsets(
   const chunk = (start: number, end: number, maxima: Float32Array, gate: number, gateOnly: boolean) =>
     scanOnsetChunk(detect, read, layout, sampleRate, maxima, gate, start, end, gateOnly);
 
+  // The reader keeps the blocks it served last, and the file was written from
+  // its start, so each round walks the spans the other way from the one
+  // before it and the first walks from the end.
+  let forward = false;
+  const round = (): Array<[number, number]> => {
+    const order = forward ? spans : [...spans].reverse();
+    forward = !forward;
+    return order;
+  };
+
   // A pass handed no maxima reports the ones its own span holds, so the file's
   // are the largest each band reaches over the chunks.
   let maxima = bandMax;
   if (maxima.length < layout.numBands) {
     maxima = new Float32Array(layout.numBands);
     const none = new Float32Array(0);
-    for (const [startFrame, endFrame] of spans) {
+    for (const [startFrame, endFrame] of round()) {
       const found = (await chunk(startFrame, endFrame, none, 0, true)).bandMax;
       for (let b = 0; b < maxima.length; b++) maxima[b] = Math.max(maxima[b], found[b]);
     }
   }
 
   let gate = 0;
-  for (const [startFrame, endFrame] of spans) {
+  for (const [startFrame, endFrame] of round()) {
     gate = Math.max(gate, (await chunk(startFrame, endFrame, maxima, 0, true)).odfMax);
   }
 
-  const parts: Float32Array[] = [];
+  const parts = new Map<number, Float32Array>();
   let total = 0;
-  for (const [startFrame, endFrame] of spans) {
+  for (const [startFrame, endFrame] of round()) {
     const part = (await chunk(startFrame, endFrame, maxima, gate, false)).onsets;
-    parts.push(part);
+    parts.set(startFrame, part);
     total += part.length;
   }
   const onsets = new Float32Array(total);
   let at = 0;
-  for (const part of parts) {
+  for (const [startFrame] of spans) {
+    const part = parts.get(startFrame)!;
     onsets.set(part, at);
     at += part.length;
   }

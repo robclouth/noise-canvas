@@ -260,6 +260,26 @@ describe("onsets found a chunk at a time", () => {
     }
   });
 
+  it("walks each round the other way from the round before", async () => {
+    const { layout, whole, read } = await analysed(12, HITS);
+    const starts: number[] = [];
+    const watched = async (ranges: Uint32Array) => {
+      starts.push(ranges[0]);
+      return await read(ranges);
+    };
+    const scanned = await scanOnsets(detect, watched, layout, SAMPLE_RATE, new Float32Array(0), 3);
+    const rounds = 3;
+    const perRound = starts.length / rounds;
+    expect(Number.isInteger(perRound)).toBe(true);
+    for (let r = 0; r < rounds; r++) {
+      const walk = starts.slice(r * perRound, (r + 1) * perRound);
+      const sorted = [...walk].sort((a, b) => a - b);
+      const expected = r % 2 === 0 ? sorted.reverse() : sorted;
+      expect(walk, `round ${r}`).toEqual(expected);
+    }
+    expectSameEvents(scanned.onsets, whole.onsets);
+  });
+
   it("never reads the whole run at once", async () => {
     const { layout, whole, read } = await analysed(12, HITS);
     let widest = 0;

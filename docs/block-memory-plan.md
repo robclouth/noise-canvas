@@ -1530,11 +1530,42 @@ detection and 0.04 s of inverse map; the 280 s open at 1.1 s decode, 10.4 s
 of spans and 14.5 s of onset scan. Without the seed overlap the 280 s spans
 took 7.8 s plus 5.7 s of encodes and writes, so the overlap saves 2.6 s.
 
-The onset scan is the next lever: it takes two rounds over the store, in
+The onset scan was the next lever: it took two rounds over the store, in
 chunk order, and a 280 s file has 151 blocks where the resident budget holds
-about 130, so every block of both rounds is decoded again from disk. Walking
-the rounds in alternate directions would keep all but about 20 blocks per
-round resident.
+about 130, so every block of both rounds was decoded again from disk.
+
+---
+
+## Phase 8 — the onset scan walks against the seed (2026-09-06)
+
+### What was built
+
+- **Each scan round walks the other way.** The block store keeps the blocks
+  it served last, and the seed wrote the file from its start, so a round that
+  also walked from the start missed every block. `scanOnsets` now walks its
+  first round from the file's end and turns round for each round after it;
+  the detected parts are put back in file order at the end. The chunks are
+  unchanged, so the events are the ones a whole-file pass reports, and the
+  onset-scan test pins the walk order.
+- **A preview that waited for its blocks now shows.** A preview the canvas
+  could not take yet showed the committed picture and stayed asked for, but
+  when the fill landed and the preview drew, the display was left on the
+  committed picture until the pointer moved again. The frame that draws the
+  waited preview switches the display back, and a cleared preview drops the
+  wait. Found and pinned with a hover driver on the 280 s file: a flick, a
+  rest, a capture, a nudge, a capture — six of eight rests at full view stalled
+  before, none after.
+
+### Measured (M4 Pro, 280 s stereo, built app, open-drive, same day A/B)
+
+| measure                     | rounds in file order | rounds alternating |
+| --------------------------- | -------------------- | ------------------ |
+| 280 s open, message to view | 14.6 s, 14.9 s       | 10.3 s, 10.1 s     |
+| `analysis` in the diag log  | 14.6 s, 14.8 s       | 10.1 s, 10.3 s     |
+
+The day's baseline is not the 26.5 s of the day before; the code was the same,
+so the machine's state was not. The saving is the scan's second decode of the
+file: what stays is the spans and one round of the detector.
 
 ---
 
