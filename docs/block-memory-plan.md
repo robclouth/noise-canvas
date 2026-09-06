@@ -343,7 +343,7 @@ paint/undo/export byte-identical on a 60 s file; suite + addon tests green.
 **STOP-ASK** with measurements. (A 10-minute file still cannot open; the GPU
 side waits for Phase 3.)
 
-Status: in progress. Done so far:
+Status: done (Phase 5 closed the last whole-run read). Landed:
 
 - Block grid (`block-grid.ts`) and store (`block-store.ts`), with an exact
   tiling proof, a patch-during-flush version counter, copy-on-encode against
@@ -575,7 +575,7 @@ Exit: a 10-minute file opens, paints, undoes and exports on an 8 GB machine at
 small file; a cold-jump stroke drops no frames (measure with the Playwright
 driver).
 
-Status: step (1) in progress —
+Status: done; both steps landed, the exit measured in Phase 5. Step (1) —
 
 - `canvas-view.ts`: view layout, file↔view range remapping, view inverse map,
   view content compose, whole-file view.
@@ -597,7 +597,7 @@ view UV with the file layout (whole-file only); same-file source info,
 `originalSpectrogramTex`, onset textures and beat-anchored modulator phases
 need the wrapper's translation; displays still read the canvas texture.
 
-Step (2) in progress. Landed so far (each parity-tested, whole-file identity
+Step (2). Landed (each parity-tested, whole-file identity
 pinned by the full suite):
 
 - The display pyramid and tile ring cut from a `CommittedSource` — the canvas
