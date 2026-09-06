@@ -5,6 +5,7 @@
 - Any string a user reads — a parameter label or description, an effect blurb, a control tooltip, a tour step, the manual — follows `docs/copy-style.md`. Read it before writing copy. British English, `-ise` not `-ize`, in visible strings only; code identifiers keep their spelling.
 - Use "npx node-gyp rebuild" to rebuild the gaborator addon after changing the C++ code. Run the native addon tests (e.g. the baked limiter) with "npm run test:addon" — they load the built `.node` in a node environment, separate from the browser/WebGL renderer suite.
 - Commit messages follow gitmoji: `<emoji> (scope): <imperative description>`. Use the unicode emoji (e.g. ✨), not the `:shortcode:`, and put the scope in round brackets. Common emojis: ✨ feature, 🐛 fix, ♻️ refactor, ⚡️ performance, 🎨 code structure/format, ✅ tests, 📝 docs.
+- The painting canvas can hold a window of the file instead of all of it. `docs/canvas-window.md` is the model. Read it before you change `lib/windowed-canvas.ts`, `lib/canvas-view.ts`, `lib/canvas-window.ts`, `lib/block-*.ts` or the stroke path in `components/file-renderer.tsx`.
 
 ## Project Architecture
 

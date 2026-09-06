@@ -1,9 +1,18 @@
 import { WebGLRenderer } from "three";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createMockSpectrogramData } from "../../test/mock-spectrogram";
+import { createConstantQMockSpectrogramData, createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createSpectrogramTextures } from "../../test/render-harness";
 import type { SpectrogramData } from "../../store/types";
-import { computeAutoRange, computeImageSize, computeTimeTaps, renderSpectrogramPlot } from "../image-export";
+import { blockGrid } from "../block-grid";
+import { ExportSourceWindow } from "../export-window";
+import { gatherPixelRanges } from "../pixel-ranges";
+import {
+  computeAutoRange,
+  computeImageSize,
+  computeTimeTaps,
+  renderSpectrogramPlot,
+  type ExportWindow,
+} from "../image-export";
 import {
   buildColormapLut,
   COLORMAPS,
@@ -242,6 +251,125 @@ describe("renderSpectrogramPlot", () => {
     const data = createMockSpectrogramData({ numFrames: 128, numBands: 32, pattern: "bandGradient" });
     const canvas = await renderSpectrogramPlot(gl, makeSource(data), 64, 64, "mono");
     expect(luma(pixelAt(canvas, 32, 60))).toBeGreaterThan(luma(pixelAt(canvas, 32, 4)) + 40);
+  });
+
+  const WINDOW_SAMPLE_RATE = 8000;
+
+  /**
+   * A spectrogram whose magnitude rises with absolute time and falls with the
+   * band, so a span read from the wrong place shows as a shift, with a ripple
+   * far finer than a pixel, so a footprint of the wrong width shows too.
+   */
+  function rampedSpectrogram() {
+    const data = createConstantQMockSpectrogramData({
+      durationSeconds: 2,
+      sampleRate: WINDOW_SAMPLE_RATE,
+      bandsPerOctave: 4,
+    });
+    const { bandOffsets, bandLengths, bandStepLog2s } = data.synthesisMetadata;
+    for (let band = 0; band < data.numBands; band++) {
+      const offset = bandOffsets[band];
+      const step = 1 << bandStepLog2s[band];
+      for (let k = 0; k < bandLengths[band]; k++) {
+        const frame = k * step;
+        const ramp = 0.02 + 0.9 * (frame / data.numFrames) * (1 - (0.6 * band) / data.numBands);
+        const level = ramp * (0.15 + 0.85 * (0.5 + 0.5 * Math.sin(frame * 0.05)));
+        data.packedData[(offset + k) * 4] = level;
+        data.packedData[(offset + k) * 4 + 2] = level;
+      }
+    }
+    return data;
+  }
+
+  function pixels(canvas: HTMLCanvasElement): Uint8ClampedArray {
+    return canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+  }
+
+  it("draws from a window of the file exactly what it draws from all of it", async () => {
+    const data = rampedSpectrogram();
+    const grid = blockGrid(
+      { numBands: data.numBands, metadata: data.metadata },
+      data.numFrames,
+      WINDOW_SAMPLE_RATE,
+      0.25,
+    );
+    expect(grid.blockCount).toBeGreaterThan(4);
+
+    const whole = await renderSpectrogramPlot(gl, makeSource(data), 96, 48, "magma");
+    const window = new ExportSourceWindow(gl, grid, {
+      windowBlocks: 2,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    try {
+      const windowed = await renderSpectrogramPlot(
+        gl,
+        { texture: null, metadataTexture: null, spectrogramData: data, window },
+        96,
+        48,
+        "magma",
+      );
+      const a = pixels(whole);
+      const b = pixels(windowed);
+      let worst = 0;
+      let sum = 0;
+      for (let i = 0; i < a.length; i++) {
+        const diff = Math.abs(a[i] - b[i]);
+        worst = Math.max(worst, diff);
+        sum += diff;
+      }
+      expect(worst, `largest channel difference ${worst}`).toBeLessThanOrEqual(2);
+      expect(sum / a.length).toBeLessThan(0.5);
+    } finally {
+      window.dispose();
+    }
+  });
+
+  it("refuses rather than draw a span it could not read", async () => {
+    const data = rampedSpectrogram();
+    const grid = blockGrid(
+      { numBands: data.numBands, metadata: data.metadata },
+      data.numFrames,
+      WINDOW_SAMPLE_RATE,
+      0.25,
+    );
+    const window = new ExportSourceWindow(gl, grid, { windowBlocks: 2, read: async () => null });
+    try {
+      await expect(
+        renderSpectrogramPlot(
+          gl,
+          { texture: null, metadataTexture: null, spectrogramData: data, window },
+          96,
+          48,
+          "magma",
+        ),
+      ).rejects.toThrow(/could not read the file/);
+    } finally {
+      window.dispose();
+    }
+  });
+
+  it("stops rather than draw a span that falls short of the columns it serves", async () => {
+    const data = rampedSpectrogram();
+    const { packedDataTex, metadataTex } = createSpectrogramTextures(data);
+    // Claims to hold the whole file, then hands back half of it.
+    const short: ExportWindow = {
+      spanFrames: data.numFrames,
+      hold: async () => ({
+        texture: packedDataTex,
+        metadataTexture: metadataTex,
+        startFrame: 0,
+        endFrame: Math.floor(data.numFrames / 2),
+      }),
+    };
+    await expect(
+      renderSpectrogramPlot(
+        gl,
+        { texture: null, metadataTexture: null, spectrogramData: data, window: short },
+        96,
+        48,
+        "magma",
+      ),
+    ).rejects.toThrow(/could not read the file/);
   });
 
   it("keeps mono grey in editor colours and tints it through a ramp", async () => {

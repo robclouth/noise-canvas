@@ -42,9 +42,12 @@ vi.mock("../host", () => ({
       extname: () => ".wav",
       join: (...parts: string[]) => parts.join("/"),
     },
+    os: { totalmem: () => 8 * 1024 ** 3 },
     analysis: {
       getGpuMemoryInfo: () => ({ bytes: 8 * 1024 ** 3, unified: true }),
       analyze: () => new Promise((resolve) => (gate.resolve = resolve)),
+      buildHistoryInverseMap: async (_o: Uint32Array, _l: Uint32Array, _s: Int32Array, pixelCount: number) =>
+        new Float32Array(pixelCount * 2),
     },
   },
 }));
@@ -67,7 +70,7 @@ function analysisResult() {
     numBands: 96,
     bandOffsets: new Uint32Array(96),
     bandStepLog2s: new Int32Array(96),
-    bandLengths: new Uint32Array(96),
+    bandLengths: new Uint32Array(96).fill(TEXELS),
     sampleRate: 48000,
     magnitudeEnergy: 1,
     onsets: new Float32Array(0),
@@ -133,7 +136,7 @@ describe("closing a file while it is being analysed", () => {
     gate.resolve?.(analysisResult());
     await opening;
 
-    expect(openFiles[fileId]?.spectrogramData?.textureWidth).toBe(TEXELS);
+    expect(openFiles[fileId]?.spectrogramData?.texels).toBe(96 * TEXELS);
     expect(get().activeFileId).toBe(fileId);
     expect(get().filesLoading[fileId]).toBeUndefined();
   });

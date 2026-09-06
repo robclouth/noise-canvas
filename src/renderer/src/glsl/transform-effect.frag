@@ -80,7 +80,8 @@ void main() {
         vec2 relativeUv = brushLocalUv - originUv; \
         float rad = radians(-(rotV)); \
         mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad)); \
-        vec2 scaledUv = rotMat * relativeUv; \
+        vec2 turnedUv = rotMat * vec2(destFileUvSpanX(relativeUv.x), relativeUv.y); \
+        vec2 scaledUv = vec2(destCanvasUvSpanX(turnedUv.x), turnedUv.y); \
         if (abs(sxV) > 1e-5 && abs(syV) > 1e-5) { scaledUv /= vec2(sxV, syV); } \
         vec2 transformedDest = scaledUv + pivot; \
         if ((sxV) < 0.0) transformedDest.x += (1.0 - 2.0 * transformOrigin.x) * brushSizeUv.x; \

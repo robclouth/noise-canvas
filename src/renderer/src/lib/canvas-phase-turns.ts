@@ -6,8 +6,11 @@ import { mergePixelRanges } from "./pixel-ranges";
 export interface PhaseTurnCanvas {
   applyPhaseTurns: (turns: ArrayLike<number>) => void;
   readPixelRanges: (pixelRanges: Uint32Array) => Promise<Float32Array>;
-  patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
+  patchFBODataCompact: (values: Float32Array, pixelRanges: Uint32Array) => void;
 }
+
+/** The named pixels of the turned packed state, laid end to end in range order. */
+export type PackedGather = (ranges: Uint32Array) => Float32Array | Promise<Float32Array>;
 
 /** A turn to put on the canvas, subtracted when it is being undone. */
 export interface CanvasTurn {
@@ -89,7 +92,7 @@ export function resetCanvasTurnVerdict(): void {
  */
 export async function applyCanvasTurns(
   canvas: PhaseTurnCanvas,
-  packed: Float32Array,
+  gather: PackedGather,
   turns: CanvasTurn[],
   except?: Uint32Array,
 ): Promise<void> {
@@ -102,7 +105,7 @@ export async function applyCanvasTurns(
   }
   if (!all.length) return;
   if (canvasAddsExactly === false) {
-    canvas.patchFBOData(packed, all);
+    canvas.patchFBODataCompact(await gather(all), all);
     return;
   }
   if (canvasAddsExactly === true) return;
@@ -110,22 +113,17 @@ export async function applyCanvasTurns(
   const sample = samplePixelRanges(all, 64, except);
   if (!sample.length) return;
   const read = await canvas.readPixelRanges(sample);
+  const want = await gather(sample);
   let exact = true;
-  for (let i = 0; i + 1 < sample.length && exact; i += 2) {
-    const p = sample[i];
-    const at = (i / 2) * 4;
-    for (let c = 0; c < 4; c++) {
-      const got = read[at + c];
-      const want = packed[p * 4 + c];
-      if (got !== want && !(Number.isNaN(got) && Number.isNaN(want))) {
-        exact = false;
-        break;
-      }
+  for (let i = 0; i < want.length; i++) {
+    if (read[i] !== want[i] && !(Number.isNaN(read[i]) && Number.isNaN(want[i]))) {
+      exact = false;
+      break;
     }
   }
   canvasAddsExactly = exact;
   if (!exact) {
     console.warn("history: the canvas does not take phase turns exactly; uploading turned pixels instead");
-    canvas.patchFBOData(packed, all);
+    canvas.patchFBODataCompact(await gather(all), all);
   }
 }

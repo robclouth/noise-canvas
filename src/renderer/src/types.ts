@@ -2,10 +2,8 @@ import { Vector2 } from "three";
 
 export interface AnalysisPayload {
   data: Buffer;
-  inverseMap: Buffer;
   metadataTexture: Buffer;
-  textureWidth: number;
-  textureHeight: number;
+  texels: number;
   numFrames: number;
   numChannels: number;
   numBands: number;

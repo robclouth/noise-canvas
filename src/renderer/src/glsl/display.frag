@@ -1,4 +1,5 @@
 #include "effect-common.glsl";
+#include "display-mags.glsl";
 
 // Uniforms specific to this display material
 uniform float minDb;
@@ -40,6 +41,48 @@ uniform sampler2D previewTex;
 uniform sampler2D previewBinRangesTex;
 uniform bool previewActive;
 
+// The canvas holds the committed state over a block-aligned frame span of the
+// file, laid out by its own metadata; these place that span on the file's
+// timeline. The preview's bin ranges are in the same view-local bins.
+uniform sampler2D canvasMetadataTex;
+uniform float canvasFrameCount;
+uniform float canvasStartFrame;
+
+// File time UV as the canvas view's own UV; x leaves [0, 1] outside the span.
+// The whole-file view short-circuits so its UV stays bit-exact.
+vec2 canvasViewUv(vec2 uv) {
+    if (canvasStartFrame == 0.0 && canvasFrameCount == sourceFrameCount) return uv;
+    return vec2((uv.x * sourceFrameCount - canvasStartFrame) / canvasFrameCount, uv.y);
+}
+
+// The committed picture as two levels of the display pyramid, in dB, with the
+// weight of the coarser one. Each level carries its own band layout, so a bin
+// index means something different in each. With displayPyramidActive off the
+// canvas is read instead.
+uniform sampler2D displayFineTex;
+uniform sampler2D displayFineMetaTex;
+uniform sampler2D displayCoarseTex;
+uniform sampler2D displayCoarseMetaTex;
+uniform float displayLevelBlend;
+uniform bool displayPyramidActive;
+// True when the canvas is finer than the pyramid and holds every block of its
+// view, so a texel inside the view reads the canvas before the pyramid.
+uniform bool displayCanvasFirst;
+
+// The tile ring: the committed picture around the view, in dB, at a level fine
+// enough for the screen. Tile `t` lives in slot `t mod displayTileSlots`, and
+// only the tiles [displayTileFirst, displayTileFirst + displayTileCount) are
+// there. Every band's tile layout is one metadata texel, the same for every
+// slot. With displayTileCount at zero the pyramid is read instead.
+uniform sampler2D displayTileTex;
+uniform sampler2D displayTileMetaTex;
+uniform float displayTileFirst;
+uniform float displayTileCount;
+uniform float displayTileSlots;
+uniform float displayTileTexels;
+uniform float displayTileBlend;
+uniform float displayTileLevel;
+
 vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize) {
     ivec2 texel = packedTexel(bandStartOffset + timeIndex, texSize);
     if (previewActive) {
@@ -50,8 +93,10 @@ vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, iv
 }
 
 vec4 sampleDisplayInterp(vec2 uv) {
+    vec2 viewUv = canvasViewUv(uv);
+    if (viewUv.x < 0.0 || viewUv.x > 1.0) return vec4(0.0);
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
-    packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
+    packedInterpBins(viewUv, canvasMetadataTex, canvasFrameCount, sourceBandCount,
                      bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
     ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
     int band = int(bandIndex);
@@ -59,6 +104,117 @@ vec4 sampleDisplayInterp(vec2 uv) {
     vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize);
     return vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
                 interpolateComplex(sample1.ba, sample2.ba, timeFraction));
+}
+
+// The dB pair one pyramid level holds, blended along time in its own bins.
+vec2 sampleLevelDb(vec2 uv, sampler2D levelTex, sampler2D levelMetaTex) {
+    float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
+    packedInterpBins(uv, levelMetaTex, sourceFrameCount, sourceBandCount,
+                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+    ivec2 texSize = textureSize(levelTex, 0);
+    vec2 sample1 = texelFetch(levelTex, packedTexel(bandStartOffset + timeIndex0, texSize), 0).rg;
+    vec2 sample2 = texelFetch(levelTex, packedTexel(bandStartOffset + timeIndex1, texSize), 0).rg;
+    return mix(sample1, sample2, timeFraction);
+}
+
+// The uncommitted preview's dB pair, where the preview covers this bin. The
+// preview lives on the canvas in the source layout, so it is addressed there
+// rather than in a level's. A tap outside the preview's ranges reads the
+// committed canvas, the way the canvas path picks per texel.
+bool previewDbAt(vec2 uv, out vec2 db) {
+    if (!previewActive) return false;
+    vec2 viewUv = canvasViewUv(uv);
+    if (viewUv.x < 0.0 || viewUv.x > 1.0) return false;
+    float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
+    packedInterpBins(viewUv, canvasMetadataTex, canvasFrameCount, sourceBandCount,
+                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+    vec2 bins = texelFetch(previewBinRangesTex, ivec2(int(bandIndex), 0), 0).rg;
+    bool covers0 = timeIndex0 >= bins.x && timeIndex0 < bins.y;
+    bool covers1 = timeIndex1 >= bins.x && timeIndex1 < bins.y;
+    if (!covers0 && !covers1) return false;
+    ivec2 texSize = textureSize(previewTex, 0);
+    vec4 sample1 = fetchDisplayTexel(int(bandIndex), bandStartOffset, timeIndex0, texSize);
+    vec4 sample2 = fetchDisplayTexel(int(bandIndex), bandStartOffset, timeIndex1, texSize);
+    vec2 left = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
+    vec2 right = interpolateComplex(sample1.ba, sample2.ba, timeFraction);
+    db = vec2(displayMagToDb(left.x), displayMagToDb(right.x));
+    return true;
+}
+
+// One bin of a band in the tile ring, when the tile holding it is resident.
+bool ringBinDb(vec4 meta, float bin, out vec2 db) {
+    float binsPerTile = meta.a;
+    float tileIndex = floor(bin / binsPerTile);
+    if (tileIndex < displayTileFirst || tileIndex >= displayTileFirst + displayTileCount) return false;
+    float slot = mod(tileIndex, displayTileSlots);
+    float linear = slot * displayTileTexels + meta.r + (bin - tileIndex * binsPerTile);
+    db = texelFetch(displayTileTex, packedTexel(linear, textureSize(displayTileTex, 0)), 0).rg;
+    return true;
+}
+
+// The ring's dB pair at an unpacked UV, blended along time and towards the
+// next coarser level, when every tile it reads is resident.
+bool sampleRingDb(vec2 uv, out vec2 db) {
+    if (displayTileCount <= 0.0) return false;
+    vec4 meta = fetchBandMetadata(displayTileMetaTex, floor((1.0 - uv.y) * sourceBandCount));
+    float scaledTime = uv.x * sourceFrameCount / exp2(meta.b);
+    float bin0, bin1, fraction;
+    bandTimeIndices(scaledTime, meta.g, bin0, bin1, fraction);
+
+    vec2 fine0, fine1;
+    if (!ringBinDb(meta, bin0, fine0) || !ringBinDb(meta, bin1, fine1)) return false;
+    db = mix(fine0, fine1, fraction);
+
+    // A band already coarser than the ring's level holds the same bins one
+    // level up, so only the finer bands need the coarse tap.
+    if (displayTileBlend <= 0.0 || meta.b > displayTileLevel) return true;
+    float coarse0, coarse1, coarseFraction;
+    bandTimeIndices(scaledTime * 0.5, ceil(meta.g * 0.5), coarse0, coarse1, coarseFraction);
+    // One level up keeps every second bin, so it reads the same tiles at even
+    // indices. Where that crosses out of the ring the fine read stands alone.
+    vec2 up0, up1;
+    if (!ringBinDb(meta, min(coarse0 * 2.0, meta.g - 1.0), up0)) return true;
+    if (!ringBinDb(meta, min(coarse1 * 2.0, meta.g - 1.0), up1)) return true;
+    db = mix(db, mix(up0, up1, coarseFraction), displayTileBlend);
+    return true;
+}
+
+// The pyramid's dB pair at an unpacked UV, blended between the two levels
+// whose bins bracket the screen.
+bool samplePyramidDb(vec2 uv, out vec2 db) {
+    if (!displayPyramidActive) return false;
+    // The blend is uniform across the view, so the coarse read is skipped
+    // outright wherever the fine level alone is what the view asked for.
+    db = sampleLevelDb(uv, displayFineTex, displayFineMetaTex);
+    if (displayLevelBlend > 0.0) {
+        db = mix(db, sampleLevelDb(uv, displayCoarseTex, displayCoarseMetaTex), displayLevelBlend);
+    }
+    return true;
+}
+
+// True when the canvas view spans this unpacked UV.
+bool canvasSpans(vec2 uv) {
+    vec2 viewUv = canvasViewUv(uv);
+    return viewUv.x >= 0.0 && viewUv.x <= 1.0;
+}
+
+// Left and right magnitudes of the picture at an unpacked UV: a resident
+// tile, else the canvas where it is the finest picture there, else the
+// pyramid, else the canvas.
+vec2 sampleDisplayMags(vec2 uv) {
+    vec2 db;
+    bool have = sampleRingDb(uv, db);
+    if (!have && displayCanvasFirst && canvasSpans(uv)) {
+        vec4 packedValue = sampleDisplayInterp(uv);
+        return vec2(packedValue.r, packedValue.b);
+    }
+    if (!have && !samplePyramidDb(uv, db)) {
+        vec4 packedValue = sampleDisplayInterp(uv);
+        return vec2(packedValue.r, packedValue.b);
+    }
+    vec2 preview;
+    if (previewDbAt(uv, preview)) db = preview;
+    return vec2(displayDbToMag(db.x), displayDbToMag(db.y));
 }
 
 // Convert screen UV (what we see) to zoomed UV (actual data coordinates).
@@ -120,20 +276,15 @@ void main() {
     // Time axis samples edge-aligned: the stored coefficient for bin k is the
     // analysis atom centered at frame k * 2^step, so an impulse reads as a
     // vertical ridge at the same time in every band regardless of bin stride.
-    vec4 packedValue = mix(sampleDisplayInterp(uv0), sampleDisplayInterp(uv1), bandFrac);
+    vec2 mags = mix(sampleDisplayMags(uv0), sampleDisplayMags(uv1), bandFrac);
 
-    // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
-    vec2 leftMagPhase = packedValue.rg;
-    float leftMag = leftMagPhase.x;
-    float leftDb = magnitudeToDb(leftMag);
-    
+    float leftDb = magnitudeToDb(mags.x);
+
     vec3 color;
     if (sourceChannelCount == 1) {
         color = vec3(leftDb);
     } else {
-        vec2 rightMagPhase = packedValue.ba;
-        float rightMag = rightMagPhase.x;
-        float rightDb = magnitudeToDb(rightMag);
+        float rightDb = magnitudeToDb(mags.y);
 
         vec3 leftColor = vec3(leftDb, leftDb * 0.5, 0.0);
         vec3 rightColor = vec3(0.0, rightDb * 0.5, rightDb);

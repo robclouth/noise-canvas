@@ -21,6 +21,13 @@ import type {
 } from "./types";
 import { getModelPath } from "./ai-separation";
 import { loadNativeAddon } from "./native-addon";
+import {
+  ONSET_CHUNK_SECONDS,
+  onsetPassesInFlight,
+  scanOnsetChunk,
+  scanOnsets,
+  type OnsetDetection,
+} from "./onset-scan";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
 export type { FourStemName, TwoStemName } from "./ai-separation";
 
@@ -100,12 +107,14 @@ interface HistoryCodecAddon {
     after: Float32Array,
     ranges: Uint32Array,
     baseCompact: boolean,
+    afterCompact: boolean,
   ): Promise<boolean>;
   historyEncodeDelta(
     base: Float32Array,
     after: Float32Array,
     ranges: Uint32Array,
     baseCompact: boolean,
+    afterCompact: boolean,
     turns: PhaseTurns | undefined,
   ): Promise<Buffer>;
   historyApplyDelta(base: Float32Array, delta: Uint8Array): Promise<Float32Array>;
@@ -114,6 +123,13 @@ interface HistoryCodecAddon {
     out: Float32Array,
     deltas: Uint8Array[],
     inverts: boolean[],
+  ): Promise<Float32Array>;
+  historyApplyDeltasWindowed(
+    values: Float32Array,
+    table: Uint32Array,
+    deltas: Uint8Array[],
+    inverts: boolean[],
+    totalPixels: number,
   ): Promise<Float32Array>;
   historyInverseMap(
     bandOffsets: Uint32Array,
@@ -130,42 +146,58 @@ function historyCodec(): HistoryCodecAddon {
 const zstdCompressAsync = promisify(zstdCompress);
 const zstdDecompressAsync = promisify(zstdDecompress);
 
-/** Reorder a packed state for compression, then compress it. */
-export async function encodeHistorySnapshot(packed: Float32Array): Promise<Buffer> {
-  return await zstdCompressAsync(await historyCodec().historyEncodePlanes(packed));
+// zstd hands its output over one chunk at a time, each through the JS thread;
+// a chunk sized to the whole result keeps a block to one trip.
+const ZSTD_CHUNK_SLACK = 64 * 1024;
+const ZSTD_CHUNK_MAX = 64 * 1024 * 1024;
+
+function zstdChunkSize(expectedBytes: number): number {
+  return Math.min(ZSTD_CHUNK_MAX, Math.max(ZSTD_CHUNK_SLACK, expectedBytes + ZSTD_CHUNK_SLACK));
 }
 
-export async function decodeHistorySnapshot(bytes: Uint8Array): Promise<Float32Array> {
-  return await historyCodec().historyDecodePlanes(await zstdDecompressAsync(bytes));
+/** Reorder a packed state for compression, then compress it. */
+export async function encodeHistorySnapshot(packed: Float32Array): Promise<Buffer> {
+  const planes = await historyCodec().historyEncodePlanes(packed);
+  return await zstdCompressAsync(planes, { chunkSize: zstdChunkSize(planes.byteLength) });
+}
+
+/** Decompress a snapshot and restore its packed order. `decodedBytes`, when known, is its size. */
+export async function decodeHistorySnapshot(bytes: Uint8Array, decodedBytes?: number): Promise<Float32Array> {
+  const options = decodedBytes === undefined ? {} : { chunkSize: zstdChunkSize(decodedBytes) };
+  return await historyCodec().historyDecodePlanes(await zstdDecompressAsync(bytes, options));
 }
 
 /**
  * True if a stroke changed anything inside the footprint it claims to cover.
- * `base` is the whole state the stroke was painted onto, or, with
- * `baseCompact`, just the footprint's values laid end to end in range order.
+ * Either state is whole, or, with its compact flag, just the footprint's
+ * values laid end to end in range order.
  */
 export async function historyFootprintChanged(
   base: Float32Array,
   after: Float32Array,
   ranges: Uint32Array,
   baseCompact = false,
+  afterCompact = false,
 ): Promise<boolean> {
-  return await historyCodec().historyFootprintChanged(base, after, ranges, baseCompact);
+  return await historyCodec().historyFootprintChanged(base, after, ranges, baseCompact, afterCompact);
 }
 
 /**
- * Encode a stroke as the difference from the state it was painted onto; `base`
- * is whole or compact as for historyFootprintChanged. `turns` carries the
- * phase shifts the stroke made past its ranges.
+ * Encode a stroke as the difference from the state it was painted onto; each
+ * state is whole or compact as for historyFootprintChanged. `turns` carries
+ * the phase shifts the stroke made past its ranges.
  */
 export async function encodeHistoryDelta(
   base: Float32Array,
   after: Float32Array,
   ranges: Uint32Array,
   baseCompact = false,
+  afterCompact = false,
   turns?: PhaseTurns,
 ): Promise<Buffer> {
-  return await zstdCompressAsync(await historyCodec().historyEncodeDelta(base, after, ranges, baseCompact, turns));
+  return await zstdCompressAsync(
+    await historyCodec().historyEncodeDelta(base, after, ranges, baseCompact, afterCompact, turns),
+  );
 }
 
 /** The phase turns a stored delta carries, or null when it has none. */
@@ -191,6 +223,25 @@ export async function applyHistoryDeltas(
 ): Promise<Float32Array> {
   const raw = await Promise.all(deltas.map((bytes) => zstdDecompressAsync(bytes)));
   return await historyCodec().historyApplyDeltas(base, out, raw, inverts);
+}
+
+/**
+ * Walk a chain of stroke deltas in place over a compact buffer holding only
+ * the pixels `table` names (sorted, non-overlapping [pixelStart, pixelCount]
+ * pairs). A write a delta makes outside the table is skipped, so the caller's
+ * table must cover every pixel it wants updated. `totalPixels` is the whole
+ * state's pixel count, which the table and every delta are checked against
+ * before anything is written.
+ */
+export async function applyHistoryDeltasWindowed(
+  values: Float32Array,
+  table: Uint32Array,
+  deltas: Uint8Array[],
+  inverts: boolean[],
+  totalPixels: number,
+): Promise<Float32Array> {
+  const raw = await Promise.all(deltas.map((bytes) => zstdDecompressAsync(bytes)));
+  return await historyCodec().historyApplyDeltasWindowed(values, table, raw, inverts, totalPixels);
 }
 
 /** Each packed pixel's time offset and band index, from the band layout. */
@@ -254,9 +305,8 @@ function analysisOnsets(analysisResult: GaboratorAnalysisResult, sampleRate: num
   );
 }
 
-export async function analyze(filePath: string, params: AnalysisParams) {
-  const gab = init();
-
+/** Planar channels from a file on disk, and what the container said about it. */
+async function decodePlanar(filePath: string) {
   const { sampleRate, channels, format, codec } = await probeAudioFile(filePath);
 
   // Gate on the file extension, not ffmpeg's container name: containers report
@@ -292,6 +342,97 @@ export async function analyze(filePath: string, params: AnalysisParams) {
   }
   const deinterleaveTime = performance.now() - deinterleaveStart;
   console.log(`[analyze] JS de-interleave time: ${deinterleaveTime.toFixed(2)}ms`);
+
+  return { channelArrays, channels, sampleRate, numFrames, format, codec };
+}
+
+/** The band layout and the size of a run, worked out before any audio is read. */
+export type AnalysisStreamLayout = {
+  texels: number;
+  numFrames: number;
+  numBands: number;
+  numChannels: number;
+  sampleRate: number;
+  metadata: Float32Array;
+  bandOffsets: Uint32Array;
+  bandLengths: Uint32Array;
+  bandStepLog2s: Int32Array;
+  bandFreqsHz: Float32Array;
+};
+
+/**
+ * A file's analysis, driven a span of frames at a time. Spans must be asked
+ * for in order and must join; each returns the coefficients of its own frames,
+ * laid out as the block of the packed state that covers them.
+ */
+export type AnalysisStream = {
+  layout: AnalysisStreamLayout;
+  format: string;
+  codec: string;
+  span: (startFrame: number, endFrame: number) => Promise<Float32Array>;
+  /** The energy of the run, and each band's loudest moment over it. */
+  summary: () => { magnitudeEnergy: number; onsetBandMax: Float32Array };
+};
+
+/** Decodes a file and opens its analysis as a stream of spans. */
+export async function openAnalysisStream(filePath: string, params: AnalysisParams): Promise<AnalysisStream> {
+  const gab = init();
+  const { channelArrays, channels, sampleRate, format, codec } = await decodePlanar(filePath);
+  const stream = new gab.AnalysisStream(channelArrays, channels, sampleRate, params);
+  return {
+    layout: stream.layout(),
+    format,
+    codec,
+    span: (startFrame: number, endFrame: number) => stream.span(startFrame, endFrame),
+    summary: () => stream.summary(),
+  };
+}
+
+/**
+ * Onsets found a chunk at a time from `read`, so no pass holds more than one
+ * chunk's coefficients. `bandMax` is each band's loudest moment over the whole
+ * file, which the analysis carries; a pass seeing one chunk cannot find it.
+ *
+ * With a region, only that span is read and reported on, against the gate a
+ * pass over the whole file arrived at. Without one, the whole file is scanned
+ * and the gate comes out of the scan.
+ */
+export function scanFileOnsets(
+  read: (ranges: Uint32Array) => Promise<Float32Array>,
+  analysisMetadata: PackedLayout,
+  sampleRate: number,
+  bandMax: Float32Array,
+  region?: { startSec: number; endSec: number; odfReference: number },
+): Promise<OnsetDetection> {
+  const gab = init();
+  const detect = (packed: Float32Array, meta: PackedLayout, rate: number, options: unknown) =>
+    gab.detectOnsets(packed, meta, rate, options);
+  if (!region) {
+    return scanOnsets(
+      detect,
+      read,
+      analysisMetadata,
+      sampleRate,
+      bandMax,
+      ONSET_CHUNK_SECONDS,
+      onsetPassesInFlight(totalmem()),
+    );
+  }
+  return scanOnsetChunk(
+    detect,
+    read,
+    analysisMetadata,
+    sampleRate,
+    bandMax,
+    region.odfReference,
+    Math.max(0, Math.floor(region.startSec * sampleRate)),
+    Math.min(analysisMetadata.numFrames, Math.ceil(region.endSec * sampleRate)),
+  );
+}
+
+export async function analyze(filePath: string, params: AnalysisParams) {
+  const gab = init();
+  const { channelArrays, channels, sampleRate, format, codec } = await decodePlanar(filePath);
 
   const analyzeStart = performance.now();
   const analysisResult: GaboratorAnalysisResult = await gab.analyze(channelArrays, channels, sampleRate, params);
@@ -359,10 +500,6 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
   return analyseChannels(channelArrays, audioBuffer.sampleRate, params);
 }
 
-// Mirrors MAX_TEXTURE_SIZE in gaborator-addon.cpp; the addon rejects output
-// buffers sized with a stale copy, so a drift fails loudly.
-const ANALYSIS_TEXTURE_SIZE = 8192;
-
 /**
  * The splice grid in samples: an edit whose length is a multiple of this keeps
  * every fine band on its own bin grid, so `spliceAnalyseChannels` rigid-moves
@@ -395,11 +532,8 @@ export async function spliceAnalyseChannels(
   for (let b = 0; b < oldLayout.numBands; b++) {
     total += newFrames > 0 ? ((newFrames - 1) >> oldLayout.bandStepLog2s[b]) + 1 : 0;
   }
-  const textureWidth = Math.min(ANALYSIS_TEXTURE_SIZE, total);
-  const textureHeight = total > 0 ? Math.ceil(total / textureWidth) : 0;
   const out = {
-    data: new Float32Array(textureWidth * textureHeight * 4),
-    inverseMap: new Float32Array(textureWidth * textureHeight * 2),
+    data: new Float32Array(total * 4),
     metadata: new Float32Array(oldLayout.numBands * 4),
   };
 

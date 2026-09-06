@@ -1,6 +1,7 @@
 import { useStore } from "@/store";
 import { useTransientStore } from "@renderer/store/transient";
 import { Box, Loader, Text } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { openFiles, viewSyncTargets } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
@@ -44,6 +45,7 @@ const ADD_TO_SELECTION_CURSOR =
 export interface FileViewProps {
   fileId: string;
   isFullscreen?: boolean;
+  isMinimized: boolean;
 }
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
@@ -105,7 +107,7 @@ function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): numbe
   return aimToBrushRectBlUv(aim, fileId, bpm).blX * totalDuration;
 }
 
-export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
+export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: FileViewProps) => {
   const file = openFiles[fileId];
   const filePath = file?.filePath || "";
 
@@ -733,6 +735,11 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (rendererRef?.current) {
         const { spectrogramData } = file;
         if (!spectrogramData) return;
+        const refusal = rendererRef.current.strokeRefusal(state);
+        if (refusal !== null) {
+          notifications.show({ id: "whole-file-brush", color: "yellow", title: "Nothing painted", message: refusal });
+          return;
+        }
         isStrokingRef.current = true;
         state.setIsStroking(true);
         rendererRef.current.beginStroke();
@@ -790,15 +797,20 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     state.setIsStroking(false);
     const finalRange = strokeTimeRangeRef.current;
 
-    // Use unified action with time range
-    if (finalRange.min !== null && finalRange.max !== null) {
-      await state.applyStrokeAtPosition(undefined, { min: finalRange.min, max: finalRange.max });
-    } else {
-      await state.applyStrokeAtPosition();
-    }
-    rendererRef.current?.endStroke();
+    // A dab waiting for the canvas to take its block must land before the
+    // commit reads the stroke.
+    await rendererRef.current?.settleStroke();
 
+    // The commit reads the stroke before its first await, and the stroke ends
+    // right after that read: a commit takes seconds, and a stroke that starts
+    // meanwhile must not be ended by this one.
+    const commit =
+      finalRange.min !== null && finalRange.max !== null
+        ? state.applyStrokeAtPosition(undefined, { min: finalRange.min, max: finalRange.max })
+        : state.applyStrokeAtPosition();
+    rendererRef.current?.endStroke();
     strokeTimeRangeRef.current = { min: null, max: null };
+    await commit;
   }, [stopRepeatClock]);
 
   // Window-level event listeners to handle mouse movements and releases outside the file view
@@ -1095,6 +1107,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
                   fileId={fileId}
                   ref={refCallback}
                   isLive={phase !== "static"}
+                  parked={isMinimized}
                   snapshotCanvasRef={snapshotCanvasRef}
                   onLiveFrame={handleLiveFrame}
                 />

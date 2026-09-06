@@ -34,7 +34,6 @@ function frameToAnalysis(frame: {
   const { meta, arrays } = frame;
   return {
     data: f32(arrays.data, "data"),
-    inverseMap: f32(arrays.inverseMap, "inverseMap"),
     metadata: f32(arrays.metadata, "metadata"),
     bandOffsets: u32(arrays.bandOffsets, "bandOffsets"),
     bandStepLog2s: i32(arrays.bandStepLog2s, "bandStepLog2s"),
@@ -42,8 +41,7 @@ function frameToAnalysis(frame: {
     onsets: f32(arrays.onsets, "onsets"),
     onsetOdfMax: meta.onsetOdfMax === undefined ? undefined : Number(meta.onsetOdfMax),
     onsetBandMax: arrays.onsetBandMax ? f32(arrays.onsetBandMax, "onsetBandMax") : undefined,
-    textureWidth: Number(meta.textureWidth),
-    textureHeight: Number(meta.textureHeight),
+    texels: Number(meta.texels),
     numFrames: Number(meta.numFrames),
     numChannels: Number(meta.numChannels),
     numBands: Number(meta.numBands),
@@ -182,6 +180,9 @@ const commitStroke: CommitStrokeFn = async (
   window,
   stroke,
 ): Promise<CommitResult> => {
+  if (analysisMetadata.viewStartFrame !== undefined || analysisMetadata.viewEndFrame !== undefined) {
+    throw new Error("the extension host commits against the whole packed state, not a view");
+  }
   const arrays: Record<string, NumericArray> = {
     packedData,
     bandOffsets: analysisMetadata.bandOffsets,
@@ -424,14 +425,23 @@ export function createExtensionAnalysis(): AnalysisApi {
     commitStroke,
     encodeHistorySnapshot: async (packed) =>
       u8((await historyCodec("encodeSnapshot", { packed })).arrays.bytes, "bytes"),
-    decodeHistorySnapshot: async (bytes) =>
-      f32((await historyCodec("decodeSnapshot", { bytes })).arrays.packed, "packed"),
-    historyFootprintChanged: async (base, after, ranges, baseCompact = false) =>
+    decodeHistorySnapshot: async (bytes, decodedBytes) =>
+      f32(
+        (await historyCodec("decodeSnapshot", { bytes }, decodedBytes === undefined ? {} : { decodedBytes })).arrays
+          .packed,
+        "packed",
+      ),
+    historyFootprintChanged: async (base, after, ranges, baseCompact = false, afterCompact = false) =>
       Number(
-        (await historyCodec("footprintChanged", { base, after, ranges }, { baseCompact: baseCompact ? 1 : 0 })).meta
-          .changed,
+        (
+          await historyCodec(
+            "footprintChanged",
+            { base, after, ranges },
+            { baseCompact: baseCompact ? 1 : 0, afterCompact: afterCompact ? 1 : 0 },
+          )
+        ).meta.changed,
       ) === 1,
-    encodeHistoryDelta: async (base, after, ranges, baseCompact = false, turns) => {
+    encodeHistoryDelta: async (base, after, ranges, baseCompact = false, afterCompact = false, turns) => {
       const arrays: Record<string, NumericArray> = { base, after, ranges };
       if (turns) {
         arrays.tailPixelStarts = turns.pixelStarts;
@@ -440,7 +450,12 @@ export function createExtensionAnalysis(): AnalysisApi {
         arrays.tailResiduals = turns.residuals;
       }
       return u8(
-        (await historyCodec("encodeDelta", arrays, { baseCompact: baseCompact ? 1 : 0 })).arrays.bytes,
+        (
+          await historyCodec("encodeDelta", arrays, {
+            baseCompact: baseCompact ? 1 : 0,
+            afterCompact: afterCompact ? 1 : 0,
+          })
+        ).arrays.bytes,
         "bytes",
       );
     },
@@ -470,6 +485,22 @@ export function createExtensionAnalysis(): AnalysisApi {
       );
       out.set(packed);
       return out;
+    },
+    applyHistoryDeltasWindowed: async (values, table, deltas, inverts, totalPixels) => {
+      const arrays: Record<string, NumericArray> = { values, table };
+      deltas.forEach((bytes, i) => (arrays[`delta${i}`] = bytes));
+      const walked = f32(
+        (
+          await historyCodec("applyDeltasWindowed", arrays, {
+            deltaCount: deltas.length,
+            inverts: inverts.map((flag) => (flag ? "1" : "0")).join(""),
+            totalPixels,
+          })
+        ).arrays.values,
+        "values",
+      );
+      values.set(walked);
+      return values;
     },
     buildHistoryInverseMap: async (bandOffsets, bandLengths, bandStepLog2s, pixelCount) =>
       f32(

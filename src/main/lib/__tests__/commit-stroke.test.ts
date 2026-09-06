@@ -30,7 +30,9 @@ interface CommitStroke {
 interface CommitResult {
   channels: Float32Array[];
   peak: number;
-  patch: { ranges: Uint32Array };
+  patch: { ranges: Uint32Array; previous: Float32Array };
+  tail: { pixelStarts: Uint32Array; pixelCounts: Uint32Array; offsets: Float32Array; residuals: Uint32Array };
+  tailApplied: boolean;
   gainReductionDb: Float32Array;
   maxGainReductionDb: number;
   levels: { startHop: number; peaks: Float32Array; overDb: Float32Array };
@@ -63,6 +65,8 @@ const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon
       bandOffsets: Uint32Array;
       bandLengths: Uint32Array;
       bandStepLog2s: Int32Array;
+      viewStartFrame?: number;
+      viewEndFrame?: number;
     },
     sampleRate: number,
     params: {
@@ -78,6 +82,18 @@ const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon
     window: CommitWindow,
     stroke: CommitStroke,
   ) => Promise<CommitResult>;
+  detectOnsets: (
+    packedData: Float32Array,
+    meta: {
+      numFrames: number;
+      numChannels: number;
+      numBands: number;
+      bandOffsets: Uint32Array;
+      bandLengths: Uint32Array;
+      bandStepLog2s: Int32Array;
+    },
+    sampleRate: number,
+  ) => Promise<{ onsets: Float32Array; odfMax: number; bandMax: Float32Array }>;
 };
 
 const SR = 48000;
@@ -91,10 +107,10 @@ const F1 = Math.round(T1 * SR);
 const HOP = Math.round(SR * 0.005);
 const TIMEOUT = 180_000;
 
-function makeNoise(amplitude = 0.3, seedInit = 987654321): Float32Array {
-  const sig = new Float32Array(N);
+function makeNoise(amplitude = 0.3, seedInit = 987654321, n = N): Float32Array {
+  const sig = new Float32Array(n);
   let seed = seedInit;
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < n; i++) {
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     sig[i] = ((seed / 0x7fffffff) * 2 - 1) * amplitude;
   }
@@ -788,6 +804,300 @@ describe("commit stroke", () => {
 
       // Onsets still run, reading the painted coefficients directly.
       expect(painted.onsets).toBeDefined();
+    },
+    TIMEOUT,
+  );
+});
+
+// A windowed commit reads and writes a buffer holding only the window's reach,
+// so a long file's commit no longer needs its whole packed state in one array.
+// Its result must be the whole-file commit's, byte for byte, with the tail
+// turns handed back for the caller to apply.
+describe("windowed commit", () => {
+  const DUR_W = 24;
+  const NW = SR * DUR_W;
+  const WT0 = 11.0;
+  const WT1 = 11.5;
+  const WF0 = Math.round(WT0 * SR);
+  const WF1 = Math.round(WT1 * SR);
+
+  /** Index of the first differing element, or -1 when the arrays are equal. */
+  function firstDifference(a: ArrayLike<number>, b: ArrayLike<number>): number {
+    if (a.length !== b.length) return Math.min(a.length, b.length);
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return i;
+    return -1;
+  }
+
+  type Fixture = {
+    analysis: GaboratorAnalysisResult;
+    original: Float32Array;
+    odfMax: number;
+    bandMax: Float32Array;
+  };
+  let fixturePromise: Promise<Fixture> | null = null;
+  function fixture(): Promise<Fixture> {
+    fixturePromise ??= (async () => {
+      const analysis = await addon.analyze([makeNoise(0.3, 246813579, NW)], 1, SR, PARAMS);
+      const original = await roundTrip(analysis, analysis.data);
+      const reference = await addon.detectOnsets(analysis.data, metaOf(analysis), SR);
+      return { analysis, original, odfMax: reference.odfMax, bandMax: reference.bandMax };
+    })();
+    return fixturePromise;
+  }
+
+  // Shifts every phase in the window far enough that the projection has to
+  // re-branch the bands' tails.
+  function paint(analysis: GaboratorAnalysisResult): Float32Array {
+    const data = new Float32Array(analysis.data);
+    for (let b = 0; b < analysis.numBands; b++) {
+      const s = 1 << analysis.bandStepLog2s[b];
+      const off = analysis.bandOffsets[b];
+      for (let k = 0; k < analysis.bandLengths[b]; k++) {
+        const t = k * s;
+        if (t >= WF0 && t < WF1) data[(off + k) * 4 + 1] += 4;
+      }
+    }
+    return data;
+  }
+
+  // The view's frame span: the window plus the pass's reach either side,
+  // sitting on every band's grid.
+  function viewSpan(analysis: GaboratorAnalysisResult, leadSec: number, trailSec: number): { v0: number; v1: number } {
+    const quantum = 1 << Math.max(...analysis.bandStepLog2s);
+    const v0 = Math.max(0, Math.floor((WF0 - leadSec * SR) / quantum) * quantum);
+    const v1 = Math.min(analysis.numFrames, Math.ceil((WF1 + trailSec * SR) / quantum) * quantum);
+    return { v0, v1 };
+  }
+
+  // Per-band spans of [v0, v1) laid back to back — the buffer a windowed
+  // commit works on, with the mapping back into the file's layout.
+  function gatherView(
+    analysis: GaboratorAnalysisResult,
+    data: Float32Array,
+    v0: number,
+    v1: number,
+  ): { view: Float32Array; viewOffsets: Uint32Array; viewK0: number[] } {
+    const viewOffsets = new Uint32Array(analysis.numBands);
+    const viewK0: number[] = [];
+    const parts: Float32Array[] = [];
+    let at = 0;
+    for (let b = 0; b < analysis.numBands; b++) {
+      const step = analysis.bandStepLog2s[b];
+      const len = analysis.bandLengths[b];
+      const k0 = v0 >> step;
+      const kEnd = v1 >= analysis.numFrames ? len : Math.min(len, v1 >> step);
+      viewOffsets[b] = at;
+      viewK0.push(k0);
+      const off = analysis.bandOffsets[b];
+      parts.push(data.subarray((off + k0) * 4, (off + kEnd) * 4));
+      at += Math.max(0, kEnd - k0);
+    }
+    const view = new Float32Array(at * 4);
+    let dst = 0;
+    for (const p of parts) {
+      view.set(p, dst);
+      dst += p.length;
+    }
+    return { view, viewOffsets, viewK0 };
+  }
+
+  const bitCast = new DataView(new ArrayBuffer(4));
+  function floatBits(v: number): number {
+    bitCast.setFloat32(0, v, true);
+    return bitCast.getUint32(0, true);
+  }
+
+  // The caller's half of a windowed commit: scatter the patch back into the
+  // whole array, then shift the tails with the same float arithmetic the
+  // addon uses in place, keeping the floats a shift cannot undo exactly.
+  function reconstruct(
+    analysis: GaboratorAnalysisResult,
+    whole: Float32Array,
+    result: CommitResult,
+    view: Float32Array,
+    viewOffsets: Uint32Array,
+    viewK0: number[],
+  ): Uint32Array {
+    const r = result.patch.ranges;
+    for (let i = 0; i < r.length; i += 3) {
+      const src = (viewOffsets[r[i]] + (r[i + 1] - viewK0[r[i]])) * 4;
+      whole.set(view.subarray(src, src + r[i + 2] * 4), (analysis.bandOffsets[r[i]] + r[i + 1]) * 4);
+    }
+    const residuals: number[] = [];
+    const t = result.tail;
+    for (let i = 0; i < t.pixelStarts.length; i++) {
+      for (let ch = 0; ch < 2; ch++) {
+        const c = t.offsets[i * 2 + ch];
+        if (c === 0) continue;
+        for (let p = 0; p < t.pixelCounts[i]; p++) {
+          const at = (t.pixelStarts[i] + p) * 4 + ch * 2 + 1;
+          if (at >= whole.length) break;
+          const before = whole[at];
+          const after = Math.fround(before + c);
+          if (Math.fround(after - c) !== before) residuals.push(at, floatBits(before));
+          whole[at] = after;
+        }
+      }
+    }
+    return Uint32Array.from(residuals);
+  }
+
+  function regionParams(fix: Fixture): Parameters<(typeof addon)["commitStroke"]>[3] {
+    return {
+      ...PARAMS,
+      detectOnsets: true,
+      onsetStartSec: WT0 - 0.25,
+      onsetEndSec: WT1 + 0.25,
+      onsetOdfReference: fix.odfMax,
+      onsetBandMax: fix.bandMax,
+    };
+  }
+
+  function windowOf(analysis: GaboratorAnalysisResult): CommitWindow {
+    return { startFrame: WF0, endFrame: WF1, startBand: 0, endBand: analysis.numBands };
+  }
+
+  const STROKE: CommitStroke = {
+    footStartFrame: WF0,
+    footEndFrame: WF1,
+    hardEdgeStart: true,
+    hardEdgeEnd: true,
+    applyLimiter: true,
+    project: true,
+  };
+
+  it(
+    "matches the whole-file commit from a view of the window's reach, byte for byte",
+    async () => {
+      const fix = await fixture();
+      const { analysis, original } = fix;
+      const wholeCanvas = paint(analysis);
+      const { v0, v1 } = viewSpan(analysis, 7.5, 5.0);
+      expect(v0).toBeGreaterThan(0);
+      expect(v1).toBeLessThan(analysis.numFrames);
+      const { view, viewOffsets, viewK0 } = gatherView(analysis, wholeCanvas, v0, v1);
+      const params = regionParams(fix);
+
+      const whole = await addon.commitStroke(
+        wholeCanvas,
+        metaOf(analysis),
+        SR,
+        params,
+        [original],
+        windowOf(analysis),
+        STROKE,
+      );
+      const windowed = await addon.commitStroke(
+        view,
+        { ...metaOf(analysis), viewStartFrame: v0, viewEndFrame: v1 },
+        SR,
+        params,
+        [original],
+        windowOf(analysis),
+        STROKE,
+      );
+
+      expect(whole.tailApplied).toBe(true);
+      expect(windowed.tailApplied).toBe(false);
+      expect(whole.tail.pixelStarts.length).toBeGreaterThan(0);
+      expect(whole.tail.residuals.length).toBeGreaterThan(0);
+      expect(windowed.tail.residuals.length).toBe(0);
+
+      expect(firstDifference(windowed.channels[0], whole.channels[0])).toBe(-1);
+      expect(windowed.peak).toBe(whole.peak);
+      expect(firstDifference(windowed.patch.ranges, whole.patch.ranges)).toBe(-1);
+      expect(firstDifference(windowed.patch.previous, whole.patch.previous)).toBe(-1);
+      expect(firstDifference(windowed.tail.pixelStarts, whole.tail.pixelStarts)).toBe(-1);
+      expect(firstDifference(windowed.tail.pixelCounts, whole.tail.pixelCounts)).toBe(-1);
+      expect(firstDifference(windowed.tail.offsets, whole.tail.offsets)).toBe(-1);
+      expect(firstDifference(windowed.gainReductionDb, whole.gainReductionDb)).toBe(-1);
+      expect(windowed.maxGainReductionDb).toBe(whole.maxGainReductionDb);
+      expect(windowed.levels.startHop).toBe(whole.levels.startHop);
+      expect(firstDifference(windowed.levels.peaks, whole.levels.peaks)).toBe(-1);
+      expect(firstDifference(windowed.levels.overDb, whole.levels.overDb)).toBe(-1);
+      expect(whole.onsets).toBeDefined();
+      if (whole.onsets && windowed.onsets) expect(firstDifference(windowed.onsets, whole.onsets)).toBe(-1);
+      expect(windowed.onsetOdfMax).toBe(whole.onsetOdfMax);
+      if (whole.onsetBandMax && windowed.onsetBandMax) {
+        expect(firstDifference(windowed.onsetBandMax, whole.onsetBandMax)).toBe(-1);
+      }
+
+      const rebuilt = paint(analysis);
+      const residuals = reconstruct(analysis, rebuilt, windowed, view, viewOffsets, viewK0);
+      expect(firstDifference(rebuilt, wholeCanvas)).toBe(-1);
+      expect(firstDifference(residuals, whole.tail.residuals)).toBe(-1);
+    },
+    TIMEOUT,
+  );
+
+  // One refusal per span the pass reads, so each coverage check answers for
+  // itself: a view can cover one reach and still fall short of another.
+  async function expectRefused(leadSec: number, trailSec: number, message: RegExp): Promise<void> {
+    const fix = await fixture();
+    const { analysis, original } = fix;
+    const canvas = paint(analysis);
+    const { v0, v1 } = viewSpan(analysis, leadSec, trailSec);
+    const { view } = gatherView(analysis, canvas, v0, v1);
+    const before = new Float32Array(view);
+
+    await expect(
+      addon.commitStroke(
+        view,
+        { ...metaOf(analysis), viewStartFrame: v0, viewEndFrame: v1 },
+        SR,
+        regionParams(fix),
+        [original],
+        windowOf(analysis),
+        STROKE,
+      ),
+    ).rejects.toThrow(message);
+    expect(firstDifference(view, before)).toBe(-1);
+  }
+
+  it(
+    "refuses a view that stops short of the synthesis fill, leaving it untouched",
+    async () => {
+      await expectRefused(0.0, 5.0, /synthesis window's reach/);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a view that stops short of the onset pass",
+    async () => {
+      await expectRefused(3.0, 5.0, /onset pass's reach/);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a view that stops short of the projection, leaving it untouched",
+    async () => {
+      await expectRefused(7.5, 1.6, /projection's reach/);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a view whose edges leave a band's grid",
+    async () => {
+      const fix = await fixture();
+      const { analysis, original } = fix;
+      const canvas = paint(analysis);
+      const { v0, v1 } = viewSpan(analysis, 7.5, 5.0);
+      const { view } = gatherView(analysis, canvas, v0, v1);
+
+      await expect(
+        addon.commitStroke(
+          view,
+          { ...metaOf(analysis), viewStartFrame: v0 + 1, viewEndFrame: v1 },
+          SR,
+          regionParams(fix),
+          [original],
+          windowOf(analysis),
+          STROKE,
+        ),
+      ).rejects.toThrow(/do not sit on every band's grid/);
     },
     TIMEOUT,
   );

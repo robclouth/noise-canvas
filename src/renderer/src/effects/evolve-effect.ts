@@ -3,7 +3,9 @@ import evolveEffectFrag from "../glsl/evolve-effect.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
-import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
+import { EVOLVE_SCALE_FULL_BEATS, EVOLVE_SCALE_FULL_SEMIS } from "@renderer/lib/constants";
+import { unitsToUv } from "@renderer/lib/utils";
+import { BaseEffect, createDefaultUniforms, sourceLayout, UpdateEffectUniformsProps } from "./base-effect";
 
 const defaultUniformValue = defaultParameterUniform(0, -100, 100);
 
@@ -49,8 +51,28 @@ class EvolveEffect extends BaseEffect {
     updateParam("evolveDriftX", "evolveDriftX");
     updateParam("evolveDriftY", "evolveDriftY");
     updateParam("evolveDecay", "evolveDecay");
-    updateParam("evolveScaleX", "evolveScaleX");
-    updateParam("evolveScaleY", "evolveScaleY");
+
+    // The neighbourhood is an offset added to a source UV, so its beats and
+    // semitones convert against the span the source textures hold.
+    const source = sourceLayout(props.commonUniforms);
+    const bpm = state.filepathsBpm[props.file.filePath] || 120;
+    const toUv = (beats: number, semis: number): { x: number; y: number } =>
+      unitsToUv(beats, semis, bpm, source.totalDuration, source.bandsPerOctave, source.numBands);
+    const full = toUv(EVOLVE_SCALE_FULL_BEATS, EVOLVE_SCALE_FULL_SEMIS);
+    const scale = toUv(
+      (state.evolveScaleX / 100) * EVOLVE_SCALE_FULL_BEATS,
+      (state.evolveScaleY / 100) * EVOLVE_SCALE_FULL_SEMIS,
+    );
+    material.uniforms.evolveScaleX.value = parameterUniform(state, "evolveScaleX", props.modContext, {
+      value: scale.x,
+      min: -full.x,
+      max: full.x,
+    });
+    material.uniforms.evolveScaleY.value = parameterUniform(state, "evolveScaleY", props.modContext, {
+      value: scale.y,
+      min: -full.y,
+      max: full.y,
+    });
     material.uniforms.evolveEdgeMode.value = state.evolveEdgeMode;
   }
 }

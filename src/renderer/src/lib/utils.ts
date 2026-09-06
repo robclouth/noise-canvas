@@ -67,6 +67,11 @@ export function resolveBrushFootprint(params: {
   return { sizeUv: new Vector2(timeUv, pitchUv), fullTime, fullPitch };
 }
 
+/** Turns an origin option (0 low, 1 middle, 2 high) into its fraction of the brush. */
+export function originFraction(option: number): number {
+  return Math.min(2, Math.max(0, option)) * 0.5;
+}
+
 // When a brush axis is in Full mode, the brush anchors to 0 on that axis so it always
 // spans the whole file regardless of cursor position.
 export function resolveBrushAnchor(cursorPos: Vector2, fullTime: boolean, fullPitch: boolean): Vector2 {

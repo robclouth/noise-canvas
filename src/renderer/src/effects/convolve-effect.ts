@@ -1,5 +1,5 @@
+import { impulseKey } from "@renderer/lib/impulse-key";
 import { getNumberParameterDef } from "@renderer/parameters";
-import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import convolveEffectFrag from "../glsl/convolve-effect.frag";
@@ -35,6 +35,8 @@ class ConvolveEffect extends BaseEffect {
           convolveIrTex: { value: null },
           convolveIrMetadataTex: { value: null },
           convolveIrFrameCount: { value: 0 },
+          convolveIrViewStartFrame: { value: 0 },
+          convolveIrFileFrameCount: { value: 0 },
           convolveIrBandCount: { value: 0 },
           convolveIrMinFreq: { value: 20 },
           convolveIrBandsPerOctave: { value: 24 },
@@ -60,42 +62,38 @@ class ConvolveEffect extends BaseEffect {
     const material = this.materials[0];
     if (!material) return;
 
-    const irFile = state.convolveIrFile;
-    let irOpenFile = irFile ? getOpenFileByPath(irFile.path) : undefined;
-    if (!irOpenFile && irFile) {
-      irOpenFile = Object.values(openFiles).find((f) => f.filePath === irFile.path);
-    }
-
-    const irTextures = irOpenFile?.rendererRef?.current?.getTextures();
-    const irData = irOpenFile?.spectrogramData;
-
-    // Resolve the IR source. If an explicit IR file was picked and is loaded, use it.
-    // Otherwise "Self" — fall back to the source (the file being painted from).
-    // updateCommonUniforms ran first, so material.uniforms.source* are populated.
-    // Painting a file onto itself collapses this to true self-convolution; painting
-    // from B onto A gives B ⊛ B (static IR, predictable). Use a "canvas as filter"
-    // workflow by explicitly picking the canvas file as the IR.
-    if (irFile && irTextures && irData) {
-      material.uniforms.convolveIrTex.value = irTextures.packed.texture;
-      material.uniforms.convolveIrMetadataTex.value = irTextures.metadata;
-      material.uniforms.convolveIrFrameCount.value = irData.numFrames;
+    // The response is the file the step named, or — with no file named — the
+    // file it paints from, read from IR Start of that file either way. Painting
+    // a file onto itself collapses the second case to true self-convolution;
+    // painting from B onto A gives B ⊛ B, a static response.
+    const impulse = props.impulses?.get(impulseKey(state)) ?? null;
+    if (impulse) {
+      const { spectrogramData: irData, textures, view } = impulse;
+      material.uniforms.convolveIrTex.value = textures.packed.texture;
+      material.uniforms.convolveIrMetadataTex.value = textures.metadata;
+      material.uniforms.convolveIrFrameCount.value = view ? view.endFrame - view.startFrame : irData.numFrames;
+      material.uniforms.convolveIrViewStartFrame.value = view ? view.startFrame : 0;
+      material.uniforms.convolveIrFileFrameCount.value = irData.numFrames;
       material.uniforms.convolveIrBandCount.value = irData.numBands;
       material.uniforms.convolveIrMinFreq.value = irData.minFreq;
       material.uniforms.convolveIrBandsPerOctave.value = irData.bandsPerOctave;
-      material.uniforms.convolveIrEnabled.value = true;
     } else {
+      const sourceFrames = material.uniforms.sourceFrameCount.value;
       material.uniforms.convolveIrTex.value = material.uniforms.sourceSpectrogramTex.value;
       material.uniforms.convolveIrMetadataTex.value = material.uniforms.sourceMetadataTex.value;
-      material.uniforms.convolveIrFrameCount.value = material.uniforms.sourceFrameCount.value;
+      material.uniforms.convolveIrFrameCount.value = sourceFrames;
+      material.uniforms.convolveIrViewStartFrame.value = 0;
+      material.uniforms.convolveIrFileFrameCount.value = sourceFrames;
       material.uniforms.convolveIrBandCount.value = material.uniforms.sourceBandCount.value;
       material.uniforms.convolveIrMinFreq.value = material.uniforms.sourceMinFreq.value;
       material.uniforms.convolveIrBandsPerOctave.value = material.uniforms.sourceBandsPerOctave.value;
-      material.uniforms.convolveIrEnabled.value = true;
     }
+    material.uniforms.convolveIrEnabled.value = true;
 
-    // Normalize against the explicit IR only. The "Self" fallback has no CPU
-    // spectrogram to measure here, so it stays unnormalized (scale 1).
-    material.uniforms.convolveIrNormScale.value = irFile && irTextures && irData ? getIrNormScale(irData) : 1;
+    // Normalize against a named response only, so filtering through the file
+    // being painted from keeps whatever level that file has.
+    material.uniforms.convolveIrNormScale.value =
+      state.convolveIrFile && impulse ? getIrNormScale(impulse.spectrogramData) : 1;
 
     material.uniforms.convolveIrSize.value = Math.max(1, Math.floor(state.convolveIrSize));
     material.uniforms.convolveEdgeMode.value = state.convolveEdgeMode;

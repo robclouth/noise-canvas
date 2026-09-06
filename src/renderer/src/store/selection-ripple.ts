@@ -118,6 +118,7 @@ function splicedOnsets(
 /** The clipboard's copied span as audio channels, synthesised from its own coefficients. */
 async function clipboardSpanAudio(clipboard: ClipboardRegion): Promise<Float32Array[] | null> {
   const { spec } = clipboard;
+  if (!spec.packedData) return null;
   const analysisParams: AnalysisParams = {
     bandsPerOctave: spec.bandsPerOctave,
     minFreq: spec.minFreq,

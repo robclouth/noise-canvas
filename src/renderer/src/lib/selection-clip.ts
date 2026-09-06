@@ -1,5 +1,5 @@
-import { Vector2 } from "three";
 import type { SpectrogramData } from "../store/types";
+import { packedTextureSizeOf } from "./canvas-view";
 import { selectionBandRange, selectionFrameRange, selectionMaskTest, type Selection } from "./selection";
 import { sourceBandUvSlope } from "./utils";
 
@@ -79,8 +79,9 @@ export function buildClipboardRegion(
     total += length;
   }
 
-  const textureWidth = Math.min(spec.textureWidth, total);
-  const textureHeight = textureWidth > 0 ? Math.ceil(total / textureWidth) : 0;
+  const packedTextureSize = packedTextureSizeOf(total);
+  const textureWidth = packedTextureSize.x;
+  const textureHeight = packedTextureSize.y;
   if (textureWidth <= 0 || textureHeight <= 0) return null;
 
   const packedData = new Float32Array(textureWidth * textureHeight * 4);
@@ -113,7 +114,7 @@ export function buildClipboardRegion(
     }
   }
 
-  const metadata = new Float32Array(numBands * 4);
+  const metadata = new Float64Array(numBands * 4);
   for (let band = 0; band < numBands; band++) {
     metadata[band * 4] = bandOffsets[band];
     metadata[band * 4 + 1] = bandLengths[band];
@@ -137,13 +138,12 @@ export function buildClipboardRegion(
       packedData,
       inverseMap,
       metadata,
-      textureWidth,
-      textureHeight,
+      texels: total,
       numFrames: clipFrames,
       numBands,
       numChannels,
       sampleRate,
-      packedTextureSize: new Vector2(textureWidth, textureHeight),
+      packedTextureSize,
       minFreq,
       bandsPerOctave,
       magnitudeEnergy: spec.magnitudeEnergy,

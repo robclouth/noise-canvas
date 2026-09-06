@@ -50,11 +50,9 @@ async function expectEquivalent(
   const spliced = await spliceAnalyseChannels(newChannels, SR, PARAMS, oldAnalysis.data, layoutOf(oldAnalysis), pieces);
 
   expect(spliced.numFrames).toBe(ref.numFrames);
-  expect(spliced.textureWidth).toBe(ref.textureWidth);
-  expect(spliced.textureHeight).toBe(ref.textureHeight);
+  expect(spliced.texels).toBe(ref.texels);
   expect(Array.from(spliced.bandOffsets)).toEqual(Array.from(ref.bandOffsets));
   expect(Array.from(spliced.bandLengths)).toEqual(Array.from(ref.bandLengths));
-  expect(spliced.inverseMap).toEqual(ref.inverseMap);
   expect(spliced.metadata).toEqual(ref.metadata);
 
   let worstMag = 0;

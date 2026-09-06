@@ -1,5 +1,6 @@
 import type { WebGLRenderer } from "three";
-import { openFiles } from "../store/files";
+import { openFileTexelCounts } from "../store/files";
+import { blockStoreResidentBytes } from "./block-stores";
 import { diag } from "./diag-log";
 import { gpuMemoryInfo, spectrogramBytes, usedBudgetFraction } from "./gpu-budget";
 import { historyMemoryCacheBytes } from "./history-manager";
@@ -62,15 +63,6 @@ function logFrameCadence(): void {
   previews = 0;
 }
 
-function openTexelCounts(): number[] {
-  const counts: number[] = [];
-  for (const file of Object.values(openFiles)) {
-    const data = file.spectrogramData;
-    if (data) counts.push(data.textureWidth * data.textureHeight);
-  }
-  return counts;
-}
-
 type MemoryFigures = Record<string, number>;
 
 function changedBeyond(previous: MemoryFigures | null, next: MemoryFigures): boolean {
@@ -88,7 +80,7 @@ const performanceWithMemory: Performance & { memory?: { usedJSHeapSize: number; 
 
 async function memoryFigures(gl: WebGLRenderer): Promise<MemoryFigures> {
   const toMB = (bytes: number): number => Math.round(bytes / 1048576);
-  const texels = openTexelCounts();
+  const texels = openFileTexelCounts();
   const unified = gpuMemoryInfo().unified;
   const figures: MemoryFigures = {
     spectrogramMB: toMB(spectrogramBytes(texels, unified)),
@@ -97,9 +89,9 @@ async function memoryFigures(gl: WebGLRenderer): Promise<MemoryFigures> {
     openFiles: texels.length,
   };
   const history = historyMemoryCacheBytes();
-  figures.historyPackedMB = toMB(history.packedStates);
   figures.historyDeltaMB = toMB(history.deltas);
   figures.historyHopMB = toMB(history.audioHops);
+  figures.blocksMB = toMB(await blockStoreResidentBytes());
   const heap = performanceWithMemory.memory;
   if (heap) figures.jsHeapMB = toMB(heap.usedJSHeapSize);
   if (typeof process !== "undefined" && typeof process.getProcessMemoryInfo === "function") {

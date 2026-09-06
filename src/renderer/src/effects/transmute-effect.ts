@@ -4,7 +4,7 @@ import rangeQuadVert from "../glsl/range-quad.vert";
 import { useStore } from "../store";
 import type { State } from "../store/types";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
-import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, sourceLayout, UpdateEffectUniformsProps } from "./base-effect";
 
 const PART_MAG = 0;
 const PART_PHASE = 1;
@@ -50,9 +50,11 @@ class TransmuteEffect extends BaseEffect {
     this.materials[0].uniforms.transmuteFrom.value = state.transmuteFrom;
     this.materials[0].uniforms.transmuteTo.value = state.transmuteTo;
 
-    const { spectrogramData, filePath } = props.file;
+    // The step is added to a source UV, so its beats convert against the span
+    // the source textures hold rather than against the file.
+    const { filePath } = props.file;
     const bpm = state.filepathsBpm[filePath] || 120;
-    const totalDuration = spectrogramData ? spectrogramData.numFrames / spectrogramData.sampleRate : 0;
+    const { totalDuration } = sourceLayout(props.commonUniforms);
     this.materials[0].uniforms.transmuteBeatsToUv.value = 60 / bpm / (totalDuration > 0 ? totalDuration : 1);
 
     this.materials[0].uniforms.transmuteAmount.value = parameterUniform(state, "transmuteAmount", props.modContext);

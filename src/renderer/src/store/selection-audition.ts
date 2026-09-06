@@ -125,7 +125,7 @@ export const createSelectionAuditionSlice = (set: ZustandSet, get: ZustandGet): 
       const data = await renderer.getFBOData();
       if (!data) return null;
       const clip = buildClipboardRegion(data, selection, spec, file.displayName);
-      if (!clip) return null;
+      if (!clip?.spec.packedData) return null;
 
       const analysisParams: AnalysisParams = {
         bandsPerOctave: spec.bandsPerOctave,

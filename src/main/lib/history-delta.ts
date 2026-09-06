@@ -48,6 +48,20 @@ export function parseHistoryDeltaTurns(delta: Uint8Array): PhaseTurns | null {
 }
 
 /**
+ * Reads the footprint ranges out of a decompressed delta, as a flat
+ * [pixelStart, pixelCount, ...] list. Null when the header is truncated.
+ */
+export function parseHistoryDeltaRanges(delta: Uint8Array): Uint32Array | null {
+  if (delta.byteLength < 4) return null;
+  const view = new DataView(delta.buffer, delta.byteOffset, delta.byteLength);
+  const rangeCount = view.getUint32(0, true) & ~TURNS_FLAG;
+  if (4 + rangeCount * 8 > delta.byteLength) return null;
+  const ranges = new Uint32Array(rangeCount * 2);
+  for (let i = 0; i < ranges.length; i++) ranges[i] = view.getUint32(4 + i * 4, true);
+  return ranges;
+}
+
+/**
  * Adds (or, inverted, subtracts) the turns' offsets to the phases of a packed
  * state in place, the same float arithmetic the addon and the GPU use. Inverting
  * puts the residual floats back afterwards, so the state returns bit for bit.
@@ -70,6 +84,32 @@ export function applyPhaseTurns(data: Float32Array, turns: PhaseTurns, invert: b
       if (turns.residuals[i] < bits.length) bits[turns.residuals[i]] = turns.residuals[i + 1];
     }
   }
+}
+
+/**
+ * Adds the turns' offsets to the phases in place — the same float arithmetic
+ * the addon uses when it applies a tail itself — and returns the residuals an
+ * inverted apply needs: for each float the shift cannot subtract back exactly,
+ * its index and its original bits.
+ */
+export function applyPhaseTurnsCollecting(data: Float32Array, turns: PhaseTurns): Uint32Array {
+  const bits = new Uint32Array(data.buffer, data.byteOffset, data.length);
+  const residuals: number[] = [];
+  for (let i = 0; i < turns.pixelStarts.length; i++) {
+    for (let ch = 0; ch < 2; ch++) {
+      const c = turns.offsets[i * 2 + ch];
+      if (c === 0) continue;
+      let at = turns.pixelStarts[i] * FLOATS_PER_PIXEL + ch * 2 + 1;
+      const end = Math.min(data.length, (turns.pixelStarts[i] + turns.pixelCounts[i]) * FLOATS_PER_PIXEL);
+      for (; at < end; at += FLOATS_PER_PIXEL) {
+        const before = data[at];
+        const after = Math.fround(before + c);
+        if (Math.fround(after - c) !== before) residuals.push(at, bits[at]);
+        data[at] = after;
+      }
+    }
+  }
+  return Uint32Array.from(residuals);
 }
 
 /** The residual floats' pixels as a flat [pixelStart, pixelCount, ...] list, one pixel each. */

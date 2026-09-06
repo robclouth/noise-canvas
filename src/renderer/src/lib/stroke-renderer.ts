@@ -2,14 +2,18 @@ import { createNoise2D } from "simplex-noise";
 import {
   BufferAttribute,
   Camera,
+  ClampToEdgeWrapping,
   Color,
+  CustomBlending,
   DataTexture,
   FloatType,
   GLSL3,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
+  MaxEquation,
   Mesh,
   NearestFilter,
+  OneFactor,
   OrthographicCamera,
   PlaneGeometry,
   RawShaderMaterial,
@@ -23,6 +27,7 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
+import { metadataTextureRows, type BandLayout } from "./band-layout";
 import { copyMaterial } from "../components/copy-material";
 import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
@@ -37,8 +42,20 @@ import { hasActiveModulatorRouting, hasNestedModulatorRouting, paramsRouteModula
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
+import { gatherPixelRanges, pixelRangeCount } from "./pixel-ranges";
+import {
+  canvasViewInverseMap,
+  viewCoversFile,
+  viewOverlapTriples,
+  wholeFileCanvasView,
+  type CanvasView,
+} from "./canvas-view";
+import type { CommittedSource } from "./display-decimate";
+import { DisplayPyramid } from "./display-pyramid-textures";
+import type { CoarseStrip } from "./coarse-strip";
+import { DisplayTileRing } from "./display-tiles-textures";
 import { footprintAimToBlUv } from "./brush-anchor";
-import { ATTRACT_MODULATOR_MAP_START } from "./constants";
+import { ATTRACT_MODULATOR_MAP_START, padToFold } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { getQuantizeLutTexture } from "./quantize-lut";
 import { selectionBandRange, selectionFrameRange, selectionUvRect, type Selection } from "./selection";
@@ -84,6 +101,12 @@ const noise2D = createNoise2D();
 const PATCH_QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
 const PATCH_QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
+function metadataEquals(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 const createParameterUniform = defaultParameterUniform;
 
 // Bins of margin around the brush's time window in the final-pass footprint,
@@ -93,6 +116,24 @@ const FOOTPRINT_MARGIN_BINS = 4;
 // Fraction of the texture above which a stroke's footprint is written by a
 // whole-texture draw and a buffer swap, rather than folded back by a copy.
 const SWAP_FOOTPRINT_FRACTION = 0.5;
+
+function viewDataTexture(
+  data: Float32Array,
+  width: number,
+  height: number,
+  format: typeof RGBAFormat | typeof RGFormat,
+  internalFormat: "RGBA32F" | "RG32F",
+): DataTexture {
+  const texture = new DataTexture(data, width, height, format, FloatType);
+  texture.internalFormat = internalFormat;
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
 
 /** Thrown when the graphics device refuses the memory a stroke needs. */
 export class GpuMemoryError extends Error {
@@ -174,7 +215,7 @@ function writeBrushParamStatics(uniforms: CommonUniforms, step: State, ctx: ModC
  * Textures required for stroke rendering
  */
 export interface StrokeTextures {
-  originalPackedDataTex: DataTexture;
+  originalPackedDataTex: Texture;
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
   placeholderTexture: Texture;
@@ -194,13 +235,39 @@ export interface SourceFileInfo {
   spectrogramData: SpectrogramData;
   textures: {
     packed: WebGLRenderTarget;
-    inverse: DataTexture;
     metadata: DataTexture;
-    original: DataTexture;
+    /** No shader samples the source's inverse map; a source window has none. */
+    inverse?: Texture;
+    /** Absent until a step that reads the original has asked a window for it. */
+    original?: Texture;
   };
+  /**
+   * The span `textures.packed` lays out. Absent when it holds the whole file.
+   * Source UVs address this span, so every source-space scale reads its frame
+   * count, not the file's.
+   */
+  view?: CanvasView;
   // Nearest-onset lookup row for this file at the current sensitivity, baked by
   // lib/onset-map.ts. Null when the file has no onsets yet.
   onsetTexture?: Texture | null;
+}
+
+/**
+ * The impulse response a convolve step filters through: the file it names, or
+ * the file it paints from when it names none. Its textures may be a window
+ * this canvas owns, so a response file long enough to page is still read at
+ * the frames the taps ask for.
+ */
+export interface ImpulseFileInfo {
+  spectrogramData: SpectrogramData;
+  textures: { packed: WebGLRenderTarget; metadata: DataTexture };
+  /** The span `textures.packed` lays out. Absent when it holds the whole file. */
+  view?: CanvasView;
+}
+
+/** Frames the source textures lay out. */
+function sourceViewFrames(source: SourceFileInfo): number {
+  return source.view ? source.view.endFrame - source.view.startFrame : source.spectrogramData.numFrames;
 }
 
 /**
@@ -223,6 +290,11 @@ export interface StrokeParams {
   // The painted file's own onset map, read by passes after the first, which
   // sample the destination rather than the source file.
   destOnsetTexture?: Texture | null;
+  /**
+   * The impulse response each convolve step reads, under the key `impulseKey`
+   * gives for that step. Absent where the canvas serves none.
+   */
+  impulses?: ReadonlyMap<string, ImpulseFileInfo>;
   // The file each step samples from, indexed by step. A step with no entry
   // names no source file of its own, so it reads what the steps before it
   // produced (or, for the first step, the `sourceFile` argument).
@@ -277,8 +349,19 @@ export class StrokeRenderer {
   private gl: WebGLRenderer;
   private spectrogramData: SpectrogramData;
   private textures: StrokeTextures;
+  // Set when the original lays out the canvas view rather than the whole file.
+  private originalTexture: Texture | null = null;
   private fileId: string;
   private effects: EffectsRegistry;
+
+  // The packed span the canvas renders over. Every dest-space size, layout,
+  // metadata texture and frame count reads from this view.
+  private view: CanvasView;
+  private viewSize: Vector2;
+  private viewSpec: BandLayout & { textureWidth: number; textureHeight: number };
+  private viewMetadataTex: DataTexture;
+  private viewInverseMapTex: DataTexture;
+  private ownsViewTextures = false;
 
   // FBOs for ping-pong rendering
   private fbo1: WebGLRenderTarget;
@@ -307,7 +390,6 @@ export class StrokeRenderer {
   // Allocated only while a preview is up.
   private rollbackFbo: WebGLRenderTarget | null = null;
   private pingPong = 0;
-  private maskPingPong = 0;
   private isInitialized = false;
   // The footprint of the stroke being rendered. Its ranges and bin ranges are
   // reused across dabs.
@@ -317,8 +399,7 @@ export class StrokeRenderer {
   private previewRangeTex: DataTexture;
   private previewActive = false;
   // Union of the packed rows [rowStart, rowEnd) every dab since the masks were
-  // last cleared has written. Outside it both mask buffers are still zero, so a
-  // mask update drawn over it alone loses nothing across the ping-pong.
+  // last cleared has written; the mask update is drawn over it.
   private maskRows: { rowStart: number; rowEnd: number } | null = null;
   // Set when the scratch targets were (re)allocated and no stroke has yet
   // confirmed the driver accepted them.
@@ -337,6 +418,8 @@ export class StrokeRenderer {
   // FBO data cache
   private fboDataCache: Float32Array | null = null;
   private fboDataDirty = true;
+  private displayPyramid: DisplayPyramid | null = null;
+  private displayTiles: DisplayTileRing | null = null;
   // Bumped on every change to the FBO contents. getFBOData() captures it before
   // its readback and keeps the result only if it still matches, so paint that
   // lands mid-read cannot leave a snapshot taken before it marked clean.
@@ -370,6 +453,7 @@ export class StrokeRenderer {
     textures: StrokeTextures,
     fileId: string,
     effects: EffectsRegistry,
+    view?: CanvasView,
   ) {
     this.gl = gl;
     this.spectrogramData = spectrogramData;
@@ -386,7 +470,38 @@ export class StrokeRenderer {
     this.fboMesh = new Mesh(new PlaneGeometry(2, 2));
     this.fboScene.add(this.fboMesh);
 
-    const { textureWidth, textureHeight, numBands } = spectrogramData;
+    this.view = view ?? wholeFileCanvasView(spectrogramData);
+    const { textureWidth, textureHeight } = this.view;
+    this.viewSize = new Vector2(textureWidth, textureHeight);
+    this.viewSpec = {
+      metadata: this.view.layout.metadata,
+      numBands: this.view.layout.numBands,
+      textureWidth,
+      textureHeight,
+    };
+    // A given view carries its own packed layout, so it gets its own metadata
+    // and inverse-map textures; the whole-file default shares the file's.
+    if (view) {
+      this.viewMetadataTex = viewDataTexture(
+        metadataTextureRows(view.layout),
+        view.layout.numBands,
+        1,
+        RGBAFormat,
+        "RGBA32F",
+      );
+      this.viewInverseMapTex = viewDataTexture(
+        canvasViewInverseMap(view),
+        textureWidth,
+        textureHeight,
+        RGFormat,
+        "RG32F",
+      );
+      this.ownsViewTextures = true;
+    } else {
+      this.viewMetadataTex = textures.metadataTex;
+      this.viewInverseMapTex = textures.inverseMapTex;
+    }
+    const { numBands } = spectrogramData;
 
     this.rangeScene = new Scene();
     this.rangeGeometry = new RangeQuadGeometry(numBands * 3);
@@ -425,7 +540,6 @@ export class StrokeRenderer {
     this.maskMaterial = new RawShaderMaterial({
       uniforms: {
         ...createDefaultUniforms(),
-        currentMaskTex: { value: null },
         destMetadataTex: { value: null },
         destInverseMapTex: { value: null },
         destSpectrogramTextureSize: { value: new Vector2(1, 1) },
@@ -437,6 +551,12 @@ export class StrokeRenderer {
       vertexShader: rangeQuadVert,
       fragmentShader: maskUpdateFrag,
       glslVersion: GLSL3,
+      // The blend keeps the strongest weight the step reached at each pixel, so
+      // a dab writes only its own and never has to read the mask back.
+      blending: CustomBlending,
+      blendEquation: MaxEquation,
+      blendSrc: OneFactor,
+      blendDst: OneFactor,
     });
 
     // The mask material mutates these ParameterUniform objects in place on the hot
@@ -449,6 +569,11 @@ export class StrokeRenderer {
     mu.brushSkewPitch = { value: createParameterUniform(0.5, 0, 1) };
   }
 
+  /** Frames the view spans; the dest frame count the shaders address with. */
+  private get viewFrameCount(): number {
+    return this.view.endFrame - this.view.startFrame;
+  }
+
   /**
    * Draws `material` over the packed pixel ranges of `list` into `target`,
    * leaving every other pixel of the target as it was.
@@ -456,7 +581,7 @@ export class StrokeRenderer {
   private drawRanges(material: RawShaderMaterial, target: WebGLRenderTarget, list: PixelRangeList): void {
     if (list.count === 0) return;
     this.rangeGeometry.setRanges(list);
-    const size = this.spectrogramData.packedTextureSize;
+    const size = this.viewSize;
     if (material.uniforms.destSpectrogramTextureSize) {
       material.uniforms.destSpectrogramTextureSize.value = size;
     } else {
@@ -472,13 +597,12 @@ export class StrokeRenderer {
 
   /** The whole packed texture as one range. */
   private fullRange(): PixelRangeList {
-    const { textureWidth, textureHeight } = this.spectrogramData;
-    return fullTextureRange(textureWidth, textureHeight);
+    return fullTextureRange(this.view.textureWidth, this.view.textureHeight);
   }
 
   /** Marks every bin of every band as holding a preview. */
   private markWholeTexturePreview(): void {
-    const { numBands, metadata } = this.spectrogramData;
+    const { numBands, metadata } = this.view.layout;
     const binRanges = this.footprint.binRanges;
     for (let band = 0; band < numBands; band++) {
       binRanges[band * 4] = 0;
@@ -558,18 +682,41 @@ export class StrokeRenderer {
   }
 
   /**
-   * Initialize the renderer with the spectrogram data.
-   * Must be called before rendering strokes.
+   * Points the original reads at `texture`, which must lay the canvas view
+   * out: the shaders address it through the destination's metadata. A canvas
+   * holding a window of the file takes a window of the original.
    */
-  initialize(): void {
+  setOriginalTexture(texture: Texture): void {
+    this.originalTexture = texture;
+  }
+
+  /** The texture the original reads sample, laid out as the canvas view is. */
+  private originalSource(): Texture {
+    return this.originalTexture ?? this.textures.originalPackedDataTex;
+  }
+
+  /**
+   * Initialize the renderer with the spectrogram data.
+   * Must be called before rendering strokes. A canvas holding a window of the
+   * file takes its content from `composeCanvas`, which writes the view's own
+   * packed layout; the whole-file canvas copies the pristine texture.
+   */
+  initialize(composeCanvas?: (target: WebGLRenderTarget) => void): void {
     if (this.isInitialized) return;
 
-    this.fboMesh.material = copyMaterial;
-    copyMaterial.uniforms.inputTex.value = this.textures.originalPackedDataTex;
+    if (composeCanvas || !viewCoversFile(this.view, this.spectrogramData.numFrames)) {
+      // The pristine texture lays the whole file out, so a canvas holding a
+      // window of it starts empty and takes its content block by block.
+      this.clearTargets([this.fbo1]);
+      composeCanvas?.(this.fbo1);
+    } else {
+      this.fboMesh.material = copyMaterial;
+      copyMaterial.uniforms.inputTex.value = this.textures.originalPackedDataTex;
 
-    this.gl.setRenderTarget(this.fbo1);
-    this.gl.render(this.fboScene, this.camera);
-    this.gl.setRenderTarget(null);
+      this.gl.setRenderTarget(this.fbo1);
+      this.gl.render(this.fboScene, this.camera);
+      this.gl.setRenderTarget(null);
+    }
 
     this.pingPong = 0;
 
@@ -577,6 +724,11 @@ export class StrokeRenderer {
     // next acquireScratch to rebuild it.
     this.pool.disown(this);
 
+    if (!this.displayPyramid) {
+      const layout = { numBands: this.spectrogramData.numBands, metadata: this.spectrogramData.metadata };
+      this.displayPyramid = new DisplayPyramid(layout);
+      this.displayTiles = new DisplayTileRing(layout, this.spectrogramData.numFrames);
+    }
     this.invalidateFboData();
     this.isInitialized = true;
   }
@@ -588,12 +740,11 @@ export class StrokeRenderer {
    * restoring the between-strokes invariants the paint path relies on.
    */
   private acquireScratch(): StrokeScratch {
-    const { textureWidth, textureHeight } = this.spectrogramData;
+    const { textureWidth, textureHeight } = this.view;
     const { scratch, refreshed } = this.pool.acquire(this, textureWidth, textureHeight);
     this.scratch = scratch;
     if (refreshed) {
       this.clearMasks(scratch);
-      this.maskPingPong = 0;
       const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
       this.snapshotToStrokeStart(scratch, currentReadFBO.texture);
       this.scratchUnverified = true;
@@ -623,14 +774,14 @@ export class StrokeRenderer {
 
   private clearMasks(scratch: StrokeScratch): void {
     const targets: WebGLRenderTarget[] = [];
-    for (const pair of scratch.strokeMaskFbos) {
-      if (pair) targets.push(pair[0], pair[1]);
+    for (const mask of scratch.strokeMaskFbos) {
+      if (mask) targets.push(mask);
     }
-    this.clearMaskTargets(targets);
+    this.clearTargets(targets);
     this.maskRows = null;
   }
 
-  private clearMaskTargets(targets: WebGLRenderTarget[]): void {
+  private clearTargets(targets: WebGLRenderTarget[]): void {
     if (targets.length === 0) return;
     const oldClearColor = new Color();
     this.gl.getClearColor(oldClearColor);
@@ -785,6 +936,104 @@ export class StrokeRenderer {
   }
 
   /**
+   * The source-read offset in the UV the source textures lay out. The offset
+   * is defined over whole files — an anchor on the destination file's clock,
+   * against the two files' durations — and is then moved onto the span the
+   * source textures hold, so a window of either file reads the frames the
+   * whole file would. Whole-file spans on both sides return the file-space
+   * value untouched.
+   */
+  private sourceOffsetForViews(
+    sourceFile: SourceFileInfo,
+    lockedOffset: { beats: number; pitch: number } | null | undefined,
+    mode: string,
+    anchor: Vector2,
+    timeScale: number,
+    bandScale: number,
+    beatRatio: number,
+  ): Vector2 {
+    const sourceSpec = sourceFile.spectrogramData;
+    const sourceStart = sourceFile.view?.startFrame ?? 0;
+    const sourceFrames = sourceViewFrames(sourceFile);
+    const wholeSource = sourceStart === 0 && sourceFrames === sourceSpec.numFrames;
+    if (wholeSource && viewCoversFile(this.view, this.spectrogramData.numFrames)) {
+      return this.calculateSourceOffset(lockedOffset, mode, anchor, timeScale, bandScale);
+    }
+    const sourceDuration = sourceSpec.numFrames / sourceSpec.sampleRate;
+    const fileOffset = this.sourceFileOffset(sourceSpec, lockedOffset, mode, anchor, bandScale, beatRatio);
+    // Where the destination span's first frame falls in the source, beat for beat.
+    const spanStartSec = (beatRatio * this.view.startFrame) / this.spectrogramData.sampleRate;
+    const readFrame = (spanStartSec + fileOffset.x * sourceDuration) * sourceSpec.sampleRate;
+    return new Vector2((readFrame - sourceStart) / sourceFrames, fileOffset.y);
+  }
+
+  /**
+   * The source-read offset as a fraction of the source file, from an anchor on
+   * the destination file's clock. Neither end depends on the span a canvas
+   * happens to hold, so a window over the source can be placed from it before
+   * its textures exist.
+   */
+  private sourceFileOffset(
+    sourceSpec: SpectrogramData,
+    lockedOffset: { beats: number; pitch: number } | null | undefined,
+    mode: string,
+    anchor: Vector2,
+    bandScale: number,
+    beatRatio: number,
+  ): Vector2 {
+    const sourceDuration = sourceSpec.numFrames / sourceSpec.sampleRate;
+    const anchorFileSec = (this.view.startFrame + anchor.x * this.viewFrameCount) / this.spectrogramData.sampleRate;
+    return this.calculateSourceOffset(
+      lockedOffset,
+      mode,
+      new Vector2(anchorFileSec, anchor.y),
+      beatRatio / sourceDuration,
+      bandScale,
+    );
+  }
+
+  /**
+   * The frames of the source file a step's dab at `cursorPos` reads, before any
+   * effect's own reach. `cursorPos` and `totalDuration` are the canvas's, the
+   * answer is the source file's own frames, so a window over the source can be
+   * placed by what the brush asks for rather than by where that file's canvas
+   * sits.
+   */
+  sourceReadFrames(
+    state: State,
+    cursorPos: Vector2,
+    bpm: number,
+    totalDuration: number,
+    source: Pick<SourceFileInfo, "filePath" | "spectrogramData">,
+    stepIndex: number = state.activeStepIndex,
+  ): { start: number; end: number } {
+    const stepState = createStepStateView(state, stepIndex);
+    const step = (state.brushes[state.activeBrushIndex]?.steps ?? [])[stepIndex];
+    const mode = stepState.sourcePositionMode as string;
+    const sourceSpec = source.spectrogramData;
+    const beatRatio = bpm / (state.filepathsBpm?.[source.filePath] || bpm);
+    const bandScale = sourceBandUvSlope(this.spectrogramData, sourceSpec);
+    const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, cursorPos.x);
+    const anchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
+    const offset = this.sourceFileOffset(
+      sourceSpec,
+      state.isStroking ? step?.lockedOffset : null,
+      mode,
+      anchor,
+      bandScale,
+      beatRatio,
+    );
+    // The shader adds the step's own source position on top, as a fraction of
+    // the source file's length. Follow mode pins it to zero.
+    const positionUv = mode === "follow" ? 0 : Number(stepState.sourceTimeOffset ?? 0) / 100;
+    const shift = (offset.x + positionUv) * sourceSpec.numFrames;
+    const scale = (beatRatio * sourceSpec.sampleRate) / this.spectrogramData.sampleRate;
+    const first = (this.view.startFrame + anchor.x * this.viewFrameCount) * scale + shift;
+    const last = first + footprint.sizeUv.x * this.viewFrameCount * scale;
+    return { start: first, end: last };
+  }
+
+  /**
    * Build common uniforms for a specific step.
    */
   buildStepUniforms(
@@ -810,7 +1059,7 @@ export class StrokeRenderer {
 
     const modulatorUniforms = buildModulatorUniforms(
       bpm,
-      totalDuration,
+      (totalDuration * this.spectrogramData.numFrames) / this.viewFrameCount,
       this.spectrogramData.bandsPerOctave,
       this.spectrogramData.numBands,
       stepState,
@@ -822,27 +1071,35 @@ export class StrokeRenderer {
       modulatorTex0: { value: null },
       modulatorTex1: { value: null },
       sourceSpectrogramTex: { value: sourceFile.textures.packed.texture || placeholderTexture },
-      sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
+      sourceSpectrogramTextureSize: {
+        value: sourceFile.view
+          ? new Vector2(sourceFile.view.textureWidth, sourceFile.view.textureHeight)
+          : sourceFile.spectrogramData.packedTextureSize,
+      },
       sourceInverseMapTex: { value: sourceFile.textures.inverse || placeholderTexture },
       sourceMetadataTex: { value: sourceFile.textures.metadata || placeholderTexture },
       sourceMinFreq: { value: sourceFile.spectrogramData.minFreq },
       sourceBandsPerOctave: { value: sourceFile.spectrogramData.bandsPerOctave },
-      sourceFrameCount: { value: sourceFile.spectrogramData.numFrames },
+      sourceFrameCount: { value: sourceViewFrames(sourceFile) },
       sourceBandCount: { value: sourceFile.spectrogramData.numBands },
       sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
       sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
       sourceOnsetTex: { value: sourceFile.onsetTexture ?? placeholderTexture },
+      sourceViewStartFrame: { value: sourceFile.view?.startFrame ?? 0 },
+      sourceFileFrameCount: { value: sourceFile.spectrogramData.numFrames },
       destSpectrogramTex: { value: destTexture.texture || placeholderTexture },
-      destSpectrogramTextureSize: { value: this.spectrogramData.packedTextureSize },
-      destInverseMapTex: { value: this.textures.inverseMapTex || placeholderTexture },
-      destMetadataTex: { value: this.textures.metadataTex || placeholderTexture },
+      destSpectrogramTextureSize: { value: this.viewSize },
+      destInverseMapTex: { value: this.viewInverseMapTex || placeholderTexture },
+      destMetadataTex: { value: this.viewMetadataTex || placeholderTexture },
       destMinFreq: { value: this.spectrogramData.minFreq },
       destBandsPerOctave: { value: this.spectrogramData.bandsPerOctave },
-      destFrameCount: { value: this.spectrogramData.numFrames },
+      destFrameCount: { value: this.viewFrameCount },
       destBandCount: { value: this.spectrogramData.numBands },
       destChannelCount: { value: this.spectrogramData.numChannels },
       destSampleRate: { value: this.spectrogramData.sampleRate },
-      originalSpectrogramTex: { value: this.textures.originalPackedDataTex || placeholderTexture },
+      destViewStartFrame: { value: this.view.startFrame },
+      destFileFrameCount: { value: this.spectrogramData.numFrames },
+      originalSpectrogramTex: { value: this.originalSource() || placeholderTexture },
       viewZoomPower: { value: viewZoomPower },
       viewOffset: { value: viewOffset },
       viewZoomPowerY: { value: viewZoomPowerY },
@@ -866,7 +1123,7 @@ export class StrokeRenderer {
       // Beat-based scale: 1 beat in dest UV = 1 beat in source UV
       sourceTimeScale: {
         value: (() => {
-          const sourceDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
+          const sourceDuration = sourceViewFrames(sourceFile) / sourceFile.spectrogramData.sampleRate;
           const divisor = sourceBpm * sourceDuration;
           return divisor > 0 ? (bpm * totalDuration) / divisor : 1;
         })(),
@@ -921,7 +1178,8 @@ export class StrokeRenderer {
     brushBottomLeftUv: Vector2,
     brushSizeUv: Vector2,
   ): { rowStart: number; rowCount: number } | null {
-    const { numBands, textureWidth, textureHeight, metadata } = this.spectrogramData;
+    const { numBands, metadata } = this.view.layout;
+    const { textureWidth, textureHeight } = this.view;
     const { lowBand, highBand } = this.brushBandRange(brushBottomLeftUv, brushSizeUv);
 
     // If brush covers most of the bands, don't bother with scissor
@@ -955,13 +1213,13 @@ export class StrokeRenderer {
     wholeBands: boolean,
     rows: { rowStart: number; rowCount: number } | null,
   ): StrokeFootprint | null {
-    const { numBands, textureWidth } = this.spectrogramData;
+    const { numBands, textureWidth } = this.viewSpec;
     const bands = wholeBands
       ? { lowBand: 0, highBand: numBands - 1 }
       : this.brushBandRange(brushBottomLeftUv, brushSizeUv);
     const footprint = this.footprint;
     footprint.count = brushFootprintRanges(
-      this.spectrogramData,
+      this.viewSpec,
       bands.lowBand,
       bands.highBand,
       window,
@@ -1004,7 +1262,8 @@ export class StrokeRenderer {
     // band count, so an empty source would put NaN coordinates into the shaders
     // and write corrupted coefficients over the destination.
     const sourceSpec = sourceFile.spectrogramData;
-    if (!(sourceSpec.numFrames > 0) || !(sourceSpec.numBands > 0) || !(sourceSpec.sampleRate > 0)) return;
+    const sourceFrames = sourceViewFrames(sourceFile);
+    if (!(sourceFrames > 0) || !(sourceSpec.numBands > 0) || !(sourceSpec.sampleRate > 0)) return;
 
     const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     const stepGeometries = this.resolveStepGeometries(state, cursorPos, bpm, totalDuration);
@@ -1019,7 +1278,7 @@ export class StrokeRenderer {
     // feed back into themselves.
     const isSameFile = sourceFile.id === this.fileId;
     const firstStepState = stepGeometries[0].state;
-    let selfInputFbo: WebGLRenderTarget | { texture: DataTexture } = isSameFile
+    let selfInputFbo: WebGLRenderTarget | { texture: Texture } = isSameFile
       ? currentReadFBO
       : sourceFile.textures.packed;
     if (!firstStepState.accumulate && isSameFile && firstStepState.sourceDataMode !== "original") {
@@ -1028,7 +1287,7 @@ export class StrokeRenderer {
 
     // The previous step's output: what the next step blends over, and what it
     // reads when it names no source file of its own.
-    let chainFbo: WebGLRenderTarget | { texture: DataTexture } = selfInputFbo;
+    let chainFbo: WebGLRenderTarget | { texture: Texture } = selfInputFbo;
 
     // The brush extent across all steps, in pitch and in time. Each step brings
     // its own origin, so the extent is the union of the steps' rectangles. A
@@ -1086,7 +1345,8 @@ export class StrokeRenderer {
     // it writes the brush footprint alone. The brush's time window is rounded
     // to frames the way the brush shader rounds it.
     const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
-    const { textureWidth, numFrames } = this.spectrogramData;
+    const { textureWidth } = this.view;
+    const numFrames = this.viewFrameCount;
     const window: FrameWindow = wholeTime
       ? null
       : {
@@ -1102,7 +1362,7 @@ export class StrokeRenderer {
     // A footprint that covers most of the texture is cheaper to write with a
     // whole-texture draw and a buffer swap than to copy back, and with no
     // rows every pass has written the whole texture, so the swap is sound.
-    const { textureHeight } = this.spectrogramData;
+    const { textureHeight } = this.view;
     const swapWhole =
       footprint !== null &&
       scissorRows === null &&
@@ -1135,10 +1395,14 @@ export class StrokeRenderer {
       const stepSource = hasOwnSource && namedSource ? namedSource : sourceFile;
       const readsNamedFile = hasOwnSource ? stepSource.id !== this.fileId : stepIndex === 0 && !isSameFile;
 
-      let stepInputFbo: WebGLRenderTarget | { texture: DataTexture };
+      let stepInputFbo: WebGLRenderTarget | { texture: Texture };
       let readsSourceFile = true;
       if (stepState.sourceDataMode === "original") {
-        stepInputFbo = { texture: stepSource.textures.original };
+        // A window over another file builds its original only once a step asks
+        // for it, so a dab arriving before that read lands paints nothing.
+        const original = stepSource.textures.original;
+        if (!original) return;
+        stepInputFbo = { texture: original };
       } else if (readsNamedFile) {
         // A named file is not painted mid-stroke, so its packed state is its
         // stroke-start state; Start and Current read the same texture here.
@@ -1172,14 +1436,20 @@ export class StrokeRenderer {
       // step's own origin and its own source file's timeline. A step reading the
       // running result stays in this file's space, where both scales are 1.
       const sourceBpm = state.filepathsBpm?.[stepSource.filePath] || bpm;
-      const stepSourceDuration = stepSource.spectrogramData.numFrames / stepSource.spectrogramData.sampleRate;
-      const sourceOffsetUv = this.calculateSourceOffset(
-        state.isStroking ? steps[geometry.index]?.lockedOffset : null,
-        stepState.sourcePositionMode as string,
-        stepAnchor,
-        readsSourceFile ? (bpm * totalDuration) / (sourceBpm * stepSourceDuration) : 1,
-        readsSourceFile ? sourceBandUvSlope(this.spectrogramData, stepSource.spectrogramData) : 1,
-      );
+      const stepSourceDuration = sourceViewFrames(stepSource) / stepSource.spectrogramData.sampleRate;
+      const stepLockedOffset = state.isStroking ? steps[geometry.index]?.lockedOffset : null;
+      const stepPositionMode = stepState.sourcePositionMode as string;
+      const sourceOffsetUv = readsSourceFile
+        ? this.sourceOffsetForViews(
+            stepSource,
+            stepLockedOffset,
+            stepPositionMode,
+            stepAnchor,
+            (bpm * totalDuration) / (sourceBpm * stepSourceDuration),
+            sourceBandUvSlope(this.spectrogramData, stepSource.spectrogramData),
+            bpm / sourceBpm,
+          )
+        : this.calculateSourceOffset(stepLockedOffset, stepPositionMode, stepAnchor, 1, 1);
 
       // Build common uniforms for this step
       const commonUniforms = this.buildStepUniforms(
@@ -1259,6 +1529,8 @@ export class StrokeRenderer {
         sourceSampleRate: commonUniforms.destSampleRate,
         sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
         sourceOnsetTex: { value: params.destOnsetTexture ?? this.textures.placeholderTexture },
+        sourceViewStartFrame: commonUniforms.destViewStartFrame,
+        sourceFileFrameCount: commonUniforms.destFileFrameCount,
         sourceOffsetX: { value: 0 },
         sourceOffsetY: { value: 0 },
         sourceTimeScale: { value: 1.0 },
@@ -1268,7 +1540,7 @@ export class StrokeRenderer {
       };
 
       // Reset currentReadFbo to the step's input for effect processing
-      let currentReadFbo: WebGLRenderTarget | { texture: DataTexture } = stepInputFbo;
+      let currentReadFbo: WebGLRenderTarget | { texture: Texture } = stepInputFbo;
 
       const isLastStep = stepIndex === numSteps - 1;
 
@@ -1377,13 +1649,13 @@ export class StrokeRenderer {
 
         // Pass the mask if enabled (non-cumulative mode). The step reads its own
         // mask, so a step with a different envelope cannot raise its weight. No
-        // pair exists until this step first commits, and the zero placeholder is
-        // what a cleared mask holds.
+        // target exists until this step first commits, and the zero placeholder
+        // is what a cleared mask holds.
         if (!stepState.accumulate) {
-          const maskPair = scratch.strokeMaskFbos[stepIndex];
+          const maskFbo = scratch.strokeMaskFbos[stepIndex];
           (uniformsForThisIteration as any).useStrokeMask = { value: true };
           (uniformsForThisIteration as any).strokeMaskTex = {
-            value: maskPair ? maskPair[this.maskPingPong].texture : this.textures.placeholderTexture,
+            value: maskFbo ? maskFbo.texture : this.textures.placeholderTexture,
           };
         } else {
           (uniformsForThisIteration as any).useStrokeMask = { value: false };
@@ -1413,6 +1685,7 @@ export class StrokeRenderer {
           file: stepSource,
           state: effectState,
           modContext: iterationContext,
+          impulses: params.impulses,
         });
 
         this.drawRanges(material, currentWriteFbo, isFinalPass ? finalRanges : passRanges);
@@ -1460,9 +1733,7 @@ export class StrokeRenderer {
       }
       if (anyNonAccumulate) {
         const dabRowStart = scissorRows ? scissorRows.rowStart : 0;
-        const dabRowEnd = scissorRows
-          ? scissorRows.rowStart + scissorRows.rowCount
-          : this.spectrogramData.textureHeight;
+        const dabRowEnd = scissorRows ? scissorRows.rowStart + scissorRows.rowCount : this.view.textureHeight;
         this.maskRows = this.maskRows
           ? {
               rowStart: Math.min(this.maskRows.rowStart, dabRowStart),
@@ -1512,7 +1783,7 @@ export class StrokeRenderer {
       this.committedPitchMin = Math.min(this.committedPitchMin, strokeStartY);
       this.committedPitchMax = Math.max(this.committedPitchMax, strokeEndY);
 
-      this.invalidateFboData();
+      this.invalidateFboData(copyBack && footprint ? footprint : undefined);
     }
 
     this.verifyScratchAllocation();
@@ -1544,10 +1815,10 @@ export class StrokeRenderer {
     const uniforms = this.maskMaterial.uniforms;
 
     // Bind invariants (same for every step) once.
-    uniforms.destMetadataTex.value = this.textures.metadataTex;
-    uniforms.destInverseMapTex.value = this.textures.inverseMapTex;
-    uniforms.destSpectrogramTextureSize.value = this.spectrogramData.packedTextureSize;
-    uniforms.destFrameCount.value = this.spectrogramData.numFrames;
+    uniforms.destMetadataTex.value = this.viewMetadataTex;
+    uniforms.destInverseMapTex.value = this.viewInverseMapTex;
+    uniforms.destSpectrogramTextureSize.value = this.viewSize;
+    uniforms.destFrameCount.value = this.viewFrameCount;
     uniforms.destBandCount.value = this.spectrogramData.numBands;
     uniforms.selectionActive.value = selectionClip.active;
     uniforms.selectionFrames.value = selectionClip.frames;
@@ -1562,8 +1833,8 @@ export class StrokeRenderer {
 
     const rows = this.maskRows;
     const maskRanges =
-      rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.spectrogramData.textureHeight
-        ? rowRange(this.spectrogramData.textureWidth, rows.rowStart, rows.rowEnd - rows.rowStart)
+      rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.view.textureHeight
+        ? rowRange(this.view.textureWidth, rows.rowStart, rows.rowEnd - rows.rowStart)
         : this.fullRange();
 
     let renderedAny = false;
@@ -1654,27 +1925,70 @@ export class StrokeRenderer {
         uniforms.modulatorTex0.value = this.textures.placeholderTexture;
         uniforms.modulatorTex1.value = this.textures.placeholderTexture;
       }
-      const { fbos, created } = this.pool.maskFbos(stepIndex);
-      if (created) this.clearMaskTargets([fbos[0], fbos[1]]);
-      uniforms.currentMaskTex.value = fbos[this.maskPingPong].texture;
+      const { fbo, created } = this.pool.maskFbo(stepIndex);
+      if (created) this.clearTargets([fbo]);
 
-      this.drawRanges(this.maskMaterial, fbos[1 - this.maskPingPong], maskRanges);
+      this.drawRanges(this.maskMaterial, fbo, maskRanges);
 
       renderedAny = true;
     }
 
-    // Every step wrote the same side of its own pair, so one flip switches them
-    // all over together.
     if (renderedAny) {
-      this.maskPingPong = 1 - this.maskPingPong;
       this.gl.setRenderTarget(null);
     }
   }
 
-  /** Marks the cached packed state stale, so the next read goes to the GPU. */
-  private invalidateFboData(): void {
+  /**
+   * Marks the cached packed state stale, so the next read goes to the GPU, and
+   * carries the changed pixels into the display pyramid. Without `changed` the
+   * whole canvas is re-encoded.
+   */
+  private invalidateFboData(changed?: PixelRangeList): void {
     this.fboDataDirty = true;
     this.fboDataEpoch++;
+    if (!this.displayPyramid && !this.displayTiles) return;
+    const ranges = changed ?? this.fullRange();
+    const source = this.committedSource();
+    this.displayPyramid?.refreshFromCanvas(this.gl, source, ranges);
+    this.displayTiles?.refreshFromCanvas(this.gl, source, ranges);
+  }
+
+  /**
+   * Encodes the whole packed state into the display's committed levels. It is
+   * how a canvas holding part of the file gets a picture of all of it.
+   */
+  seedDisplayFromPacked(data: Float32Array): void {
+    this.displayPyramid?.seedFromPacked(this.gl, data);
+  }
+
+  /** Encodes the pixels of `ranges` into the display's levels from their own values. */
+  patchDisplayFromCompact(values: Float32Array, ranges: Uint32Array): void {
+    this.displayPyramid?.patchFromCompact(this.gl, values, ranges);
+  }
+
+  /** Seeds the display's coarser levels from a strip of the whole file, ahead of the finer draw. */
+  seedDisplayFromStrip(strip: CoarseStrip): void {
+    this.displayPyramid?.seedLevelFromStrip(this.gl, strip);
+  }
+
+  /** Declares the display's levels all drawn. */
+  finishDisplaySeed(): void {
+    this.displayPyramid?.seedFinished();
+  }
+
+  /** Declares the display's levels about to be drawn block by block. */
+  beginDisplaySeedFromStore(): void {
+    this.displayPyramid?.seedingFromCompact();
+  }
+
+  /** The display's committed levels, built once the canvas holds the file. */
+  getDisplayPyramid(): DisplayPyramid | null {
+    return this.displayPyramid;
+  }
+
+  /** The display's tile ring, which holds the view at a finer level than the pyramid. */
+  getDisplayTiles(): DisplayTileRing | null {
+    return this.displayTiles;
   }
 
   /**
@@ -1687,10 +2001,10 @@ export class StrokeRenderer {
       return this.fboDataCache;
     }
 
-    const { packedTextureSize } = this.spectrogramData;
+    const { textureWidth, textureHeight } = this.view;
     const fboToRead = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const epoch = this.fboDataEpoch;
-    const data = await readRenderTargetPixelsAsync(this.gl, fboToRead, 0, 0, packedTextureSize.x, packedTextureSize.y);
+    const data = await readRenderTargetPixelsAsync(this.gl, fboToRead, 0, 0, textureWidth, textureHeight);
 
     // Paint that landed while the read was in flight is absent from `data`, so
     // it stands in for nothing later: leave the cache stale for the next read.
@@ -1709,8 +2023,7 @@ export class StrokeRenderer {
    * only that is read back, so the cost follows the footprint, not the file.
    */
   async readPixelRanges(pixelRanges: Uint32Array): Promise<Float32Array> {
-    const { packedTextureSize } = this.spectrogramData;
-    const width = packedTextureSize.x;
+    const width = this.view.textureWidth;
 
     let patchPixels = 0;
     let numRanges = 0;
@@ -1785,9 +2098,7 @@ export class StrokeRenderer {
    * other ping-pong buffer and are copied back, so nothing is uploaded.
    */
   applyPhaseTurns(turns: ArrayLike<number>): void {
-    const { packedTextureSize } = this.spectrogramData;
-    const width = packedTextureSize.x;
-    const height = packedTextureSize.y;
+    const { textureWidth: width, textureHeight: height } = this.view;
 
     let numRanges = 0;
     for (let i = 0; i + 3 < turns.length; i += 4) if (turns[i + 1] > 0) numRanges++;
@@ -1846,12 +2157,12 @@ export class StrokeRenderer {
    * Set the FBO data from an external source (e.g., for undo/redo).
    */
   setFBOData(data: Float32Array): void {
-    const { packedTextureSize } = this.spectrogramData;
+    const { textureWidth, textureHeight, texels } = this.view;
 
     this.releaseRollback();
     this.pingPong = 0;
 
-    const dataTex = new DataTexture(data, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
+    const dataTex = new DataTexture(padToFold(data, texels, 4), textureWidth, textureHeight, RGBAFormat, FloatType);
     dataTex.needsUpdate = true;
 
     this.gl.initTexture(dataTex);
@@ -1885,9 +2196,25 @@ export class StrokeRenderer {
    * span most of the texture.
    */
   patchFBOData(data: Float32Array, pixelRanges: Uint32Array): void {
-    const { packedTextureSize } = this.spectrogramData;
-    const width = packedTextureSize.x;
-    const height = packedTextureSize.y;
+    const { textureWidth: width, textureHeight: height } = this.view;
+
+    // Past roughly half the texture the gather plus scatter costs more than
+    // just re-uploading everything.
+    const patchPixels = pixelRangeCount(pixelRanges);
+    if (patchPixels >= width * height * 0.5) {
+      this.setFBOData(data);
+      return;
+    }
+
+    this.patchFBODataCompact(gatherPixelRanges(data, pixelRanges), pixelRanges);
+  }
+
+  /**
+   * Update only the texture rows covered by `pixelRanges` from `values`,
+   * which hold exactly those pixels laid end to end in range order.
+   */
+  patchFBODataCompact(values: Float32Array, pixelRanges: Uint32Array): void {
+    const { textureWidth: width, textureHeight: height } = this.view;
 
     let patchPixels = 0;
     let numRanges = 0;
@@ -1897,16 +2224,11 @@ export class StrokeRenderer {
       numRanges++;
     }
     if (patchPixels === 0) return;
-    // Past roughly half the texture the gather plus scatter costs more than
-    // just re-uploading everything.
-    if (patchPixels >= width * height * 0.5) {
-      this.setFBOData(data);
-      return;
-    }
+    if (values.length !== patchPixels * 4) throw new Error("the patch values do not match the ranges");
 
-    // Gather the ranges into one compact block, and record where each range
-    // landed so the shader can scatter it back.
-    const patch = new Float32Array(patchPixels * 4);
+    // Record where each range sits in the compact block so the shader can
+    // scatter it back.
+    const patch = values;
     const instances = new Uint32Array(numRanges * 3);
     let srcPixel = 0;
     let inst = 0;
@@ -1914,7 +2236,6 @@ export class StrokeRenderer {
       const start = pixelRanges[i];
       const count = pixelRanges[i + 1];
       if (count === 0) continue;
-      patch.set(data.subarray(start * 4, (start + count) * 4), srcPixel * 4);
       instances[inst * 3] = start;
       instances[inst * 3 + 1] = count;
       instances[inst * 3 + 2] = srcPixel;
@@ -1973,7 +2294,7 @@ export class StrokeRenderer {
 
     geometry.dispose();
     patchTex.dispose();
-    this.invalidateFboData();
+    this.invalidateFboData({ ranges: pixelRanges, count: pixelRanges.length >> 1 });
   }
 
   /**
@@ -1990,21 +2311,24 @@ export class StrokeRenderer {
     metadata: DataTexture;
     original: DataTexture;
   } {
-    const { textureWidth, textureHeight } = spec;
+    const { packedData, inverseMap } = spec;
+    if (!packedData || !inverseMap) throw new Error("a detached source needs its packed state and its inverse map");
+    const textureWidth = spec.packedTextureSize.x;
+    const textureHeight = spec.packedTextureSize.y;
 
-    const packedTex = new DataTexture(spec.packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+    const packedTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
     packedTex.internalFormat = "RGBA32F";
     packedTex.minFilter = NearestFilter;
     packedTex.magFilter = NearestFilter;
     packedTex.needsUpdate = true;
 
-    const inverse = new DataTexture(spec.inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+    const inverse = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
     inverse.internalFormat = "RG32F";
     inverse.minFilter = NearestFilter;
     inverse.magFilter = NearestFilter;
     inverse.needsUpdate = true;
 
-    const metadata = new DataTexture(spec.metadata, spec.numBands, 1, RGBAFormat, FloatType);
+    const metadata = new DataTexture(new Float32Array(spec.metadata), spec.numBands, 1, RGBAFormat, FloatType);
     metadata.internalFormat = "RGBA32F";
     metadata.minFilter = NearestFilter;
     metadata.magFilter = NearestFilter;
@@ -2027,19 +2351,34 @@ export class StrokeRenderer {
     packed: WebGLRenderTarget;
     inverse: DataTexture;
     metadata: DataTexture;
-    original: DataTexture;
+    original: Texture;
   } {
     return {
       packed: this.pingPong === 0 ? this.fbo1 : this.fbo2,
-      inverse: this.textures.inverseMapTex,
-      metadata: this.textures.metadataTex,
-      original: this.textures.originalPackedDataTex,
+      inverse: this.viewInverseMapTex,
+      metadata: this.viewMetadataTex,
+      original: this.originalSource(),
     };
   }
 
   /** The committed spectrogram texture. */
   getDisplayTexture(): Texture {
     return (this.pingPong === 0 ? this.fbo1 : this.fbo2).texture;
+  }
+
+  /** The committed canvas texels together with the view that lays them out. */
+  committedSource(): CommittedSource {
+    return { texture: this.getDisplayTexture(), view: this.view };
+  }
+
+  /**
+   * Writes committed content into the canvas through `fill`, which draws over
+   * the view's own packed layout. It is for the parts of the view the canvas
+   * does not hold yet, so it must not reach pixels a stroke has painted.
+   */
+  fillCanvas(fill: (target: WebGLRenderTarget) => void): void {
+    fill(this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    this.invalidateFboData();
   }
 
   /**
@@ -2075,11 +2414,7 @@ export class StrokeRenderer {
     if (this.rollbackFbo) {
       this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
     } else {
-      this.rollbackFbo = this.createFBO(
-        this.spectrogramData.textureWidth,
-        this.spectrogramData.textureHeight,
-        RGBAFormat,
-      );
+      this.rollbackFbo = this.createFBO(this.view.textureWidth, this.view.textureHeight, RGBAFormat);
       this.blitFBO(this.pingPong === 0 ? this.fbo1 : this.fbo2, this.rollbackFbo);
     }
     this.invalidateFboData();
@@ -2107,6 +2442,155 @@ export class StrokeRenderer {
   releaseRollback(): void {
     this.rollbackFbo?.dispose();
     this.rollbackFbo = null;
+  }
+
+  /** Draws (dest texel, count, src texel) patch triples into `target`, leaving other texels alone. */
+  private drawPatchTriples(target: WebGLRenderTarget, triples: Uint32Array): void {
+    const geometry = new InstancedBufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(PATCH_QUAD_POSITIONS, 3));
+    geometry.setIndex(new BufferAttribute(PATCH_QUAD_INDICES, 1));
+    geometry.setAttribute("aRange", new InstancedBufferAttribute(triples, 3));
+    geometry.instanceCount = triples.length / 3;
+    const mesh = new Mesh(geometry, patchMaterial);
+    mesh.frustumCulled = false;
+    const scene = new Scene();
+    scene.add(mesh);
+    const prevAutoClear = this.gl.autoClear;
+    this.gl.autoClear = false;
+    this.gl.setRenderTarget(target);
+    this.gl.render(scene, this.camera);
+    this.gl.setRenderTarget(null);
+    this.gl.autoClear = prevAutoClear;
+    geometry.dispose();
+  }
+
+  /**
+   * Moves the canvas onto `next`, a view with the same texture fold. Texels
+   * the two views share are carried over, and `composeEntering` writes the
+   * committed values of the blocks that enter where `next` places them. With
+   * `midStroke` the stroke-start snapshot, the rollback target and the step
+   * masks move too, so the stroke keeps blending against the same base;
+   * otherwise the shared scratch is disowned and rebuilds at the next stroke.
+   * The display caches are untouched: the picture does not change in file
+   * space. Painted texels of blocks that leave must be read before the call.
+   */
+  slideView(
+    next: CanvasView,
+    composeEntering: (target: WebGLRenderTarget, blocks: number[]) => void,
+    opts: { midStroke: boolean },
+  ): void {
+    const current = this.view;
+    if (next.firstBlock === current.firstBlock && next.lastBlock === current.lastBlock) return;
+    if (next.textureWidth !== current.textureWidth || next.textureHeight !== current.textureHeight) {
+      throw new Error("the next view must keep the canvas texture fold");
+    }
+    if (!this.isInitialized) throw new Error("the canvas cannot slide before it is initialized");
+
+    const entering: number[] = [];
+    for (let block = next.firstBlock; block <= next.lastBlock; block++) {
+      if (block < current.firstBlock || block > current.lastBlock) entering.push(block);
+    }
+    const triples = viewOverlapTriples(current, next);
+
+    const shiftInto = (target: WebGLRenderTarget, sourceTex: Texture, withEntering: boolean): void => {
+      if (withEntering && entering.length > 0) composeEntering(target, entering);
+      if (triples.length > 0) {
+        patchMaterial.uniforms.patchTex.value = sourceTex;
+        patchMaterial.uniforms.destWidth.value = next.textureWidth;
+        patchMaterial.uniforms.destHeight.value = next.textureHeight;
+        patchMaterial.uniforms.patchWidth.value = current.textureWidth;
+        this.drawPatchTriples(target, triples);
+        patchMaterial.uniforms.patchTex.value = null;
+      }
+    };
+
+    const canonical = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    const partner = this.pingPong === 0 ? this.fbo2 : this.fbo1;
+    shiftInto(partner, canonical.texture, true);
+    this.pingPong = 1 - this.pingPong;
+
+    if (opts.midStroke && this.scratch && this.pool.ownedBy(this)) {
+      const scratch = this.scratch;
+      const [bounce] = this.pool.passFbos(1);
+      shiftInto(bounce, scratch.strokeStartFbo.texture, true);
+      this.blitFBO(bounce, scratch.strokeStartFbo);
+      if (this.rollbackFbo) {
+        shiftInto(bounce, this.rollbackFbo.texture, true);
+        this.blitFBO(bounce, this.rollbackFbo);
+      }
+      if (triples.length > 0) {
+        // The mask's entering span was never painted, so it clears to zero;
+        // the overlap bounces out, the target clears, and the overlap comes
+        // back at its new place.
+        const identity = Uint32Array.from(triples);
+        for (let i = 0; i < identity.length; i += 3) identity[i + 2] = identity[i];
+        for (const mask of scratch.strokeMaskFbos) {
+          if (!mask) continue;
+          shiftInto(bounce, mask.texture, false);
+          this.clearTargets([mask]);
+          patchMaterial.uniforms.patchTex.value = bounce.texture;
+          patchMaterial.uniforms.destWidth.value = next.textureWidth;
+          patchMaterial.uniforms.destHeight.value = next.textureHeight;
+          patchMaterial.uniforms.patchWidth.value = next.textureWidth;
+          this.drawPatchTriples(mask, identity);
+          patchMaterial.uniforms.patchTex.value = null;
+        }
+      } else {
+        this.clearMasks(scratch);
+      }
+      if (this.maskRows) this.maskRows = { rowStart: 0, rowEnd: next.textureHeight };
+    } else {
+      this.pool.disown(this);
+      this.maskRows = null;
+      this.rollbackFbo?.dispose();
+      this.rollbackFbo = null;
+    }
+
+    const currentFrames = current.endFrame - current.startFrame;
+    const nextFrames = next.endFrame - next.startFrame;
+    const rebaseX = (x: number): number => (x * currentFrames + current.startFrame - next.startFrame) / nextFrames;
+    if (this.committedTimeMax > this.committedTimeMin) {
+      this.committedTimeMin = rebaseX(this.committedTimeMin);
+      this.committedTimeMax = rebaseX(this.committedTimeMax);
+    }
+    if (this.dirtyRegion) {
+      this.dirtyRegion.startX = rebaseX(this.dirtyRegion.startX);
+      this.dirtyRegion.endX = rebaseX(this.dirtyRegion.endX);
+    }
+    this.previewActive = false;
+    this.fboDataCache = null;
+    this.fboDataDirty = true;
+    this.fboDataEpoch++;
+
+    const layoutChanged = !metadataEquals(current.layout.metadata, next.layout.metadata);
+    this.view = next;
+    this.viewSpec = {
+      metadata: next.layout.metadata,
+      numBands: next.layout.numBands,
+      textureWidth: next.textureWidth,
+      textureHeight: next.textureHeight,
+    };
+    if (layoutChanged) {
+      if (this.ownsViewTextures) {
+        this.viewMetadataTex.dispose();
+        this.viewInverseMapTex.dispose();
+      }
+      this.viewMetadataTex = viewDataTexture(
+        metadataTextureRows(next.layout),
+        next.layout.numBands,
+        1,
+        RGBAFormat,
+        "RGBA32F",
+      );
+      this.viewInverseMapTex = viewDataTexture(
+        canvasViewInverseMap(next),
+        next.textureWidth,
+        next.textureHeight,
+        RGFormat,
+        "RG32F",
+      );
+      this.ownsViewTextures = true;
+    }
   }
 
   /**
@@ -2171,15 +2655,16 @@ export class StrokeRenderer {
   }
 
   /**
-   * Packed-pixel ranges the current stroke's committed footprint covers, as a
-   * flat [pixelStart, pixelCount, ...] list — one range per band, mapping the
-   * footprint's time window into each band's packed segment. Returns null when
-   * nothing was committed, so history stores a full snapshot.
+   * Packed-pixel ranges the current stroke's committed footprint covers, in
+   * the view's own pixel space, as a flat [pixelStart, pixelCount, ...] list —
+   * one range per band, mapping the footprint's time window into each band's
+   * packed segment. Returns null when nothing was committed, so history
+   * stores a full snapshot.
    */
   getDirtyPixelRanges(): Uint32Array | null {
     if (this.committedTimeMax <= this.committedTimeMin) return null;
 
-    const { numBands, metadata } = this.spectrogramData;
+    const { numBands, metadata } = this.viewSpec;
     const pitchMargin = 4;
     const highBand = Math.min(
       numBands - 1,
@@ -2215,9 +2700,7 @@ export class StrokeRenderer {
     const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     this.snapshotToStrokeStart(this.scratch, currentReadFBO.texture);
 
-    // Clear both Mask FBOs and reset ping-pong
     this.clearMasks(this.scratch);
-    this.maskPingPong = 0;
   }
 
   /**
@@ -2293,5 +2776,13 @@ export class StrokeRenderer {
     this.rangeGeometry.dispose();
     this.rangeScene.remove(this.rangeMesh);
     this.previewRangeTex.dispose();
+    if (this.ownsViewTextures) {
+      this.viewMetadataTex.dispose();
+      this.viewInverseMapTex.dispose();
+    }
+    this.displayPyramid?.dispose();
+    this.displayPyramid = null;
+    this.displayTiles?.dispose();
+    this.displayTiles = null;
   }
 }

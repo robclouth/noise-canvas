@@ -25,7 +25,7 @@ function makeSpec(): { spec: SpectrogramData; data: Float32Array } {
     total += bandLengths[band];
   }
 
-  const metadata = new Float32Array(numBands * 4);
+  const metadata = new Float64Array(numBands * 4);
   for (let band = 0; band < numBands; band++) {
     metadata[band * 4] = bandOffsets[band];
     metadata[band * 4 + 1] = bandLengths[band];
@@ -48,8 +48,7 @@ function makeSpec(): { spec: SpectrogramData; data: Float32Array } {
     packedData: new Float32Array(total * 4),
     inverseMap: new Float32Array(total * 2),
     metadata,
-    textureWidth: 64,
-    textureHeight: 1,
+    texels: total,
     numFrames,
     numBands,
     numChannels: 2,
@@ -85,7 +84,7 @@ describe("buildClipboardRegion", () => {
     if (!clip) return;
 
     const { bandOffsets } = clip.spec.synthesisMetadata;
-    const magAt = (band: number, bin: number) => clip.spec.packedData[(bandOffsets[band] + bin) * 4];
+    const magAt = (band: number, bin: number) => clip.spec.packedData![(bandOffsets[band] + bin) * 4];
 
     // Band 1 has 2-frame bins; left edges in [5, 13) are bins 3..6 of the
     // source, which land at clip bins 1..4 with the origin at frame 4.
@@ -94,7 +93,7 @@ describe("buildClipboardRegion", () => {
     expect([0, 1, 2].map((bin) => magAt(2, bin))).toEqual([0, 202, 203]);
     // All four channels of a copied pixel come across.
     const at = (bandOffsets[1] + 1) * 4;
-    expect(Array.from(clip.spec.packedData.slice(at, at + 4))).toEqual([103, 0.5, 103.25, -0.5]);
+    expect(Array.from(clip.spec.packedData!.slice(at, at + 4))).toEqual([103, 0.5, 103.25, -0.5]);
   });
 
   it("keeps unselected bands silent but in place, with their frequencies unchanged", () => {
@@ -106,7 +105,7 @@ describe("buildClipboardRegion", () => {
     const { bandOffsets, bandLengths } = clip.spec.synthesisMetadata;
     for (const band of [0, 3]) {
       for (let bin = 0; bin < bandLengths[band]; bin++) {
-        expect(clip.spec.packedData[(bandOffsets[band] + bin) * 4]).toBe(0);
+        expect(clip.spec.packedData![(bandOffsets[band] + bin) * 4]).toBe(0);
       }
     }
     for (let band = 0; band < spec.numBands; band++) {

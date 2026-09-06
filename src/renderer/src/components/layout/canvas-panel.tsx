@@ -117,7 +117,8 @@ type FileLaneProps = {
 
 const FileLane = memo(({ fileId, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: FileLaneProps) => {
   const isFullscreen = fullscreenFileId === fileId;
-  const hidden = (fullscreenFileId !== null && !isFullscreen) || minimizedFileIds.includes(fileId);
+  const isMinimized = minimizedFileIds.includes(fileId);
+  const hidden = (fullscreenFileId !== null && !isFullscreen) || isMinimized;
   return (
     <Box
       ref={fileId === activeFileId ? activeRef : undefined}
@@ -125,7 +126,7 @@ const FileLane = memo(({ fileId, activeFileId, activeRef, fullscreenFileId, mini
       h={isFullscreen ? "100%" : undefined}
       flex={isFullscreen ? 1 : undefined}
     >
-      <FileView fileId={fileId} isFullscreen={isFullscreen} />
+      <FileView fileId={fileId} isFullscreen={isFullscreen} isMinimized={isMinimized} />
     </Box>
   );
 });

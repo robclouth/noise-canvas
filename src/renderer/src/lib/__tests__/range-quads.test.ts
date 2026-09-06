@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { brushFootprintRanges, fullTextureRange, rowRange } from "../range-quads";
+import { packedFold } from "../constants";
 
 function footprint(
   data: ReturnType<typeof createConstantQMockSpectrogramData>,
@@ -10,9 +11,20 @@ function footprint(
   marginBins = 4,
   pixelClamp?: { start: number; end: number },
 ) {
+  const fold = packedFold(data.texels);
+  const layout = { metadata: data.metadata, numBands: data.numBands, ...fold };
   const ranges = new Uint32Array(data.numBands * 6);
   const binRanges = new Float32Array(data.numBands * 4);
-  const count = brushFootprintRanges(data, lowBand, highBand, window, marginBins, ranges, binRanges, pixelClamp);
+  const count = brushFootprintRanges(
+    { metadata: layout.metadata, numBands: layout.numBands, textureWidth: fold.width, textureHeight: fold.height },
+    lowBand,
+    highBand,
+    window,
+    marginBins,
+    ranges,
+    binRanges,
+    pixelClamp,
+  );
   return { ranges: ranges.subarray(0, count * 2), count, binRanges };
 }
 
@@ -36,7 +48,7 @@ function pixelsOf(ranges: Uint32Array): Set<number> {
 
 describe("brushFootprintRanges", () => {
   const data = createConstantQMockSpectrogramData({ durationSeconds: 2, sampleRate: 8000, bandsPerOctave: 6 });
-  const width = data.textureWidth;
+  const width = packedFold(data.texels).width;
 
   it("keeps every range inside one row or row-aligned at both ends", () => {
     const { ranges } = footprint(data, 0, data.numBands - 1, null);
@@ -124,8 +136,8 @@ describe("brushFootprintRanges", () => {
     for (let i = 1; i < ranges.length; i += 2) footprintPixels += ranges[i];
     const firstPixel = long.metadata[lowBand * 4];
     const lastPixel = long.metadata[highBand * 4] + long.metadata[highBand * 4 + 1];
-    const rowPixels =
-      (Math.ceil(lastPixel / long.textureWidth) - Math.floor(firstPixel / long.textureWidth)) * long.textureWidth;
+    const longWidth = packedFold(long.texels).width;
+    const rowPixels = (Math.ceil(lastPixel / longWidth) - Math.floor(firstPixel / longWidth)) * longWidth;
     expect(footprintPixels).toBeLessThan(rowPixels / 50);
   });
 });

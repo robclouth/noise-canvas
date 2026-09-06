@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyHistoryDelta,
   applyHistoryDeltas,
+  applyHistoryDeltasWindowed,
   buildHistoryInverseMap,
   decodeHistorySnapshot,
   encodeHistoryDelta,
@@ -10,6 +11,8 @@ import {
   historyFootprintChanged,
   readHistoryDeltaTurns,
 } from "../audio-analysis";
+import { parseHistoryDeltaRanges } from "../history-delta";
+import type { PhaseTurns } from "../types";
 
 /**
  * The undo history's codec, as the addon implements it. Undo has to give back
@@ -346,7 +349,7 @@ describe("phase turns", () => {
       }
     }
     turns.residuals = Uint32Array.from(residuals);
-    const delta = await encodeHistoryDelta(base, after, ranges([100, 20]), false, turns);
+    const delta = await encodeHistoryDelta(base, after, ranges([100, 20]), false, false, turns);
     return { base, after, delta, residualCount: residuals.length / 2 };
   }
 
@@ -380,12 +383,182 @@ describe("phase turns", () => {
 
   it("refuses a turn that runs past the state", async () => {
     const base = phasedState(64, 1);
-    const delta = await encodeHistoryDelta(base, base, ranges([0, 1]), false, {
+    const delta = await encodeHistoryDelta(base, base, ranges([0, 1]), false, false, {
       pixelStarts: Uint32Array.from([60]),
       pixelCounts: Uint32Array.from([10]),
       offsets: Float32Array.from([1, 1]),
       residuals: new Uint32Array(0),
     });
     await expect(applyHistoryDeltas(base, base, [delta], [false])).rejects.toThrow(/past the end/);
+  });
+});
+
+describe("compact painted state", () => {
+  const PIXELS = 512;
+  const gather = (state: Float32Array, rs: Uint32Array): Float32Array => {
+    const parts: number[] = [];
+    for (let r = 0; r < rs.length; r += 2) {
+      for (let p = rs[r]; p < rs[r] + rs[r + 1]; p++) for (let c = 0; c < 4; c++) parts.push(state[p * 4 + c]);
+    }
+    return Float32Array.from(parts);
+  };
+
+  it("encodes the same delta from the footprint's values as from the whole states", async () => {
+    const base = packedState(PIXELS, 12);
+    const after = new Float32Array(base);
+    for (let p = 30; p < 55; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = ((p * 11 + c) % 87) / 87;
+    for (let p = 400; p < 420; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = -((p * 7 + c) % 71) / 71;
+    const rs = ranges([30, 25], [400, 20]);
+
+    const whole = await encodeHistoryDelta(base, after, rs);
+    const compact = await encodeHistoryDelta(gather(base, rs), gather(after, rs), rs, true, true);
+    expect(Array.from(compact)).toEqual(Array.from(whole));
+  });
+
+  it("compares the footprint's values on both sides", async () => {
+    const base = packedState(PIXELS, 13);
+    const after = new Float32Array(base);
+    const rs = ranges([100, 8]);
+    expect(await historyFootprintChanged(gather(base, rs), gather(after, rs), rs, true, true)).toBe(false);
+    after[103 * 4 + 1] += 1;
+    expect(await historyFootprintChanged(gather(base, rs), gather(after, rs), rs, true, true)).toBe(true);
+  });
+
+  it("refuses a compact painted state of the wrong size", async () => {
+    const base = packedState(PIXELS, 14);
+    await expect(encodeHistoryDelta(base, new Float32Array(3), ranges([0, 4]), false, true)).rejects.toThrow(/compact/);
+  });
+});
+
+describe("windowed delta walk", () => {
+  const PIXELS = 2048;
+  const TWO_PI = 2 * Math.PI;
+
+  const gather = (state: Float32Array, rs: Uint32Array): Float32Array => {
+    const parts: number[] = [];
+    for (let r = 0; r < rs.length; r += 2) {
+      for (let p = rs[r]; p < rs[r] + rs[r + 1]; p++) for (let c = 0; c < 4; c++) parts.push(state[p * 4 + c]);
+    }
+    return Float32Array.from(parts);
+  };
+
+  const paint = (base: Float32Array, start: number, count: number, salt: number): Float32Array => {
+    const out = new Float32Array(base);
+    for (let p = start; p < start + count; p++)
+      for (let c = 0; c < 4; c++) out[p * 4 + c] = ((p * 7 + c + salt) % 91) / 91;
+    return out;
+  };
+
+  /** A stroke that paints a window and turns every phase after it, as a projection's tail does. */
+  const paintWithTail = (
+    base: Float32Array,
+    start: number,
+    count: number,
+    salt: number,
+    offsets: [number, number],
+  ): { after: Float32Array; turns: PhaseTurns } => {
+    const after = paint(base, start, count, salt);
+    const tailStart = start + count;
+    const stateBits = new Uint32Array(after.buffer);
+    const residuals: number[] = [];
+    for (let p = tailStart; p < PIXELS; p++) {
+      for (let ch = 0; ch < 2; ch++) {
+        const i = p * 4 + ch * 2 + 1;
+        const before = after[i];
+        const shifted = Math.fround(before + offsets[ch]);
+        if (Math.fround(shifted - offsets[ch]) !== before) residuals.push(i, stateBits[i]);
+        after[i] = shifted;
+      }
+    }
+    return {
+      after,
+      turns: {
+        pixelStarts: Uint32Array.from([tailStart]),
+        pixelCounts: Uint32Array.from([PIXELS - tailStart]),
+        offsets: Float32Array.from(offsets),
+        residuals: Uint32Array.from(residuals),
+      },
+    };
+  };
+
+  /**
+   * A chain whose second stroke paints inside the first stroke's turned tail,
+   * over a state whose small phases force turn residuals — the two hazards a
+   * windowed walk must keep in order.
+   */
+  async function chain() {
+    const base = new Float32Array(PIXELS * 4);
+    for (let p = 0; p < PIXELS; p++) {
+      base[p * 4] = ((p * 7) % 91) / 91;
+      base[p * 4 + 1] = Math.fround(1e-3 * p + ((p * 13) % 97) / 97);
+      base[p * 4 + 2] = ((p * 5) % 89) / 89;
+      base[p * 4 + 3] = Math.fround(-5e-4 * p + ((p * 11) % 83) / 83);
+    }
+    const first = paintWithTail(base, 100, 20, 1, [Math.fround(TWO_PI * 3), Math.fround(-TWO_PI)]);
+    const b = paint(first.after, 900, 40, 2);
+    const dA = await encodeHistoryDelta(base, first.after, ranges([100, 20]), false, false, first.turns);
+    const dB = await encodeHistoryDelta(first.after, b, ranges([900, 40]));
+    expect(first.turns.residuals.length).toBeGreaterThan(0);
+    return { base, b, deltas: [dA, dB] };
+  }
+
+  it("matches the whole walk over a table that tiles the state", async () => {
+    const { base, b, deltas } = await chain();
+    // Uneven tiles, the way block ranges scatter across bands.
+    const table = ranges([0, 7], [7, 250], [257, 800], [1057, 991]);
+    const values = gather(base, table);
+    const walked = await applyHistoryDeltasWindowed(values, table, deltas, [false, false], PIXELS);
+    expect(walked).toBe(values);
+    const whole = await applyHistoryDeltas(base, new Float32Array(base.length), deltas, [false, false]);
+    expect(Array.from(bits(walked))).toEqual(Array.from(bits(gather(whole, table))));
+    expect(Array.from(bits(whole))).toEqual(Array.from(bits(b)));
+  });
+
+  it("updates exactly the pixels a partial table covers", async () => {
+    const { base, deltas } = await chain();
+    const table = ranges([104, 10], [880, 100], [1500, 30]);
+    const values = gather(base, table);
+    await applyHistoryDeltasWindowed(values, table, deltas, [false, false], PIXELS);
+    const whole = await applyHistoryDeltas(base, new Float32Array(base.length), deltas, [false, false]);
+    expect(Array.from(bits(values))).toEqual(Array.from(bits(gather(whole, table))));
+  });
+
+  it("walks back up exactly, residuals included", async () => {
+    const { base, b, deltas } = await chain();
+    const table = ranges([0, 512], [512, 1536]);
+    const values = gather(b, table);
+    await applyHistoryDeltasWindowed(values, table, deltas.slice().reverse(), [true, true], PIXELS);
+    expect(Array.from(bits(values))).toEqual(Array.from(bits(gather(base, table))));
+  });
+
+  it("refuses a table that is not sorted and disjoint, untouched", async () => {
+    const { base, deltas } = await chain();
+    const table = ranges([100, 50], [120, 10]);
+    const values = gather(base, ranges([100, 50], [120, 10]));
+    const kept = new Float32Array(values);
+    await expect(applyHistoryDeltasWindowed(values, table, deltas, [false, false], PIXELS)).rejects.toThrow(/sorted/);
+    expect(Array.from(bits(values))).toEqual(Array.from(bits(kept)));
+  });
+
+  it("refuses a table past the state's end, and a buffer of another size", async () => {
+    const { base, deltas } = await chain();
+    await expect(
+      applyHistoryDeltasWindowed(new Float32Array(8), ranges([PIXELS - 1, 2]), deltas, [false, false], PIXELS),
+    ).rejects.toThrow(/past the end/);
+    await expect(
+      applyHistoryDeltasWindowed(new Float32Array(3), ranges([0, 4]), deltas, [false, false], PIXELS),
+    ).rejects.toThrow(/does not match/);
+    void base;
+  });
+
+  it("reads a delta's footprint ranges back out of the stored bytes", async () => {
+    const { promisify } = await import("util");
+    const { zstdDecompress } = await import("zlib");
+    const decompress = promisify(zstdDecompress);
+    const { base, deltas } = await chain();
+    const raw = await decompress(deltas[0]);
+    const parsed = parseHistoryDeltaRanges(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+    expect(Array.from(parsed!)).toEqual([100, 20]);
+    void base;
   });
 });

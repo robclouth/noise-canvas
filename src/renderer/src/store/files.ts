@@ -1,3 +1,4 @@
+import { CoarseStripBuilder, coarseStripLevel } from "../lib/coarse-strip";
 import {
   openConfirm,
   openGroupFilesPrompt,
@@ -14,7 +15,17 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
 import { diag } from "../lib/diag-log";
-import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budget";
+import {
+  canvasWindowBlocks,
+  remainingCoefficientBudget,
+  usedBudgetFraction,
+  type OpenFileTexels,
+} from "../lib/gpu-budget";
+import { blockBandLayout, blockGrid, blockTexels, frameRangeOfBlock, type BlockGrid } from "../lib/block-grid";
+import { destroyBlockStore, openBlockStore } from "../lib/block-stores";
+import { needsCanvasWindow } from "../lib/canvas-window";
+import { viewCoversFile } from "../lib/canvas-view";
+import { synthesiseInChunks, type SynthesiseView } from "../../../main/lib/synthesis-chunks";
 import { toChannelCount } from "../lib/channel-mix";
 import { mixdown } from "../lib/mixdown";
 import { resampleChannels } from "../lib/resample";
@@ -28,9 +39,13 @@ import type {
   AnalysisParams,
   CommitLevels,
   CommitStrokeResult,
+  PackedLayout,
   PackedOnsets,
   SplicePiece,
 } from "../../../main/lib/types";
+import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
+import { commitViewOf, composeViewBuffer, scatterCommitPatch, type CommitView } from "../lib/commit-view";
+import { gatherPixelRanges, scatterCompactPixelRanges } from "../lib/pixel-ranges";
 import {
   computeOutputLevels,
   measureOutputLevels,
@@ -39,6 +54,8 @@ import {
   type OutputLevels,
 } from "../lib/output-levels";
 import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type AudioStateMeta } from "../lib/audio-hop";
+import { bandLayoutOf, bandLengthsTexels, type BandLayout } from "../lib/band-layout";
+import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { gatherFileIds, gatherFileGroups, reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
@@ -79,6 +96,17 @@ export interface CommitOutcome {
   result: CommitStrokeResult;
   audioBuffer: AudioBuffer | null;
   audioHop: AudioHop | null;
+  /** The view a windowed commit ran on, with `viewBuffer` holding its pixels after the commit. */
+  view: CommitView | null;
+  viewBuffer: Float32Array | null;
+  /** The whole painted state, when the commit had to read or was handed one. */
+  data: Float32Array | null;
+}
+
+/** What a commit reads the painted state from: the whole canvas, or the stroke's footprint over the block store. */
+export interface CommitSource {
+  data: Float32Array | null;
+  footprint: { ranges: Uint32Array; values: Float32Array } | null;
 }
 
 export interface FilesState {
@@ -149,9 +177,9 @@ export interface FilesState {
    * Rejects whole — a commit that half happened would leave the three
    * disagreeing.
    */
-  commitStroke: (fileId: string, snapshot: StrokeCommitSnapshot, data: Float32Array) => Promise<CommitOutcome | null>;
+  commitStroke: (fileId: string, snapshot: StrokeCommitSnapshot, source: CommitSource) => Promise<CommitOutcome | null>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
-  restoreOnsetsForNode: (fileId: string, nodeId: string, packedData: Float32Array) => Promise<void>;
+  restoreOnsetsForNode: (fileId: string, nodeId: string, packedData?: Float32Array) => Promise<void>;
   exportHistory: () => Promise<void>;
   exportHistoryBranch: (nodeId: string) => Promise<void>;
   exportHistoryBranchToLive: (nodeId: string) => Promise<void>;
@@ -367,14 +395,349 @@ function stripExtensionForLabel(name: string): string {
 }
 
 /** Texel counts of the open files' packed textures, skipping `excludeFileId`. */
-function openFileTexelCounts(excludeFileId?: string): number[] {
-  const counts: number[] = [];
+/** The packed-size fields of a spectrogram, from the band lengths the analysis returned. */
+function packedSizeOf(bandLengths: Uint32Array): { texels: number; packedTextureSize: Vector2 } {
+  const texels = bandLengthsTexels(bandLengths);
+  return { texels, packedTextureSize: packedTextureSizeOf(texels) };
+}
+
+/** What each open file holds, for the graphics budget. */
+export function openFileTexelCounts(excludeFileId?: string): OpenFileTexels[] {
+  const counts: OpenFileTexels[] = [];
   for (const [id, file] of Object.entries(openFiles)) {
     if (id === excludeFileId) continue;
     const data = file.spectrogramData;
-    if (data) counts.push(data.textureWidth * data.textureHeight);
+    if (!data) continue;
+    const texels = data.texels;
+    if (file.parked) {
+      counts.push({ file: texels, canvas: 0, block: 0 });
+      continue;
+    }
+    const grid = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate);
+    const blocks = canvasWindowBlocks(grid);
+    if (needsCanvasWindow(grid, blocks)) {
+      const block = blockTexels(grid, 0);
+      counts.push({ file: texels, canvas: blocks * block, block });
+    } else {
+      counts.push({ file: texels, canvas: texels, block: 0 });
+    }
   }
   return counts;
+}
+
+/** What a fresh analysis returns, whichever host ran it. */
+type AnalysisResult = {
+  data: Float32Array;
+  metadata: Float32Array;
+  bandOffsets: Uint32Array;
+  bandStepLog2s: Int32Array;
+  bandLengths: Uint32Array;
+  numFrames: number;
+  numBands: number;
+  numChannels: number;
+  sampleRate: number;
+  magnitudeEnergy: number;
+};
+
+/**
+ * The synthesis inverse map for a file's whole layout, or nothing when the
+ * canvas will hold a window: a windowed canvas builds its own from the view
+ * and never samples a file-sized one, which at ten minutes is half a gigabyte.
+ */
+async function wholeFileInverseMap(
+  layout: BandLayout,
+  numFrames: number,
+  sampleRate: number,
+  synthesis: { bandOffsets: Uint32Array; bandStepLog2s: Int32Array; bandLengths: Uint32Array },
+  texels: number,
+): Promise<Float32Array | undefined> {
+  const grid = blockGrid(layout, numFrames, sampleRate);
+  if (needsCanvasWindow(grid, canvasWindowBlocks(grid))) return undefined;
+  return await host.analysis.buildHistoryInverseMap(
+    new Uint32Array(synthesis.bandOffsets),
+    new Uint32Array(synthesis.bandLengths),
+    new Int32Array(synthesis.bandStepLog2s),
+    texels,
+  );
+}
+
+/** Rebuilds the whole file's audio from the store, a chunk of coefficients at a time. */
+function synthesiseFromSpans(
+  read: (ranges: Uint32Array) => Promise<Float32Array | null>,
+  layout: PackedLayout,
+  sampleRate: number,
+  params: AnalysisParams,
+) {
+  const pass: SynthesiseView = (packed, meta, existingAudio, startFrame, endFrame) =>
+    host.analysis.synthesize(
+      packed,
+      meta,
+      sampleRate,
+      params,
+      false,
+      existingAudio,
+      startFrame,
+      endFrame,
+      0,
+      layout.numBands,
+    );
+  return synthesiseInChunks(pass, spanReader(read), layout, sampleRate);
+}
+
+/** A range reader that refuses rather than answering with a gap. */
+function spanReader(read: (ranges: Uint32Array) => Promise<Float32Array | null>) {
+  return async (ranges: Uint32Array): Promise<Float32Array> => {
+    const values = await read(ranges);
+    if (!values) throw new Error("the store could not serve the painted state");
+    return values;
+  };
+}
+
+/**
+ * The onsets a chunked synthesis owes, read from the store rather than from a
+ * run of the file. Null when the host answers whole passes only. A pass with
+ * no reference to judge a span by covers the file and works one out, which is
+ * what a whole-file pass would have done.
+ */
+async function scanOnsetsFromSpans(
+  read: (ranges: Uint32Array) => Promise<Float32Array | null>,
+  layout: PackedLayout,
+  sampleRate: number,
+  file: OpenFile,
+  params: AnalysisParams,
+): Promise<{ onsets: PackedOnsets; onsetOdfMax: number; onsetBandMax: Float32Array } | null> {
+  const scan = host.analysis.scanFileOnsets;
+  if (!scan) return null;
+  const reference = file.onsetReference;
+  const region =
+    reference && params.onsetStartSec !== undefined && params.onsetEndSec !== undefined
+      ? { startSec: params.onsetStartSec, endSec: params.onsetEndSec, odfReference: reference.odfMax }
+      : undefined;
+  const bandMax = reference?.bandMax ?? new Float32Array(0);
+  const found = await scan(spanReader(read), layout, sampleRate, bandMax, region);
+  return { onsets: found.onsets, onsetOdfMax: found.odfMax, onsetBandMax: found.bandMax };
+}
+
+/** What an analysis leaves behind, however it was run. */
+type AnalysedFile = {
+  spectrogramData: SpectrogramData;
+  onsets: PackedOnsets;
+  onsetReference: { odfMax: number; bandMax: Float32Array };
+};
+
+/**
+ * Analyses a file a block at a time, writing each block into the file's store
+ * as it lands, so the coefficients of the whole file are never held. A file
+ * the canvas can hold whole keeps its run all the same: everything downstream
+ * of a short file still works on one, and a short file's run is cheap.
+ */
+async function analyseIntoBlocks(
+  fileId: string,
+  filePath: string,
+  params: AnalysisParams,
+  openStream: NonNullable<typeof host.analysis.openAnalysisStream>,
+): Promise<AnalysedFile> {
+  const openStart = performance.now();
+  const stream = await openStream(filePath, params);
+  const decodeMs = performance.now() - openStart;
+  const shape = stream.layout;
+  const layout = bandLayoutOf(
+    shape.numBands,
+    shape.bandOffsets,
+    shape.bandLengths,
+    shape.bandStepLog2s,
+    shape.bandFreqsHz,
+  );
+  const size = packedSizeOf(shape.bandLengths);
+  const grid = blockGrid(layout, shape.numFrames, shape.sampleRate);
+  const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
+  const store = await openBlockStore(fileId, layout, {
+    numFrames: shape.numFrames,
+    sampleRate: shape.sampleRate,
+    texelCount: size.texels,
+  });
+
+  const whole = windowed ? null : new Float32Array(size.texels * 4);
+  const strip = windowed ? new CoarseStripBuilder(layout, coarseStripLevel(layout)) : null;
+  const spansStart = performance.now();
+  await store.seedFrom(async (index) => {
+    const { start, end } = frameRangeOfBlock(grid, index);
+    const block = await stream.span(start, end);
+    if (whole) scatterCompactPixelRanges(whole, block, store.blockRanges(index));
+    strip?.add(store.blockRanges(index), block);
+    return block;
+  });
+  const summary = stream.summary();
+  const spansMs = performance.now() - spansStart;
+
+  const packedLayout: PackedLayout = {
+    numFrames: shape.numFrames,
+    numChannels: shape.numChannels,
+    numBands: shape.numBands,
+    bandOffsets: shape.bandOffsets,
+    bandStepLog2s: shape.bandStepLog2s,
+    bandLengths: shape.bandLengths,
+  };
+  const scan = host.analysis.scanFileOnsets;
+  const detected =
+    whole || !scan
+      ? await host.analysis.detectOnsets(whole ?? (await store.readAll()), packedLayout, shape.sampleRate)
+      : await scan((ranges) => store.readRanges(ranges), packedLayout, shape.sampleRate, summary.onsetBandMax);
+  diag.timing("file", "open phases", performance.now() - openStart, {
+    decode: Math.round(decodeMs),
+    spans: Math.round(spansMs),
+    onsets: Math.round(performance.now() - spansStart - spansMs),
+  });
+
+  return {
+    spectrogramData: {
+      packedData: whole ?? undefined,
+      coarseStrip: strip?.strip(),
+      inverseMap: await wholeFileInverseMap(layout, shape.numFrames, shape.sampleRate, packedLayout, size.texels),
+      metadata: layout.metadata,
+      ...size,
+      numFrames: shape.numFrames,
+      numBands: shape.numBands,
+      numChannels: shape.numChannels,
+      sampleRate: shape.sampleRate,
+      minFreq: params.minFreq,
+      bandsPerOctave: params.bandsPerOctave,
+      magnitudeEnergy: summary.magnitudeEnergy,
+      synthesisMetadata: {
+        bandOffsets: shape.bandOffsets,
+        bandStepLog2s: shape.bandStepLog2s,
+        bandLengths: shape.bandLengths,
+      },
+    },
+    onsets: detected.onsets,
+    onsetReference: { odfMax: detected.odfMax, bandMax: detected.bandMax },
+  };
+}
+
+/**
+ * A file's current painted state, by pixel range. The block store serves it
+ * where it holds that state; otherwise one run of the whole file is read and
+ * gathered from, which is what a host with no block state has to do.
+ */
+async function currentStateRanges(file: OpenFile): Promise<(ranges: Uint32Array) => Promise<Float32Array>> {
+  const manager = getHistoryManager(file.id);
+  await manager.awaitPackedReaders();
+  if ((await manager.currentRanges(new Uint32Array())) !== null) {
+    let fallback: Float32Array | null = null;
+    return async (ranges) => {
+      if (fallback) return gatherPixelRanges(fallback, ranges);
+      const values = await manager.currentRanges(ranges);
+      if (values) return values;
+      console.warn("Block store unreadable, falling back to full painted state");
+      fallback = (await readCurrentPackedData(file)) ?? null;
+      if (!fallback) throw new Error("could not read the file's painted state");
+      return gatherPixelRanges(fallback, ranges);
+    };
+  }
+  const whole = await readCurrentPackedData(file);
+  if (!whole) throw new Error("could not read the file's painted state");
+  return async (ranges) => gatherPixelRanges(whole, ranges);
+}
+
+/**
+ * Seeds `toFileId`'s block store a block at a time, so no file's run is ever
+ * held. `blockOf` turns the block's pixel ranges into the values to write —
+ * one file's state, or several files summed. Returns the whole run only when
+ * the canvas can hold it: everything downstream of a short file works on one.
+ */
+async function seedFileBlocks(
+  toFileId: string,
+  spec: SpectrogramData,
+  blockOf: (grid: BlockGrid, index: number, ranges: Uint32Array) => Promise<Float32Array>,
+): Promise<Float32Array | undefined> {
+  const layout = { numBands: spec.numBands, metadata: spec.metadata };
+  const grid = blockGrid(layout, spec.numFrames, spec.sampleRate);
+  const store = await openBlockStore(toFileId, layout, {
+    numFrames: spec.numFrames,
+    sampleRate: spec.sampleRate,
+    texelCount: spec.texels,
+  });
+  const whole = needsCanvasWindow(grid, canvasWindowBlocks(grid)) ? null : new Float32Array(spec.texels * 4);
+  await store.seedFrom(async (index) => {
+    const ranges = store.blockRanges(index);
+    const values = await blockOf(grid, index, ranges);
+    if (whole) scatterCompactPixelRanges(whole, values, ranges);
+    return values;
+  });
+  return whole ?? undefined;
+}
+
+/** Seeds `toFileId`'s store from another file's current painted state. */
+async function copyStateIntoBlocks(
+  from: OpenFile,
+  toFileId: string,
+  spec: SpectrogramData,
+): Promise<Float32Array | undefined> {
+  const read = await currentStateRanges(from);
+  return await serializeFileTask(from.id, () =>
+    seedFileBlocks(toFileId, spec, (_grid, _index, ranges) => read(ranges)),
+  );
+}
+
+/**
+ * Seeds `toFileId`'s store with the files' coefficients summed. The sum is
+ * per texel, so a block of the sum is the sum of that block.
+ */
+async function mergeStatesIntoBlocks(
+  files: OpenFile[],
+  toFileId: string,
+  spec: SpectrogramData,
+): Promise<Float32Array | undefined> {
+  const readers = await Promise.all(files.map((file) => currentStateRanges(file)));
+  const sortedIds = [...new Set(files.map((file) => file.id))].sort();
+  const runSeed = (): Promise<Float32Array | undefined> =>
+    seedFileBlocks(toFileId, spec, async (grid, index, ranges) => {
+      const parts: Float32Array[] = [];
+      for (const read of readers) parts.push(await read(ranges));
+      const { merged } = await host.analysis.mergeSpectrograms(parts, {
+        ...blockBandLayout(grid, index),
+        numChannels: spec.numChannels,
+      });
+      return merged;
+    });
+  return await sortedIds.reduceRight((next, fileId) => () => serializeFileTask(fileId, next), runSeed)();
+}
+
+/**
+ * A fresh analysis as the state the renderer paints on. The analysis returns
+ * coefficients alone, so the inverse map is built here.
+ */
+async function spectrogramFromAnalysis(
+  result: AnalysisResult,
+  opts: { minFreq: number; bandsPerOctave: number },
+): Promise<SpectrogramData & { packedData: Float32Array }> {
+  const rows = new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4);
+  const freqs = new Float64Array(result.numBands);
+  for (let band = 0; band < result.numBands; band++) freqs[band] = rows[band * 4 + 3];
+  // Built from the exact per-band arrays, not from the metadata rows: those
+  // are floats for the texture, and a float cannot count a long file's
+  // coefficients one by one.
+  const layout = bandLayoutOf(result.numBands, result.bandOffsets, result.bandLengths, result.bandStepLog2s, freqs);
+  const size = packedSizeOf(result.bandLengths);
+  const inverseMap = await wholeFileInverseMap(layout, result.numFrames, result.sampleRate, result, size.texels);
+  return {
+    packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+    inverseMap,
+    metadata: layout.metadata,
+    ...size,
+    numFrames: result.numFrames,
+    numBands: result.numBands,
+    numChannels: result.numChannels,
+    sampleRate: result.sampleRate,
+    minFreq: opts.minFreq,
+    bandsPerOctave: opts.bandsPerOctave,
+    magnitudeEnergy: result.magnitudeEnergy,
+    synthesisMetadata: {
+      bandOffsets: result.bandOffsets,
+      bandStepLog2s: result.bandStepLog2s,
+      bandLengths: result.bandLengths,
+    },
+  };
 }
 
 /** Logs a file's spectrogram footprint and the share of the graphics budget all open files now hold. */
@@ -388,9 +751,10 @@ export function logFileFootprint(fileId: string, event: string, extra?: Record<s
     sampleRate: data.sampleRate,
     channels: data.numChannels,
     bandsPerOctave: data.bandsPerOctave,
-    textureWidth: data.textureWidth,
-    textureHeight: data.textureHeight,
-    texels: data.textureWidth * data.textureHeight,
+    texels: data.texels,
+    windowBlocks: canvasWindowBlocks(
+      blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate),
+    ),
     openFiles: Object.keys(openFiles).length,
     budgetPercent: Math.round((usedBudgetFraction(openFileTexelCounts()) ?? 0) * 100),
     ...extra,
@@ -413,13 +777,24 @@ async function loadRealFileViaGaborator(
   const diskPath = isBundledPath(filePath) ? resolveBundledPath(filePath) : filePath;
   const otherTexelCounts = openFileTexelCounts(fileId);
   const analysisStart = performance.now();
-  let result: Awaited<ReturnType<typeof host.analysis.analyze>>;
+  const params: AnalysisParams = {
+    bandsPerOctave,
+    minFreq,
+    maxCoefficients: remainingCoefficientBudget(otherTexelCounts),
+  };
+  const openStream = host.analysis.openAnalysisStream;
+  let analysed: AnalysedFile;
   try {
-    result = await host.analysis.analyze(diskPath, {
-      bandsPerOctave,
-      minFreq,
-      maxCoefficients: remainingCoefficientBudget(otherTexelCounts),
-    });
+    if (openStream) {
+      analysed = await analyseIntoBlocks(fileId, diskPath, params, openStream);
+    } else {
+      const result = await host.analysis.analyze(diskPath, params);
+      analysed = {
+        spectrogramData: await spectrogramFromAnalysis(result, { minFreq, bandsPerOctave }),
+        onsets: result.onsets,
+        onsetReference: { odfMax: result.onsetOdfMax ?? 0, bandMax: result.onsetBandMax ?? new Float32Array() },
+      };
+    }
   } catch (error) {
     diag.error("file", "analysis failed", { name: host.path.basename(filePath), bandsPerOctave, error });
     if (error instanceof Error && error.message.includes("maximum audio duration") && otherTexelCounts.length > 0) {
@@ -428,38 +803,11 @@ async function loadRealFileViaGaborator(
     throw error;
   }
   const analysisMs = performance.now() - analysisStart;
-  const spectrogramData = {
-    packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-    inverseMap: new Float32Array(
-      result.inverseMap.buffer,
-      result.inverseMap.byteOffset,
-      result.inverseMap.byteLength / 4,
-    ),
-    metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-    textureWidth: result.textureWidth,
-    textureHeight: result.textureHeight,
-    numFrames: result.numFrames,
-    numBands: result.numBands,
-    numChannels: result.numChannels,
-    sampleRate: result.sampleRate,
-    packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-    minFreq,
-    bandsPerOctave,
-    magnitudeEnergy: result.magnitudeEnergy,
-    synthesisMetadata: {
-      bandOffsets: result.bandOffsets,
-      bandStepLog2s: result.bandStepLog2s,
-      bandLengths: result.bandLengths,
-    },
-  };
   diag.timing("file", "analysis", analysisMs, { name: host.path.basename(filePath), bandsPerOctave });
   return updateOpenFile(fileId, {
-    spectrogramData,
-    onsets: result.onsets,
-    onsetReference:
-      result.onsetOdfMax !== undefined && result.onsetBandMax
-        ? { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax }
-        : undefined,
+    spectrogramData: analysed.spectrogramData,
+    onsets: analysed.onsets,
+    onsetReference: analysed.onsetReference.bandMax.length > 0 ? analysed.onsetReference : undefined,
   });
 }
 
@@ -643,14 +991,23 @@ export function getFileIdByPath(filePath: string): string | undefined {
 
 // ─── Stem splitting ──────────────────────────────────────────────────────────
 
-// Derive a child spectrogram from the file it was split from: same grid, same
-// metadata, new coefficients. The typed arrays are copied so editing the child
-// never writes through to its source.
-function deriveSpectrogramData(base: SpectrogramData, packedData: Float32Array): SpectrogramData {
+/**
+ * Derive a child spectrogram from the file it came from: same grid, same
+ * metadata, new coefficients. The small typed arrays are copied so editing the
+ * child never writes through to its source; the file-sized inverse map is
+ * shared, because nothing writes it — a re-analysis builds a fresh one.
+ */
+export async function deriveSpectrogramData(
+  base: SpectrogramData,
+  packedData?: Float32Array,
+): Promise<SpectrogramData> {
+  const inverseMap =
+    base.inverseMap ??
+    (await wholeFileInverseMap(base, base.numFrames, base.sampleRate, base.synthesisMetadata, base.texels));
   return {
     ...base,
     packedData,
-    inverseMap: base.inverseMap.slice(),
+    inverseMap,
     metadata: base.metadata.slice(),
     synthesisMetadata: {
       bandLengths: base.synthesisMetadata.bandLengths.slice(),
@@ -684,38 +1041,22 @@ function synthesisLayout(data: SpectrogramData) {
 }
 
 /**
- * The spectrogram an analysis describes. `params` carries the resolution it was
- * actually run at, which a file has to record rather than reading the current
- * global setting back later.
+ * A file's sound as its canvas currently holds it, synthesised from the store
+ * a chunk of coefficients at a time so the run of the whole file is never
+ * held. A host that answers whole passes only takes the run.
  */
-function spectrogramFromAnalysis(
-  result: Awaited<ReturnType<typeof host.analysis.analyseBuffer>>,
-  params: { minFreq: number; bandsPerOctave: number },
-): SpectrogramData {
-  return {
-    packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-    inverseMap: new Float32Array(
-      result.inverseMap.buffer,
-      result.inverseMap.byteOffset,
-      result.inverseMap.byteLength / 4,
-    ),
-    metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-    textureWidth: result.textureWidth,
-    textureHeight: result.textureHeight,
-    numFrames: result.numFrames,
-    numBands: result.numBands,
-    numChannels: result.numChannels,
-    sampleRate: result.sampleRate,
-    packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-    minFreq: params.minFreq,
-    bandsPerOctave: params.bandsPerOctave,
-    magnitudeEnergy: result.magnitudeEnergy,
-    synthesisMetadata: {
-      bandOffsets: result.bandOffsets,
-      bandStepLog2s: result.bandStepLog2s,
-      bandLengths: result.bandLengths,
-    },
-  };
+async function currentFileAudio(file: OpenFile): Promise<Float32Array[] | null> {
+  const spec = file.spectrogramData;
+  if (!spec) return null;
+  const params: AnalysisParams = { bandsPerOctave: spec.bandsPerOctave, minFreq: spec.minFreq };
+  const layout = synthesisLayout(spec);
+  if (host.analysis.openAnalysisStream) {
+    const read = await currentStateRanges(file);
+    return (await synthesiseFromSpans(read, layout, spec.sampleRate, params)).channels;
+  }
+  const whole = await readCurrentPackedData(file);
+  if (!whole) return null;
+  return (await host.analysis.synthesize(whole, layout, spec.sampleRate, params, false)).channels;
 }
 
 /** A file's audio as it currently sounds, synthesising it when it has no buffer. */
@@ -726,17 +1067,8 @@ async function currentFileChannels(fileId: string): Promise<{ channels: Float32A
   const file = openFiles[fileId];
   const spectrogramData = file?.spectrogramData;
   if (!file || !spectrogramData) return null;
-  const packedData = await readCurrentPackedData(file);
-  if (!packedData) return null;
-
-  const result = await host.analysis.synthesize(
-    packedData,
-    synthesisLayout(spectrogramData),
-    spectrogramData.sampleRate,
-    { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq },
-    false,
-  );
-  return { channels: result.channels, sampleRate: spectrogramData.sampleRate };
+  const channels = await currentFileAudio(file);
+  return channels ? { channels, sampleRate: spectrogramData.sampleRate } : null;
 }
 
 /**
@@ -765,7 +1097,7 @@ async function mixFilesDown(fileIds: string[], base: SpectrogramData): Promise<S
   const audioBuffer = Tone.getContext().rawContext.createBuffer(channels.length, channels[0].length, sampleRate);
   for (let ch = 0; ch < channels.length; ch++) audioBuffer.getChannelData(ch).set(channels[ch]);
 
-  return spectrogramFromAnalysis(await host.analysis.analyseBuffer(audioBuffer, analysisParams), analysisParams);
+  return await spectrogramFromAnalysis(await host.analysis.analyseBuffer(audioBuffer, analysisParams), analysisParams);
 }
 
 /**
@@ -810,9 +1142,7 @@ export async function rebuildFileFromCurrentAudio(
     if (!file?.spectrogramData) return;
     const buffer = file.audioBuffer;
     if (!buffer) {
-      const packedData = await readCurrentPackedData(file);
-      if (!packedData) throw new Error("Could not read the current spectrogram state.");
-      await rebuildFileFromAudioNow(set, fileId, packedData, transform, snapshot, onVisible);
+      await rebuildFileFromAudioNow(set, fileId, transform, snapshot, onVisible);
       return;
     }
     const channels: Float32Array[] = [];
@@ -826,7 +1156,6 @@ export async function rebuildFileFromCurrentAudio(
 async function rebuildFileFromAudioNow(
   set: ZustandSet,
   fileId: string,
-  packedData: Float32Array,
   transform: (channels: Float32Array[]) => Float32Array[],
   snapshot: { kind: "resize" | "reanalyze"; label: string },
   onVisible?: () => void,
@@ -834,24 +1163,11 @@ async function rebuildFileFromAudioNow(
   const file = openFiles[fileId];
   if (!file?.spectrogramData) return;
 
-  const { spectrogramData } = file;
-  const analysisParams: AnalysisParams = {
-    bandsPerOctave: spectrogramData.bandsPerOctave,
-    minFreq: spectrogramData.minFreq,
-    maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
-  };
-
-  const synthResult = await host.analysis.synthesize(
-    packedData,
-    synthesisLayout(spectrogramData),
-    spectrogramData.sampleRate,
-    analysisParams,
-    false,
-  );
-
+  const channels = await currentFileAudio(file);
+  if (!channels) throw new Error("Could not read the current spectrogram state.");
   if (!openFiles[fileId]) return;
 
-  await rebuildFileWithChannels(set, fileId, transform(synthResult.channels), snapshot, onVisible);
+  await rebuildFileWithChannels(set, fileId, transform(channels), snapshot, onVisible);
 }
 
 /**
@@ -894,13 +1210,17 @@ async function rebuildFileWithChannels(
   // say the audio is unchanged; anything that cannot splice takes the full
   // analysis road below.
   let result: Awaited<ReturnType<typeof host.analysis.analyseBuffer>> | undefined;
-  if (pieces && precomputedOnsets && host.analysis.spliceAnalyseChannels) {
+  const splices = Boolean(pieces && precomputedOnsets && host.analysis.spliceAnalyseChannels);
+  // The unchanged ranges copy across as they stand now, paint and all, so the
+  // splice reads the painted state rather than the coefficients analysis left.
+  const oldPacked = splices ? await readCurrentPackedData(file) : undefined;
+  if (pieces && oldPacked && host.analysis.spliceAnalyseChannels) {
     try {
       result = await host.analysis.spliceAnalyseChannels(
         channels,
         spectrogramData.sampleRate,
         analysisParams,
-        spectrogramData.packedData,
+        oldPacked,
         synthesisLayout(spectrogramData),
         pieces(spectrogramData.numFrames),
       );
@@ -912,7 +1232,7 @@ async function rebuildFileWithChannels(
 
   if (!openFiles[fileId]) return;
 
-  file.spectrogramData = spectrogramFromAnalysis(result, analysisParams);
+  file.spectrogramData = await spectrogramFromAnalysis(result, analysisParams);
   file.audioBuffer = audioBuffer;
   file.unprojectedPaint = false;
   // The rebuild moves every frame, so the onsets come from the caller when it
@@ -935,6 +1255,9 @@ async function rebuildFileWithChannels(
   file.audioPeak = newPeak > 0 ? newPeak : 1;
 
   file.rendererRef?.current?.reloadTextures();
+
+  const reshaped = file.spectrogramData.packedData;
+  if (!reshaped) throw new Error("the snapshot result carries no packed state");
 
   const newDuration = length / spectrogramData.sampleRate;
   set(
@@ -961,11 +1284,12 @@ async function rebuildFileWithChannels(
   onVisible?.();
 
   const nodeId = await getHistoryManager(fileId).addSnapshot({
-    data: file.spectrogramData.packedData,
+    data: reshaped,
     kind: snapshot.kind,
     label: snapshot.label,
     spectrogram: file.spectrogramData,
   });
+  file.rendererRef?.current?.releaseAnalysisData();
 
   if (file.onsets && file.onsetReference) {
     await getHistoryManager(fileId).setNodeOnsets(
@@ -975,11 +1299,23 @@ async function rebuildFileWithChannels(
   }
 }
 
-// The current painted state of a file, falling back to its analysed
-// coefficients when no renderer is mounted to read an FBO from.
+// The current painted state of a file. Without a mounted renderer to read an
+// FBO from, the block store's current tier serves it, and a transient rebuild
+// from the on-disk history is the last resort.
 export async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
   const fboData = await file.rendererRef?.current?.getFBOData();
-  return fboData ?? file.spectrogramData?.packedData;
+  if (fboData) return fboData;
+  const manager = getHistoryManager(file.id);
+  const blocks = await manager.currentBlockState();
+  if (blocks) return blocks;
+  if (file.spectrogramData?.packedData) return file.spectrogramData.packedData;
+  const currentId = manager.getCurrentId();
+  if (!currentId) return undefined;
+  try {
+    return (await manager.reconstruct(currentId)).packedData;
+  } catch {
+    return undefined;
+  }
 }
 
 type FileAudioSnapshot = { nodeId: string | null; channels: Float32Array[]; sampleRate: number };
@@ -1189,7 +1525,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
       });
 
-      const spectrogramData = spectrogramFromAnalysis(result, analysisParams);
+      const spectrogramData = await spectrogramFromAnalysis(result, analysisParams);
 
       const fileId = generateFileId();
       const filepath = makeManagedFilePath(fileId);
@@ -1320,44 +1656,32 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   duplicateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
-    if (!originalFile?.spectrogramData) return;
-
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
-    if (!fboData) {
-      console.error("Failed to duplicate file: could not get FBO data");
-      return;
-    }
+    const originalSpec = originalFile?.spectrogramData;
+    if (!originalFile || !originalSpec) return;
 
     const newFileId = generateFileId();
     const newFilePath = makeManagedFilePath(newFileId);
     const displayName = `${stripExtensionForLabel(originalFile.displayName)} copy`;
 
-    const newFile: OpenFile = {
+    openFiles[newFileId] = {
       id: newFileId,
       filePath: newFilePath,
       displayName,
       unprojectedPaint: originalFile.unprojectedPaint,
-      spectrogramData: {
-        ...originalFile.spectrogramData,
-        packedData: fboData,
-        inverseMap: originalFile.spectrogramData.inverseMap.slice(),
-        metadata: originalFile.spectrogramData.metadata.slice(),
-        synthesisMetadata: {
-          bandLengths: originalFile.spectrogramData.synthesisMetadata.bandLengths.slice(),
-          bandOffsets: originalFile.spectrogramData.synthesisMetadata.bandOffsets.slice(),
-          bandStepLog2s: originalFile.spectrogramData.synthesisMetadata.bandStepLog2s.slice(),
-        },
-      },
+      onsets: originalFile.onsets?.slice(),
+      onsetReference: originalFile.onsetReference
+        ? {
+            odfMax: originalFile.onsetReference.odfMax,
+            bandMax: originalFile.onsetReference.bandMax.slice(),
+          }
+        : undefined,
     };
-
-    openFiles[newFileId] = newFile;
 
     const sourceBpm = get().filepathsBpm[originalFile.filePath];
 
     set(
       produce((state: State) => {
         state.openFileIds.push(newFileId);
-        state.activeFileId = newFileId;
         state.filesBandsPerOctave[newFileId] = state.filesBandsPerOctave[fileId];
         state.filesZoom[newFileId] = state.filesZoom[fileId];
         state.filesOffset[newFileId] = state.filesOffset[fileId];
@@ -1370,14 +1694,35 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         if (sourceBpm !== undefined) {
           state.filepathsBpm[newFilePath] = sourceBpm;
         }
+        state.filesLoading[newFileId] = "Duplicating...";
       }),
     );
+
+    try {
+      const packedData = await copyStateIntoBlocks(originalFile, newFileId, originalSpec);
+      updateOpenFile(newFileId, {
+        spectrogramData: await deriveSpectrogramData(originalSpec, packedData),
+      });
+    } catch (error) {
+      console.error("Failed to duplicate file: could not read the painted state", error);
+      notifications.show({
+        title: "Duplicate failed",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+      await destroyBlockStore(newFileId);
+      discardFiles(set, [newFileId]);
+      return;
+    }
+
+    clearLoading(set, [newFileId]);
+    await get().setActiveFileId(newFileId);
   },
   hpssFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
     if (!originalFile) return;
 
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    const fboData = await readCurrentPackedData(originalFile);
     if (!fboData) return;
 
     const { spectrogramData } = originalFile;
@@ -1395,8 +1740,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     try {
       const { harmonic, percussive } = await host.analysis.hpss(fboData, bandLayout(spectrogramData));
 
-      updateOpenFile(ids[0], { spectrogramData: deriveSpectrogramData(spectrogramData, harmonic) });
-      updateOpenFile(ids[1], { spectrogramData: deriveSpectrogramData(spectrogramData, percussive) });
+      updateOpenFile(ids[0], { spectrogramData: await deriveSpectrogramData(spectrogramData, harmonic) });
+      updateOpenFile(ids[1], { spectrogramData: await deriveSpectrogramData(spectrogramData, percussive) });
     } catch (error) {
       console.error("HPSS separation failed:", error);
       notifications.show({
@@ -1415,7 +1760,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const originalFile = openFiles[fileId];
     if (!originalFile) return;
 
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    const fboData = await readCurrentPackedData(originalFile);
     if (!fboData) return;
 
     const { spectrogramData } = originalFile;
@@ -1432,7 +1777,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         throw new Error(`Expected ${parts} parts, got ${result.parts.length}`);
       }
       for (let i = 0; i < ids.length; i++) {
-        updateOpenFile(ids[i], { spectrogramData: deriveSpectrogramData(spectrogramData, result.parts[i]) });
+        updateOpenFile(ids[i], { spectrogramData: await deriveSpectrogramData(spectrogramData, result.parts[i]) });
       }
     } catch (error) {
       console.error("NMF separation failed:", error);
@@ -1559,15 +1904,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     try {
       if (sameGrid) {
-        const packed = await Promise.all(files.map((f) => readCurrentPackedData(f)));
-        const parts = packed.filter((p): p is Float32Array => Boolean(p));
-        if (parts.length !== files.length) throw new Error("Could not read the current state of every file");
-
-        const { merged } = await host.analysis.mergeSpectrograms(parts, bandLayout(base));
+        const merged = await mergeStatesIntoBlocks(files, newFileId, base);
 
         updateOpenFile(newFileId, {
           spectrogramData: {
-            ...deriveSpectrogramData(base, merged),
+            ...(await deriveSpectrogramData(base, merged)),
             // The parts each carry a slice of the original's energy, so none of
             // their totals describes the sum. Take the figure the split came
             // from when it's still around; the Convolve effect normalises its
@@ -1585,6 +1926,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         message: `${error instanceof Error ? error.message : "Unknown error"}`,
         color: "red",
       });
+      await destroyBlockStore(newFileId);
       discardFiles(set, [newFileId]);
       return;
     }
@@ -1687,26 +2029,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     let audioContext: AudioContext | null = null;
     try {
       // Step 1: Synthesize the current painted state via Gaborator → get audio channels
-      const fboData = await originalFile.rendererRef?.current?.getFBOData();
-      if (!fboData) throw new Error("Could not read current spectrogram state");
-
-      const synthesisResult = await host.analysis.synthesize(
-        fboData,
-        {
-          numFrames: spectrogramData.numFrames,
-          numChannels: spectrogramData.numChannels,
-          numBands: spectrogramData.numBands,
-          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
-          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
-          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
-        },
-        spectrogramData.sampleRate,
-        { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq },
-        false, // don't limit — preserve relative levels for separation
-      );
+      const channels = await currentFileAudio(originalFile);
+      if (!channels) throw new Error("Could not read current spectrogram state");
 
       // Step 2: AI-separate the synthesized audio into stems
-      const stems = await host.analysis.aiSeparate(synthesisResult.channels, spectrogramData.sampleRate);
+      const stems = await host.analysis.aiSeparate(channels, spectrogramData.sampleRate);
 
       // Step 3: Re-analyse each stem with Gaborator → SpectrogramData → new file entry
       const analysisParams = { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq };
@@ -1727,7 +2054,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
         });
 
-        updateOpenFile(stemIds[i], { spectrogramData: spectrogramFromAnalysis(result, analysisParams) });
+        updateOpenFile(stemIds[i], {
+          // From analysisParams, not the current global setting — a stem has to
+          // record the resolution it was actually analysed at, or it stops
+          // lining up with the file it was split from.
+          spectrogramData: await spectrogramFromAnalysis(result, analysisParams),
+        });
       }
 
       audioContext.close();
@@ -2124,45 +2456,48 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const originalAnalysis = file.spectrogramData;
       const renderer = file.rendererRef.current;
 
-      // Use prefetched FBO data if provided, otherwise fetch it
-      let fboData: Float32Array;
-      if (prefetchedFboData) {
-        console.log("[timing] using prefetched FBO data");
-        fboData = prefetchedFboData;
-      } else {
+      const packedLayout: PackedLayout = {
+        numFrames: originalAnalysis.numFrames,
+        numChannels: originalAnalysis.numChannels,
+        numBands: originalAnalysis.numBands,
+        bandOffsets: originalAnalysis.synthesisMetadata.bandOffsets,
+        bandStepLog2s: originalAnalysis.synthesisMetadata.bandStepLog2s,
+        bandLengths: originalAnalysis.synthesisMetadata.bandLengths,
+      };
+
+      // A file whose canvas holds one window has no run of the whole of it, so
+      // the audio is rebuilt a chunk at a time out of the store. Reading one
+      // array out instead would hold the file's coefficients twice over. Only a
+      // host that runs its analysis in spans reads a view of the packed state;
+      // the rest answer whole passes and take the run.
+      const canvasView = renderer.getCanvasView();
+      const readSpans =
+        !prefetchedFboData &&
+        host.analysis.openAnalysisStream &&
+        canvasView &&
+        !viewCoversFile(canvasView, originalAnalysis.numFrames)
+          ? (ranges: Uint32Array) => getHistoryManager(fileId).currentRanges(ranges)
+          : null;
+
+      let processedDataArray = prefetchedFboData ?? new Float32Array(0);
+      if (!prefetchedFboData && !readSpans) {
         const fboStart = performance.now();
-        fboData = await renderer.getFBOData();
+        const whole = await readCurrentPackedData(file);
+        if (!whole) throw new Error("the synthesis could not read the painted state");
+        processedDataArray = whole;
         diag.timing("timing", "getFBOData for synthesis", performance.now() - fboStart);
       }
-
-      const payload = {
-        processedData: fboData.buffer,
-        analysisMetadata: {
-          numFrames: originalAnalysis.numFrames,
-          numChannels: originalAnalysis.numChannels,
-          numBands: originalAnalysis.numBands,
-          bandOffsets: originalAnalysis.synthesisMetadata.bandOffsets,
-          bandStepLog2s: originalAnalysis.synthesisMetadata.bandStepLog2s,
-          bandLengths: originalAnalysis.synthesisMetadata.bandLengths,
-        },
-      };
 
       const analysisParams: AnalysisParams = {
         bandsPerOctave: originalAnalysis.bandsPerOctave,
         minFreq: originalAnalysis.minFreq,
       };
 
-      const processedDataArray = new Float32Array(
-        payload.processedData,
-        0,
-        payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
-      );
-
       // Check for dirty region to enable partial synthesis optimization
       const dirtyRegion = renderer.getDirtyRegion();
 
       const existingBuffer = file.audioBuffer;
-      const canDoPartialSynthesis = dirtyRegion && existingBuffer;
+      const canDoPartialSynthesis = dirtyRegion && existingBuffer && !readSpans;
       console.log("[timing] canDoPartialSynthesis:", canDoPartialSynthesis);
 
       let startFrame: number | undefined;
@@ -2224,30 +2559,52 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       let synthesisResult;
       const cppSynthStart = performance.now();
       try {
-        // The native call references the packed buffer and existing audio in
-        // place rather than copying them, so the synchronous part before the
-        // promise is returned is near-zero; the FFT runs off-thread. Timing the
-        // gap before the await isolates any remaining main-thread marshaling.
-        const synthPromise = host.analysis.synthesize(
-          processedDataArray,
-          payload.analysisMetadata,
-          originalAnalysis.sampleRate,
-          analysisParams,
-          false,
-          existingAudio,
-          startFrame,
-          endFrame,
-          startBand,
-          endBand,
-        );
-        diag.timing("timing", "synthesize marshaling on main thread", performance.now() - cppSynthStart);
-        synthesisResult = await synthPromise;
+        if (readSpans) {
+          synthesisResult = await synthesiseFromSpans(
+            readSpans,
+            packedLayout,
+            originalAnalysis.sampleRate,
+            analysisParams,
+          );
+          if (analysisParams.detectOnsets) {
+            const found = await scanOnsetsFromSpans(
+              readSpans,
+              packedLayout,
+              originalAnalysis.sampleRate,
+              file,
+              analysisParams,
+            );
+            if (found) synthesisResult = { ...synthesisResult, ...found };
+          }
+        } else {
+          // The native call references the packed buffer and existing audio in
+          // place rather than copying them, so the synchronous part before the
+          // promise is returned is near-zero; the FFT runs off-thread. Timing the
+          // gap before the await isolates any remaining main-thread marshaling.
+          const synthPromise = host.analysis.synthesize(
+            processedDataArray,
+            packedLayout,
+            originalAnalysis.sampleRate,
+            analysisParams,
+            false,
+            existingAudio,
+            startFrame,
+            endFrame,
+            startBand,
+            endBand,
+          );
+          diag.timing("timing", "synthesize marshaling on main thread", performance.now() - cppSynthStart);
+          synthesisResult = await synthPromise;
+        }
       } catch (synthError) {
         console.error("[timing] Synthesis failed:", synthError);
         throw synthError;
       }
       const isPartial = startFrame !== undefined;
-      diag.timing("timing", "C++ synthesis", performance.now() - cppSynthStart, { partial: isPartial });
+      diag.timing("timing", "C++ synthesis", performance.now() - cppSynthStart, {
+        partial: isPartial,
+        chunked: Boolean(readSpans),
+      });
 
       if (!synthesisResult || !synthesisResult.channels) {
         console.error("[timing] Invalid synthesis result:", synthesisResult);
@@ -2359,7 +2716,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (get().isPlaying && get().activeFileId === fileId) get().swapPlayingBuffer(audioBuffer);
     return true;
   },
-  commitStroke: async (fileId, snapshot, data) => {
+  commitStroke: async (fileId, snapshot, source) => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData) return null;
 
@@ -2404,25 +2761,101 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     get().setFileSynthesizing(fileId, true);
     try {
+      const layout: PackedLayout = {
+        numFrames: spec.numFrames,
+        numChannels: spec.numChannels,
+        numBands: spec.numBands,
+        bandOffsets: spec.synthesisMetadata.bandOffsets,
+        bandStepLog2s: spec.synthesisMetadata.bandStepLog2s,
+        bandLengths: spec.synthesisMetadata.bandLengths,
+      };
+      // A windowed call hands the addon only the window's reach instead of the
+      // whole packed state. It needs a window with audio to splice into and a
+      // regional onset reference, and the extension host does not speak it.
+      const windowable =
+        window != null &&
+        !wholeFile &&
+        existingAudio.length > 0 &&
+        !(params.detectOnsets && params.onsetStartSec === undefined) &&
+        !host.env.isExtension;
+      const view = windowable && window ? commitViewOf(layout, window, spec.sampleRate) : null;
+
       const commitStart = performance.now();
-      const result = await host.analysis.commitStroke(
-        data,
-        {
-          numFrames: spec.numFrames,
-          numChannels: spec.numChannels,
-          numBands: spec.numBands,
-          bandOffsets: spec.synthesisMetadata.bandOffsets,
-          bandStepLog2s: spec.synthesisMetadata.bandStepLog2s,
-          bandLengths: spec.synthesisMetadata.bandLengths,
-        },
-        spec.sampleRate,
-        params,
-        existingAudio,
-        window ?? { startFrame: -1, endFrame: -1, startBand: -1, endBand: -1 },
-        stroke,
-      );
+      let data = source.data;
+      // The whole painted state, read from the canvas only when a pass needs
+      // all of it and the caller did not hand it over.
+      const readWhole = async (): Promise<Float32Array> => {
+        if (data) return data;
+        let whole = await file.rendererRef?.current?.getFBOData();
+        if (!whole) {
+          // A canvas holding a window cannot serve the whole state, so the
+          // store's committed pixels take the stroke's footprint over them.
+          whole = await getHistoryManager(fileId).currentBlockState();
+          if (whole && source.footprint) {
+            scatterCompactPixelRanges(whole, source.footprint.values, source.footprint.ranges);
+          }
+        }
+        if (!whole) throw new Error("the commit could not read the canvas");
+        data = whole;
+        return whole;
+      };
+      const commitWhole = async (): Promise<CommitStrokeResult> =>
+        host.analysis.commitStroke(
+          await readWhole(),
+          layout,
+          spec.sampleRate,
+          params,
+          existingAudio,
+          window ?? { startFrame: -1, endFrame: -1, startBand: -1, endBand: -1 },
+          stroke,
+        );
+      let usedView = false;
+      let viewFromStore = false;
+      let viewBuffer: Float32Array | null = null;
+      let result: CommitStrokeResult;
+      if (view && window) {
+        // The view's pre-stroke pixels come from the block store, with the
+        // stroke's own footprint written over them; only when the store
+        // cannot serve them is the view gathered from a whole readback.
+        const preStroke = source.footprint ? await getHistoryManager(fileId).currentRanges(view.ranges) : null;
+        if (preStroke && source.footprint) {
+          viewBuffer = composeViewBuffer(preStroke, view, source.footprint.values, source.footprint.ranges);
+          viewFromStore = viewBuffer != null;
+        }
+        if (!viewBuffer) viewBuffer = gatherPixelRanges(await readWhole(), view.ranges);
+        try {
+          result = await host.analysis.commitStroke(
+            viewBuffer,
+            { ...layout, viewStartFrame: view.startFrame, viewEndFrame: view.endFrame },
+            spec.sampleRate,
+            params,
+            existingAudio,
+            window,
+            stroke,
+          );
+          usedView = true;
+        } catch (error) {
+          if (!(error instanceof Error) || !/view/.test(error.message)) throw error;
+          // The view fell short of a pass's reach; the whole state still
+          // commits correctly, at the cost of reading all of it.
+          console.error("windowed commit fell back to the whole state:", error);
+          result = await commitWhole();
+        }
+      } else {
+        result = await commitWhole();
+      }
+      if (usedView && view && viewBuffer && data) {
+        scatterCommitPatch(data, view, viewBuffer, result.patch.ranges, layout);
+        // The residuals that make the tail invertible are collected by the
+        // history's own turn walk over the block store, not from this copy.
+        if (result.tailApplied === false && hasPhaseTurns(result.tail)) {
+          applyPhaseTurns(data, result.tail, false);
+        }
+      }
       diag.timing("timing", "commitStroke", performance.now() - commitStart, {
         bandRanges: result.patch.ranges.length / 3,
+        windowed: usedView ? 1 : 0,
+        viewFromStore: viewFromStore ? 1 : 0,
       });
 
       if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;
@@ -2449,7 +2882,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         onsetEndSec: params.onsetEndSec,
         levelWindow: window ? result.levels : undefined,
       });
-      return { result, audioBuffer, audioHop };
+      return {
+        result,
+        audioBuffer,
+        audioHop,
+        view: usedView ? view : null,
+        viewBuffer: usedView ? viewBuffer : null,
+        data: data ?? null,
+      };
     } finally {
       get().setFileSynthesizing(fileId, false);
     }
@@ -2460,7 +2900,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
    * before they were stored, or one whose file has gone, is detected once and
    * then stored, so a history heals as it is used.
    */
-  restoreOnsetsForNode: async (fileId: string, nodeId: string, packedData: Float32Array): Promise<void> => {
+  restoreOnsetsForNode: async (fileId: string, nodeId: string, packedData?: Float32Array): Promise<void> => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData) return;
     const historyManager = getHistoryManager(fileId);
@@ -2475,8 +2915,46 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       const spectrogramData = file.spectrogramData;
+      const grid = blockGrid(
+        { numBands: spectrogramData.numBands, metadata: spectrogramData.metadata },
+        spectrogramData.numFrames,
+        spectrogramData.sampleRate,
+      );
+      const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
+      if (windowed && host.analysis.scanFileOnsets) {
+        const scan = host.analysis.scanFileOnsets;
+        const packedLayout: PackedLayout = {
+          numBands: spectrogramData.numBands,
+          numChannels: spectrogramData.numChannels,
+          numFrames: spectrogramData.numFrames,
+          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
+        };
+        const result = await scan(
+          spanReader((ranges) => historyManager.currentRanges(ranges)),
+          packedLayout,
+          spectrogramData.sampleRate,
+          new Float32Array(0),
+        );
+        file.onsets = result.onsets;
+        file.onsetReference = { odfMax: result.odfMax, bandMax: result.bandMax };
+        await historyManager.setNodeOnsets(
+          nodeId,
+          packOnsetState({ onsets: result.onsets, reference: file.onsetReference }),
+        );
+        return;
+      }
+
+      // Without stored onsets the coefficients are walked in full, from
+      // whichever whole copy is cheapest to come by.
+      const packed =
+        packedData ??
+        (await getHistoryManager(fileId).currentBlockState()) ??
+        (await file.rendererRef?.current?.getFBOData());
+      if (!packed) return;
       const result = await host.analysis.detectOnsets(
-        packedData,
+        packed,
         {
           numBands: spectrogramData.numBands,
           numChannels: spectrogramData.numChannels,
@@ -2741,34 +3219,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           : await host.analysis.analyze(file.filePath, reanalysisParams);
         const analysisMs = performance.now() - analysisStart;
 
-        const spectrogramData = {
-          packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-          inverseMap: new Float32Array(
-            result.inverseMap.buffer,
-            result.inverseMap.byteOffset,
-            result.inverseMap.byteLength / 4,
-          ),
-          metadata: new Float32Array(
-            result.metadata.buffer,
-            result.metadata.byteOffset,
-            result.metadata.byteLength / 4,
-          ),
-          textureWidth: result.textureWidth,
-          textureHeight: result.textureHeight,
-          numFrames: result.numFrames,
-          numBands: result.numBands,
-          numChannels: result.numChannels,
-          sampleRate: result.sampleRate,
-          packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-          minFreq,
-          bandsPerOctave,
-          magnitudeEnergy: result.magnitudeEnergy,
-          synthesisMetadata: {
-            bandOffsets: result.bandOffsets,
-            bandStepLog2s: result.bandStepLog2s,
-            bandLengths: result.bandLengths,
-          },
-        };
+        const spectrogramData = await spectrogramFromAnalysis(result, { minFreq, bandsPerOctave });
+        const reshaped = spectrogramData.packedData;
 
         if (!openFiles[fileId]) return;
 
@@ -2779,11 +3231,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         file.rendererRef?.current?.reloadTextures();
 
         await getHistoryManager(fileId).addSnapshot({
-          data: spectrogramData.packedData,
+          data: reshaped,
           kind: "reanalyze",
           label: "Re-analyse",
           spectrogram: spectrogramData,
         });
+        file.rendererRef?.current?.releaseAnalysisData();
 
         set(
           produce((state: State) => {
@@ -3245,7 +3698,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           // machine, reopens at any size and exhausts the GPU pool.
           const otherTexelCounts = openFileTexelCounts(fileId);
           const allowed = remainingCoefficientBudget(otherTexelCounts);
-          const coefficients = spectrogramData.textureWidth * spectrogramData.textureHeight;
+          const coefficients = spectrogramData.texels;
           if (allowed !== undefined && coefficients > allowed) {
             throw new Error(
               otherTexelCounts.length > 0
@@ -3378,6 +3831,20 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Stop playback before minimizing
       if (state.isPlaying && state.activeFileId === fileId) {
         state.stopAudio();
+      }
+    } else {
+      // Restoring a parked file is an admission, like opening it.
+      const file = openFiles[fileId];
+      if (file?.parked && file.spectrogramData) {
+        const allowed = remainingCoefficientBudget(openFileTexelCounts(fileId));
+        if (allowed !== undefined && file.spectrogramData.texels > allowed) {
+          notifications.show({
+            title: "Not enough graphics memory",
+            message: "Close another file to free graphics memory, then restore this one.",
+            color: "red",
+          });
+          return;
+        }
       }
     }
     set(

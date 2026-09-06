@@ -57,6 +57,11 @@ export function subtractPixelRanges(a: Uint32Array, b: Uint32Array): Uint32Array
   return toRanges(out);
 }
 
+/** The pixels both lists cover, as a sorted range list. */
+export function intersectPixelRanges(a: Uint32Array, b: Uint32Array): Uint32Array {
+  return subtractPixelRanges(a, subtractPixelRanges(a, b));
+}
+
 /** Copies the ranges' pixels (4 floats each) from `src` into `dest`. */
 export function scatterPixelRanges(dest: Float32Array, src: Float32Array, ranges: Uint32Array): void {
   const pixels = Math.min(dest.length, src.length) >> 2;
@@ -72,6 +77,15 @@ export function pixelRangeCount(ranges: Uint32Array): number {
   let count = 0;
   for (let i = 1; i < ranges.length; i += 2) count += ranges[i];
   return count;
+}
+
+/** Whether two float arrays hold the same bit patterns, NaNs and signed zeros included. */
+export function float32BitsEqual(a: Float32Array, b: Float32Array): boolean {
+  if (a.length !== b.length) return false;
+  const aBits = new Uint32Array(a.buffer, a.byteOffset, a.length);
+  const bBits = new Uint32Array(b.buffer, b.byteOffset, b.length);
+  for (let i = 0; i < aBits.length; i++) if (aBits[i] !== bBits[i]) return false;
+  return true;
 }
 
 /** Copies the ranges' pixels (4 floats each) out of `src` into one block, in range order. */
@@ -95,6 +109,45 @@ export function scatterCompactPixelRanges(dest: Float32Array, compact: Float32Ar
     const count = ranges[i + 1];
     dest.set(compact.subarray(at, at + count * 4), start * 4);
     at += count * 4;
+  }
+}
+
+/**
+ * Copies the pixels both range lists hold, out of `src` laid out in
+ * `srcRanges` order and into `dest` laid out in `destRanges` order. Both lists
+ * must be sorted and non-overlapping.
+ */
+export function copyCompactOverlap(
+  dest: Float32Array,
+  destRanges: Uint32Array,
+  src: Float32Array,
+  srcRanges: Uint32Array,
+): void {
+  let srcIndex = 0;
+  let srcAt = 0;
+  let destAt = 0;
+  for (let i = 0; i + 1 < destRanges.length; i += 2) {
+    const destStart = destRanges[i];
+    const destEnd = destStart + destRanges[i + 1];
+    while (srcIndex + 1 < srcRanges.length && srcRanges[srcIndex] + srcRanges[srcIndex + 1] <= destStart) {
+      srcAt += srcRanges[srcIndex + 1] * 4;
+      srcIndex += 2;
+    }
+    let cursor = srcIndex;
+    let at = srcAt;
+    while (cursor + 1 < srcRanges.length && srcRanges[cursor] < destEnd) {
+      const srcStart = srcRanges[cursor];
+      const srcEnd = srcStart + srcRanges[cursor + 1];
+      const low = Math.max(destStart, srcStart);
+      const high = Math.min(destEnd, srcEnd);
+      if (high > low) {
+        const from = at + (low - srcStart) * 4;
+        dest.set(src.subarray(from, from + (high - low) * 4), destAt + (low - destStart) * 4);
+      }
+      at += srcRanges[cursor + 1] * 4;
+      cursor += 2;
+    }
+    destAt += destRanges[i + 1] * 4;
   }
 }
 

@@ -2,6 +2,7 @@ import { defaultParameterUniform } from "@renderer/lib/static-modulation";
 import { OpenFile, State } from "@renderer/store/types";
 import { ModulatorParameterUniform, ParameterUniform } from "@renderer/types";
 import type { ModContext } from "@renderer/lib/static-modulation";
+import type { ImpulseFileInfo } from "@renderer/lib/stroke-renderer";
 import * as THREE from "three";
 import { Texture, Vector2 } from "three";
 
@@ -40,6 +41,8 @@ export type CommonUniforms = {
   sourceMinFreq: { value: number };
   sourceBandsPerOctave: { value: number };
   sourceOnsetTex: { value: Texture | null };
+  sourceViewStartFrame: { value: number };
+  sourceFileFrameCount: { value: number };
   destSpectrogramTex: { value: Texture | null };
   destInverseMapTex: { value: Texture | null };
   destMetadataTex: { value: Texture | null };
@@ -50,6 +53,8 @@ export type CommonUniforms = {
   destSampleRate: { value: number };
   destMinFreq: { value: number };
   destBandsPerOctave: { value: number };
+  destViewStartFrame: { value: number };
+  destFileFrameCount: { value: number };
   originalSpectrogramTex: { value: Texture | null };
   brushBottomLeftUv: { value: Vector2 };
   brushSizeUv: { value: Vector2 };
@@ -138,6 +143,8 @@ export function createDefaultUniforms(): CommonUniforms {
     sourceMinFreq: { value: 20.0 },
     sourceOnsetTex: { value: null },
     sourceBandsPerOctave: { value: 24.0 },
+    sourceViewStartFrame: { value: 0 },
+    sourceFileFrameCount: { value: 0 },
     destSpectrogramTex: { value: null },
     destInverseMapTex: { value: null },
     destMetadataTex: { value: null },
@@ -148,6 +155,8 @@ export function createDefaultUniforms(): CommonUniforms {
     destSampleRate: { value: 44100.0 },
     destMinFreq: { value: 20.0 },
     destBandsPerOctave: { value: 24.0 },
+    destViewStartFrame: { value: 0 },
+    destFileFrameCount: { value: 0 },
     originalSpectrogramTex: { value: null },
     brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
     brushSizeUv: { value: new Vector2(0.1, 0.1) },
@@ -225,12 +234,32 @@ export function destinationLayout(commonUniforms: CommonUniforms): {
   };
 }
 
+/**
+ * The source side's own layout, for effects that offset a source UV. The frame
+ * count is the span the source textures hold, which is a window of the source
+ * file when the canvas holds one.
+ */
+export function sourceLayout(commonUniforms: CommonUniforms): {
+  totalDuration: number;
+  bandsPerOctave: number;
+  numBands: number;
+} {
+  const sampleRate = commonUniforms.sourceSampleRate.value;
+  return {
+    totalDuration: sampleRate > 0 ? commonUniforms.sourceFrameCount.value / sampleRate : 0,
+    bandsPerOctave: commonUniforms.sourceBandsPerOctave.value,
+    numBands: commonUniforms.sourceBandCount.value,
+  };
+}
+
 export type UpdateEffectUniformsProps = {
   commonUniforms: CommonUniforms;
   passIndex: number;
   file: OpenFile;
   state?: State;
   modContext: ModContext;
+  /** The impulse response each convolve step reads, keyed by `impulseKey`. */
+  impulses?: ReadonlyMap<string, ImpulseFileInfo>;
 };
 
 export abstract class BaseEffect {

@@ -106,12 +106,28 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
   }
 }
 
+// Pattern and sequencer positions belong to the file, so a canvas holding one
+// span of it still puts them where the whole file would. The modulator preview
+// has no canvas and its UV is the file's already.
+#ifndef MODULATOR_FILE_UV_X
+#define MODULATOR_FILE_UV_X(x) (x)
+#endif
+#ifndef MODULATOR_FILE_UV_DX
+#define MODULATOR_FILE_UV_DX(x) (x)
+#endif
+
+// The brush footprint on the axes the patterns are measured in.
+vec2 brushSizePatternUv() {
+  return vec2(MODULATOR_FILE_UV_DX(brushSizeUv.x), brushSizeUv.y);
+}
+
 // Brush-space UV for phaseMode == 1: the offset from the brush's bottom-left
 // corner, following the brush around the canvas edge when that axis wraps. The
-// offset keeps canvas scale, so a rate or a loop measures the same span in
+// offset keeps the file's scale, so a rate or a loop measures the same span in
 // either phase mode and the brush only moves the origin.
 vec2 brushSpaceUv(vec2 uv) {
-  return getEffectiveBrushOffset(uv);
+  vec2 offset = getEffectiveBrushOffset(uv);
+  return vec2(MODULATOR_FILE_UV_DX(offset.x), offset.y);
 }
 
 // Snaps a modulator's raw 0..1 output to `steps` evenly spaced levels, then
@@ -163,7 +179,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   // Handle sequencer mode
   if (modulator.modulatorMode == 2) { // Sequencer mode
     // Apply phase mode: adjust UV based on canvas or brush space
-    vec2 adjustedUv = uv;
+    vec2 adjustedUv = vec2(MODULATOR_FILE_UV_X(uv.x), uv.y);
     if (modulator.modulatorPhaseMode == 1) { // Brush mode
       adjustedUv = brushSpaceUv(uv);
     }
@@ -197,7 +213,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
 
   // Pattern mode (mode 0) - continue with pattern generation
   // Apply phase mode: adjust UV based on canvas or brush space
-  vec2 adjustedUv = uv;
+  vec2 adjustedUv = vec2(MODULATOR_FILE_UV_X(uv.x), uv.y);
   if (modulator.modulatorPhaseMode == 1) { // Brush mode
     // Convert to brush-relative coordinates (bottom-left is origin)
     adjustedUv = brushSpaceUv(uv);
@@ -214,7 +230,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   mat2 m = mat2(c, -s, s, c);
   // Rotate about the middle of whatever the pattern is pinned to: the canvas,
   // or the brush footprint in brush phase mode.
-  vec2 pivot = modulator.modulatorPhaseMode == 1 ? brushSizeUv * 0.5 : vec2(0.5);
+  vec2 pivot = modulator.modulatorPhaseMode == 1 ? brushSizePatternUv() * 0.5 : vec2(0.5);
   vec2 rotatedUv = m * (adjustedUv - pivot) + pivot;
 
   vec2 pos = rotatedUv * rates;

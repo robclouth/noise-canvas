@@ -8,10 +8,12 @@ import {
   Vector2,
   WebGLRenderer,
 } from "three";
+import { packedFold, padToFold } from "../lib/constants";
 import type { EffectType } from "../effects/types";
 import type { SpectrogramData, State } from "../store/types";
 import { createMockState } from "./mock-state";
 import type { SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
+import { metadataTextureRows } from "../lib/band-layout";
 
 /**
  * Shared rendering harness for tests that need a real WebGL StrokeRenderer
@@ -36,9 +38,16 @@ export function createSpectrogramTextures(spectrogramData: SpectrogramData): {
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
 } {
-  const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+  const { packedData, inverseMap, metadata, texels, numBands } = spectrogramData;
+  const { width: textureWidth, height: textureHeight } = packedFold(texels);
 
-  const packedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+  const packedDataTex = new DataTexture(
+    padToFold(packedData!, texels, 4),
+    textureWidth,
+    textureHeight,
+    RGBAFormat,
+    FloatType,
+  );
   packedDataTex.internalFormat = "RGBA32F";
   packedDataTex.minFilter = NearestFilter;
   packedDataTex.magFilter = NearestFilter;
@@ -49,7 +58,13 @@ export function createSpectrogramTextures(spectrogramData: SpectrogramData): {
   const originalPackedDataTex = packedDataTex.clone();
   originalPackedDataTex.needsUpdate = true;
 
-  const inverseMapTex = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+  const inverseMapTex = new DataTexture(
+    padToFold(inverseMap!, texels, 2),
+    textureWidth,
+    textureHeight,
+    RGFormat,
+    FloatType,
+  );
   inverseMapTex.internalFormat = "RG32F";
   inverseMapTex.minFilter = NearestFilter;
   inverseMapTex.magFilter = NearestFilter;
@@ -57,7 +72,7 @@ export function createSpectrogramTextures(spectrogramData: SpectrogramData): {
   inverseMapTex.wrapT = ClampToEdgeWrapping;
   inverseMapTex.needsUpdate = true;
 
-  const metadataTex = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
+  const metadataTex = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
   metadataTex.internalFormat = "RGBA32F";
   metadataTex.minFilter = NearestFilter;
   metadataTex.magFilter = NearestFilter;

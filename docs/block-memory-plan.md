@@ -228,7 +228,7 @@ Commit: `🐛 (budget): charge the history caches and pin the CPU rate`
   or Activity Monitor). Expect ~200 MB lower at rest, ~330 MB at peak.
 - **STOP-ASK**: present the measurements; Rob decides whether Phases 1–4 run.
 
-Status: not started.
+Status: done, awaiting the go/no-go on Phase 1.
 
 ---
 
@@ -270,7 +270,38 @@ Tests:
 Exit: no read of `fbo1`/`fbo2` remains in the display path; parity and perf
 measurements pass. **STOP-ASK** with the measurements before Phase 2.
 
-Status: not started.
+Status: done. Pyramid and tile ring both built, wired and measured. The
+committed picture no longer reads the canvas at any zoom; the hover preview
+still does, by the design this phase keeps.
+
+Two figures in this section did not survive contact with the code, and the
+built numbers are what shipped:
+
+- The epsilon is 1e-9, not 1e-7. `interpolateComplex` mixes magnitudes under
+  1e-9, and 1e-7 broke parity by 32 grey units next to silence.
+- The pyramid cap is 5M texels (20 MB), not 16M (64 MB). 64 MB is 17% of the
+  Iris 655's whole budget for one open file, and the plan's own fixed-budget
+  list says 20 MB.
+
+The tile ring differs from this section's sketch in one way that matters: its
+tiles are not a fixed grid. A tile's frame span follows the zoom (256 screen
+pixels wide, rounded up to the coarsest band's step), because a fixed grid
+either needs hundreds of slots when zoomed out or covers a fraction of a
+screen when zoomed in. The ring is therefore a screen-sized cache, not an
+early cut of Phase 2's block grid; the two are separate objects.
+
+Measured on a 120 s stereo 48 kHz file, `17e2672` (pyramid only) vs `19d2402`:
+
+|                              | pyramid only         | with the ring        |
+| ---------------------------- | -------------------- | -------------------- |
+| accounted spectrogram memory | 4463 MB              | 4471 MB              |
+| budget readout               | 54 %                 | 55 %                 |
+| pan/zoom cadence             | 18.240 ms (54.8 fps) | 18.015 ms (55.5 fps) |
+| `fileFrame(active)`          | 1.655 ms             | 1.874 ms             |
+
+Memory is +8 MB, the ring's flat charge, and it does not grow with the file.
+Cadence does not regress. The display shader costs +0.22 ms a frame for the
+ring's extra reads.
 
 ---
 
@@ -312,7 +343,182 @@ paint/undo/export byte-identical on a 60 s file; suite + addon tests green.
 **STOP-ASK** with measurements. (A 10-minute file still cannot open; the GPU
 side waits for Phase 3.)
 
-Status: not started.
+Status: done (Phase 5 closed the last whole-run read). Landed:
+
+- Block grid (`block-grid.ts`) and store (`block-store.ts`), with an exact
+  tiling proof, a patch-during-flush version counter, copy-on-encode against
+  torn writes, a serialised flush chain that `dispose` fences, and a dirty
+  tier that flushes itself past the resident budget.
+- The history root now lives as the block store's seed (`block-stores.ts`
+  registry at `<userData>/blocks/<fileId>`): `addRootSnapshot` seeds instead
+  of writing a snapshot file, `reconstruct` reads the root anchor from the
+  store (falling back to the file for older histories), `resetToCurrent`
+  re-seeds, close destroys the blocks, app start sweeps orphans, and the diag
+  log carries `blocksMB`.
+- Deviations, both approved 2026-08-26: the blocks live beside the history
+  directory rather than inside it (`readManifest` wipes the history dir on a
+  manifest-version bump, which would destroy the blocks), and the root
+  snapshot file is replaced by the seed rather than duplicated (the store is
+  read-only until the reader migration, so seed == root).
+- Measured on the 120 s file (this Mac): open-to-loaded 2.7 s → 3.1 s, disk
+  settle 6.7 s → 8.1 s, on-disk 271 MB → 296 MB (23 MB history + 273 MB
+  blocks; per-block zstd compresses ~9% worse than one whole-file pass). The
+  plan as written would have doubled disk to ~544 MB.
+- A close during a disk rebuild now drops the navigation instead of rejecting
+  (`navigateToNow` catches reconstruction errors once the manifest is gone) —
+  a latent race the truthful recursive-rm test stub exposed.
+
+The store now carries the current state as well, on the copy-on-write shape
+(chosen 2026-08-26 under Rob's "whatever is best while keeping it safe"):
+
+- Seeded blocks are never rewritten. Patches flush into a `current/` overlay,
+  so a torn write can only reach the overlay; the seed plus the deltas stay
+  the durable truth, and a block whose size does not fit the store's grid is
+  refused rather than misread.
+- Commits and undo/redo hops patch the overlay in step with `currentPacked`
+  (phase-turn spans included) and flush inside the per-file queue, so disk
+  always holds the current state. The manifest's `overlayNodeId` names the
+  node the overlay holds; it is invalidated on disk before the overlay
+  changes, and a patch whose base the overlay does not hold reseeds it whole.
+- A re-analysis reshapes the store to the new grid with the new state as its
+  seed (`seedNodeId`); the previous seed-holder is first written out as its
+  own snapshot file, so every anchor stays reconstructable and no state is
+  ever stored twice.
+
+The commit now runs windowed (2026-08-26): the addon's `commitStroke` accepts
+a view — a buffer holding only a frame span of the file, block-aligned, with
+every packed access translated through a per-band origin — and validates each
+pass's reach against it before touching anything, so a view that falls short
+rejects with the buffer untouched. Tail turns come back unapplied
+(`tailApplied: false`); the caller shifts them with the addon's own float
+arithmetic and collects the residuals. Byte-for-byte parity with the
+whole-file commit is pinned in the addon suite (audio, patch, tails,
+residuals, onsets, levels), and `commit-view.ts` maps the view's gather and
+scatter on the renderer side, falling back to the whole state if the addon
+refuses the view. Measured live on the 120 s file: the same brush stroke
+committed windowed in 191 ms against 1.4–1.8 s for a whole-file pass, and the
+current tier followed the stroke and the undo hop. Export and save turned out
+to read the audio channels, not the packed state — nothing to migrate there.
+
+The in-place packed truth is gone (2026-08-26). What shipped:
+
+- The tier is the read source, gated on `overlayNodeId === currentId`. A
+  stroke's `addStroke` runs the tier ops before the delta encode: the store
+  patches its own blocks from the painted footprint and walks the tail turns
+  itself (`applyTurnsCollecting`), and the residuals that walk collects are
+  the ones the delta stores — so undo subtracts back exactly over the store
+  with no whole-array walk anywhere. A tier that cannot take the patch drops
+  to a whole snapshot, and turns without a tier walk refuse rather than store
+  an uninvertible delta.
+- The commit is compact end to end: brush.ts reads only the footprint back
+  (`readPixelRanges`), takes the pre-stroke values from the store
+  (`currentRanges`), and `commitStroke` composes the addon's view from the
+  store's pixels with the footprint written over them. The canvas patch and
+  the turn probe read from the store after the stroke is stored (the
+  `PackedGather` is async now); a store that cannot serve marks the FBO out
+  of sync and the next navigation rebuilds whole. Stashed patches slimmed to
+  `{ranges, turns}` — their values live in the tier.
+- Hops walk the deltas windowed over the store (`walkTierValues`) and patch
+  the canvas compactly; the whole-array mirror (`currentPacked`,
+  `currentPackedState`) is deleted, and every fallback reader
+  (`readCurrentPackedData`, onset restore, hop synthesis, `resetToCurrent`)
+  goes FBO → tier → transient reconstruct.
+- `spectrogramData.packedData` is optional and released once the GPU holds
+  the state: `releasePackedData` forces the texture upload (`initTexture`),
+  empties the texture's CPU copy, and drops the field — after the history
+  hookup on mount, after a re-analysis snapshot, and after a cross-anchor
+  restore. The texture seed lives in a ref keyed to the spectrogram object,
+  so the release cannot retrigger the texture effect with nothing to build
+  from.
+
+Measured (150 s stereo file, fresh profile, renderer private memory, GC'd):
+open+settle 1518 MB before → 468 MB after (the app idles at ~154 MB); after
+a stroke, an undo and a redo 1679 MB → 516 MB. Live runs on the built app
+show the compact route end to end (`commitStroke` logs `windowed:1,
+viewFromStore:1`, hops log `mode:"patch"` at 5–45 ms) with no history parity
+warnings.
+
+The inverse map is released the same way (2026-08-26): `inverseMap` is
+optional, `releaseAnalysisData` frees it with the packed array once both
+textures are on the GPU, and `deriveSpectrogramData` (stem splits, merges)
+rebuilds it from the band layout via `buildHistoryInverseMap` when the base
+has released its copy.
+
+Phase 2 exit measurements (renderer private memory, fresh profile, GC'd):
+
+- 150 s stereo: open+settle costs ~316 MB over the ~154 MB idle app
+  (pre-removal: 1364 MB — 4.3× less); after a stroke, an undo and a redo the
+  process sits at ~560 MB against 1679 MB before.
+- 60 s stereo: open+settle costs 121 MB. The open cost therefore still
+  scales at ~2.2 MB per second of audio (it was ~9.1 MB/s), and the release
+  of the packed and inverse arrays is verified to run — so the remaining
+  slope lives elsewhere: the audio buffers (~0.7 MB/s by design until
+  Phase 4), and unattributed length-scaled state (display pyramid strips,
+  addon-held analysis state — the addon runs in-process). Attribution needs
+  a heap snapshot; `Runtime.queryObjects` cannot see the page realm here.
+
+Follow-ups, not in this phase: heap-snapshot attribution of the remaining
+slope; a hop-synthesis view over the store only if the FBO-readback fallback
+measurably slows undo.
+
+### Attribution and stroke-cost investigation (2026-08-26, post-exit)
+
+Heap-snapshot attribution (CDP snapshot, retainer walk) found the remaining
+non-audio slope: `createTextures` listed `spectrogramData.inverseMap` in its
+dependency array, and React's hook record kept the pre-release array alive
+until the component's next render — 91 MiB at 60 s, 227 MiB at 150 s, the
+whole "unattributed" slope. Fixed by dropping the field from the deps (the
+spectrogram object identity already covers every real change). Corrected
+numbers, same procedure: 60 s open+settle 293 MB, 150 s 353 MB → slope
+~0.66 MB/s, which is the audio alone (0.34 MB/s JS channel arrays +
+~0.32 MB/s native audio copy — Phase 4 scope). The display pyramid and the
+addon hold nothing length-scaled at settle.
+
+Stroke timing against the fork point (9f2e9a5, same harness, 6 strokes +
+6 undo + 6 redo, medians, end-to-end):
+
+|                                          | commit 60 s | commit 150 s | undo 150 s | redo 150 s |
+| ---------------------------------------- | ----------- | ------------ | ---------- | ---------- |
+| old (fork)                               | 363 ms      | 776 ms       | 210 ms     | 434 ms     |
+| new, resident budget 0                   | 1054 ms     | 1449 ms      | 534 ms     | 546 ms     |
+| new, resident budget 256 MB (experiment) | —           | ~946 ms      | ~332 ms    | ~294 ms    |
+
+Paint-time fps is unchanged (~60 both systems). The overhead is entirely the
+block layer, and the codec dominates: `openBlockStore` sets
+`maxResidentBytes: 0` (a pre-hot-path choice), so every read decodes zstd
+(~15 ms/block, 43–76 decodes per 150 s stroke) and every dirty set encodes
+on the awaited `store.flush()` inside `tierStrokePatch` and
+`syncStoreToCurrent`. Disk IO itself is minor (~100–200 ms/stroke read+write
+combined). With a 256 MB budget the decodes vanish once warm; the remaining
+gap over the old system is the awaited encode+flush (~170–480 ms per op).
+Candidate remedies, undecided: a RAM-scaled resident budget; deferring the
+flush off the commit path (write-behind — the overlay marker already
+invalidates before mutation, so a crash costs a longer restore, not
+corruption); keeping hot overlay blocks raw and compressing on eviction.
+
+Remedies shipped (2026-08-26, Rob picked the first two): the RAM-scaled
+resident budget (`historyCacheBudgets().blockResident`, 64→256 MiB over
+8→16 GiB of system memory, charged in the GPU-budget overhead) and the
+write-behind flush (`scheduleTierFlush` in history-manager). The write-behind
+keeps the crash contract: the in-RAM tier marker goes valid at patch time so
+the next stroke and the packed readers never wait, while every manifest write
+masks the on-disk marker until the last pending flush lands and writes it
+unmasked — the disk can never name a tier the overlay does not fully hold. A
+failed flush leaves the mask standing. `seed`/`seedCurrent` join the store's
+flush chain, and reshape/reset/dispose/purge drain pending flushes first.
+Same harness, medians, end-to-end:
+
+|                    | commit 60 s | undo 60 s | redo 60 s | commit 150 s | undo 150 s | redo 150 s |
+| ------------------ | ----------- | --------- | --------- | ------------ | ---------- | ---------- |
+| old (fork)         | 363 ms      | 151 ms    | 178 ms    | 776 ms       | 210 ms     | 434 ms     |
+| new, both remedies | 367 ms      | 115 ms    | 117 ms    | 1058 ms      | 395 ms     | 360 ms     |
+
+At 60 s the gap is closed — undo and redo beat the old system. The overhead
+left at 150 s is the O(file-length) turn-tail work through the store (a
+decode per cold block, the float walk, the patch of every block right of the
+stroke), which a longer resident budget cannot remove; end-of-session private
+at 150 s is 1086 MB (the resident cache full) against the old system's
+2644 MB. Raw hot overlay blocks (the third remedy) stay unimplemented.
 
 ---
 
@@ -345,12 +551,630 @@ whole-file-sized cache (pure refactor, parity-tested byte-identical), (2)
 shrink the cache + acquisition/prefetch, (3) late-dab replay, (4) budget and
 gate. **STOP-ASK** after (1) with the parity result.
 
+Step (1) architecture (decided 2026-08-26): the canvas renders over a
+**view** — a block-aligned frame span expressed as its own packed layout
+(`canvas-view.ts`), the GPU twin of the addon's `CommitView`. The stroke
+shaders are already parametrised by a metadata texture and a frame count, so
+a view needs no shader changes: the FBO pair, the scratch set and the
+footprint machinery are built over the view's layout, and the wrapper
+translates coordinates at the edges. The per-block GPU LRU holds committed
+block texels in slots; stroke start composes the acquired blocks into the
+view (a blit per resident block, an upload from the block store per cold
+one) and commit copies the painted blocks back to their slots. This keeps
+every effect pass byte-identical by construction and puts all block logic on
+the CPU side, instead of an atlas indirection inside every GLSL sampling
+helper — and per-view addressing retires the 2^24 ceiling the same way
+per-block would. With the whole file as one view, step (1) degenerates to
+today's behaviour exactly. A view's inverse map comes from the existing
+`buildHistoryInverseMap` over the view's band table. Displays stop reading
+the canvas texture as their full-res fallback in step (2) — the tile ring
+takes that over.
+
 Exit: a 10-minute file opens, paints, undoes and exports on an 8 GB machine at
 ≤ ~1 GB resident; committed strokes byte-identical to the whole-file path on a
 small file; a cold-jump stroke drops no frames (measure with the Playwright
 driver).
 
-Status: not started.
+Status: done; both steps landed, the exit measured in Phase 5. Step (1) —
+
+- `canvas-view.ts`: view layout, file↔view range remapping, view inverse map,
+  view content compose, whole-file view.
+- `block-slot-cache.ts`: paged slot store with LRU claim, upload / compose /
+  copy-back over the existing patch and gather materials.
+- StrokeRenderer renders over a view: every dest-space size, layout, metadata
+  texture and frame count reads from `this.view` (whole-file by default,
+  byte-identical — full suite green). An explicit view builds its own
+  metadata + inverse-map textures.
+- Sub-view stroke parity proven (`stroke-renderer-view.test.ts`): the real
+  transform brush over a 4-block sub-view matches the whole-file path —
+  magnitudes < 1e-5, phases < 1e-3 (interpolated reads across seeded random
+  phase jumps amplify a last-bit UV difference; bit-exactness holds only for
+  the whole-file view), zero paint outside the view. A canvas composed from
+  block slots paints and folds back byte-identically.
+
+Known sub-view gaps, deliberate until step (2): `getDirtyPixelRanges` mixes
+view UV with the file layout (whole-file only); same-file source info,
+`originalSpectrogramTex`, onset textures and beat-anchored modulator phases
+need the wrapper's translation; displays still read the canvas texture.
+
+Step (2). Landed (each parity-tested, whole-file identity
+pinned by the full suite):
+
+- The display pyramid and tile ring cut from a `CommittedSource` — the canvas
+  texture plus the view that lays it out — with every source address
+  translated through the view and clamped to taps the view holds. Cutting a
+  whole ring tile the view does not cover throws.
+- The display shader's canvas taps (fallback and hover preview) address the
+  canvas through `canvasMetadataTex` / `canvasFrameCount` /
+  `canvasStartFrame`; the whole-file case short-circuits bit-exactly.
+- Whole-state readers in files.ts (duplicate, HPSS, NMF, AI stems, whole-file
+  synthesis) go through `readCurrentPackedData`'s FBO → tier → reconstruct
+  chain, so the FBO step can be view-gated in one place at the shrink.
+- The ring works without a covering canvas: `aim` picks the window and lists
+  missing tiles (emptying the bound window when a far pan retargets slots
+  it still shows), `tileSourcePixelRanges` names the file pixels to read, and
+  `cutTileFromPacked` cuts a tile from those values byte-identically to the
+  canvas path.
+
+Chosen shrink architecture (step 2 remainder): the canvas pair becomes a
+fixed K-block sliding window. Every interior K-block view shares one band
+layout, and the only other shape is the tail view, so both layouts and their
+metadata/inverse textures are built once — a slide moves content, never
+allocates. A slide runs between dabs: range-copies shift the canvas pair,
+stroke-start snapshot and masks through a bounce target; blocks entering
+compose from the slot cache or store; painted texels leaving are read back
+and stashed for the commit. Files at or under K blocks keep the whole-file
+view and today's behaviour exactly. Order: (S1) `slideView` in the renderer
+with dab-across-slide parity, (S2) wrapper view placement on hover/drag,
+(S3) commit across slides + file-space translation at the handle, (S4)
+navigation patches invalidate slots and patch the intersecting view, (S5)
+load seeds the pyramid from packed data and the ring drives aim/cut when the
+canvas cannot cover, (S6) source-file views (cross-file and same-file), (S7)
+original/onset textures composed from the seed tier per view, (S8) budget,
+admission and the whole-file-effect gate.
+
+S1 and the handle half of S3 are done:
+
+- `slideView` moves the canvas onto a new same-fold view mid-stroke: overlap
+  carries over by patch triples, entering blocks compose committed values
+  into the canvas and the stroke-start snapshot, masks bounce out, clear and
+  come back at their new place, and the view-relative CPU state (committed
+  bounds, dirty region, mask rows) rebases. A three-dab stroke across a
+  slide matches the whole-file stroke to the sub-view tolerances, with a
+  low-intensity dab pinning the mask move (a flat envelope hides a stale
+  mask — the weight is max(own, mask), so only a weaker later dab can see
+  it). Between strokes the slide disowns the scratch instead.
+- The handle speaks file space whatever the view holds: reads, patches,
+  phase turns and dirty ranges translate through `clipRangesToView` /
+  `viewRangesToFile`, UV regions rebase on the time axis, `getFBOData`
+  returns null when the view does not cover the file (the store chain
+  serves those callers), and a covering view passes everything through
+  untouched — today's whole-file behaviour is pinned by the full suite.
+
+S2, S4 and S5 are done. The window is off unless the build sets
+`VITE_CANVAS_WINDOW_BLOCKS`, so the shipped canvas still holds the whole file
+and the full suite pins that behaviour:
+
+- `canvas-window.ts` places the window — centred on the blocks the brush
+  needs, held still while a margin of blocks remains on each side the file
+  continues past, clamped at the ends — and fills its slots from the store,
+  one read per block. Every window of a file keeps the texture fold of a full
+  window, so the shorter window at the end lays out in the same textures and
+  a slide never allocates.
+- The renderer builds the window, composes the blocks it holds, reads the
+  rest in the background, and moves the canvas when they land: a slide
+  between strokes, or mid-stroke while one is up. A dab's cursor and duration
+  are the window's, not the file's.
+- The display stopped needing a covering canvas. The pyramid is seeded from
+  the analysed state at load and from a whole-state restore
+  (`patchFromCompact` takes a range's own pixels, so the store can feed it),
+  the ring cuts its tiles from the store through `aim` / `cutTileFromPacked`,
+  and a history hop patches the picture from the values it applies while the
+  block slots and the ring tiles it touched are dropped. Phase turns drop
+  slots too: the display never shows phase, but the slots hold it.
+- Measured live on a 60 s file with an 8-block window (~15 s of canvas): the
+  window follows the pointer end to end, the picture shows the whole file, a
+  stroke commits windowed (`windowed:1, viewFromStore:1`, 80–102 ms), and an
+  undo and a redo with the canvas at the far end of the file patch through
+  (`navigateTo FBO upload mode:patch`, 1.4–3.9 ms) with no parity warning.
+
+S6's same-file half, S3's commit half, S7 and the original window are done:
+
+- A dab's source carries the span its textures lay out, so every source-space
+  scale reads the canvas's frame count instead of the file's. Without it a
+  windowed canvas painting from itself read the last texel of every band.
+- Paint on a block that leaves the canvas mid-stroke is kept: the block slots
+  take the painted texels so a window coming back shows them, the display
+  picture takes them so they stay on screen, and the carry holds them for the
+  commit, which merges them into its footprint and its values. A block whose
+  slot loses its paint to the store keeps its pixels in the carry. Measured on
+  a 60 s file with an 8-block window: a 36 s drag commits the same 153 ranges
+  and 1,430,229 pixels the whole-file canvas commits; without the carry the
+  commit keeps 372,189 of them.
+- Reading for a window no longer takes the slot of a block that window needs.
+- Absolute positions are the file's, not the canvas's: onset lookups, the
+  transient phase anchors, the carrier re-anchor in the Sharp warp, the
+  modulator patterns and the sequencer, and the random draws behind
+  Synthesise's noise and the warp's noise-phase replacement. Each is pinned by
+  a sub-view parity test; the whole-file path returns its old value untouched,
+  which the full suite pins.
+- Two random draws changed for everyone: Synthesise's noise and the warp's
+  noise-phase replacement now seed on whole frames rather than on the UV a
+  fragment happens to arrive with. The noise is different, its character is
+  not.
+- The original is a window too. The block store serves its seeded state by
+  range, so a second window over the same blocks composes the original into
+  one texture laid out by the canvas view, and the shaders read it through the
+  destination's metadata. The two windows move together: the canvas slides
+  only once both have their blocks.
+- The file-sized packed and inverse-map textures are gone under a window.
+  Nothing samples them any more, and they were the largest thing a long file
+  put on the graphics device: a 60 s file at rest went from 791 MB to 573 MB.
+- A window request that superseded a pending one used to drop its fill, and
+  the next slide then shifted the empty overlap into place and composed only
+  what entered — half the window stayed black, and a dab there blended out of
+  nothing and committed silence. The window now tracks which blocks the canvas
+  holds, composes whatever it still lacks, and a dab waits for a block the
+  canvas has no content for.
+
+Step (3) is done. A dab the canvas cannot take is held rather than dropped:
+
+- `paintWhenHeld` takes the dab with the frames it lands on, and the fill that
+  brings the block in runs it — at the position it was given, not where the
+  brush has moved on to. Held dabs run in the order they were given, so a dab
+  the canvas could take does not overtake one still waiting. `settle` drains
+  what is left before the commit reads the stroke, bringing the window back to
+  a waiting dab if the brush has run elsewhere, and drops the paint after
+  eight fills so a read that never lands cannot stall a commit.
+- `holdsFrames` used to clip the asked-for span to the view before testing it,
+  so a dab entirely past the view's edge measured as empty and passed. It now
+  refuses any span the view does not contain, unless the span is wider than
+  the window and so can never fit in one.
+- The slot cache now holds two windows, not one. A slide claims the entering
+  window's slots, then folds the leaving window's paint back into its own
+  slots; a jump the width of the window makes those sets disjoint, so
+  `windowBlocks + 4` slots let the copy-back evict a block the slide was about
+  to compose. The app threw "the block has no slot" on every later fill, the
+  stroke committed nothing, and the retries ran resident memory to 1.5 GB.
+  `2 × windowBlocks + 4` costs about 48 MB more at eight blocks on a 60 s
+  file, and stays flat in file length. Pinned by a unit test that jumps a
+  five-block window over a twenty-block grid.
+- `window:check` could not see any of this. Its drag was shorter than the
+  window, so the window never slid. The drag now crosses the file and ends
+  with a dab back at the start, on a block the window has long left: that dab
+  has to wait for a read, and dropping it shortens the commit. Steps are
+  spaced 400 ms because the whole-file build cannot render a dab per frame on
+  a 60 s file, and a collapsed reference run compares nothing. The footprint
+  comparison allows one bin per band: the footprint's time edge rounds up
+  against the band's bin count, which the file rounds up again, so the two
+  runs can land a bin apart at an edge. The four-bin margin covers it.
+
+S6b is done. A brush painting from another file reads it through a window of
+the destination's own:
+
+- The source read had to become a position in the source FILE before a window
+  could be placed by it. `sourceOffsetForViews` puts the brush anchor on the
+  destination file's clock, asks `calculateSourceOffset` for a fraction of the
+  source file, and divides that by the span the source textures hold; the
+  shader scales the source time offset the same way, because that control names
+  a fraction of the source file's whole length. Whole-file spans on both sides
+  return the old value untouched, which the full suite pins. Painting from a
+  short source onto a windowed canvas was already wrong before the window
+  existed on the source side: it read from the source's start rather than the
+  beat-matched position.
+- `source-window.ts` is a window over another file: a `PackedWindow` over its
+  committed state plus the view's own band table, and a second window over its
+  original built the first time a step reads it. `sourceReadFrames` names the
+  frames a dab reads, `sourceReadSpan` widens and wraps them, and the dab waits
+  through `paintWhenHeld` until both the canvas and that window hold what it
+  asked for.
+- A read-only block window now takes one window of slots plus the spare, not
+  two. The two-window budget exists so a slide can fold the leaving window's
+  paint back while the entering window holds its own; nothing copies back into
+  the original or the source window. `window:check` resident went 603 → 545 MB.
+- The window serves the source file's COMMITTED state, so it re-reads when that
+  state moves (`HistoryManager.revision`, read through the source file's
+  history manager, so a parked source still invalidates the window). Reading another file's half-painted stroke, which the live-canvas
+  path allowed, is gone.
+- Not covered by a test: the wiring in `file-renderer.tsx` that decides a
+  source window is needed. `window:check` paints one file only, so a cross-file
+  drag would have to open two files and set the step's source.
+- `sourceInverseMapTex` is declared and uploaded but no shader samples it. The
+  source texture set makes it optional rather than removing it; removing the
+  uniform touches every test that builds a `SourceFileInfo`.
+
+Reverse is fixed and the gate is in. Reverse turned out to be worth fixing
+rather than gating; wrap could not be:
+
+- A reversal turns every band by 2πf·T, and T was read off the canvas. Through a
+  window the painted phase was out by up to 5.3 rad. `destFileAxisSec` and
+  `sourceFileAxisSec` ask the file's frame count instead, at the three sites
+  that apply the turn (Basic, Locked, Soft). A whole-file canvas divides the
+  same numbers as before. Pinned per warp algorithm in the view parity test.
+- The parity harness fed the sub-view renderer the whole file's pristine
+  texture while addressing it through the view's metadata, so every algorithm
+  that reads the original was compared against garbage. It now calls
+  `setOriginalTexture` with a composed window, as the app does.
+- `lib/whole-file-gate.ts` names what a brush asks for that a window cannot
+  serve: wrap in time (`fract` folds onto the far end of the CANVAS), a
+  full-length brush (it spans the canvas), and the effects that read past any
+  span — attract, convolve, evolve, sort, transmute. `dispatchStroke` refuses
+  the dab, the file view shows one message. Dormant while the canvas holds the
+  whole file, which is every file today.
+- Measured and left alone: the Locked warp at an exact -1 mirror differs by up
+  to 2π on 660 of ~4,000 painted texels. The mirror lands on bin edges and
+  Locked differences adjacent stored phases, so `floor` is decided by the last
+  bit of the coordinate. At -1.013 the window is bit-identical to the whole
+  file. It is a knife edge in the algorithm, not in the window.
+
+Effects under a window are done. Three separate faults, each measured on the
+sub-view parity harness before it was fixed:
+
+- **A smear and a repeat gap converted against the file.** Both are offsets
+  added to a source UV, and the shader reads that UV against the span the
+  source textures hold. A 4% blur was out by 0.178 in magnitude and a 2-copy
+  repeat by 0.270, with no read leaving the view at all. `sourceLayout` gives
+  them the source side's own duration, as `destinationLayout` already gave the
+  warp its shift.
+- **A turn traded time for pitch on the canvas's axis.** A rotation mixes the
+  two UV axes, so a shorter canvas turned the sound by a different amount: out
+  by 0.89 in magnitude at 5 degrees, 30 and 90 alike. `destFileUvSpanX` and
+  `destCanvasUvSpanX` take the turn to the file's time axis and back. A canvas
+  over the whole file returns the distance untouched.
+- **A read that leaves the window clamps at its edge.** `effect-reach.ts`
+  declares how far each effect reads past the brush, in seconds of the file:
+  the blur smear and its tap noise (one-sided by Origin), the furthest repeat
+  copy through its shape table, and the warp's arm, turn, mirror and shift. A
+  modulated parameter reaches as far as its own sources can move it, and a
+  scale that can pass through zero reads without bound. Only Bleed and Invert
+  read past the brush at all — Cut, Wrap, Clamp and Reflect fold the read back
+  inside it, so they reach nothing. The aim and the dab's wait widen by the
+  reach, and `overReachNeeds` refuses a brush whose dab plus reach cannot fit a
+  whole window. Pinned by a parity test that fails at 0.95 on a view holding
+  only the dab and passes on the same view widened by the declared reach.
+- Source tracking away from Follow, and a source time offset, put a same-file
+  read anywhere in the file. Both are now named by `wholeFileNeeds`.
+
+S8 is done, and the window is on by default:
+
+- `canvasWindowBlocks(grid)` sizes the window against the GPU pool. A file
+  whose whole analysed state fits a third of the spectrogram budget keeps one
+  canvas over all of it and behaves exactly as it did; a longer one takes the
+  widest window of blocks that budget affords, floored at four blocks and
+  capped at sixteen. `VITE_CANVAS_WINDOW_BLOCKS` still pins the figure, and 0
+  now means "keep the whole file" — `window:check` sets it for its reference
+  run.
+- Admission stops depending on length. `spectrogramBytes` charges a windowed
+  file its window, its block slots and no CPU copies, and
+  `remainingCoefficientBudget` returns undefined — no limit but the analyser's
+  own texture cap — as soon as what is left can hold one more window. The
+  budget's per-texel rates are pinned against what `CanvasWindow` and
+  `PackedWindow` really claim.
+- A commit that needs the whole painted state takes it from the block store
+  with the stroke's own pixels written over it, in `brush.ts` and again in the
+  addon call's `readWhole`. Before this a stroke that rebuilt the whole file —
+  Re-analyse over older unprojected paint — committed nothing at all on a
+  windowed canvas.
+- The image export walks the file in strips, each served by its own window over
+  the committed state (`export-window.ts`), and the shader reads each strip's
+  columns as a UV range on that span. Pinned by rendering the same file both
+  ways: no channel differs by more than 2 of 255. The snapshot needed nothing —
+  it draws the display material, which the pyramid and the ring already serve.
+
+Left before the window can carry a real session:
+
+- The cross-file source window still widens by the dab's own span either side
+  rather than by the declared reach; the reach is in destination seconds and
+  the source window counts source frames through the beat ratio.
+- The fit refusal measures the brush from `resolveBrushFootprint`, which does
+  not know the grid swing that can widen a snapped cell.
+- The warp's noise-phase replacement still draws differently for about 0.8% of
+  texels through a window (517 of 65,216 measured) even with the file-seeded
+  draw. It is a random phase either way, so it is a difference in the noise,
+  not in the signal. The Noisey warp seeds on the source TEXTURE's pixel
+  coordinates, so it draws a different phase through a window for the same
+  reason.
+- Not pinned by a test yet: the rigid transient tail at a file edge, the
+  cross-resolution carrier rebase (it needs two bands-per-octave settings), the
+  warp's noise seed, and the three wirings in the React component that decide
+  what a window has to hold (`sourceNeedFor`, `reachFrames` and
+  `strokeRefusal`) — `window:check` opens one file with a plain brush.
+
+### Phase 3 exit measurements (2026-09-01)
+
+Taken on an Apple M4 Pro, 24 GB, which reports a 16 GB graphics budget — not
+the 8 GB Iris 655 the plan targets. Renderer private memory, fresh profile, one
+mono 44.1 kHz file at 36 bands per octave, through open, a drag, an undo, a
+redo and an image export. The four-block row is pinned with
+`VITE_CANVAS_WINDOW_BLOCKS`; it stands in for the window a small device's
+budget would pick.
+
+| 300 s file, 59.5M texels                   | idle | open | paint | undo | redo | export | budget |
+| ------------------------------------------ | ---- | ---- | ----- | ---- | ---- | ------ | ------ |
+| whole file on the canvas                   | 285  | 595  | 861   | 924  | 923  | 760 MB | 115 %  |
+| window the budget picks (16 blocks, ~32 s) | 286  | 624  | 772   | 680  | 696  | 613 MB | 21 %   |
+| window pinned to 4 blocks (~8 s)           | 286  | 557  | 605   | 567  | 572  | 557 MB | 12 %   |
+
+A 60 s file keeps the whole-file canvas on this machine and peaks at 477 MB
+against a 286 MB idle app.
+
+What the measurements say:
+
+- The canvas has stopped scaling with length. The whole-file canvas accounts
+  for 115 % of the graphics budget at five minutes and would not open on the
+  target device; a four-block window accounts for 12 % and peaks 319 MB over
+  the idle app.
+- What still scales is the audio, at about 0.66 MB a second, which is Phase 4's
+  scope: 60 s costs 148 MB over idle and 300 s costs 319 MB, and the difference
+  is the audio buffers almost exactly.
+- Undo and redo cost less than painting under a window, where on the whole-file
+  canvas they were the peak.
+
+**The ten-minute file does not open, and the graphics budget is not what stops
+it.** The analyser refuses it: "The maximum audio duration is 318 seconds."
+That is `MAX_TEXTURE_SIZE² = 8192 × 8192` packed coefficients at the worst-case
+density of 4.79 per sample — 318 s at 44.1 kHz, 292 s at 48 kHz — checked in
+`gaborator-addon.cpp` before any allocation. `remainingCoefficientBudget` now
+returns undefined for any length, so the cap is the only limit left.
+
+Nothing in the windowed path needs the packed state to be one texture: the
+canvas addresses a view, the display reads the pyramid and the ring, and the
+block store works in linear pixel ranges. The file-sized texture is not even
+built. Lifting the cap is therefore a separate piece of work, and a decision:
+raise `MAX_TEXTURE_SIZE` (the device here reports 16384, which would take the
+cap to about 21 minutes), or stop shaping the analysed state as a texture at
+all. **STOP-ASK.**
+
+---
+
+## Phase 3.5 — the analysed state stops being a texture
+
+Rob answered the Phase 3 exit STOP-ASK on 2026-09-02: drop the texture shape.
+
+### The shape it takes
+
+A file's analysed state is **N coefficients in band order**, four floats each —
+magnitude and unwrapped phase per channel. N is the sum of the band lengths. It
+has no width, no height and no padding. Where a piece of it goes on the
+graphics device, that piece picks its own fold: `width = min(8192, texels)`,
+`height = ceil(texels / width)`. `canvasViewOf`, `display-pyramid`,
+`display-tiles` and `block-slot-cache` already fold that way. The file stops
+being the one thing that carries a fold of its own.
+
+Why four floats interleaved, and not two planes or a narrower mono pixel:
+
+- Every consumer already reads and writes this stride — the window upload, the
+  block patch, the FBO readback, `gatherPixelRanges` and
+  `scatterCompactPixelRanges`. Planes would add a de-interleave to every block
+  upload and a re-interleave to every readback, on the JS thread.
+- Storage is already planar where planes pay: `encodeHistorySnapshot` reorders
+  into planes before zstd, so a mono file's two empty channels cost almost
+  nothing on disk.
+- In RAM only bounded pieces are held now, so a mono file's empty channels cost
+  nothing that grows with length.
+
+What leaves the analysis payload:
+
+- **The inverse map.** It is `(k << stepLog2, band)` for each coefficient — a
+  pure function of the band layout, which the payload already carries three
+  ways. It costs 8 bytes a coefficient to build and send, and the renderer
+  drops it unread as soon as the canvas holds a window.
+  `buildHistoryInverseMap` already rebuilds it on demand.
+- **The padding to a rectangle.**
+- **`textureWidth` and `textureHeight`.** One `texels` count replaces them.
+
+### What the length limit becomes
+
+- The analyser's own cap goes. What is left is the caller's coefficient budget,
+  which measures RAM rather than a texture edge.
+- One texture still cannot exceed the device's edge, so a file with more than
+  `ANALYSIS_MAX_TEXTURE_SIZE²` coefficients can never hold its whole state on
+  one canvas. `canvasWindowBlocks` must return a finite window for such a file
+  whatever the budget says.
+
+### What the analyser holds while it works
+
+Counted for a 600 s mono 44.1 kHz file at 36 bands per octave, N ≈ 119M:
+
+| held at once                        | today        | after this phase |
+| ----------------------------------- | ------------ | ---------------- |
+| the coefficients                    | 1.90 GB      | 1.90 GB          |
+| their copy into JS                  | 1.90 GB      | —                |
+| the inverse map                     | 0.95 GB      | —                |
+| its copy into JS                    | 0.95 GB      | —                |
+| one unwrapped phase per coefficient | 0.48 GB      | —                |
+| the analyser's own coefficient tree | 0.95 GB      | 0.95 GB          |
+| **peak**                            | **≈ 7.1 GB** | **≈ 2.9 GB**     |
+
+### Tasks
+
+- **3.5.1 — `texels` replaces the texture pair.** DONE. `SpectrogramData` and
+  `HistoryDimensions` carry `texels`. A `packedFold(texels)` helper gives the
+  fold where a whole-file texture is really built. `wholeFileCanvasView`
+  collapses into `canvasViewOf`, because there is one fold convention now. A
+  manifest written before this reads its pair and keeps working.
+- **3.5.2 — the analyser returns coefficients, not an image.** DONE. No padding, no
+  inverse map, no `MAX_TEXTURE_SIZE` cap. The renderer builds the inverse map
+  only when it builds a whole-file texture. What limits the length now is the
+  RAM one analysis holds at its peak (`analysisPeakTexels`), which is what
+  `remainingCoefficientBudget` returns for a file a window will serve.
+- **3.5.3 — one unwrapped phase a band.** DONE. `unwrapForward` reads the previous
+  bin only, and the walk is ascending inside a band, so the analyser keeps one
+  phase and one bin index per band instead of one phase per coefficient.
+- **3.5.4 — hand the coefficients over without copying them.** The worker's
+  vector becomes the JS array's storage through an external `ArrayBuffer` with
+  a finaliser, rather than a memcpy into a fresh one.
+- **3.5.5 — a window is compulsory above one texture.** DONE.
+- **3.5.6 — MEASURE at 600 s.** DONE; see below.
+- **3.5.8 — the band layout stops being a texture row.** DONE. The 600 s run threw
+  "the block lies outside the view": `BandLayout.metadata` is the Float32Array
+  the metadata texture is built from, and float32 counts integers exactly only
+  to 2^24. At 119M coefficients the band offsets round to multiples of 8, so
+  the CPU range arithmetic picks the wrong band. The exact figures are already
+  in the payload as `bandOffsets`/`bandLengths`/`bandStepLog2s`; the CPU layout
+  must read those and the texture stay a separate, converted payload.
+- **3.5.7 — analyse in spans and forget.** DONE; see Phase 5.
+  - The worker's constructor works out the band layout — it follows from the
+    sample rate, the resolution and the frame count alone — checks the budget
+    and claims the result array on the JavaScript thread. Execute fills it in
+    place, so the copy at the end is gone (−16 B a texel at the peak).
+  - Execute adds `ANALYSIS_SPAN_SECONDS` of audio at a time, writes out the
+    coefficients no later sample can change (`t1 - analysis_support()`), and
+    calls `forget_before`. The tree holds a span, not the file (−8 B a texel a
+    channel). `spanSeconds` in the analysis params sets the span; a smaller one
+    holds less and costs a little more work at the margins.
+  - The phase unwrap moved out of the walk into a pass of its own over the
+    finished array. A chain that ran during the walk broke at every seam.
+  - Two traps, both pinned by `analysis-spans.test.ts`: gaborator's signal
+    pointer names the sample at `t0`, not the file's first; and an unwrapped
+    phase carries the arbitrariness of every near-silent bin before it, so
+    equivalence is judged on magnitudes and on the phase STEP between bins that
+    carry signal.
+  - The coefficient run itself was the last of the three, and needed the
+    renderer to drive the spans. That is Phase 5.
+
+### Phase 3.5 measurements (2026-09-02)
+
+Same machine as the Phase 3 exit: Apple M4 Pro, 24 GB, a 16 GB graphics budget.
+Mono 44.1 kHz, 36 bands per octave, the window the budget picks (16 blocks).
+Renderer private MB; `peak` is the largest reading while the file opens, polled
+every 400 ms, so it catches the analysis.
+
+| file  | texels | idle | open (peak) | paint | undo | redo | export | budget |
+| ----- | ------ | ---- | ----------- | ----- | ---- | ---- | ------ | ------ |
+| 300 s | 59.5M  | 285  | 628 (1601)  | 800   | 700  | 808  | 617 MB | 21 %   |
+| 600 s | 119.0M | 285  | 590 (2783)  | 980   | 1069 | 1075 | 907 MB | 21 %   |
+
+**The ten-minute file opens, paints, undoes, redoes and exports.** The old
+analyser refused it outright. The graphics budget charges it the same 21 % as
+the five-minute file, because both paint through a 16-block window.
+
+What the measurement says:
+
+- The settled cost still rises with length — 691 MB against 584 MB at open —
+  and the rise is the audio buffer (~0.66 MB a second, Phase 4's scope) plus
+  the history caches painting fills.
+- **The peak is the analysis, not the canvas.** 2783 MB for ten minutes against
+  590 MB settled, after 3.5.7 removed the copy into JavaScript and bounded the
+  analyser's tree — it was 3453 MB before. What is left is the coefficient run
+  itself: 1.9 GB at ten minutes, 16 bytes a coefficient, exactly the gap
+  between the peak and the settled figure. Only a renderer that drives the
+  spans and seeds the block store as they arrive removes it.
+- On the 8 GB Iris target the RAM cap (`analysisPeakTexels`, 20 bytes a
+  coefficient over a quarter of memory) allows about eight minutes, so a
+  ten-minute file is refused there rather than tried.
+- The rows are the run after 3.5.7 and 3.5.8. Before 3.5.8, painting the
+  ten-minute file threw "the block lies outside the view" on the first stroke.
+
+Status: done.
+
+### What the window costs the interaction (2026-09-02)
+
+Memory was the only thing measured until now. This is the CPU side: the same
+gestures a user makes, timed against `dev`.
+
+Method: `cpu-bench.mjs` drives the built app through idle, a 240-move hover, a
+zoom in, a wheel pan, a right-button drag pan, a zoom out, a 60-dab stroke and
+the commit. It reads main-thread task time from CDP `Performance.getMetrics`
+either side of each gesture, and frame cadence from a rAF sampler in the page.
+A run whose frames stop arriving is dropped, not reported — the display going
+to sleep stops rAF and silently flatters the numbers.
+
+The brush matters more than anything else here. A fresh profile starts on a
+brush whose effect chain is empty, and a chain of nothing measures nothing;
+these runs load the factory blur brush through the picker first.
+
+180 s file — the longest `dev` opens on this machine. Main-thread task time in
+milliseconds, median of two runs.
+
+| gesture          | dev  | branch, window off | branch, window on |
+| ---------------- | ---- | ------------------ | ----------------- |
+| idle, 3 s        | 78   | 45                 | 57                |
+| hover, 240 moves | 740  | 630                | **4670**          |
+| zoom in, 10      | 104  | 73                 | 263               |
+| pan wheel, 60    | 308  | 263                | 640               |
+| pan drag, 100    | 709  | 612                | 793               |
+| zoom out, 10     | 70   | 73                 | 176               |
+| paint, 60 dabs   | 274  | 174                | 926               |
+| commit           | 508  | **2012**           | **1796**          |
+| graphics budget  | 68 % | 72 %               | 21 %              |
+
+- **The branch costs nothing by itself.** With the window off it matches `dev`
+  or beats it on every navigation gesture.
+- **The window is the whole cost, and hover is its worst case** — 7× `dev`,
+  with p95 frame time 20.9 ms against 9.1 and ten slow frames in a five-second
+  sweep. `file-renderer.tsx` aims the canvas at the pointer on every move,
+  painting or not, so at whole-file zoom the pointer crosses a two-second block
+  every few pixels and one sweep pages the file through sixteen slots. Zoomed
+  in, where the detail work happens, the cost falls to 1.3–2.4×. Holding the
+  window still while the pointer only hovers is the section below.
+- **The commit is 3.5× `dev`** — it is the same with the window off, so the
+  window is not why. Diagnosed below.
+- `dev` refuses this machine anything past 248 seconds. Above that there is no
+  comparison to draw.
+
+Found while driving the measurement: a long stroke threw "the block has no
+slot" and died. Two claims could take a slot from the window the canvas was about to compose —
+a read the canvas had stopped waiting for, and a block leaving the window
+folding its paint back on the way out. Both pin the newest window now, and both
+are pinned by tests in `canvas-window.test.ts`.
+
+### Holding the window still on hover (2026-09-02)
+
+A window that is not painting now follows only an aim that has come to rest —
+`AimRest` in `canvas-window.ts`, 90 ms. A stroke still pages ahead of the brush
+every frame. A preview the canvas cannot serve shows the committed picture and
+stays asked for, so the brush keeps following the pointer and the preview
+appears when the window arrives, instead of the frame freezing where it was.
+
+The same build measured with the rest at 0 ms and at 90 ms, so nothing else
+differs. Main-thread task time, median of two runs, 180 s file:
+
+| gesture          | 0 ms     | 90 ms   |
+| ---------------- | -------- | ------- |
+| hover, 240 moves | **4277** | **576** |
+| zoom in, 10      | 260      | 231     |
+| pan wheel, 60    | 632      | 623     |
+| pan drag, 100    | 791      | 783     |
+| zoom out, 10     | 182      | 210     |
+| paint, 60 dabs   | 1006     | 1413    |
+| commit           | 2156     | 2290    |
+
+Hover falls below `dev`'s 740 ms. The stroke rises by about 400 ms because the
+window arrives at the brush cold now rather than warmed by the sweep that
+crossed it; that fill lands during the pause before the click, so the two
+gestures together fall from 5283 ms to 1989 ms. Frames while painting are
+slightly worse for it — p95 15.7 ms against 9.2, and two slow frames rather
+than one.
+
+---
+
+### What the commit costs, and why (2026-09-02)
+
+A single stroke over 90 seconds of a 180 s file, the same brush and the same
+gesture on both builds. Wall time from the app's own log, and the footprint
+each commit actually carried:
+
+| step              | `dev`  | branch |
+| ----------------- | ------ | ------ |
+| `commitStroke`    | 934 ms | 2040   |
+| `addStroke` delta | 55 ms  | 849    |
+| footprint, pixels | 1.11M  | 1.15M  |
+
+Both numbers are the block store, and both scale with the span the stroke
+covered rather than with the length of the file:
+
+- `commitStroke` reads the view's pre-stroke pixels with `currentRanges`, which
+  decodes every block the stroke's reach spans — 45 of them here, six megabytes
+  each. `dev` had the whole state in RAM already.
+- The `addStroke` delta is `tierStrokePatch` writing the stroke into the store:
+  the same blocks decoded again where the resident cache has dropped them,
+  patched, then encoded and written back.
+
+`DEFAULT_RESIDENT_BYTES` is 64 MB, about ten blocks at this length, so a stroke
+wider than that re-decodes. Raising it trades the memory this whole plan is
+about, and moving the store write off the commit needs a barrier against every
+reader, so neither is a small change. Left as it is, measured and named.
 
 ---
 
@@ -371,7 +1195,415 @@ the effects registry:
 No memory change; this phase removes the Phase 3 gate so the ~0.9 GB figure
 covers the full effect set.
 
-Status: not started.
+### 4.1 — what each gated effect really reads (2026-09-02)
+
+Measured against the shaders, not read off them. `effect-reach-measured.test.ts`
+paints a dab on a filled brush, puts a one-bin impulse a known distance outside
+it, and paints again; the furthest distance whose impulse changes the dab is
+the reach. A blur, whose reach `effect-reach.ts` already declares, is the
+control that says the measurement can be believed — it finds the smear's taps
+to within one probe step. Every reading below is pinned by a test, and each
+test fails when the shader's reach is changed.
+
+| effect    | reads outside the dab                | scales with                |
+| --------- | ------------------------------------ | -------------------------- |
+| sort      | nothing                              | —                          |
+| transmute | up to Amount, in beats               | Amount, when To is Time    |
+| attract   | up to Smooth Time, in beats          | Smooth Time                |
+| convolve  | the head of the file, with no IR set | IR Size × Rate, past that  |
+| evolve    | over a quarter of the canvas         | the settings and the sound |
+
+What that means for each:
+
+- **Sort is not a global sort.** It is an odd–even transposition, four passes,
+  each swapping a bin with the one beside it and only when that one is inside
+  the brush as well. The measurement finds no read outside the dab at all. The
+  STOP-ASK the plan carried for it does not arise: there is nothing to stream
+  and no range to cap.
+- **Transmute** reads elsewhere only on the To = Time route, and only as far as
+  Amount says, in beats. Doubling Amount doubles the measured reach.
+- **Attract** gathers energy only from bins the brush covers; what leaves the
+  brush is the field it reads to decide where that energy lands, and the
+  kernel holds that to Smooth Time either side. Widening the window the gather
+  covers widens the measured reach, and the test catches it.
+- **Convolve** with no impulse response picked uses the canvas itself as the
+  response, and reads it from the file's first frame: tap k takes IR frame k
+  wherever the dab sits. That is a whole-file read at any setting. With a file
+  picked, the response comes out of that file — which a source window already
+  serves — and what is read of the painted file is the taps alone, IR Size ×
+  Rate × the band's stride.
+- **Evolve** is the one that cannot be served. Its neighbourhood and drift are
+  fractions of the canvas rather than of the file, so the same settings mean a
+  different span through a window; and the advection follows the magnitude
+  gradient, so how far it reads depends on the sound. Measured over a quarter
+  of the canvas either side at full settings.
+
+So three of the five come off the gate with a reach entry rather than a
+streaming rewrite, and convolve comes off it whenever an impulse response is
+picked.
+
+### 4.2 — sort, transmute and attract come off the gate (2026-09-02)
+
+`WHOLE_FILE_EFFECTS` is now `convolve` and `evolve` alone. Sort declares
+nothing, because it reads nothing. Transmute declares its Amount in beats on
+the To = Time route, and attract twice its Smooth Time — twice, because the
+field lattice rounds the kernel up to its next tap. A brush that asks for more
+than a window holds is refused by reach now, with "reaches too far", instead of
+by name with "reads the whole file".
+
+One bug came out of it: transmute converted its beats against the **file's**
+duration, where the step it builds is added to a source UV and must convert
+against the span the source textures hold (`docs/canvas-window.md`, rule 11).
+It was wrong through a window, and wrong across two files of different lengths.
+
+### 4.3 — Evolve moves onto the file's clock (2026-09-02)
+
+Rob's call: a fraction of the canvas was never right. It was a fraction of the
+**file** before the window existed, so the same brush read half a second of a
+ten-second file and fifteen seconds of a five-minute one.
+
+- **Scale ↔ is beats, Scale ↕ is semitones.** Full scale is one beat and four
+  semitones, converted against the span the source textures hold. The controls
+  stay percentages of that full scale, as the blur's Amount does, so no stored
+  brush changes value.
+- **Flow is measured in neighbourhoods.** The gradient still says which way and
+  how hard; the neighbourhood says how far. At full Scale on a ten-second file
+  at 120 bpm the step is exactly what it was, which is where the anchor came
+  from.
+- **The step is capped at eight neighbourhoods.** The gradient grows with the
+  sound, so without a cap a loud passage carries the read anywhere and no reach
+  can be declared. The cap only bites on material louder than the old formula
+  ever handled well.
+
+Evolve declares nine neighbourhoods and comes off the gate. Measured: the read
+stays inside what it declares, and doubling Scale doubles it.
+
+`WHOLE_FILE_EFFECTS` is now **convolve alone**.
+
+### 4.4 — Convolve's response gets a window (2026-09-02)
+
+Rob picked the window over a fit-whole refusal, so a response file of any
+length works.
+
+- `SourceWindowSlot` in `source-window.ts` holds one window pointed at one
+  file. The canvas keeps two: the file a step paints from, and the file a
+  convolve step takes its response from. A dab waits on both.
+- The response's textures reach the shader as `ImpulseFileInfo` on the stroke's
+  parameters, so `convolve-effect.ts` no longer reaches into `openFiles` for
+  another file's canvas — which was the fault: that canvas sits wherever its
+  own brush left it.
+- IR Start is a fraction of the response **file**, so it lands against the file
+  and is then measured against the window (`convolveIrViewStartFrame`,
+  `convolveIrFileFrameCount`). A test paints the same dab through a whole
+  response and through a one-block window of it and requires the same pixels;
+  drop either uniform and it fails.
+- The reach is the response's own length times Rate: the taps walk it one bin
+  each and cannot outrun it.
+
+### 4.5 Convolve with no response file named
+
+The last refusal. With no file named, convolve filters through the file the
+step paints **from** — the file it paints **on** when it names neither — read
+from IR Start of that file. On a whole-file canvas the source textures held
+those frames, so the shader read them straight; on a window they hold the
+window, and the read was wrong. The gate covered it by refusing the dab, which
+made a freshly added Convolve say "Nothing painted" on any long file.
+
+- `lib/impulse-key.ts` holds the one rule for which file a step filters
+  through: the response it names, else the file it paints from, else this file.
+  It is a leaf with a type-only store import — `convolve-effect.ts` imports it,
+  and a value import of the store barrel from an effect is a cycle.
+- `lib/impulse-need.ts` walks the brush and gives each response the frames its
+  taps cover, merged over every step that reads it.
+- The canvas keeps one window **per response file**, not one in total, so two
+  convolve steps filtering through two files each get their own. A response
+  whose own canvas holds all of it is read through that canvas instead, which
+  is also what restores a named response on a short file — that path had been
+  reading the source textures since the window landed.
+- The reach is `Rate × min(taps × the coarsest response bin, the response's
+length)`, on the side Rate's sign points at. The taps walk the response one
+  bin each and cannot outrun it. Both bounds are needed: the taps keep a Self
+  convolve on a ten-minute file from claiming it reads the whole thing, and the
+  side keeps it inside a window. At 36 bands per octave the coarsest bin is
+  16384 frames, so the default 64 taps really do read 23.8 s back — two-sided,
+  that is 48 s and no window serves it; one-sided it fits.
+- Normalisation still applies to a **named** response only, so filtering
+  through the file painted from keeps that file's level.
+
+`WHOLE_FILE_EFFECTS` is gone, and with it the effects loop in `wholeFileNeeds`.
+What the gate still refuses is wrapping in time, a brush the length of the
+file, and source tracking away from Follow.
+
+Status: Phase 4 done — every effect declares a reach, and none reads the whole
+file.
+
+---
+
+## Phase 5 — nothing holds the run of a whole file (2026-09-02)
+
+The Phase 3.5 measurement left one term: 1.9 GB of coefficients at ten minutes,
+16 bytes a texel, held because the analysis returned them in one array. Three
+passes wanted that array — the analysis that produced it, the onset detector
+that read it, and the synthesis that turned it back into audio. Removing it
+meant giving all three a way to work a chunk at a time.
+
+### What was built
+
+- **`AnalysisStream`** (addon). The band layout follows from the sample rate,
+  the resolution and the frame count alone, so it is known before any audio is
+  read. Each `span(startFrame, endFrame)` call returns the coefficients of its
+  own frames, laid out as the block of the packed state covering them — the
+  same per-band ranges `blockPixelRanges` names, so a span **is** a block and
+  `BlockStore.seedFrom` writes it straight out. The analyser carries its
+  coefficient tree, its unwrapped phase and its running totals across the
+  spans. It also carries each band's loudest moment, which the onset pass would
+  otherwise find by reading the whole run.
+- **Onsets a chunk at a time** (`onset-scan.ts`). A pass can now read a view of
+  the packed state and can stop once it has the gate. Two rounds: the silence
+  gate is a share of the loudest moment of the detection function anywhere in
+  the file, so one round finds that moment and the next judges every chunk
+  against it. A regional pass also looks for peaks far enough before its span
+  to find the last one a whole-file pass would have accepted — without that a
+  chunk edge in dense material adds an event, which is how the equivalence test
+  found it.
+- **Synthesis a chunk at a time** (`synthesis-chunks.ts`). `synthesize` takes a
+  view, deriving its per-band ranges through the same helper a windowed commit
+  uses, and refuses one that falls short of the fill it needs. Each pass splices
+  its chunk into the audio the pass before it left, so the seams are crossfades
+  between two syntheses of the same coefficients.
+- **The open path.** A file the canvas can hold whole still keeps its run:
+  everything downstream of a short file works on one. A longer one gets none —
+  the root snapshot takes the store as it stands, and the display draws the file
+  out of the store block by block.
+- A host that answers whole passes only — the extension, which reaches the addon
+  over RPC and drops the view fields — keeps the whole-run path.
+
+### Phase 5 measurements (2026-09-02)
+
+Same machine as before: Apple M4 Pro, 24 GB, a 16 GB graphics budget. Mono
+44.1 kHz, 36 bands per octave, the window the budget picks. Renderer private MB,
+polled every 300 ms; `peak` is the largest reading during the gesture.
+
+| file  | texels | idle | open       | paint      | undo      | redo      |
+| ----- | ------ | ---- | ---------- | ---------- | --------- | --------- |
+| 300 s | 59.5M  | 295  | 543 (874)  | 592 (1135) | 572 (633) | 532 (680) |
+| 600 s | 119.0M | 296  | 692 (1026) | 757 (1725) | 929 (929) | 933 (940) |
+
+- **The ten-minute open peaks at 1.0 GB, against 2.78 GB before.** Nothing in
+  RAM holds the run of a whole file any more.
+- Over the idle figure, the two opens fit **441 MB flat plus 2.3 bytes a
+  coefficient**. The flat part is the chunk each pass reads, the blocks that
+  stay decoded and the canvas window; the per-coefficient part is the audio —
+  the decoded samples the analysis reads and the buffer the file plays from.
+  `analysisPeakTexels` now has that shape, which takes an eight-gigabyte machine
+  from about eight minutes to about twenty-two.
+- The paint peaks are not comparable between the rows: the driver drags across
+  the same **fraction** of the view, so the ten-minute stroke covers twice the
+  frames and the commit does twice the work.
+- Time to first view at ten minutes is 25 s, almost all of it the analysis. The
+  chunked synthesis takes 8.7 s where the whole-file one took 2.4 s plus 5.1 s
+  to read the run out.
+
+### Untested
+
+Every figure here is from the M4 Pro. The plan targets an 8 GB Iris 655, where
+the caches are narrower and the window smaller; the flat 441 MB charged there is
+more than that machine holds.
+
+---
+
+## Phase 6 — deriving one file from another (2026-09-04)
+
+Phase 5 left the passes over a file's own coefficients chunked, and the paths
+that derive a new file from an old one still reading whole runs: a duplicate
+read one, a merge read one per part and built the sum as a third.
+
+### What was built
+
+- **One block-wise seeder.** A new file's store takes its blocks one at a time
+  from a reader of the old files' current state. A duplicate's reader is the one
+  file it copies; a merge's sums the parts. The sum is per texel, so a block of
+  the sum is the sum of that block, and a block's own packed layout is each
+  band's run of it laid back to back — `blockBandLayout`, pinned against a
+  whole-run merge texel for texel in `block-merge.test.ts`.
+- **One reader of a file's sound.** Everything that wanted the audio a canvas
+  currently holds — the mixdown a merge falls back to when the grids differ, a
+  rebuild with no audio buffer to start from, the AI stem split — synthesises
+  from the store a chunk at a time through it.
+- **Onsets with nothing to go on.** A chunk asked for band maxima reports what
+  its own span holds, so a round over the file arrives at the file's. A pass
+  that had no reference used to leave the onsets it found alone.
+- **The picture lands in a static view.** A block patched into the display
+  marks the lane's snapshot stale and schedules its refresh, so a lane with no
+  cursor over it fills in as the blocks are read rather than on the next hover.
+- **A derive reads one state.** The seed loop runs under the source file's task
+  queue, so a stroke committed on the source mid-copy waits for the copy; the
+  copy is one state, not two halves of two.
+- **A reopen keeps no run.** A windowed file whose tier holds its current node
+  reopens without `reconstruct`; the display, the onsets and the audio all read
+  the tier a block or a chunk at a time. A minimized lane parks its renderer,
+  gives the graphics budget back, and rebuilds through the same path when it
+  is restored.
+
+### Measured (M4 Pro, 90 s mono, an eight-block window)
+
+| step      | before  | after   |
+| --------- | ------- | ------- |
+| duplicate | 1331 MB | 1120 MB |
+| merge     | 2230 MB | 1379 MB |
+
+### What still takes the whole run
+
+- HPSS and NMF, which are addon passes over the whole coefficient set. HPSS
+  would chunk with a margin; NMF learns its basis over the file and cannot.
+- The splice re-analysis, which takes the old coefficients as one array.
+
+### The commit, measured
+
+The commit was thought to cost several times what it did before the window,
+from decoding each block twice. It does not. With the same stroke — twenty
+seconds of painting, not the same fraction of the view, which is what made the
+earlier reading — the store read is a tenth of the commit and the native pass
+is the rest:
+
+| build      | file  | commit | native | store read |
+| ---------- | ----- | ------ | ------ | ---------- |
+| whole file | 90 s  | 528 ms | 435 ms | 91 ms      |
+| 8 blocks   | 90 s  | 425 ms | 388 ms | 33 ms      |
+| 8 blocks   | 300 s | 547 ms | 482 ms | 60 ms      |
+
+The windowed commit is faster than the whole-file one, and the view it reads is
+the same size whatever the file's length. What is left of the length-dependence
+— 122 ms between 90 s and 300 s — is the audio: the commit copies the whole
+buffer, splices the window into it, scans every sample for the peak and hands
+the whole thing back, and the caller rebuilds the playback buffer from it.
+
+## Phase 7 — the three costs dev never paid (2026-09-05)
+
+Against dev, the window cost a short file an extra second at open and every
+file some latency: the store encoded and wrote the whole file at open even
+when the canvas held it whole, every fill held a window over the original
+whether or not the brush read it, and each block went from the store to its
+slot through two copies on the main thread.
+
+### What was built
+
+- **A file the canvas holds whole keeps its state in RAM.** `openBlockStore`
+  asks `canvasHoldsWholeFile` — the same answer that sizes the canvas — and
+  gives such a file a `WholeStateStore`: one array, patched in place by every
+  commit, no encode and no overlay write on the stroke path. The seeded blocks
+  are written behind the open, the first patch waits for them, and until then
+  the array answers for the seed too. The manifest on disk never names a tier
+  held in RAM; a relaunch rebuilds the state and seeds the array again.
+  `addRootSnapshot` no longer re-seeds a store the analysis already seeded,
+  which was a second encode and write of every block at open.
+- **The seed overlaps its writes.** A block store's `seedFrom` encodes and
+  writes one block while the source reads the next.
+- **The original window is built on first use.** `WindowedCanvas` holds the
+  original only for a dab whose steps read it (`DabNeeds.original`), the way a
+  source window already did; the aim, the held-dab release and the preview
+  gate all carry the flag.
+- **A block reaches its slot uncopied.** `readBlock` hands the store's own
+  array to the slot cache, which uploads it at once through a texture it keeps
+  and a staging buffer it reuses. The range readers stay for every caller that
+  keeps what it reads.
+
+### Measured (M4 Pro, stereo, built app, drivers in the session scratchpad)
+
+Paint latency is the time from the pointer passing a column, flicking across
+the whole file zoomed out, to that column showing the erase; the sampler's
+gap says how often the compositor could be captured, which is bounded by how
+busy the process was.
+
+| measure                                    | before (ed002b8)   | after            |
+| ------------------------------------------ | ------------------ | ---------------- |
+| 60 s paint latency median / p90 / max      | 112 / 169 / 296 ms | 12 / 54 / 124 ms |
+| 60 s sampler gap                           | 168 ms             | 19 ms            |
+| 280 s + 3 files latency median / p90 / max | 138 / 220 / 257 ms | 22 / 72 / 170 ms |
+| 280 s + 3 files sampler gap                | 170 ms             | 22 ms            |
+| 60 s open, message to view                 | 3.15 s             | 3.0 s            |
+| 280 s open, message to view                | —                  | 26.5 s           |
+
+The open did not move, because the store was never its cost. A phase probe
+put the 60 s open at 0.24 s decode, 1.48 s of spans, 1.0 s of onset
+detection and 0.04 s of inverse map; the 280 s open at 1.1 s decode, 10.4 s
+of spans and 14.5 s of onset scan. Without the seed overlap the 280 s spans
+took 7.8 s plus 5.7 s of encodes and writes, so the overlap saves 2.6 s.
+
+The onset scan was the next lever: it took two rounds over the store, in
+chunk order, and a 280 s file has 151 blocks where the resident budget holds
+about 130, so every block of both rounds was decoded again from disk.
+
+---
+
+## Phase 8 — the onset scan walks against the seed (2026-09-06)
+
+### What was built
+
+- **Each scan round walks the other way.** The block store keeps the blocks
+  it served last, and the seed wrote the file from its start, so a round that
+  also walked from the start missed every block. `scanOnsets` now walks its
+  first round from the file's end and turns round for each round after it;
+  the detected parts are put back in file order at the end. The chunks are
+  unchanged, so the events are the ones a whole-file pass reports, and the
+  onset-scan test pins the walk order.
+- **A preview that waited for its blocks now shows.** A preview the canvas
+  could not take yet showed the committed picture and stayed asked for, but
+  when the fill landed and the preview drew, the display was left on the
+  committed picture until the pointer moved again. The frame that draws the
+  waited preview switches the display back, and a cleared preview drops the
+  wait. Found and pinned with a hover driver on the 280 s file: a flick, a
+  rest, a capture, a nudge, a capture — six of eight rests at full view stalled
+  before, none after.
+
+### Measured (M4 Pro, 280 s stereo, built app, open-drive, same day A/B)
+
+| measure                     | rounds in file order | rounds alternating |
+| --------------------------- | -------------------- | ------------------ |
+| 280 s open, message to view | 14.6 s, 14.9 s       | 10.3 s, 10.1 s     |
+| `analysis` in the diag log  | 14.6 s, 14.8 s       | 10.1 s, 10.3 s     |
+
+The day's baseline is not the 26.5 s of the day before; the code was the same,
+so the machine's state was not. The saving is the scan's second decode of the
+file: what stays is the spans and the two detector rounds.
+
+---
+
+## Phase 9 — the open uses more than one core (2026-09-06)
+
+A phase timing now in the diag log (`open phases`: decode, spans, onsets) put
+the 280 s stereo open at 1.0 s of decode, 8.6 s of spans and 7.7 s of onset
+scan, on a machine under a load of thirty. The scan's two rounds cost 3.5 s
+each, of which reading was 0.7 s: the detector itself was the cost, on one
+core at a time, and so were the spans.
+
+### What was built
+
+- **The passes of a scan round run together.** The detector runs on a worker
+  thread, and the passes of one round are independent, so `scanOnsets` keeps
+  several in flight; the rounds stay in order, and the walk order of the
+  reads is unchanged. How many is set by the machine's memory
+  (`onsetPassesInFlight`: one at 8 GB, two at 16, three from 24), because
+  each pass holds one chunk's coefficients while its detector runs.
+- **Each channel is analysed on a thread of its own.** Both the stream
+  (`AnalysisStream::fillSpan`) and the whole-file worker share the analyzer,
+  which analysis never changes, and each channel owns its coefficient tree,
+  its phase carry and its two floats of every texel; the magnitude energy is
+  summed per channel and added at the end. Gaborator's own thread count is a
+  stub, so this is the only parallelism the analysis has.
+
+### Measured (M4 Pro, 280 s stereo, built app, open-drive, interleaved same day)
+
+| measure                     | before | passes in flight | + channel threads |
+| --------------------------- | ------ | ---------------- | ----------------- |
+| 280 s open, message to view | 10.6 s | 8.1 s            | 5.7 s, 6.0 s      |
+| `spans` phase               | 5.3 s  | 5.3 s            | 3.0 s             |
+| `onsets` phase              | ~5.5 s | 2.3 s            | 2.2 s, 2.5 s      |
+| 60 s stereo open            | —      | —                | 1.4 s             |
+
+The machine carried a load of twenty throughout (a DAW and an indexer), so
+the absolute numbers are that day's; the ratios are the point. What stays is
+the analysis itself, which is one core per channel.
 
 ---
 

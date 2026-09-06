@@ -116,6 +116,7 @@ vi.mock("../host", () => ({
       extname: (p: string) => `.${p.split(".").pop()}`,
       join: (...parts: string[]) => parts.join("/"),
     },
+    os: { totalmem: () => 8 * 1024 ** 3 },
     analysis: {
       getGpuMemoryInfo: () => ({ bytes: 8 * 1024 ** 3, unified: true }),
       synthesize: () => new Promise((resolve) => gate.synthesize.push(resolve)),
@@ -132,6 +133,8 @@ vi.mock("../host", () => ({
         gate.order.push("analyse");
         return gate.analysisResult();
       },
+      buildHistoryInverseMap: async (_o: Uint32Array, _l: Uint32Array, _s: Int32Array, pixelCount: number) =>
+        new Float32Array(pixelCount * 2),
     },
   },
 }));
@@ -183,6 +186,7 @@ function openTestFile(filePath = "/audio/a.wav") {
       sampleRate: 48000,
       bandsPerOctave: 12,
       minFreq: 20,
+      metadata: new Float32Array(numBands * 4),
       synthesisMetadata: {
         bandOffsets: new Uint32Array(numBands),
         bandStepLog2s: new Int32Array(numBands),
@@ -192,9 +196,11 @@ function openTestFile(filePath = "/audio/a.wav") {
     rendererRef: {
       current: {
         getFBOData: async () => new Float32Array(64),
+        getCanvasView: () => null,
         getDirtyRegion: () => null,
         clearDirtyRegion: vi.fn(),
         reloadTextures: vi.fn(),
+        releaseAnalysisData: vi.fn(),
       },
     },
   } as unknown as (typeof openFiles)[string];

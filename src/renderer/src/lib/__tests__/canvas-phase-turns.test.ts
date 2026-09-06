@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PhaseTurns } from "../../../../main/lib/types";
 import { applyPhaseTurns } from "../../../../main/lib/history-delta";
+import { gatherPixelRanges } from "../pixel-ranges";
 import {
   applyCanvasTurns,
   flattenPhaseTurns,
@@ -57,13 +58,19 @@ function makeCanvas(start: Float32Array, slip = 0): PhaseTurnCanvas & { canvas: 
       }
       return out;
     }),
-    patchFBOData: (data, ranges) => {
+    patchFBODataCompact: (values, ranges) => {
       patches.push(ranges);
+      let at = 0;
       for (let i = 0; i + 1 < ranges.length; i += 2) {
-        canvas.set(data.subarray(ranges[i] * 4, (ranges[i] + ranges[i + 1]) * 4), ranges[i] * 4);
+        canvas.set(values.subarray(at, at + ranges[i + 1] * 4), ranges[i] * 4);
+        at += ranges[i + 1] * 4;
       }
     },
   };
+}
+
+function gatherOf(packed: Float32Array): (ranges: Uint32Array) => Float32Array {
+  return (ranges) => gatherPixelRanges(packed, ranges);
 }
 
 describe("canvas phase turns", () => {
@@ -92,14 +99,14 @@ describe("canvas phase turns", () => {
     const c0 = Math.fround(2 * Math.PI);
     const first = makeTurns(8, pixels - 8, c0, 0);
     applyPhaseTurns(packed, first, false);
-    await applyCanvasTurns(canvas, packed, [{ turns: first, invert: false }], new Uint32Array([4, 4]));
+    await applyCanvasTurns(canvas, gatherOf(packed), [{ turns: first, invert: false }], new Uint32Array([4, 4]));
     expect(canvas.readPixelRanges).toHaveBeenCalledTimes(1);
     expect(Array.from(canvas.canvas)).toEqual(Array.from(packed));
     expect(canvas.patches).toHaveLength(0);
 
     const second = makeTurns(16, pixels - 16, 0, -c0);
     applyPhaseTurns(packed, second, false);
-    await applyCanvasTurns(canvas, packed, [{ turns: second, invert: false }]);
+    await applyCanvasTurns(canvas, gatherOf(packed), [{ turns: second, invert: false }]);
     expect(canvas.readPixelRanges).toHaveBeenCalledTimes(1);
     expect(Array.from(canvas.canvas)).toEqual(Array.from(packed));
     expect(canvas.patches).toHaveLength(0);
@@ -112,14 +119,14 @@ describe("canvas phase turns", () => {
     const c0 = Math.fround(2 * Math.PI);
     const first = makeTurns(8, pixels - 8, c0, 0);
     applyPhaseTurns(packed, first, false);
-    await applyCanvasTurns(canvas, packed, [{ turns: first, invert: false }]);
+    await applyCanvasTurns(canvas, gatherOf(packed), [{ turns: first, invert: false }]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(canvas.patches.map((r) => Array.from(r))).toEqual([[8, pixels - 8]]);
     expect(Array.from(canvas.canvas)).toEqual(Array.from(packed));
 
     const second = makeTurns(16, pixels - 16, 0, -c0);
     applyPhaseTurns(packed, second, false);
-    await applyCanvasTurns(canvas, packed, [{ turns: second, invert: false }]);
+    await applyCanvasTurns(canvas, gatherOf(packed), [{ turns: second, invert: false }]);
     expect(canvas.readPixelRanges).toHaveBeenCalledTimes(1);
     expect(canvas.patches.map((r) => Array.from(r))).toEqual([
       [8, pixels - 8],

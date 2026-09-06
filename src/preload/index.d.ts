@@ -1,5 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { IpcRenderer } from "electron";
+import type { AnalysisStream } from "../main/lib/audio-analysis";
+import type { OnsetDetection } from "../main/lib/onset-scan";
 import {
   AnalysisParams,
   CommitStroke,
@@ -28,10 +30,8 @@ declare global {
         params: AnalysisParams,
       ) => Promise<{
         data: Float32Array;
-        inverseMap: Float32Array;
         metadata: Float32Array;
-        textureWidth: number;
-        textureHeight: number;
+        texels: number;
         numFrames: number;
         numChannels: number;
         numBands: number;
@@ -54,10 +54,8 @@ declare global {
         params: AnalysisParams,
       ) => Promise<{
         data: Float32Array;
-        inverseMap: Float32Array;
         metadata: Float32Array;
-        textureWidth: number;
-        textureHeight: number;
+        texels: number;
         numFrames: number;
         numChannels: number;
         numBands: number;
@@ -75,6 +73,23 @@ declare global {
         codec: string;
         channels: number;
       }>;
+      /**
+       * A file's analysis, driven a span of frames at a time so the run of the
+       * whole file is never held. Absent in a host that can only answer a whole
+       * analysis, where the caller falls back to `analyze`.
+       */
+      openAnalysisStream?: (filePath: string, params: AnalysisParams) => Promise<AnalysisStream>;
+      /**
+       * Onsets found a chunk at a time, reading each chunk through `read`.
+       * With a region, only that span is read and reported on.
+       */
+      scanFileOnsets?: (
+        read: (ranges: Uint32Array) => Promise<Float32Array>,
+        analysisMetadata: PackedLayout,
+        sampleRate: number,
+        bandMax: Float32Array,
+        region?: { startSec: number; endSec: number; odfReference: number },
+      ) => Promise<OnsetDetection>;
       /** The splice grid in samples; edits quantise their lengths to it. */
       spliceQuantSamples: (sampleRate: number) => number;
       /**
@@ -92,10 +107,8 @@ declare global {
         pieces: SplicePiece[],
       ) => Promise<{
         data: Float32Array;
-        inverseMap: Float32Array;
         metadata: Float32Array;
-        textureWidth: number;
-        textureHeight: number;
+        texels: number;
         numFrames: number;
         numChannels: number;
         numBands: number;
@@ -210,18 +223,20 @@ declare global {
       // Undo-history codec. Each of these walks a packed state, so they run in
       // the addon off the renderer thread.
       encodeHistorySnapshot: (packed: Float32Array) => Promise<Uint8Array>;
-      decodeHistorySnapshot: (bytes: Uint8Array) => Promise<Float32Array>;
+      decodeHistorySnapshot: (bytes: Uint8Array, decodedBytes?: number) => Promise<Float32Array>;
       historyFootprintChanged: (
         base: Float32Array,
         after: Float32Array,
         ranges: Uint32Array,
         baseCompact?: boolean,
+        afterCompact?: boolean,
       ) => Promise<boolean>;
       encodeHistoryDelta: (
         base: Float32Array,
         after: Float32Array,
         ranges: Uint32Array,
         baseCompact?: boolean,
+        afterCompact?: boolean,
         turns?: PhaseTurns,
       ) => Promise<Uint8Array>;
       readHistoryDeltaTurns: (bytes: Uint8Array) => Promise<PhaseTurns | null>;
@@ -231,6 +246,13 @@ declare global {
         out: Float32Array,
         deltas: Uint8Array[],
         inverts: boolean[],
+      ) => Promise<Float32Array>;
+      applyHistoryDeltasWindowed: (
+        values: Float32Array,
+        table: Uint32Array,
+        deltas: Uint8Array[],
+        inverts: boolean[],
+        totalPixels: number,
       ) => Promise<Float32Array>;
       buildHistoryInverseMap: (
         bandOffsets: Uint32Array,

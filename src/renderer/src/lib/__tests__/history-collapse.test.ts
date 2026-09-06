@@ -3,8 +3,7 @@ import type { HistoryNode } from "@renderer/lib/history-manager";
 import { describe, expect, it } from "vitest";
 
 const DIMENSIONS = {
-  textureWidth: 4,
-  textureHeight: 4,
+  texels: 4 * 4,
   numFrames: 4,
   numBands: 4,
   numChannels: 1,

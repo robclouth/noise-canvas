@@ -1,3 +1,4 @@
+import type { CoarseStrip } from "../lib/coarse-strip";
 import type { FileRendererHandle } from "@renderer/components/file-renderer";
 import type { BrushStep } from "@renderer/parameters";
 import type { OutputLevels } from "@renderer/lib/output-levels";
@@ -51,11 +52,22 @@ export type FileSettings = {
 };
 
 export type SpectrogramData = {
-  packedData: Float32Array;
-  inverseMap: Float32Array;
-  metadata: Float32Array;
-  textureWidth: number;
-  textureHeight: number;
+  // The analysed packed state. Present only between analysis and the first
+  // texture upload: the renderer releases it once the GPU holds the state,
+  // and from then on the FBO and the block store carry it.
+  packedData?: Float32Array;
+  // The whole file at one coarser display level, kept by the analysis of a
+  // file the canvas cannot hold. Shows while the display is drawn from the
+  // store, and is released with `packedData`.
+  coarseStrip?: CoarseStrip;
+  // The synthesis inverse map. Released with `packedData` once the GPU holds
+  // it; rebuilt in milliseconds from the band layout when a derived file or a
+  // reopen needs it again.
+  inverseMap?: Float32Array;
+  /** The band layout, four per band; `metadataTextureRows` makes the texture the shaders read. */
+  metadata: Float64Array;
+  /** Packed coefficients the file holds: the sum of the band lengths, with no padding. */
+  texels: number;
   numFrames: number;
   numBands: number;
   numChannels: number;
@@ -107,6 +119,8 @@ export type OpenFile = {
   // painted rather than as the audio analyses. The next projecting stroke
   // rebuilds the whole file to clear it, so the picture holds together.
   unprojectedPaint?: boolean;
+  // The lane is minimized and the renderer's GPU state is released.
+  parked?: boolean;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

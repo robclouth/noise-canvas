@@ -1,4 +1,5 @@
 import { BufferAttribute, DynamicDrawUsage, InstancedBufferAttribute, InstancedBufferGeometry } from "three";
+import type { BandLayout } from "./band-layout";
 
 const QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
 const QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
@@ -74,7 +75,7 @@ export type BinRanges = Float32Array;
  * range count; `ranges` needs room for three ranges per band.
  */
 export function brushFootprintRanges(
-  layout: { metadata: Float32Array; numBands: number; textureWidth: number; textureHeight: number },
+  layout: BandLayout & { textureWidth: number; textureHeight: number },
   lowBand: number,
   highBand: number,
   window: FrameWindow,

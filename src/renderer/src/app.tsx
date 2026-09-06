@@ -32,6 +32,7 @@ import { anchorProps } from "./lib/ui-anchors";
 import { BRUSH_PANEL_WIDTH } from "./lib/ui-density";
 import { precompileDisplayShader, precompileRemainingShaders, warmEffectPipelines } from "./lib/precompile-shaders";
 import { setShaderWarmupProgress } from "./lib/shader-warmup-progress";
+import { sweepOrphanBlocks } from "./lib/block-stores";
 import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
 import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
@@ -199,6 +200,7 @@ function App(): React.JSX.Element {
     // close paths that didn't call destroyHistoryManager. Runs after persisted
     // state is loaded so we know which fileIds are still alive.
     void pruneOrphanHistoryDirs(new Set(Object.keys(useStore.getState().persistedFilePaths)));
+    void sweepOrphanBlocks(new Set(Object.keys(useStore.getState().persistedFilePaths)));
   }, []);
 
   // Route playback to the chosen output, and again whenever one is plugged in
