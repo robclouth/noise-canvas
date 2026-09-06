@@ -1565,7 +1565,45 @@ about 130, so every block of both rounds was decoded again from disk.
 
 The day's baseline is not the 26.5 s of the day before; the code was the same,
 so the machine's state was not. The saving is the scan's second decode of the
-file: what stays is the spans and one round of the detector.
+file: what stays is the spans and the two detector rounds.
+
+---
+
+## Phase 9 — the open uses more than one core (2026-09-06)
+
+A phase timing now in the diag log (`open phases`: decode, spans, onsets) put
+the 280 s stereo open at 1.0 s of decode, 8.6 s of spans and 7.7 s of onset
+scan, on a machine under a load of thirty. The scan's two rounds cost 3.5 s
+each, of which reading was 0.7 s: the detector itself was the cost, on one
+core at a time, and so were the spans.
+
+### What was built
+
+- **The passes of a scan round run together.** The detector runs on a worker
+  thread, and the passes of one round are independent, so `scanOnsets` keeps
+  several in flight; the rounds stay in order, and the walk order of the
+  reads is unchanged. How many is set by the machine's memory
+  (`onsetPassesInFlight`: one at 8 GB, two at 16, three from 24), because
+  each pass holds one chunk's coefficients while its detector runs.
+- **Each channel is analysed on a thread of its own.** Both the stream
+  (`AnalysisStream::fillSpan`) and the whole-file worker share the analyzer,
+  which analysis never changes, and each channel owns its coefficient tree,
+  its phase carry and its two floats of every texel; the magnitude energy is
+  summed per channel and added at the end. Gaborator's own thread count is a
+  stub, so this is the only parallelism the analysis has.
+
+### Measured (M4 Pro, 280 s stereo, built app, open-drive, interleaved same day)
+
+| measure                     | before | passes in flight | + channel threads |
+| --------------------------- | ------ | ---------------- | ----------------- |
+| 280 s open, message to view | 10.6 s | 8.1 s            | 5.7 s, 6.0 s      |
+| `spans` phase               | 5.3 s  | 5.3 s            | 3.0 s             |
+| `onsets` phase              | ~5.5 s | 2.3 s            | 2.2 s, 2.5 s      |
+| 60 s stereo open            | —      | —                | 1.4 s             |
+
+The machine carried a load of twenty throughout (a DAW and an indexer), so
+the absolute numbers are that day's; the ratios are the point. What stays is
+the analysis itself, which is one core per channel.
 
 ---
 
