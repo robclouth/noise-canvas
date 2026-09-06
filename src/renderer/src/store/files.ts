@@ -537,7 +537,9 @@ async function analyseIntoBlocks(
   params: AnalysisParams,
   openStream: NonNullable<typeof host.analysis.openAnalysisStream>,
 ): Promise<AnalysedFile> {
+  const openStart = performance.now();
   const stream = await openStream(filePath, params);
+  const decodeMs = performance.now() - openStart;
   const shape = stream.layout;
   const layout = bandLayoutOf(
     shape.numBands,
@@ -557,6 +559,7 @@ async function analyseIntoBlocks(
 
   const whole = windowed ? null : new Float32Array(size.texels * 4);
   const strip = windowed ? new CoarseStripBuilder(layout, coarseStripLevel(layout)) : null;
+  const spansStart = performance.now();
   await store.seedFrom(async (index) => {
     const { start, end } = frameRangeOfBlock(grid, index);
     const block = await stream.span(start, end);
@@ -565,6 +568,7 @@ async function analyseIntoBlocks(
     return block;
   });
   const summary = stream.summary();
+  const spansMs = performance.now() - spansStart;
 
   const packedLayout: PackedLayout = {
     numFrames: shape.numFrames,
@@ -579,6 +583,11 @@ async function analyseIntoBlocks(
     whole || !scan
       ? await host.analysis.detectOnsets(whole ?? (await store.readAll()), packedLayout, shape.sampleRate)
       : await scan((ranges) => store.readRanges(ranges), packedLayout, shape.sampleRate, summary.onsetBandMax);
+  diag.timing("file", "open phases", performance.now() - openStart, {
+    decode: Math.round(decodeMs),
+    spans: Math.round(spansMs),
+    onsets: Math.round(performance.now() - spansStart - spansMs),
+  });
 
   return {
     spectrogramData: {

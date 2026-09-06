@@ -22,6 +22,28 @@ export type DetectRegional = (
 /** The span of the file one pass reports on, when it is not the caller's own. */
 export const ONSET_CHUNK_SECONDS = 45;
 
+/**
+ * How many passes a scan keeps in flight on a machine with `totalBytes` of
+ * memory. Each pass holds its chunk's coefficients while the detector runs.
+ */
+export function onsetPassesInFlight(totalBytes: number): number {
+  return Math.max(1, Math.min(3, Math.floor(totalBytes / (8 * 1024 ** 3))));
+}
+
+/** Runs `run` over the items in order, at most `limit` at a time; the results come back in item order. */
+async function inFlight<T, R>(items: T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await run(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return results;
+}
+
 // What a pass reads outside the span it reports on: the whitening's warm-up and
 // the mean taken before a peak, then the level and ridge windows measured after
 // one. A margin over both, because a pass reading too little would report
@@ -75,7 +97,8 @@ export async function scanOnsetChunk(
  * Two rounds, because the silence gate is a share of the loudest moment of the
  * detection function anywhere in the file. The first round only reports that
  * moment; the second judges every chunk against it. A caller with no band
- * maxima to hand takes a round before both, since whitening reads them.
+ * maxima to hand takes a round before both, since whitening reads them. The
+ * passes of one round are independent, so up to `passesInFlight` run at once.
  */
 export async function scanOnsets(
   detect: DetectRegional,
@@ -84,6 +107,7 @@ export async function scanOnsets(
   sampleRate: number,
   bandMax: Float32Array,
   chunkSeconds = ONSET_CHUNK_SECONDS,
+  passesInFlight = 1,
 ): Promise<OnsetDetection> {
   const spans = chunkSpans(layout.numFrames, Math.max(1, Math.round(chunkSeconds * sampleRate)));
   const chunk = (start: number, end: number, maxima: Float32Array, gate: number, gateOnly: boolean) =>
@@ -105,23 +129,23 @@ export async function scanOnsets(
   if (maxima.length < layout.numBands) {
     maxima = new Float32Array(layout.numBands);
     const none = new Float32Array(0);
-    for (const [startFrame, endFrame] of round()) {
-      const found = (await chunk(startFrame, endFrame, none, 0, true)).bandMax;
-      for (let b = 0; b < maxima.length; b++) maxima[b] = Math.max(maxima[b], found[b]);
+    const found = await inFlight(round(), passesInFlight, ([start, end]) => chunk(start, end, none, 0, true));
+    for (const pass of found) {
+      for (let b = 0; b < maxima.length; b++) maxima[b] = Math.max(maxima[b], pass.bandMax[b]);
     }
   }
 
   let gate = 0;
-  for (const [startFrame, endFrame] of round()) {
-    gate = Math.max(gate, (await chunk(startFrame, endFrame, maxima, 0, true)).odfMax);
-  }
+  const gates = await inFlight(round(), passesInFlight, ([start, end]) => chunk(start, end, maxima, 0, true));
+  for (const pass of gates) gate = Math.max(gate, pass.odfMax);
 
+  const order = round();
+  const passes = await inFlight(order, passesInFlight, ([start, end]) => chunk(start, end, maxima, gate, false));
   const parts = new Map<number, Float32Array>();
   let total = 0;
-  for (const [startFrame, endFrame] of round()) {
-    const part = (await chunk(startFrame, endFrame, maxima, gate, false)).onsets;
-    parts.set(startFrame, part);
-    total += part.length;
+  for (let i = 0; i < order.length; i++) {
+    parts.set(order[i][0], passes[i].onsets);
+    total += passes[i].onsets.length;
   }
   const onsets = new Float32Array(total);
   let at = 0;

@@ -21,7 +21,13 @@ import type {
 } from "./types";
 import { getModelPath } from "./ai-separation";
 import { loadNativeAddon } from "./native-addon";
-import { scanOnsetChunk, scanOnsets, type OnsetDetection } from "./onset-scan";
+import {
+  ONSET_CHUNK_SECONDS,
+  onsetPassesInFlight,
+  scanOnsetChunk,
+  scanOnsets,
+  type OnsetDetection,
+} from "./onset-scan";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
 export type { FourStemName, TwoStemName } from "./ai-separation";
 
@@ -401,7 +407,17 @@ export function scanFileOnsets(
   const gab = init();
   const detect = (packed: Float32Array, meta: PackedLayout, rate: number, options: unknown) =>
     gab.detectOnsets(packed, meta, rate, options);
-  if (!region) return scanOnsets(detect, read, analysisMetadata, sampleRate, bandMax);
+  if (!region) {
+    return scanOnsets(
+      detect,
+      read,
+      analysisMetadata,
+      sampleRate,
+      bandMax,
+      ONSET_CHUNK_SECONDS,
+      onsetPassesInFlight(totalmem()),
+    );
+  }
   return scanOnsetChunk(
     detect,
     read,

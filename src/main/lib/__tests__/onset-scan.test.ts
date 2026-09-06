@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { gatherPixelRanges } from "../../../renderer/src/lib/pixel-ranges";
-import { scanOnsets, type DetectRegional, type OnsetDetection } from "../onset-scan";
+import { onsetPassesInFlight, scanOnsets, type DetectRegional, type OnsetDetection } from "../onset-scan";
 import type { GaboratorAnalysisResult, PackedLayout } from "../types";
 
 // Onsets can be found a chunk of the file at a time, each pass reading only its
@@ -267,7 +267,7 @@ describe("onsets found a chunk at a time", () => {
       starts.push(ranges[0]);
       return await read(ranges);
     };
-    const scanned = await scanOnsets(detect, watched, layout, SAMPLE_RATE, new Float32Array(0), 3);
+    const scanned = await scanOnsets(detect, watched, layout, SAMPLE_RATE, new Float32Array(0), 3, 3);
     const rounds = 3;
     const perRound = starts.length / rounds;
     expect(Number.isInteger(perRound)).toBe(true);
@@ -278,6 +278,35 @@ describe("onsets found a chunk at a time", () => {
       expect(walk, `round ${r}`).toEqual(expected);
     }
     expectSameEvents(scanned.onsets, whole.onsets);
+  });
+
+  it("runs the passes of a round together and reports the same events", async () => {
+    const { layout, whole, read } = await analysed(12, HITS);
+    let open = 0;
+    let widest = 0;
+    const watched = async (ranges: Uint32Array) => {
+      open++;
+      widest = Math.max(widest, open);
+      const values = await read(ranges);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      open--;
+      return values;
+    };
+    const alone = await scanOnsets(detect, read, layout, SAMPLE_RATE, new Float32Array(0), 2, 1);
+    const together = await scanOnsets(detect, watched, layout, SAMPLE_RATE, new Float32Array(0), 2, 3);
+    expect(widest).toBe(3);
+    expect(together.odfMax).toBe(alone.odfMax);
+    expect(Array.from(together.bandMax)).toEqual(Array.from(alone.bandMax));
+    expect(pairs(together.onsets)).toEqual(pairs(alone.onsets));
+    expectSameEvents(together.onsets, whole.onsets);
+  });
+
+  it("keeps passes in flight by the memory the machine has", () => {
+    const gib = 1024 ** 3;
+    expect(onsetPassesInFlight(8 * gib)).toBe(1);
+    expect(onsetPassesInFlight(16 * gib)).toBe(2);
+    expect(onsetPassesInFlight(24 * gib)).toBe(3);
+    expect(onsetPassesInFlight(128 * gib)).toBe(3);
   });
 
   it("never reads the whole run at once", async () => {
