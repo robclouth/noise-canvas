@@ -4,6 +4,12 @@ import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
 /** RG16F: left and right magnitude, in dB. */
 export const DISPLAY_PYRAMID_BYTES_PER_TEXEL = 4;
 
+/**
+ * The dB a display store holds where nothing has been drawn yet. Must match
+ * `DISPLAY_DB_UNKNOWN` in `glsl/display-mags.glsl`, which is what reads it.
+ */
+export const DISPLAY_DB_UNKNOWN = -1000;
+
 /** Texels every resident level together may hold — 20 MB at RG16F, per open file. */
 export const DISPLAY_PYRAMID_MAX_TEXELS = 5_000_000;
 

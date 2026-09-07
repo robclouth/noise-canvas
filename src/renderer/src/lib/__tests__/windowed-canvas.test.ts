@@ -817,7 +817,7 @@ describe("a canvas that holds a window of the file", () => {
     let seeded = false;
     const seedSpy = vi.spyOn(renderer, "beginDisplaySeedFromStore").mockImplementation(() => {
       seeded = true;
-      renderer?.getDisplayPyramid()?.seedingFromCompact();
+      renderer?.getDisplayPyramid()?.seedingFromCompact(gl);
     });
     const patchSpy = vi.spyOn(renderer, "patchDisplayFromCompact");
     const fillSpy = vi.spyOn(renderer, "fillCanvas");

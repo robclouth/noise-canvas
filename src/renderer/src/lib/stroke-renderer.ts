@@ -1996,7 +1996,7 @@ export class StrokeRenderer {
 
   /** Declares the display's levels about to be drawn block by block. */
   beginDisplaySeedFromStore(): void {
-    this.displayPyramid?.seedingFromCompact();
+    this.displayPyramid?.seedingFromCompact(this.gl);
   }
 
   /** The display's committed levels, built once the canvas holds the file. */

@@ -114,14 +114,17 @@ vec4 sampleDisplayInterp(vec2 uv) {
 }
 
 // The dB pair one pyramid level holds, blended along time in its own bins.
-vec2 sampleLevelDb(vec2 uv, sampler2D levelTex, sampler2D levelMetaTex) {
+// False where either tap is a bin the level has not been drawn into yet.
+bool sampleLevelDb(vec2 uv, sampler2D levelTex, sampler2D levelMetaTex, out vec2 db) {
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
     packedInterpBins(uv, levelMetaTex, sourceFrameCount, sourceBandCount,
                      bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
     ivec2 texSize = textureSize(levelTex, 0);
     vec2 sample1 = texelFetch(levelTex, packedTexel(bandStartOffset + timeIndex0, texSize), 0).rg;
     vec2 sample2 = texelFetch(levelTex, packedTexel(bandStartOffset + timeIndex1, texSize), 0).rg;
-    return mix(sample1, sample2, timeFraction);
+    if (!displayDbKnown(sample1) || !displayDbKnown(sample2)) return false;
+    db = mix(sample1, sample2, timeFraction);
+    return true;
 }
 
 // The uncommitted preview's dB pair, where the preview covers this bin. The
@@ -156,7 +159,7 @@ bool ringBinDb(vec4 meta, float bin, out vec2 db) {
     float slot = mod(tileIndex, displayTileSlots);
     float linear = slot * displayTileTexels + meta.r + (bin - tileIndex * binsPerTile);
     db = texelFetch(displayTileTex, packedTexel(linear, textureSize(displayTileTex, 0)), 0).rg;
-    return true;
+    return displayDbKnown(db);
 }
 
 // The ring's dB pair at an unpacked UV, blended along time and towards the
@@ -192,9 +195,11 @@ bool samplePyramidDb(vec2 uv, out vec2 db) {
     if (!displayPyramidActive) return false;
     // The blend is uniform across the view, so the coarse read is skipped
     // outright wherever the fine level alone is what the view asked for.
-    db = sampleLevelDb(uv, displayFineTex, displayFineMetaTex);
+    if (!sampleLevelDb(uv, displayFineTex, displayFineMetaTex, db)) return false;
     if (displayLevelBlend > 0.0) {
-        db = mix(db, sampleLevelDb(uv, displayCoarseTex, displayCoarseMetaTex), displayLevelBlend);
+        vec2 coarse;
+        if (!sampleLevelDb(uv, displayCoarseTex, displayCoarseMetaTex, coarse)) return false;
+        db = mix(db, coarse, displayLevelBlend);
     }
     return true;
 }
@@ -208,9 +213,11 @@ bool canvasSpans(vec2 uv) {
 // Left and right magnitudes of the picture at an unpacked UV: a resident
 // tile, else the canvas where it is the finest picture there, else the
 // pyramid, else the canvas. `loading` is 1 where the pyramid stands in for
-// a finer picture that has not landed.
-vec2 sampleDisplayMags(vec2 uv, out float loading) {
+// a finer picture that has not landed, and `unknown` is 1 where nothing holds
+// the picture yet — an undrawn store must not read as a loud one.
+vec2 sampleDisplayMags(vec2 uv, out float loading, out float unknown) {
     loading = displayLoadingAll ? 1.0 : 0.0;
+    unknown = 0.0;
     vec2 db;
     bool have = sampleRingDb(uv, db);
     if (!have && displayCanvasFirst && canvasSpans(uv)) {
@@ -221,8 +228,12 @@ vec2 sampleDisplayMags(vec2 uv, out float loading) {
     if (!have) {
         if (!samplePyramidDb(uv, db)) {
             loading = 0.0;
-            vec4 packedValue = sampleDisplayInterp(uv);
-            return vec2(packedValue.r, packedValue.b);
+            if (canvasSpans(uv)) {
+                vec4 packedValue = sampleDisplayInterp(uv);
+                return vec2(packedValue.r, packedValue.b);
+            }
+            unknown = 1.0;
+            return vec2(0.0);
         }
         if (displayFinerWanted) loading = 1.0;
     }
@@ -290,9 +301,10 @@ void main() {
     // Time axis samples edge-aligned: the stored coefficient for bin k is the
     // analysis atom centered at frame k * 2^step, so an impulse reads as a
     // vertical ridge at the same time in every band regardless of bin stride.
-    float loading0, loading1;
-    vec2 mags = mix(sampleDisplayMags(uv0, loading0), sampleDisplayMags(uv1, loading1), bandFrac);
+    float loading0, loading1, unknown0, unknown1;
+    vec2 mags = mix(sampleDisplayMags(uv0, loading0, unknown0), sampleDisplayMags(uv1, loading1, unknown1), bandFrac);
     float loading = mix(loading0, loading1, bandFrac) * displayLoading;
+    float unknown = mix(unknown0, unknown1, bandFrac);
 
     float leftDb = magnitudeToDb(mags.x);
 
@@ -305,6 +317,14 @@ void main() {
         vec3 leftColor = vec3(leftDb, leftDb * 0.5, 0.0);
         vec3 rightColor = vec3(0.0, rightDb * 0.5, rightDb);
         color = leftColor + rightColor;
+    }
+
+    // Where nothing holds the picture yet the ground is a dark hatch, so an
+    // undrawn region reads as "not known" rather than as a loud one. It needs
+    // no grace: there is no picture to flash away from.
+    if (unknown > 0.0) {
+        float hatch = 0.5 + 0.5 * sin((gl_FragCoord.x + gl_FragCoord.y) * 0.35);
+        color = mix(color, vec3(0.10 + 0.08 * hatch), unknown);
     }
 
     // A region still loading is flattened to a mid grey with faint diagonal

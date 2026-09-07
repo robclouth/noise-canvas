@@ -18,7 +18,11 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { blockGrid, blockPixelRanges } from "../block-grid";
 import { CoarseStripBuilder } from "../coarse-strip";
 import { DisplayPyramid } from "../display-pyramid-textures";
-import { displayPyramidLevels as displayPyramidLevelsOf, levelDecimation } from "../display-pyramid";
+import {
+  DISPLAY_DB_UNKNOWN,
+  displayPyramidLevels as displayPyramidLevelsOf,
+  levelDecimation,
+} from "../display-pyramid";
 import { gatherPixelRanges } from "../pixel-ranges";
 
 const RESOLVE_VERT = /* glsl */ `
@@ -155,13 +159,35 @@ describe("display pyramid textures", () => {
       expect(Array.from(readLevel(pyramid, index))).toEqual(Array.from(readLevel(reference, index)));
     }
 
-    pyramid.seedingFromCompact();
+    pyramid.seedingFromCompact(gl);
     for (const block of blocks) pyramid.patchFromCompact(gl, block.values, block.ranges);
     pyramid.seedFinished();
     expect(pyramid.readyLevel).toBe(0);
     for (let index = 0; index < pyramid.levels.length; index++) {
       expect(Array.from(readLevel(pyramid, index))).toEqual(Array.from(readLevel(reference, index)));
     }
+  });
+
+  it("holds every bin as not known until something draws it", () => {
+    const pyramid = makePyramid();
+    pyramid.seedingFromCompact(gl);
+    for (let index = 0; index < pyramid.levels.length; index++) {
+      const pixels = readLevel(pyramid, index);
+      for (let i = 0; i < pixels.length; i += 4) {
+        expect([pixels[i], pixels[i + 1]]).toEqual([DISPLAY_DB_UNKNOWN, DISPLAY_DB_UNKNOWN]);
+      }
+    }
+
+    // A drawn block is known; the rest of the level stays as it was.
+    const grid = blockGrid(layout, data.numFrames, data.sampleRate, 1);
+    const list = blockPixelRanges(grid, 0);
+    const ranges = list.ranges.slice(0, list.count * 2);
+    pyramid.patchFromCompact(gl, gatherPixelRanges(data.packedData, ranges), ranges);
+    const drawn = readLevel(pyramid, 0);
+    let known = 0;
+    for (let i = 0; i < drawn.length; i += 4) if (drawn[i] !== DISPLAY_DB_UNKNOWN) known++;
+    expect(known).toBeGreaterThan(0);
+    expect(known).toBeLessThan(drawn.length / 4);
   });
 
   it("refuses a strip cut for a level the stack does not hold", () => {

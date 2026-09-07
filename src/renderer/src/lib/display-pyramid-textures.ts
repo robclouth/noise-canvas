@@ -22,6 +22,7 @@ import {
   type SourcePixels,
 } from "./display-decimate";
 import {
+  DISPLAY_DB_UNKNOWN,
   displayPyramidLevels,
   levelBinSpan,
   levelDecimation,
@@ -101,6 +102,7 @@ export class DisplayPyramid {
   seedLevelFromStrip(gl: WebGLRenderer, strip: CoarseStrip): boolean {
     const index = this.levels.findIndex((level) => level.stepLog2 === strip.level.stepLog2);
     if (index < 0) return false;
+    if (!this.seeded) this.markUnknown(gl);
     const bins = strip.values.length / 2;
     for (let start = 0; start < bins; start += this.uploadChunkBins) {
       const count = Math.min(this.uploadChunkBins, bins - start);
@@ -129,6 +131,21 @@ export class DisplayPyramid {
     this.readyFrom = 0;
   }
 
+  /**
+   * Marks every bin of every level as one nothing has drawn yet. Without it an
+   * undrawn bin reads as 0 dB — the loudest value there is — and a level being
+   * filled in shows white where it has not been reached.
+   */
+  private markUnknown(gl: WebGLRenderer): void {
+    const context = gl.getContext() as WebGL2RenderingContext;
+    const previous = gl.getRenderTarget();
+    for (const target of this.targets) {
+      gl.setRenderTarget(target);
+      context.clearBufferfv(context.COLOR, 0, [DISPLAY_DB_UNKNOWN, DISPLAY_DB_UNKNOWN, 0, 0]);
+    }
+    gl.setRenderTarget(previous);
+  }
+
   /** The per-band layout of one level, for the display's metadata sampler. */
   metadataTexture(levelIndex: number): DataTexture {
     return this.metadataTextures[levelIndex];
@@ -145,6 +162,7 @@ export class DisplayPyramid {
    * nothing samples them.
    */
   seedFromPacked(gl: WebGLRenderer, data: Float32Array): void {
+    if (!this.seeded) this.markUnknown(gl);
     const instances: DecimateInstance[] = [];
     for (let band = 0; band < this.layout.numBands; band++) {
       const instance = this.finestInstance(band, 0, this.layout.metadata[band * 4 + 1]);
@@ -174,7 +192,8 @@ export class DisplayPyramid {
    * with `patchFromCompact` a block at a time. Those patches are the picture,
    * and a patch into a pyramid holding nothing is skipped.
    */
-  seedingFromCompact(): void {
+  seedingFromCompact(gl: WebGLRenderer): void {
+    if (!this.seeded) this.markUnknown(gl);
     this.seeded = true;
   }
 

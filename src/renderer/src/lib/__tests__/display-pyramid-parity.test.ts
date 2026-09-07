@@ -26,6 +26,7 @@ import {
 } from "../../test/render-harness";
 import type { SpectrogramData, State } from "../../store/types";
 import { displayLevelChoice } from "../display-pyramid";
+import { DisplayPyramid } from "../display-pyramid-textures";
 import type { EffectsRegistry, StrokeRenderer as StrokeRendererType } from "../stroke-renderer";
 import { StrokeRenderer } from "../stroke-renderer";
 import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL } from "../utils";
@@ -92,6 +93,16 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
     u.displayPyramidActive.value = fromPyramid;
     u.displayTileCount.value = 0;
 
+    gl.setRenderTarget(target);
+    gl.render(scene, camera);
+    gl.setRenderTarget(null);
+    const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+    gl.readRenderTargetPixels(target, 0, 0, WIDTH, HEIGHT, pixels);
+    return pixels;
+  }
+
+  /** Renders with the uniforms as they stand and reads the pixels back. */
+  function shoot(): Uint8Array {
     gl.setRenderTarget(target);
     gl.render(scene, camera);
     gl.setRenderTarget(null);
@@ -172,7 +183,7 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
     return render(false, zoomPower, textures.originalPackedDataTex);
   }
 
-  return { renderer, material, textures, render, renderAtLevel, renderFromRing, renderOriginal, dispose };
+  return { renderer, material, textures, render, renderAtLevel, renderFromRing, renderOriginal, shoot, dispose };
 }
 
 describe("display pyramid parity", () => {
@@ -306,6 +317,39 @@ describe("display pyramid parity", () => {
     it("stays close to the canvas at whole-file zoom, where it shows a coarser level", () => {
       const v = view(data);
       expect(maxChannelDiff(v.render(true, 0), v.render(false, 0))).toBeLessThanOrEqual(24);
+    });
+  });
+
+  describe("a level nothing has drawn into", () => {
+    const data = createConstantQMockSpectrogramData({ durationSeconds: 2, sampleRate: 8000, bandsPerOctave: 4 });
+
+    it("hatches the ground instead of showing the loudest value there is", () => {
+      const v = view(data);
+      const drawn = v.render(true, 0);
+
+      const blank = new DisplayPyramid({ numBands: data.numBands, metadata: data.metadata });
+      blank.seedingFromCompact(gl);
+      const u = v.material.uniforms;
+      // The canvas is put outside the file, as a canvas holding another window
+      // is, so nothing else can answer for these pixels.
+      u.canvasStartFrame.value = data.numFrames;
+      u.displayFineTex.value = blank.texture(0);
+      u.displayFineMetaTex.value = blank.metadataTexture(0);
+      u.displayCoarseTex.value = blank.texture(0);
+      u.displayCoarseMetaTex.value = blank.metadataTexture(0);
+      u.displayLevelBlend.value = 0;
+      u.displayPyramidActive.value = true;
+      const blankPixels = v.shoot();
+      blank.dispose();
+      u.canvasStartFrame.value = 0;
+
+      // An undrawn bin used to read as 0 dB, the loudest value there is, which
+      // paints white. Nothing in the hatch comes near it.
+      expect(Math.max(...blankPixels.filter((_unused, i) => i % 4 !== 3))).toBeLessThan(60);
+      expect(maxChannelDiff(blankPixels, drawn)).toBeGreaterThan(20);
+      // It is a hatch, not a flat field: neighbouring pixels differ.
+      const row = Array.from(blankPixels.slice(0, WIDTH * 4)).filter((_unused, i) => i % 4 === 0);
+      expect(Math.max(...row) - Math.min(...row)).toBeGreaterThan(2);
     });
   });
 
