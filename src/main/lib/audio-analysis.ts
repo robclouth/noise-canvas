@@ -160,16 +160,80 @@ function zstdChunkSize(expectedBytes: number): number {
   return Math.min(ZSTD_CHUNK_MAX, Math.max(ZSTD_CHUNK_SLACK, expectedBytes + ZSTD_CHUNK_SLACK));
 }
 
+// A snapshot larger than this is cut into slices that reorder and compress on
+// threads of their own; the codec is single-threaded, so this is what makes a
+// whole-state write use more than one core. Slices are whole RGBA pixels.
+const SNAPSHOT_SLICE_BYTES = 64 * 1024 * 1024;
+const SNAPSHOT_MAX_SLICES = 16;
+// "NCP1", which no zstd frame can begin with, so a snapshot written before
+// slicing still reads as one zstd stream.
+const SLICED_MAGIC = 0x4e435031;
+const SLICED_HEADER_BYTES = 16;
+
+function sliceValues(values: number): number {
+  const wanted = Math.ceil((values * 4) / SNAPSHOT_SLICE_BYTES);
+  const slices = Math.min(SNAPSHOT_MAX_SLICES, Math.max(1, wanted));
+  if (slices === 1) return values;
+  return Math.ceil(values / slices / 4) * 4;
+}
+
 /** Reorder a packed state for compression, then compress it. */
 export async function encodeHistorySnapshot(packed: Float32Array): Promise<Buffer> {
-  const planes = await historyCodec().historyEncodePlanes(packed);
-  return await zstdCompressAsync(planes, { chunkSize: zstdChunkSize(planes.byteLength) });
+  const per = sliceValues(packed.length);
+  if (per >= packed.length) {
+    const planes = await historyCodec().historyEncodePlanes(packed);
+    return await zstdCompressAsync(planes, { chunkSize: zstdChunkSize(planes.byteLength) });
+  }
+
+  const parts = await Promise.all(
+    Array.from({ length: Math.ceil(packed.length / per) }, async (_unused, index) => {
+      const planes = await historyCodec().historyEncodePlanes(
+        packed.subarray(index * per, Math.min(packed.length, (index + 1) * per)),
+      );
+      return await zstdCompressAsync(planes, { chunkSize: zstdChunkSize(planes.byteLength) });
+    }),
+  );
+
+  const header = Buffer.alloc(SLICED_HEADER_BYTES + parts.length * 4);
+  header.writeUInt32BE(SLICED_MAGIC, 0);
+  header.writeUInt32LE(parts.length, 4);
+  header.writeUInt32LE(per, 8);
+  header.writeUInt32LE(packed.length, 12);
+  parts.forEach((part, index) => header.writeUInt32LE(part.byteLength, SLICED_HEADER_BYTES + index * 4));
+  return Buffer.concat([header, ...parts]);
 }
 
 /** Decompress a snapshot and restore its packed order. `decodedBytes`, when known, is its size. */
 export async function decodeHistorySnapshot(bytes: Uint8Array, decodedBytes?: number): Promise<Float32Array> {
-  const options = decodedBytes === undefined ? {} : { chunkSize: zstdChunkSize(decodedBytes) };
-  return await historyCodec().historyDecodePlanes(await zstdDecompressAsync(bytes, options));
+  const head = new DataView(bytes.buffer, bytes.byteOffset, Math.min(bytes.byteLength, SLICED_HEADER_BYTES));
+  if (bytes.byteLength < SLICED_HEADER_BYTES || head.getUint32(0, false) !== SLICED_MAGIC) {
+    const options = decodedBytes === undefined ? {} : { chunkSize: zstdChunkSize(decodedBytes) };
+    return await historyCodec().historyDecodePlanes(await zstdDecompressAsync(bytes, options));
+  }
+
+  const count = head.getUint32(4, true);
+  const per = head.getUint32(8, true);
+  const values = head.getUint32(12, true);
+  const lengths = new DataView(bytes.buffer, bytes.byteOffset + SLICED_HEADER_BYTES, count * 4);
+  let offset = SLICED_HEADER_BYTES + count * 4;
+  const spans: Array<{ start: number; bytes: Uint8Array }> = [];
+  for (let index = 0; index < count; index++) {
+    const length = lengths.getUint32(index * 4, true);
+    spans.push({ start: index * per, bytes: bytes.subarray(offset, offset + length) });
+    offset += length;
+  }
+
+  const out = new Float32Array(values);
+  await Promise.all(
+    spans.map(async (span) => {
+      const size = Math.min(per, values - span.start) * 4;
+      const part = await historyCodec().historyDecodePlanes(
+        await zstdDecompressAsync(span.bytes, { chunkSize: zstdChunkSize(size) }),
+      );
+      out.set(part, span.start);
+    }),
+  );
+  return out;
 }
 
 /**

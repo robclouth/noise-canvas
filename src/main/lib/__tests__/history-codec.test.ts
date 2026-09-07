@@ -85,6 +85,22 @@ describe("history snapshot codec", () => {
   it("refuses a state that is not whole RGBA pixels rather than truncating it", async () => {
     await expect(encodeHistorySnapshot(new Float32Array(6))).rejects.toThrow(/whole number of RGBA pixels/);
   });
+
+  it("round-trips a state large enough to be cut into slices", async () => {
+    // Past the slice threshold the blob carries several compressed spans
+    // behind a header, so the whole-stream reader must not be the one used.
+    const packed = packedState(5 * 1024 * 1024, 7);
+    const encoded = await encodeHistorySnapshot(packed);
+    expect(encoded.readUInt32BE(0)).toBe(0x4e435031);
+    expect(encoded.readUInt32LE(4)).toBeGreaterThan(1);
+
+    const restored = await decodeHistorySnapshot(encoded);
+    const before = bits(packed);
+    const after = bits(restored);
+    let differing = 0;
+    for (let i = 0; i < before.length; i++) if (before[i] !== after[i]) differing++;
+    expect([after.length, differing]).toEqual([before.length, 0]);
+  }, 60_000);
 });
 
 describe("history stroke delta", () => {

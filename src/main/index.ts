@@ -10,6 +10,11 @@ import { createMenu, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 import { checkForUpdates, initUpdater } from "./lib/updater";
 
+// The history codec and zstd run on libuv's thread pool, in this process and
+// in the renderer that inherits this environment. Four threads leave most of
+// the machine idle while a whole state is written.
+if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = "8";
+
 // Which ANGLE backend translates our shaders, chosen per platform because the
 // default is the wrong trade on both. Set NOISE_CANVAS_ANGLE (gl, vulkan, d3d11,
 // metal, default) to override on a machine whose driver disagrees.
