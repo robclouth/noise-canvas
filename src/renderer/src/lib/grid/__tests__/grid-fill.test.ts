@@ -82,6 +82,25 @@ describe("resolveGridFill", () => {
     expect(painted.brushSizePitch).toBe(BRUSH_SIZE_PITCH_FULL);
   });
 
+  it("cuts an unsnapped time axis into equal cells the canvas can take", () => {
+    const state = withBrushSize(stateWith({ snapTime: false }), 0, 0);
+    // A one-second file on a canvas that takes 0.3 s at once: four equal cells
+    // of a quarter second, three pitch rows each.
+    const { anchors, state: painted } = resolveGridFill(state, { ...target(), maxStrokeSeconds: 0.3 });
+    expect(anchors).toHaveLength(4 * 3);
+    const starts = [...new Set(anchors.map((anchor) => anchor.aimX))].sort((a, b) => a - b);
+    expect(starts.map((x) => Math.round(x * 100) / 100)).toEqual([0, 0.25, 0.5, 0.75]);
+    // A quarter second at 120bpm is half a beat.
+    expect(painted.brushSizeTime).toBeCloseTo(0.5, 5);
+  });
+
+  it("keeps one stroke when the canvas takes the whole span", () => {
+    const state = withBrushSize(stateWith({ snapTime: false }), 0, 0);
+    const { anchors, state: painted } = resolveGridFill(state, { ...target(), maxStrokeSeconds: 2 });
+    expect(anchors).toHaveLength(3);
+    expect(painted.brushSizeTime).toBeCloseTo(2, 5);
+  });
+
   it("measures an unsnapped axis against the region rather than the file", () => {
     const state = withBrushSize(stateWith({ snapTime: false }), 0, 0);
     const { state: painted } = resolveGridFill(state, target({ start: 0, end: 0.5 }));

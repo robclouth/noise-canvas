@@ -13,6 +13,9 @@ import {
   tapSpanRanges,
 } from "./pixel-ranges";
 
+// Blocks a whole-state read or write keeps in flight at once.
+const READ_ALL_AHEAD = 4;
+
 /** Where a store keeps its encoded blocks between reads. */
 export interface BlockBackend {
   read(index: number): Promise<Uint8Array | null>;
@@ -219,11 +222,20 @@ export class BlockStore implements PackedStateStore {
     this.dirty.clear();
     this.dirtyVersion.clear();
     this.clean.clear();
-    for (let index = 0; index < this.grid.blockCount; index++) {
+    const store = this.overlay ?? this.backend;
+    const seed = async (index: number): Promise<void> => {
       const block = gatherPixelRanges(packed, this.blockRanges(index));
       this.everPatched.add(index);
-      await (this.overlay ?? this.backend).write(index, await this.codec.encode(block));
+      await store.write(index, await this.codec.encode(block));
       this.clean.set(String(index), block);
+    };
+    // A few blocks encode and write at once; each is its own record.
+    for (let start = 0; start < this.grid.blockCount; start += READ_ALL_AHEAD) {
+      const batch: Promise<void>[] = [];
+      for (let index = start; index < Math.min(start + READ_ALL_AHEAD, this.grid.blockCount); index++) {
+        batch.push(seed(index));
+      }
+      await Promise.all(batch);
     }
   }
 
@@ -250,10 +262,23 @@ export class BlockStore implements PackedStateStore {
   /** The whole packed array, one block at a time, padded as the texture is. */
   async readAll(): Promise<Float32Array> {
     const out = new Float32Array(this.texelCount * 4);
-    for (let index = 0; index < this.grid.blockCount; index++) {
-      scatterCompactPixelRanges(out, await this.block(index), this.blockRanges(index));
-    }
+    await this.eachBlock((index, values) => scatterCompactPixelRanges(out, values, this.blockRanges(index)));
     return out;
+  }
+
+  /**
+   * Hands every block's current values to `take`, in index order, with a few
+   * decodes in flight ahead of the block being taken.
+   */
+  private async eachBlock(take: (index: number, values: Float32Array) => void): Promise<void> {
+    const count = this.grid.blockCount;
+    const pending: Promise<Float32Array>[] = [];
+    for (let index = 0; index < Math.min(READ_ALL_AHEAD, count); index++) pending.push(this.block(index));
+    for (let index = 0; index < count; index++) {
+      const values = await pending.shift()!;
+      if (index + READ_ALL_AHEAD < count) pending.push(this.block(index + READ_ALL_AHEAD));
+      take(index, values);
+    }
   }
 
   /** The packed state as it was seeded, one block at a time, padded as the texture is. */

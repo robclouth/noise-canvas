@@ -372,6 +372,18 @@ export class WindowedCanvas {
   }
 
   /**
+   * Starts reading the blocks a window over [startFrame, endFrame) would need
+   * into spare slots, so an aim there later composes without waiting on the
+   * store. The canvas itself does not move.
+   */
+  prefetch(startFrame: number, endFrame: number): void {
+    const window = this.blocks;
+    const renderer = this.deps.renderer();
+    if (!window || !renderer?.getIsInitialized()) return;
+    window.prefetch(window.plan(renderer.committedSource().view, startFrame, endFrame));
+  }
+
+  /**
    * Keeps a stroke's paint on the canvas after its pen-up until the function
    * returned is called: a block the window brings in meanwhile is read from a
    * store that does not hold the stroke yet, so its pixels of `values`, which

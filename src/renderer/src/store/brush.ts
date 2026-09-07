@@ -217,6 +217,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const releasePaint = painted && paintedRead ? renderer.holdPaint(painted, paintedRead) : null;
 
       const commitTask = serializeFileTask(activeFileId, async () => {
+        const readStart = performance.now();
         let read = await readPromise;
         const paintedValues = paintedPromise ? await paintedPromise : null;
         // A navigation's synthesis may still be landing — the commit measures
@@ -232,6 +233,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           read = stored;
         }
         if (!read) return;
+        diag.timing("timing", "commit state read", performance.now() - readStart, {
+          footprintOnly: footprintOnly ? 1 : 0,
+        });
 
         // A patch an earlier commit could not upload, because this stroke was
         // already on the canvas when it landed. Its pixels live in the block
@@ -324,6 +328,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           }
           if (!data && !afterFootprint) throw new Error("the commit produced no state to store");
 
+          const historyStart = performance.now();
           const node = await historyManager.addStroke({
             data: data ?? undefined,
             label: snapshot.brushName,
@@ -335,6 +340,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             afterFootprint,
             turns: turns ?? undefined,
           });
+          diag.timing("timing", "commit history add", performance.now() - historyStart, { whole: data ? 1 : 0 });
 
           // The turns go on the canvas as an operation; the window pixels and
           // any stashed ones are uploaded from the state — the whole readback

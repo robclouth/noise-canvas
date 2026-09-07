@@ -1743,6 +1743,75 @@ then the whole file is resynthesised — and now costs more than the paint.
 Reads could overlap painting by prefetching the next chunk's blocks into
 spare slots; not done.
 
+## Phase 13 — onsets ride the synthesis read, and the commit's threads (2026-09-07)
+
+Rob: "why can't we do the onset detection in parallel with each block of
+the synthesis, rather than waiting for all of the blocks and then doing the
+whole onset thing". Three things stood in the way, and only one of them was
+real. The detector whitens each band against its loudest moment in the
+file — the analysis already carries those. The silence gate is a share of
+the loudest moment of the detection function anywhere in the file — that
+needs every chunk's curve before any event can be accepted, which is why
+the scan took a whole read for the gate and another for the events. And an
+event's size is read off the coefficients around it, up to where the next
+event starts, which the curves cannot carry.
+
+### What was built
+
+- The addon's `computeOnsets` is three stages: `computeOnsetCurves`
+  (whitening, flux and energy curves), `pickOnsetCandidates` (the events,
+  off curves alone) and `measureOnsets` (each event's size, off the
+  coefficients). The whole and regional passes compose them as before, byte
+  for byte (the addon suite pins it). `detectOnsets` gained `curvesOnly`,
+  which returns a span's curves cut on bin edges, and two bindings,
+  `pickOnsets` and `onsetSalience`, run the other two stages.
+- `scanOnsets` is one curves round, one pick over the file's curves laid
+  end to end, and one measuring round that reads only around the events.
+  The pick is global, so a chunk seam no longer needs its own lead and
+  trail logic to agree with a whole-file pass.
+- `synthesiseInChunks` takes a `ChunkOnsetPass`: the chunk's read is
+  widened to the whitening's warm-up, and the curves pass runs on the same
+  buffer while the chunk is synthesised. `synthesizeFile` finishes the
+  onsets from the curves once the audio is there. A windowed file opens
+  with no onsets and no gate (`hasOnsetGate`), its first synthesis brings
+  both, and the root node stores them then.
+- The synthesis and commit workers synthesise each channel on a thread of
+  its own (`forEachChannel`), and run the onset pass on another thread
+  alongside — in the commit only while Re-analyse is off, because the
+  projection rewrites the coefficients the onsets answer to.
+- The whole-state read (`readAll`) keeps four block decodes in flight, and
+  the tier reseed (`seedCurrent`) encodes and writes four blocks at once.
+- The fill reads the blocks under the next chunk into spare slots while the
+  current chunk lands (`renderStrokeBatch(strokes, ahead)`,
+  `WindowedCanvas.prefetch`). With time snapping off on a windowed file the
+  span is cut into equal cells no longer than half a window
+  (`maxStrokeSeconds`), each stroke one cell long, instead of refusing.
+- Phase timings on the commit path: `commit state read`, `commit history
+add`, `addStroke tier patch`, `addStroke packed write`.
+
+### Measured (M4 Pro under Rob's Live session, 280 s stereo, `fill-drive.mjs`)
+
+| measure (280 s stereo, 1-beat grid, 3360 strokes) | before  | fused onsets + threads | + parallel store read/reseed |
+| ------------------------------------------------- | ------- | ---------------------- | ---------------------------- |
+| open phases (decode + spans + onsets)             | 14.8 s  | 8.2 s (onsets 0)       | 6.6 s                        |
+| first synthesis                                   | 12.0 s  | 15.0 s, onsets +1.9 s  | 11.8 s, onsets +1.4 s        |
+| fill paint phase                                  | 10.5 s  | 10.0 s                 | 5.7 s                        |
+| commit state read                                 | —       | 9.0 s                  | 4.6 s                        |
+| `commitStroke` (synthesis + onsets)               | 24.4 s  | 6.8 s                  | 12.0 s                       |
+| `addStroke packed write`                          | —       | 13.9 s                 | 11.0 s                       |
+| commit history add, whole                         | —       | 21.4 s                 | 15.5 s                       |
+| fill dialog, start to close                       | 65–69 s | 49.4 s                 | 40.1 s                       |
+
+The runs share one machine under Rob's Live session, so single columns
+swing by seconds; the direction is what holds. With time snapping off
+(`--nosnap`), the same file fills in 114 half-window strokes, every column
+erased zoomed out and at 8, 50 and 92 % inside, where it used to refuse.
+
+Still whole-state costs: the packed snapshot is Node's zstd over the
+planes, single-threaded, and a fill touching more than half the file stores
+whole by design. Splitting the snapshot into independently compressed
+slices would let it use every core, at the price of a format version.
+
 ---
 
 ## Risks

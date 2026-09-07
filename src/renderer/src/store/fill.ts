@@ -45,6 +45,7 @@ function resolveTarget(state: State) {
     bpm: state.filepathsBpm[file.filePath] || 120,
     totalDuration: spectrogramData.numFrames / spectrogramData.sampleRate,
     region: activeLoopRegion(state),
+    maxStrokeSeconds: renderer.maxStrokeSeconds() ?? undefined,
   };
   return { fileId: activeFileId, renderer, target };
 }
@@ -94,10 +95,11 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
       let settleMs = 0;
       const paintStart = performance.now();
       for (let start = 0; start < total; start += FILL_CHUNK) {
-        const chunk: StrokeDispatch[] = anchors
-          .slice(start, start + FILL_CHUNK)
-          .map((anchor) => ({ aimX: anchor.aimX, aimY: anchor.aimY, state: painted }));
-        strokesPainted += renderer.renderStrokeBatch(chunk);
+        const dispatch = (from: number, to: number): StrokeDispatch[] =>
+          anchors.slice(from, to).map((anchor) => ({ aimX: anchor.aimX, aimY: anchor.aimY, state: painted }));
+        const chunk = dispatch(start, start + FILL_CHUNK);
+        const ahead = dispatch(start + FILL_CHUNK, start + 2 * FILL_CHUNK);
+        strokesPainted += renderer.renderStrokeBatch(chunk, ahead);
         // A canvas holding a window of the file takes the chunk's strokes as
         // the window reaches them, so each chunk lands before the next is given.
         const settleStart = performance.now();

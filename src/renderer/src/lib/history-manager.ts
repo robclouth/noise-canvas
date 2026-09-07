@@ -921,7 +921,9 @@ export class HistoryManager {
       }
       // The tier takes the stroke before the delta is cut: its turn walk
       // yields the residuals that make the turns invertible over the store.
+      const tierStart = performance.now();
       tierResiduals = await this.tierStrokePatch(parentId, ranges, deltaSides.patch, turnsIn, opts.data);
+      diag.timing("timing", "addStroke tier patch", performance.now() - tierStart, { ranges: ranges.length / 2 });
       if (!this.manifest) return { id: parentId, isNew: false };
       if (turnsIn && tierResiduals == null) {
         // Without a tier walk there are no residuals to subtract the turns
@@ -964,7 +966,9 @@ export class HistoryManager {
       // the tier was just patched to this state, so it reads back whole.
       const whole = opts.data ?? (tierResiduals != null ? await this.tierWholeState() : null);
       if (!whole) throw new Error("HistoryManager: the stroke needs the whole state and none was read back");
+      const packedStart = performance.now();
       await writePackedCompressed(this.packedPath(dir, id), whole);
+      diag.timing("timing", "addStroke packed write", performance.now() - packedStart);
     }
 
     // Closing the file purges the manifest while the delta encoding and the
