@@ -137,14 +137,17 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   }, [file, fileId, getTimeFromX, setFilePlaybackStartTime, activeFileId, isPlaying, setPlaybackTime]);
 
   useEffect(() => {
+    let frame: number | null = null;
+    let size: { width: number; height: number } | null = null;
+
     const draw = () => {
+      frame = null;
       const canvas = canvasRef.current;
       const container = legendRef.current;
       const spectrogramData = openFiles[fileId]?.spectrogramData;
       if (!canvas || !container || !spectrogramData) return;
 
-      const width = container.clientWidth;
-      const height = container.clientHeight;
+      const { width, height } = size ?? { width: container.clientWidth, height: container.clientHeight };
       if (width === 0 || height === 0) return;
 
       const dpr = window.devicePixelRatio || 1;
@@ -185,6 +188,12 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       }
     };
 
+    // Zoom and offset change once per pointer event; drawing on the next frame
+    // keeps the legend off the gesture's own task.
+    const requestDraw = () => {
+      if (frame === null) frame = requestAnimationFrame(draw);
+    };
+
     const legendFile = openFiles[fileId];
     const unsubscribe = useStore.subscribe(
       (state) => ({
@@ -195,16 +204,21 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
         loading: state.filesLoading[fileId],
         busy: state.filesBusy[fileId],
       }),
-      draw,
+      requestDraw,
       { equalityFn: shallow, fireImmediately: true },
     );
 
-    const observer = new ResizeObserver(draw);
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[entries.length - 1]?.contentRect;
+      if (box) size = { width: box.width, height: box.height };
+      requestDraw();
+    });
     if (legendRef.current) observer.observe(legendRef.current);
 
     return () => {
       unsubscribe();
       observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [fileId]);
 

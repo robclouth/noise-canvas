@@ -77,18 +77,44 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
 // allocation (a meaningful source of GC pauses while dragging).
 function createDebouncedStorage<S>(delayMs: number, project: (state: S) => unknown): PersistStorage<S> {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let idle: number | null = null;
   let pending: { name: string; value: StorageValue<S> } | null = null;
 
-  const flush = () => {
+  const write = () => {
+    idle = null;
+    if (!pending) return;
+    const serializable = { ...pending.value, state: project(pending.value.state) };
+    host.prefs.write(pending.name, JSON.stringify(serializable));
+    pending = null;
+  };
+
+  const cancel = () => {
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
     }
-    if (pending) {
-      const serializable = { ...pending.value, state: project(pending.value.state) };
-      host.prefs.write(pending.name, JSON.stringify(serializable));
-      pending = null;
+    if (idle !== null) {
+      if (typeof cancelIdleCallback === "function") cancelIdleCallback(idle);
+      else clearTimeout(idle as unknown as ReturnType<typeof setTimeout>);
+      idle = null;
     }
+  };
+
+  // The projection and the write together are the largest step of a dragged
+  // frame, so they wait for the frame's spare time. The timeout bounds the
+  // wait, and a hidden or unloading page still writes at once.
+  const schedule = () => {
+    timer = null;
+    if (idle !== null) return;
+    idle =
+      typeof requestIdleCallback === "function"
+        ? requestIdleCallback(write, { timeout: 1000 })
+        : (setTimeout(write, 0) as unknown as number);
+  };
+
+  const flush = () => {
+    cancel();
+    write();
   };
 
   if (typeof window !== "undefined") {
@@ -106,15 +132,12 @@ function createDebouncedStorage<S>(delayMs: number, project: (state: S) => unkno
     },
     setItem: (name, value) => {
       pending = { name, value };
-      if (timer !== null) clearTimeout(timer);
-      timer = setTimeout(flush, delayMs);
+      cancel();
+      timer = setTimeout(schedule, delayMs);
     },
     removeItem: (name) => {
       pending = null;
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
+      cancel();
       host.prefs.remove(name);
     },
   };
@@ -580,10 +603,29 @@ export function selectEffectParameter(effectId: string, key: ParameterKey) {
  * Creates a view state object that includes effect-specific parameter values.
  * Used by the renderer to get parameters for a specific effect instance.
  */
+// Cached like the step view: neither the state nor an effect item is changed
+// in place, so one view answers every later reader of the same pair.
+const effectStateViews = new WeakMap<State, Map<number, WeakMap<EffectItem, State>>>();
+
 export function createEffectStateView(state: State, stepIndex: number, effectItem: EffectItem): State {
   const stepView = createStepStateView(state, stepIndex);
   if (!effectItem.params) return stepView;
 
+  let byStep = effectStateViews.get(state);
+  if (!byStep) {
+    byStep = new Map();
+    effectStateViews.set(state, byStep);
+  }
+  let byItem = byStep.get(stepIndex);
+  if (!byItem) {
+    byItem = new WeakMap();
+    byStep.set(stepIndex, byItem);
+  }
+  const cached = byItem.get(effectItem);
+  if (cached) return cached;
+
   // Merge effect params into the view
-  return { ...stepView, ...effectItem.params } as State;
+  const built = { ...stepView, ...effectItem.params } as State;
+  byItem.set(effectItem, built);
+  return built;
 }
