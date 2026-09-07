@@ -1857,6 +1857,11 @@ The synthesis reads the same as before; it only shares the machine with the
 stem now. The snapshot codec, 512 MB: 909 ms whole, 197 ms in eight slices
 on a pool of four, 165 ms on a pool of eight.
 
+In the app, `session-drive.mjs` on the same file and seed either side of the
+change: ten strokes cost 39.6 s of commit before and 19.0 s after, the worst
+single stroke 9.4 s before and 3.5 s after, and `edges` 436-2078 ms before
+and 1.5-19 ms after. Both runs pass with no lost paint.
+
 ### What was tried and dropped
 
 Rebuilding the window a chunk at a time, as the open does, is faster — 744
