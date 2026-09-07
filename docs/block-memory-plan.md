@@ -1812,6 +1812,71 @@ planes, single-threaded, and a fill touching more than half the file stores
 whole by design. Splitting the snapshot into independently compressed
 slices would let it use every core, at the price of a format version.
 
+## Phase 14 — the commit's own threads, and a snapshot on every core (2026-09-07)
+
+A session driven the way a person paints — quick flicks at full zoom-out
+on a 280 s stereo file — spends nearly all of its wait in one call:
+`commitStroke`, between 2.5 and 24 s a stroke. A flick spans most of the
+file, so the window the commit rebuilds is most of the file, however thin
+the paint. The `phases` field on the pass says where that time goes.
+
+### What was built
+
+- `commitStroke` returns `phases`: the milliseconds of the synthesis, the
+  hard edges, the limiter, the projection, the onset join and the levels,
+  plus the frames the synthesis covered. They ride the `commitStroke` diag
+  line. The console preview only shows five fields of an object, so read
+  the whole line in the log file (Help → Show Log File).
+- The hard time edges are a second synthesis — the stem the gate takes back
+  out — and it ran after the window's own. It is now built beside it:
+  `synthesiseEdgeStem` fills one channel's stem, `applyEdgeStem` subtracts
+  it, and the pass runs `channels * 2` jobs where it used to run `channels`.
+- The true-peak detector splits its samples across threads (`forEachBlock`).
+  The limiter reads it three times over the window, and it was the whole of
+  the limiter's cost.
+- A packed snapshot larger than 64 MB is cut into slices of that size (16 at
+  most), each reordered and compressed on its own pool thread, behind a
+  header naming the slices. A snapshot written before this reads as it
+  always did — the header's first four bytes are ones no zstd frame can
+  begin with. libzstd's own `nbWorkers` is not an option: the copy Node
+  bundles refuses the parameter.
+- `UV_THREADPOOL_SIZE` is 8 unless the environment names one. The codec and
+  zstd both run on that pool, in the main process and in the renderer that
+  inherits it.
+
+### Measured (M4 Pro, 280 s stereo, `commit-bench.mjs`, whole-file span)
+
+| phase of one commit | before       | after        |
+| ------------------- | ------------ | ------------ |
+| synthesis           | 837–1325 ms  | 999–1572 ms  |
+| hard edges          | 1288 ms      | 9–17 ms      |
+| limiter             | 890–1000 ms  | 267–435 ms   |
+| whole pass          | 3193–3571 ms | 2101–2359 ms |
+
+The synthesis reads the same as before; it only shares the machine with the
+stem now. The snapshot codec, 512 MB: 909 ms whole, 197 ms in eight slices
+on a pool of four, 165 ms on a pool of eight.
+
+### What was tried and dropped
+
+Rebuilding the window a chunk at a time, as the open does, is faster — 744
+against 999–1572 ms — but wrong. A chunk fills its coefficients two
+synthesis supports either side, and that support is capped at 0.1 s, while
+the lowest bands reach seconds. The seam between two chunks then carries a
+low-frequency error: 2.4e-3 against a floor of 1.8e-7, spreading three
+seconds either side of every join, on a signal whose peak is 0.3. Filling
+each chunk to the whole, uncapped support removes it exactly (2e-7
+everywhere) and costs more than not chunking at all.
+
+**The open path has that seam today.** `synthesiseInChunks` rebuilds the
+file in 30 s chunks through the same pass, so every opened file's audio
+carries the same −42 dB low-band error at each 30 s boundary. It is a slow
+deviation rather than a step, so it does not click. Fixing it means filling
+each chunk to the uncapped support, which the same measurement says costs
+about 40 % of the synthesis. That trade is Rob's to make.
+
+---
+
 ---
 
 ## Risks
