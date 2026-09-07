@@ -273,10 +273,18 @@ export class BlockStore implements PackedStateStore {
   private async eachBlock(take: (index: number, values: Float32Array) => void): Promise<void> {
     const count = this.grid.blockCount;
     const pending: Promise<Float32Array>[] = [];
-    for (let index = 0; index < Math.min(READ_ALL_AHEAD, count); index++) pending.push(this.block(index));
+    // A read ahead of the walk is dropped where the walk stops early — a store
+    // disposed under it — so each carries its own handler and the one that is
+    // waited on still throws.
+    const readAhead = (index: number): Promise<Float32Array> => {
+      const values = this.block(index);
+      void values.catch(() => {});
+      return values;
+    };
+    for (let index = 0; index < Math.min(READ_ALL_AHEAD, count); index++) pending.push(readAhead(index));
     for (let index = 0; index < count; index++) {
       const values = await pending.shift()!;
-      if (index + READ_ALL_AHEAD < count) pending.push(this.block(index + READ_ALL_AHEAD));
+      if (index + READ_ALL_AHEAD < count) pending.push(readAhead(index + READ_ALL_AHEAD));
       take(index, values);
     }
   }
