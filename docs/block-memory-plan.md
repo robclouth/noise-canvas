@@ -1882,6 +1882,46 @@ about 40 % of the synthesis. That trade is Rob's to make.
 
 ---
 
+## Phase 15 — an undrawn picture is a hatch, not white (2026-09-07)
+
+Rob: "as the file opens it's all white, which gradually gets filled in with
+the actual value. White looks very weird — we need a generic 'I don't know
+what's here' texture, which is also under the brush when the preview has not
+caught up."
+
+The display's levels and tiles hold magnitudes as dB, and an untouched
+texel is zero. Zero dB is a magnitude of one — the loudest value the picture
+can show, which paints white in both channels. Nothing exposed that until a
+level could be sampled before it was drawn: `beginDisplaySeedFromStore`
+marked the pyramid seeded so the block-by-block draw could patch it, while
+`readyLevel` still said every level was ready. A file that arrives without a
+coarse strip — one restored from its history, or any canvas rebuilt after
+the analysis data was released — therefore showed white and filled in a
+block at a time.
+
+### What was built
+
+- `DISPLAY_DB_UNKNOWN` (-1000 dB, in `display-pyramid.ts` and mirrored in
+  `glsl/display-mags.glsl`): the value a display store holds where nothing
+  has been drawn. Every level is cleared to it before any seed.
+- The samplers refuse it: `sampleLevelDb` and `ringBinDb` report a tap they
+  do not know, and `samplePyramidDb` fails rather than returning it.
+- `sampleDisplayMags` reports `unknown` where neither a tile, the canvas nor
+  the pyramid can answer, and the display draws a dark diagonal hatch there.
+  It needs no grace period, unlike the loading grey: there is no picture to
+  flash away from.
+
+### Measured
+
+`display-pyramid-parity.test.ts` renders a pyramid nothing has drawn into.
+Without the store half it reads 255 — Rob's white; without the shader half
+it is flat black; with both it is a hatch under 60 with visible stripes. The
+normal open path is unchanged: a 900 s stereo file still shows its picture
+from the first frame the view exists (`white-open.mjs`, white fraction
+0.001 either side).
+
+---
+
 ---
 
 ## Risks

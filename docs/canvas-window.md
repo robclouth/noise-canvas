@@ -272,6 +272,15 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     `MAX_PACKED_TEXTURE_TEXELS`; `canvasWindowBlocks` returns a finite figure
     there whatever else says.
 
+15. **A display store says where it has nothing, and nothing reads as zero.**
+    The pyramid and the tile ring hold magnitudes as dB, so an untouched texel
+    is 0 dB — the loudest value there is, which paints white. Every level is
+    cleared to `DISPLAY_DB_UNKNOWN` before anything seeds it, the samplers
+    refuse a tap holding it, and the display draws a hatch over what nothing
+    can answer for. This is what a file being drawn block by block shows: it
+    reaches `beginDisplaySeedFromStore` with no coarse strip to stand in, and
+    the levels fill in one block at a time.
+
 ## How to check it still works
 
 The unit suite cannot see most of this: it compares two renderers, and both can
