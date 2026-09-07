@@ -72,6 +72,7 @@ export class DisplayTileRing {
   private window = { first: 0, count: 0 };
   private residency = new Int32Array(0);
   private blend = 0;
+  private stage: { texture: DataTexture; array: Float32Array; width: number; texels: number } | null = null;
 
   constructor(layout: BandLayout, numFrames: number, opts?: { maxTexels?: number }) {
     this.layout = layout;
@@ -212,6 +213,14 @@ export class DisplayTileRing {
     return missing;
   }
 
+  /**
+   * Lets go of the bound window, so the display reads the canvas or the
+   * pyramid instead. Resident tiles stay for a later aim.
+   */
+  release(): void {
+    this.window = { first: 0, count: 0 };
+  }
+
   /** The time step the ring's tiles are cut at, or -1 while it has no grid. */
   gridLevel(): number {
     return this.grid ? this.grid.level : -1;
@@ -263,28 +272,28 @@ export class DisplayTileRing {
   }
 
   /**
-   * The file pixel ranges holding one tile's source bins, as [start, count]
-   * per band, in the order `cutTileFromPacked` reads their values.
+   * The taps one tile's bins read, as [startPixel, count, stride] per band,
+   * in the order `cutTileFromTaps` takes their magnitudes.
    */
-  tileSourcePixelRanges(tile: number): Uint32Array {
+  tileTapRuns(tile: number): Uint32Array {
     const grid = this.grid;
     if (!grid) throw new Error("the ring has no grid");
-    const ranges: number[] = [];
+    const runs: number[] = [];
     for (let band = 0; band < this.layout.numBands; band++) {
       const run = this.tileSourceRun(grid, tile, band);
       if (!run) continue;
-      ranges.push(this.layout.metadata[band * 4] + run.srcStart, run.srcCount);
+      runs.push(this.layout.metadata[band * 4] + run.srcStart, run.destCount, run.decimation);
     }
-    return Uint32Array.from(ranges);
+    return Uint32Array.from(runs);
   }
 
   /**
-   * Cuts one tile's slot from `values`, the compact packed pixels of
-   * `tileSourcePixelRanges(tile)`. Cutting into a slot the bound window
+   * Cuts one tile's slot from `taps`, the left and right magnitudes of
+   * `tileTapRuns(tile)` two floats each. Cutting into a slot the bound window
    * still shows as another tile would corrupt the picture, so that throws;
    * `aim` empties the window first when a pan retargets its slots.
    */
-  cutTileFromPacked(gl: WebGLRenderer, tile: number, values: Float32Array): void {
+  cutTileFromTaps(gl: WebGLRenderer, tile: number, taps: Float32Array): void {
     const grid = this.grid;
     if (!grid || this.slots === 0) throw new Error("the ring has no grid to cut into");
     const slot = tile % this.slots;
@@ -307,27 +316,34 @@ export class DisplayTileRing {
         destStart: slot * grid.tileTexels + grid.metadata[band * 4],
         destCount: run.destCount,
         srcStart: texels,
-        decimation: run.decimation,
+        decimation: 1,
       });
-      texels += run.srcCount;
+      texels += run.destCount;
     }
-    if (values.length !== texels * 4) throw new Error("the values do not match the tile's source pixels");
+    if (taps.length !== texels * 2) throw new Error("the taps do not match the tile's bins");
     if (texels === 0) return;
 
+    const stage = this.stageFor(grid);
+    stage.array.set(taps);
+    stage.texture.needsUpdate = true;
+    this.draw.run(gl, this.target, stage.texture, stage.width, "chunk", instances);
+    this.residency[slot] = tile;
+  }
+
+  /** The upload texture one tile's taps go through, kept at the grid's tile size. */
+  private stageFor(grid: TileGrid): { texture: DataTexture; array: Float32Array; width: number; texels: number } {
+    const texels = Math.max(1, grid.tileTexels);
+    if (this.stage && this.stage.texels === texels) return this.stage;
+    this.stage?.texture.dispose();
     const width = Math.min(ANALYSIS_MAX_TEXTURE_SIZE, texels);
     const height = Math.ceil(texels / width);
-    let padded = values;
-    if (values.length !== width * height * 4) {
-      padded = new Float32Array(width * height * 4);
-      padded.set(values);
-    }
-    const chunk = new DataTexture(padded, width, height, RGBAFormat, FloatType);
-    chunk.internalFormat = "RGBA32F";
-    chunk.needsUpdate = true;
-    gl.initTexture(chunk);
-    this.draw.run(gl, this.target, chunk, width, "canvas", instances);
-    chunk.dispose();
-    this.residency[slot] = tile;
+    const array = new Float32Array(width * height * 2);
+    const texture = new DataTexture(array, width, height, RGFormat, FloatType);
+    texture.internalFormat = "RG32F";
+    texture.minFilter = NearestFilter;
+    texture.magFilter = NearestFilter;
+    this.stage = { texture, array, width, texels };
+    return this.stage;
   }
 
   /** One band's ring-bin and source-bin runs inside a tile, or null when the band has none. */
@@ -424,6 +440,7 @@ export class DisplayTileRing {
   dispose(): void {
     this.target.dispose();
     this.metadataTex.dispose();
+    this.stage?.texture.dispose();
     this.draw.dispose();
   }
 }

@@ -104,8 +104,13 @@ export class StrokeScratchPool {
   private width = 0;
   private height = 0;
 
-  acquire(owner: unknown, width: number, height: number): { scratch: StrokeScratch; refreshed: boolean } {
+  acquire(
+    owner: unknown,
+    width: number,
+    height: number,
+  ): { scratch: StrokeScratch; refreshed: boolean; allocated: boolean } {
     const sizeChanged = width !== this.width || height !== this.height;
+    const allocated = !this.targets || sizeChanged;
     if (!this.targets) {
       this.targets = createTargets(width, height);
     } else if (sizeChanged) {
@@ -117,7 +122,7 @@ export class StrokeScratchPool {
     this.owner = owner;
     this.width = width;
     this.height = height;
-    return { scratch: this.targets, refreshed };
+    return { scratch: this.targets, refreshed, allocated };
   }
 
   /**

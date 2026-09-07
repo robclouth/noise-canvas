@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { float32BitsEqual, mergePixelRanges, scatterPixelRanges, subtractPixelRanges } from "../pixel-ranges";
+import {
+  copyTapsFromCompact,
+  float32BitsEqual,
+  gatherPixelRanges,
+  gatherTaps,
+  mergePixelRanges,
+  scatterPixelRanges,
+  subtractPixelRanges,
+  tapCount,
+  tapSpanRanges,
+} from "../pixel-ranges";
 
 describe("subtractPixelRanges", () => {
   it("cuts a hole out of a range", () => {
@@ -71,5 +81,55 @@ describe("float32BitsEqual", () => {
     expect(float32BitsEqual(Float32Array.from([0]), Float32Array.from([-0]))).toBe(false);
     expect(float32BitsEqual(Float32Array.from([1, 2]), Float32Array.from([1, 3]))).toBe(false);
     expect(float32BitsEqual(Float32Array.from([1]), Float32Array.from([1, 1]))).toBe(false);
+  });
+});
+
+describe("taps", () => {
+  // A packed array whose every float is its own index, so a wrong pixel shows.
+  const packed = Float32Array.from({ length: 4000 * 4 }, (_, i) => i);
+  // Two runs in different bands: one at stride 8, one at stride 3.
+  const runs = Uint32Array.of(100, 50, 8, 1500, 20, 3);
+
+  it("counts the taps and spans the pixels they stride over", () => {
+    expect(tapCount(runs)).toBe(70);
+    expect(Array.from(tapSpanRanges(runs))).toEqual([100, 49 * 8 + 1, 1500, 19 * 3 + 1]);
+    expect(Array.from(tapSpanRanges(Uint32Array.of(7, 0, 4)))).toEqual([7, 0]);
+  });
+
+  it("gathers the left and right magnitudes at each tap", () => {
+    const taps = gatherTaps(packed, runs);
+    expect(taps.length).toBe(140);
+    expect(taps[0]).toBe(100 * 4);
+    expect(taps[1]).toBe(100 * 4 + 2);
+    expect(taps[2]).toBe(108 * 4);
+    expect(taps[100]).toBe(1500 * 4);
+    expect(taps[139]).toBe((1500 + 19 * 3) * 4 + 2);
+  });
+
+  it("picks the taps out of compact pieces the same as out of the whole", () => {
+    // Pieces that split both runs, with gaps the taps must skip.
+    const pieces = Uint32Array.of(0, 250, 300, 200, 1490, 30, 1540, 40);
+    const compact = gatherPixelRanges(packed, pieces);
+    const out = new Float32Array(tapCount(runs) * 2).fill(-1);
+    copyTapsFromCompact(out, runs, compact, pieces);
+    const whole = gatherTaps(packed, runs);
+    for (let i = 0; i < out.length; i++) {
+      const pixel = i < 100 ? 100 + Math.floor(i / 2) * 8 : 1500 + Math.floor((i - 100) / 2) * 3;
+      const held =
+        (pixel >= 0 && pixel < 250) ||
+        (pixel >= 300 && pixel < 500) ||
+        (pixel >= 1490 && pixel < 1520) ||
+        (pixel >= 1540 && pixel < 1580);
+      expect(out[i]).toBe(held ? whole[i] : -1);
+    }
+    expect(float32BitsEqual(out, whole)).toBe(false);
+    const rest = new Float32Array(out);
+    copyTapsFromCompact(
+      rest,
+      runs,
+      gatherPixelRanges(packed, Uint32Array.of(250, 50, 500, 1000, 1520, 20)),
+      Uint32Array.of(250, 50, 500, 1000, 1520, 20),
+    );
+    expect(float32BitsEqual(rest, whole)).toBe(true);
   });
 });

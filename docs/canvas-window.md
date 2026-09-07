@@ -123,11 +123,18 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    lands: a commit takes seconds, and a stroke begun meanwhile would
    otherwise be ended mid-way, its slides carrying nothing.
    The display's tile ring reads the committed state through the canvas for
-   the same reason (`readCommitted`): a tile cut while a commit is landing
-   takes the held paint over the store's values, so a zoom across a level
-   never shows the state before the stroke; and holding the paint re-encodes
-   the stroke's footprint from the canvas, so a tile cut while the stroke was
-   painted shows its dabs.
+   the same reason (`readCommittedTaps`): a tile cut while a commit is
+   landing takes the held paint over the store's values, so a zoom across a
+   level never shows the state before the stroke; and holding the paint
+   re-encodes the stroke's footprint from the canvas, so a tile cut while
+   the stroke was painted shows its dabs. A tile reads only the taps its bins
+   keep (`readTaps`, two floats each), not every pixel of the span they
+   stride over, because a level's decimation is what the cut would have
+   thrown away. And the ring serves only a view the canvas neither holds nor
+   is filling to hold: where the window is aimed at the view, the ring lets
+   go and the pyramid's finest level stands in until the canvas lands. At
+   fine levels a tile is floored to the coarsest band's step, four viewports
+   wide, and reading four of those per level was the pause a zoom paid.
 5. **Any whole-state move installs a fresh carry.** After a history hop, a
    restore or phase turns, the old carry no longer speaks for the file. A
    commit already reading the old one keeps the object it took.

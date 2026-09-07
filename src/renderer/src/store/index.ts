@@ -522,30 +522,32 @@ export function selectParameter(key: ParameterKey) {
  * This allows existing code that reads from state to work with step-aware values.
  * Falls back to parameter defaults if the step doesn't have a value.
  */
-export function createStepStateView(state: State, stepIndex: number): State {
-  // Create a shallow copy to avoid proxy-on-proxy issues
-  const view = { ...state } as Record<string, unknown>;
+// A step view is built once per state object and step. A state is never
+// changed in place, so the cached view answers every later reader of it.
+const stepStateViews = new WeakMap<State, Map<number, State>>();
+let stepParameterKeys: ParameterKey[] | null = null;
 
-  // Override step parameters with values from the specific step in the active brush
+export function createStepStateView(state: State, stepIndex: number): State {
+  let views = stepStateViews.get(state);
+  if (!views) {
+    views = new Map();
+    stepStateViews.set(state, views);
+  }
+  const cached = views.get(stepIndex);
+  if (cached) return cached;
+
+  stepParameterKeys ??= (Object.keys(parameterDefs) as ParameterKey[]).filter((key) => isStepParameter(key));
+  const view = { ...state } as Record<string, unknown>;
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const step = steps[stepIndex];
   if (step) {
-    Object.keys(parameterDefs).forEach((key) => {
-      if (isStepParameter(key as ParameterKey)) {
-        if (key in step) {
-          view[key] = step[key as ParameterKey];
-        } else {
-          // Fall back to parameter default if not in step
-          const def = parameterDefs[key as ParameterKey];
-          if (def) {
-            view[key] = def.default;
-          }
-        }
-      }
-    });
+    for (const key of stepParameterKeys) {
+      view[key] = key in step ? step[key] : parameterDefs[key]?.default;
+    }
   }
-
-  return view as unknown as State;
+  const built = view as unknown as State;
+  views.set(stepIndex, built);
+  return built;
 }
 
 /**

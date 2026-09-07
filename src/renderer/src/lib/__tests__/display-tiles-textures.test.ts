@@ -20,7 +20,7 @@ import { wholeFileCanvasView } from "../canvas-view";
 import type { CommittedSource } from "../display-decimate";
 import { DisplayTileRing, type RingView } from "../display-tiles-textures";
 import { DISPLAY_TILES_BYTES_PER_TEXEL, displayTilesBytes, tileGrid } from "../display-tiles";
-import { gatherPixelRanges } from "../pixel-ranges";
+import { gatherTaps, tapSpanRanges } from "../pixel-ranges";
 import { packedFold, padToFold } from "../constants";
 
 const RESOLVE_VERT = /* glsl */ `
@@ -299,7 +299,7 @@ describe("display tile ring", () => {
     expect(expectRingMatches(ring, maxTexels, packed, 0)).toBeGreaterThan(1000);
   });
 
-  it("cuts a tile from packed values the same as from the canvas", () => {
+  it("cuts a tile from its taps the same as from the canvas", () => {
     const maxTexels = 1 << 16;
     const fromCanvas = makeRing(maxTexels);
     const fromStore = makeRing(maxTexels);
@@ -314,7 +314,7 @@ describe("display tile ring", () => {
     expect(missing.length).toBeGreaterThan(0);
     expect(fromStore.uniforms().tileCount).toBe(0);
     for (const tile of missing) {
-      fromStore.cutTileFromPacked(gl, tile, gatherPixelRanges(varied, fromStore.tileSourcePixelRanges(tile)));
+      fromStore.cutTileFromTaps(gl, tile, gatherTaps(varied, fromStore.tileTapRuns(tile)));
     }
     expect(fromStore.aim(ringView, PYRAMID_STEP)).toEqual([]);
     expect(fromStore.uniforms()).toEqual(fromCanvas.uniforms());
@@ -343,7 +343,7 @@ describe("display tile ring", () => {
     expect(ring.uniforms().tileCount).toBe(0);
 
     for (const tile of missing) {
-      ring.cutTileFromPacked(gl, tile, gatherPixelRanges(varied, ring.tileSourcePixelRanges(tile)));
+      ring.cutTileFromTaps(gl, tile, gatherTaps(varied, ring.tileTapRuns(tile)));
     }
     expect(ring.aim(far, PYRAMID_STEP)).toEqual([]);
     expect(ring.uniforms().firstTile).toBe(missing[0]);
@@ -385,10 +385,10 @@ describe("display tile ring", () => {
     // The pixels of the first tile alone: the ring forgets that tile and
     // keeps the rest of the window.
     const dropped = bound.firstTile;
-    ring.dropTiles(ring.tileSourcePixelRanges(dropped));
+    ring.dropTiles(tapSpanRanges(ring.tileTapRuns(dropped)));
     expect(ring.aim(view(1, 0), PYRAMID_STEP)).toEqual([dropped]);
 
-    ring.cutTileFromPacked(gl, dropped, gatherPixelRanges(varied, ring.tileSourcePixelRanges(dropped)));
+    ring.cutTileFromTaps(gl, dropped, gatherTaps(varied, ring.tileTapRuns(dropped)));
     expect(ring.aim(view(1, 0), PYRAMID_STEP)).toEqual([]);
     expect(expectRingMatches(ring, maxTexels, varied, 0)).toBeGreaterThan(1000);
   });

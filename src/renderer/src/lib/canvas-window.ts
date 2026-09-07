@@ -41,6 +41,8 @@ export type BlockSpan = { firstBlock: number; lastBlock: number };
 
 /** Reads the packed values of file-absolute pixel ranges, compact and in order. */
 export type BlockValueReader = (ranges: Uint32Array) => Promise<Float32Array | null>;
+/** Reads the left and right magnitudes at strided taps, [startPixel, count, stride] per run; null when the store cannot serve them. */
+export type TapValueReader = (runs: Uint32Array) => Promise<Float32Array | null>;
 
 /**
  * Reads one block's packed values, compact in block order. The array may be

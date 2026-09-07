@@ -6,7 +6,7 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { layoutTexels } from "../band-layout";
 import { blockGrid, blockPixelRanges } from "../block-grid";
 import { BlockStore, type BlockBackend, type BlockCodec } from "../block-store";
-import { gatherPixelRanges } from "../pixel-ranges";
+import { gatherPixelRanges, gatherTaps } from "../pixel-ranges";
 
 const SAMPLE_RATE = 8000;
 const data = createConstantQMockSpectrogramData({ durationSeconds: 2, sampleRate: SAMPLE_RATE, bandsPerOctave: 4 });
@@ -129,6 +129,15 @@ describe("BlockStore", () => {
     const { store } = await seeded();
     const ranges = Uint32Array.of(...bandRange(0, 100, 3000), ...bandRange(5, 7, 90));
     expect(Array.from(await store.readRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+  });
+
+  it("reads strided taps across blocks as the whole array holds them", async () => {
+    const { grid, store } = await seeded();
+    const bins = grid.binsPerBlock[0];
+    const [first] = bandRange(0, bins - 7, 1);
+    const [second] = bandRange(5, 3, 1);
+    const runs = Uint32Array.of(first, Math.floor((bins * 3) / 16), 16, second, 20, 3);
+    expect(Array.from(await store.readTaps(runs))).toEqual(Array.from(gatherTaps(packed, runs)));
   });
 
   it("reads a range that spans several blocks", async () => {

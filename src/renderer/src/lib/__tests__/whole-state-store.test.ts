@@ -6,7 +6,7 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { layoutTexels } from "../band-layout";
 import { blockGrid } from "../block-grid";
 import type { BlockBackend, BlockCodec } from "../block-store";
-import { gatherPixelRanges } from "../pixel-ranges";
+import { gatherPixelRanges, gatherTaps } from "../pixel-ranges";
 import { WholeStateStore } from "../whole-state-store";
 
 const SAMPLE_RATE = 8000;
@@ -98,6 +98,9 @@ describe("WholeStateStore", () => {
     expect(Array.from(await store.readRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
     const block = await store.readBlock(3);
     expect(Array.from(block)).toEqual(Array.from(gatherPixelRanges(packed, store.blockRanges(3))));
+    const [first] = bandRange(0, 100, 1);
+    const runs = Uint32Array.of(first, 50, 8);
+    expect(Array.from(await store.readTaps(runs))).toEqual(Array.from(gatherTaps(packed, runs)));
     expect(grid.blockCount).toBeGreaterThan(4);
   });
 

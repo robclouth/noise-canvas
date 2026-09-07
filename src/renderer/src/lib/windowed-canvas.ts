@@ -12,7 +12,13 @@ import {
   viewUvToFileUv,
   type CanvasView,
 } from "./canvas-view";
-import { CanvasWindow, needsCanvasWindow, type BlockReader, type BlockValueReader } from "./canvas-window";
+import {
+  CanvasWindow,
+  needsCanvasWindow,
+  type BlockReader,
+  type BlockValueReader,
+  type TapValueReader,
+} from "./canvas-window";
 import { canvasWindowBlocks } from "./gpu-budget";
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
 import type { CoarseStrip } from "./coarse-strip";
@@ -20,10 +26,13 @@ import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
 import {
   composePixelRangeValues,
+  copyTapsFromCompact,
   gatherPixelRanges,
   intersectPixelRanges,
   mergePixelRanges,
   pixelRangeCount,
+  tapCount,
+  tapSpanRanges,
 } from "./pixel-ranges";
 import { SourceWindowSlot, type SourceFileBlocks, type SourceNeed, type SourceWindowTextures } from "./source-window";
 import type { StrokeRenderer } from "./stroke-renderer";
@@ -72,6 +81,8 @@ export type WindowedCanvasDeps = {
   renderer: () => StrokeRenderer | null;
   /** The file's committed pixels, by file-absolute range. */
   readCurrent: BlockValueReader;
+  /** The committed magnitudes at strided taps; without it, taps are picked out of `readCurrent`. */
+  readCurrentTaps?: TapValueReader;
   /** The file's original pixels — what the store was seeded with. */
   readRoot: BlockValueReader;
   /** The committed pixels of one block, without the range read's copy. */
@@ -388,23 +399,29 @@ export class WindowedCanvas {
   }
 
   /**
-   * The committed pixels of `ranges` as the file stands: the store's values
-   * with the paint of every stroke still committing over them, newest stroke
-   * on top. Null when the store cannot serve the range.
+   * The left and right magnitudes at the taps `runs` names — [startPixel,
+   * count, stride] per band — as the file stands: the store's values with
+   * the paint of every stroke still committing over them. Null when the
+   * store cannot serve them.
    */
-  async readCommitted(ranges: Uint32Array): Promise<Float32Array | null> {
-    const stored = await this.deps.readCurrent(ranges);
-    if (!stored || this.pending.length === 0) return stored;
-    await Promise.all(this.pending.map((paint) => paint.landed));
-    const layers: { ranges: Uint32Array; values: Float32Array }[] = [];
-    for (let i = this.pending.length - 1; i >= 0; i--) {
-      const paint = this.pending[i];
-      if (!paint.values || pixelRangeCount(intersectPixelRanges(paint.ranges, ranges)) === 0) continue;
-      layers.push({ ranges: paint.ranges, values: paint.values });
+  async readCommittedTaps(runs: Uint32Array): Promise<Float32Array | null> {
+    const { readCurrentTaps, readCurrent } = this.deps;
+    let taps: Float32Array | null;
+    if (readCurrentTaps) {
+      taps = await readCurrentTaps(runs);
+    } else {
+      const spans = tapSpanRanges(runs);
+      const values = await readCurrent(spans);
+      if (!values) return null;
+      taps = new Float32Array(tapCount(runs) * 2);
+      copyTapsFromCompact(taps, runs, values, spans);
     }
-    if (layers.length === 0) return stored;
-    layers.push({ ranges, values: stored });
-    return composePixelRangeValues(ranges, layers);
+    if (!taps || this.pending.length === 0) return taps;
+    await Promise.all(this.pending.map((paint) => paint.landed));
+    for (const paint of this.pending) {
+      if (paint.values) copyTapsFromCompact(taps, runs, paint.values, paint.ranges);
+    }
+    return taps;
   }
 
   /** Drops the slots of the blocks over the named file pixels, so the store serves them next. */

@@ -10,7 +10,13 @@ import {
   type PackedStateStore,
 } from "./block-store";
 import { ByteBudgetCache } from "./byte-budget-cache";
-import { copyCompactOverlap, gatherPixelRanges, pixelRangeCount, scatterCompactPixelRanges } from "./pixel-ranges";
+import {
+  copyCompactOverlap,
+  gatherPixelRanges,
+  gatherTaps,
+  pixelRangeCount,
+  scatterCompactPixelRanges,
+} from "./pixel-ranges";
 
 /** What a whole-state store keeps beyond its grid and its backend. */
 export type WholeStateStoreOptions = {
@@ -148,6 +154,11 @@ export class WholeStateStore implements PackedStateStore {
   /** The pixels `ranges` names, laid end to end in range order. */
   async readRanges(ranges: Uint32Array): Promise<Float32Array> {
     return gatherPixelRanges(this.tier(), ranges);
+  }
+
+  /** The magnitudes at the taps `runs` names, two floats per tap in run order. */
+  async readTaps(runs: Uint32Array): Promise<Float32Array> {
+    return gatherTaps(this.tier(), runs);
   }
 
   /** The pixels `ranges` names as they were seeded, laid end to end in range order. */

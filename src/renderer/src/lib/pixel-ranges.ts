@@ -213,3 +213,84 @@ export function composePixelRangeValues(
   }
   return out;
 }
+
+/**
+ * Runs of taps over the packed array: [startPixel, count, stride] triples,
+ * each inside one band, sorted by start. A run's taps are the pixels
+ * `startPixel + k * stride` for `k` below `count`.
+ */
+export function tapCount(runs: Uint32Array): number {
+  let count = 0;
+  for (let i = 0; i + 2 < runs.length; i += 3) count += runs[i + 1];
+  return count;
+}
+
+/** The pixel range each run's taps span, one [start, count] pair per run. */
+export function tapSpanRanges(runs: Uint32Array): Uint32Array {
+  const out = new Uint32Array((runs.length / 3) * 2);
+  for (let i = 0, j = 0; i + 2 < runs.length; i += 3, j += 2) {
+    out[j] = runs[i];
+    out[j + 1] = runs[i + 1] === 0 ? 0 : (runs[i + 1] - 1) * runs[i + 2] + 1;
+  }
+  return out;
+}
+
+/** The left and right magnitudes at every tap of `runs`, two floats per tap in run order, out of the whole packed array. */
+export function gatherTaps(src: Float32Array, runs: Uint32Array): Float32Array {
+  const out = new Float32Array(tapCount(runs) * 2);
+  let at = 0;
+  for (let i = 0; i + 2 < runs.length; i += 3) {
+    const start = runs[i];
+    const count = runs[i + 1];
+    const stride = runs[i + 2];
+    for (let k = 0; k < count; k++) {
+      const pixel = (start + k * stride) * 4;
+      out[at++] = src[pixel];
+      out[at++] = src[pixel + 2];
+    }
+  }
+  return out;
+}
+
+/**
+ * Copies into `out`, laid out as `gatherTaps` lays it, the magnitudes of
+ * every tap of `runs` that `srcRanges` holds, out of `src` laid out in
+ * `srcRanges` order. Taps outside the ranges are left as they are. Both lists
+ * must be sorted and non-overlapping.
+ */
+export function copyTapsFromCompact(
+  out: Float32Array,
+  runs: Uint32Array,
+  src: Float32Array,
+  srcRanges: Uint32Array,
+): void {
+  let srcIndex = 0;
+  let srcAt = 0;
+  let outAt = 0;
+  for (let i = 0; i + 2 < runs.length; i += 3) {
+    const start = runs[i];
+    const count = runs[i + 1];
+    const stride = runs[i + 2];
+    const end = count === 0 ? start : start + (count - 1) * stride + 1;
+    while (srcIndex + 1 < srcRanges.length && srcRanges[srcIndex] + srcRanges[srcIndex + 1] <= start) {
+      srcAt += srcRanges[srcIndex + 1] * 4;
+      srcIndex += 2;
+    }
+    let cursor = srcIndex;
+    let at = srcAt;
+    while (cursor + 1 < srcRanges.length && srcRanges[cursor] < end) {
+      const rangeStart = srcRanges[cursor];
+      const rangeEnd = rangeStart + srcRanges[cursor + 1];
+      const first = Math.max(0, Math.ceil((rangeStart - start) / stride));
+      const last = Math.min(count - 1, Math.floor((rangeEnd - 1 - start) / stride));
+      for (let k = first; k <= last; k++) {
+        const pixel = at + (start + k * stride - rangeStart) * 4;
+        out[(outAt + k) * 2] = src[pixel];
+        out[(outAt + k) * 2 + 1] = src[pixel + 2];
+      }
+      at += srcRanges[cursor + 1] * 4;
+      cursor += 2;
+    }
+    outAt += count;
+  }
+}

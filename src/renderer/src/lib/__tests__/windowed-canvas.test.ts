@@ -15,7 +15,7 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockOfFrame, blockPixelRanges, type BlockGrid } from "../block-grid";
 import { fileRangesToView } from "../canvas-view";
-import { float32BitsEqual, gatherPixelRanges, scatterCompactPixelRanges, subtractPixelRanges } from "../pixel-ranges";
+import { float32BitsEqual, gatherPixelRanges, gatherTaps, scatterCompactPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { WindowedCanvas } from "../windowed-canvas";
 import { CoarseStripBuilder } from "../coarse-strip";
@@ -554,7 +554,7 @@ describe("a canvas that holds a window of the file", () => {
     expect(float32BitsEqual(await canvasBlock0(), original)).toBe(true);
   });
 
-  it("serves a committing stroke's paint to a reader of the committed state", async () => {
+  it("serves a committing stroke's paint to a reader of the committed taps", async () => {
     const rig = harness(1);
     await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
     rig.canvas.beginStroke();
@@ -562,29 +562,32 @@ describe("a canvas that holds a window of the file", () => {
     const dirty = rig.canvas.dirtyPixelRanges();
     expect(dirty).not.toBeNull();
     const painted = await rig.canvas.readPixelRanges(dirty!);
-    const original = gatherPixelRanges(data.packedData, dirty!);
-    expect(float32BitsEqual(painted, original)).toBe(false);
+    expect(float32BitsEqual(painted, gatherPixelRanges(data.packedData, dirty!))).toBe(false);
+    const whole = Float32Array.from(data.packedData);
+    scatterCompactPixelRanges(whole, painted, dirty!);
+
+    // Every fourth pixel of the first block: taps inside the stroke and around it.
+    const block0 = blockPixelRanges(grid, 0);
+    const runs: number[] = [];
+    for (let i = 0; i < block0.count; i++) {
+      const start = block0.ranges[i * 2];
+      const count = Math.ceil(block0.ranges[i * 2 + 1] / 4);
+      if (count > 0) runs.push(start, count, 4);
+    }
+    const tapRuns = Uint32Array.from(runs);
+    const original = gatherTaps(data.packedData, tapRuns);
+    const withPaint = gatherTaps(whole, tapRuns);
+    expect(float32BitsEqual(original, withPaint)).toBe(false);
 
     // Until the pen lifts the store speaks for the file.
-    expect(float32BitsEqual((await rig.canvas.readCommitted(dirty!))!, original)).toBe(true);
+    expect(float32BitsEqual((await rig.canvas.readCommittedTaps(tapRuns))!, original)).toBe(true);
 
     const release = rig.canvas.holdPaint(dirty!, rig.canvas.readPixelRanges(dirty!));
     rig.canvas.endStroke();
-    expect(float32BitsEqual((await rig.canvas.readCommitted(dirty!))!, painted)).toBe(true);
-
-    // A wider read gets the paint inside the stroke and the store around it.
-    const block0 = blockPixelRanges(grid, 0);
-    const block0Ranges = block0.ranges.slice(0, block0.count * 2);
-    const wide = await rig.canvas.readCommitted(block0Ranges);
-    expect(wide).not.toBeNull();
-    const whole = new Float32Array(data.packedData.length);
-    scatterCompactPixelRanges(whole, wide!, block0Ranges);
-    expect(float32BitsEqual(gatherPixelRanges(whole, dirty!), painted)).toBe(true);
-    const rest = subtractPixelRanges(block0Ranges, dirty!);
-    expect(float32BitsEqual(gatherPixelRanges(whole, rest), gatherPixelRanges(data.packedData, rest))).toBe(true);
+    expect(float32BitsEqual((await rig.canvas.readCommittedTaps(tapRuns))!, withPaint)).toBe(true);
 
     release();
-    expect(float32BitsEqual((await rig.canvas.readCommitted(dirty!))!, original)).toBe(true);
+    expect(float32BitsEqual((await rig.canvas.readCommittedTaps(tapRuns))!, original)).toBe(true);
   });
 
   it("re-encodes the stroke into the display when its paint is held", async () => {

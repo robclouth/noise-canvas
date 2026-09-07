@@ -1651,6 +1651,54 @@ Before the fix the zoomed-out view held the pre-stroke picture for the whole
 
 ---
 
+## Phase 11 — the jerks and pauses while moving around (2026-09-07)
+
+Rob: "there's still sort of jerks and pauses as I move around". A CPU profile
+of the renderer under a scripted session (`nav-profile.mjs`: zooms, wheel
+scrolls, drags, hovers on 280 s stereo) put the pauses on the tile ring. A
+tile read every pixel of its source span through `readRanges` and uploaded
+them as RGBA32F, though a level keeps one tap in 2^(level − step) per band
+and only two of the four floats; and at fine levels a tile is floored to the
+coarsest band's step, four viewports wide, so a zoom-in cut four of them per
+level while the canvas already held the view and was drawn first.
+
+### What was built
+
+- `readTaps` on the stores and `currentTaps` on the history manager: the
+  magnitudes at strided taps, two floats each, gathered out of the blocks
+  (`copyTapsFromCompact`). `WindowedCanvas.readCommittedTaps` lays the held
+  paint over them. The ring cuts a tile from its taps through one kept
+  upload texture (`cutTileFromTaps`).
+- The ring lets go wherever the canvas holds the view or the window is aimed
+  to hold it (`viewAimedRef`); the pyramid's finest level stands in until the
+  canvas lands. The loading grace restarts whenever the view moves, so a zoom
+  under way is never greyed.
+- `verifyScratchAllocation` polls `getError` only after a real allocation,
+  not at every refresh: on a hover it stalled the GPU every preview frame.
+- `createStepStateView` is memoised per state object and step, and walks the
+  step keys once, so the frame loop's four readers rebuild it once per
+  store update.
+
+### Measured (M4 Pro, 280 s stereo, built app, `nav-profile.mjs`, ~25 s session)
+
+| measure                          | before            | taps              | + ring skip, memo |
+| -------------------------------- | ----------------- | ----------------- | ----------------- |
+| main thread busy                 | 6.6 s             | 3.2 s             | 2.0 s             |
+| long tasks (count, total, worst) | 22, 3.4 s, 495 ms | 4, 0.37 s, 143 ms | 1, 86 ms, 86 ms   |
+| rAF gaps over 80 ms              | —                 | 16, worst 333 ms  | 3, worst 100 ms   |
+| `copyCompactOverlap` / taps      | 1277 ms           | 389 ms            | 0                 |
+| `texSubImage2D`                  | 866 ms            | 75 ms             | 28 ms             |
+| garbage collector                | 713 ms            | 135 ms            | 139 ms            |
+| `createStepStateView`            | 748 ms            | 711 ms            | 67 ms             |
+| `getError`                       | 227 ms            | 0                 | 0                 |
+
+With `__perf.sync()` on, the frame loop ran at 59 fps over the session and a
+file frame cost 0.55 ms on average, so what remained was not the GPU. The
+diag cadence line's `maxMs` still reads 430 ms: that is the pause between
+gestures, under its 500 ms idle cut-off, not a slow frame.
+
+---
+
 ## Risks
 
 - MAX blending on R16F on ANGLE/Metal and ANGLE/GL (Task 0.2) — the capability

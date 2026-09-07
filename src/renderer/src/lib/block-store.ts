@@ -3,7 +3,15 @@ import { layoutTexels } from "./band-layout";
 import { blockPixelRanges, blocksForPixelRanges, type BlockGrid } from "./block-grid";
 import { ByteBudgetCache } from "./byte-budget-cache";
 import { host } from "./host";
-import { copyCompactOverlap, gatherPixelRanges, pixelRangeCount, scatterCompactPixelRanges } from "./pixel-ranges";
+import {
+  copyCompactOverlap,
+  copyTapsFromCompact,
+  gatherPixelRanges,
+  pixelRangeCount,
+  scatterCompactPixelRanges,
+  tapCount,
+  tapSpanRanges,
+} from "./pixel-ranges";
 
 /** Where a store keeps its encoded blocks between reads. */
 export interface BlockBackend {
@@ -79,6 +87,11 @@ export interface PackedStateStore {
   readAllRoot(): Promise<Float32Array>;
   readRanges(ranges: Uint32Array): Promise<Float32Array>;
   readRootRanges(ranges: Uint32Array): Promise<Float32Array>;
+  /**
+   * The left and right magnitudes at the taps `runs` names — [startPixel,
+   * count, stride] triples, sorted — two floats per tap in run order.
+   */
+  readTaps(runs: Uint32Array): Promise<Float32Array>;
   patch(ranges: Uint32Array, values: Float32Array): Promise<void>;
   applyTurnsCollecting(turns: PhaseTurns): Promise<Uint32Array>;
   flush(): Promise<void>;
@@ -272,6 +285,15 @@ export class BlockStore implements PackedStateStore {
     const blocks = blocksForPixelRanges(this.grid, ranges);
     for (const index of blocks) {
       copyCompactOverlap(out, ranges, await this.block(index), this.blockRanges(index));
+    }
+    return out;
+  }
+
+  /** The magnitudes at the taps `runs` names, two floats per tap in run order. */
+  async readTaps(runs: Uint32Array): Promise<Float32Array> {
+    const out = new Float32Array(tapCount(runs) * 2);
+    for (const index of blocksForPixelRanges(this.grid, tapSpanRanges(runs))) {
+      copyTapsFromCompact(out, runs, await this.block(index), this.blockRanges(index));
     }
     return out;
   }

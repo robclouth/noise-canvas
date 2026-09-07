@@ -741,13 +741,13 @@ export class StrokeRenderer {
    */
   private acquireScratch(): StrokeScratch {
     const { textureWidth, textureHeight } = this.view;
-    const { scratch, refreshed } = this.pool.acquire(this, textureWidth, textureHeight);
+    const { scratch, refreshed, allocated } = this.pool.acquire(this, textureWidth, textureHeight);
     this.scratch = scratch;
+    if (allocated) this.scratchUnverified = true;
     if (refreshed) {
       this.clearMasks(scratch);
       const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
       this.snapshotToStrokeStart(scratch, currentReadFBO.texture);
-      this.scratchUnverified = true;
     }
     return scratch;
   }
@@ -755,7 +755,7 @@ export class StrokeRenderer {
   /**
    * Throws when the driver refused the scratch allocations. The targets are
    * created lazily on first bind, so the refusal only shows up as a GL error
-   * after the first stroke that uses them; the check runs once per refresh.
+   * after the first stroke that uses them; the check runs once per allocation.
    */
   private verifyScratchAllocation(): void {
     if (!this.scratchUnverified) return;
@@ -1926,7 +1926,10 @@ export class StrokeRenderer {
         uniforms.modulatorTex1.value = this.textures.placeholderTexture;
       }
       const { fbo, created } = this.pool.maskFbo(stepIndex);
-      if (created) this.clearTargets([fbo]);
+      if (created) {
+        this.clearTargets([fbo]);
+        this.scratchUnverified = true;
+      }
 
       this.drawRanges(this.maskMaterial, fbo, maskRanges);
 

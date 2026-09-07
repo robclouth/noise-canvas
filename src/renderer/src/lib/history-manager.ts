@@ -1673,6 +1673,28 @@ export class HistoryManager {
   }
 
   /**
+   * The left and right magnitudes at the taps `runs` names — [startPixel,
+   * count, stride] per band — from the current node's packed state, or null
+   * when the store does not carry that state. Waits the way `currentRanges`
+   * does.
+   */
+  async currentTaps(runs: Uint32Array): Promise<Float32Array | null> {
+    await this.initialize();
+    while (this.storeHolds > 0 && this.manifest && this.manifest.overlayNodeId !== this.manifest.currentId) {
+      await this.storeReleased;
+    }
+    const manifest = this.manifest;
+    if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
+    const holder = this.seedHolder();
+    if (!holder) return null;
+    try {
+      return await (await this.seedBlockStore(holder)).readTaps(runs);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * One block of the current node's packed state, as the store holds it —
    * not a copy, so a later commit changes the array — or null when the store
    * does not carry that state. Waits the way `currentRanges` does.

@@ -523,6 +523,10 @@ const FileRendererInner = memo(
     const ringRequestsRef = useRef<Set<string>>(new Set());
     // When the display last began waiting for a finer picture, or null while it has one.
     const loadingSinceRef = useRef<number | null>(null);
+    // The zoom and offset the loading grace was last measured against.
+    const loadingViewRef = useRef({ zoom: 0, offset: 0 });
+    // True while the canvas window is aimed to hold the whole visible span.
+    const viewAimedRef = useRef(false);
 
     // Cleanup StrokeRenderer on unmount or when textures change
     useEffect(() => {
@@ -738,6 +742,11 @@ const FileRendererInner = memo(
       let lacking = false;
       if (canvasCoversFile()) {
         tiles.update(gl, strokeRenderer.committedSource(), ringView, pyramidStepLog2);
+      } else if ((canvasRef.current?.holdsView() ?? false) || viewAimedRef.current) {
+        // The canvas is the sharp picture over the view, or is filling to be
+        // it, so tiles read out of the store would serve nothing.
+        tiles.release();
+        lacking = true;
       } else {
         const missing = tiles.aim(ringView, pyramidStepLog2);
         requestRingTiles(tiles, missing);
@@ -757,9 +766,10 @@ const FileRendererInner = memo(
     };
 
     /**
-     * Reads the tiles the ring is missing out of the committed state and cuts
-     * them in as they land. The read goes through the canvas, which lays the
-     * paint of a stroke still committing over the store's values. A tile
+     * Reads the taps of the tiles the ring is missing out of the committed
+     * state and cuts them in as they land. The read goes through the canvas,
+     * which lays the paint of a stroke still committing over the store's
+     * values. A tile
      * whose level has moved on, or whose slot the bound window took back, is
      * dropped: the next aim asks again.
      */
@@ -770,10 +780,10 @@ const FileRendererInner = memo(
         const key = `${level}:${tile}`;
         if (ringRequestsRef.current.has(key)) continue;
         ringRequestsRef.current.add(key);
-        const ranges = tiles.tileSourcePixelRanges(tile);
+        const runs = tiles.tileTapRuns(tile);
         const read = canvasRef.current
-          ? canvasRef.current.readCommitted(ranges)
-          : getHistoryManager(fileId).currentRanges(ranges);
+          ? canvasRef.current.readCommittedTaps(runs)
+          : getHistoryManager(fileId).currentTaps(runs);
         void read
           .then((values) => {
             ringRequestsRef.current.delete(key);
@@ -781,7 +791,7 @@ const FileRendererInner = memo(
             const live = strokeRendererRef.current?.getDisplayTiles();
             if (!values || !gl || live !== tiles) return;
             if (tiles.gridLevel() !== level || !tiles.canCutTile(tile)) return;
-            tiles.cutTileFromPacked(gl, tile, values);
+            tiles.cutTileFromTaps(gl, tile, values);
             // A tile cut mid-stroke came from a store without the dabs so far.
             if (canvasRef.current?.isStroking && tiles.uniforms().tileCount > 0) {
               strokeRendererRef.current?.refreshDisplayFromStroke();
@@ -846,7 +856,11 @@ const FileRendererInner = memo(
         return;
       }
       const now = performance.now();
-      if (loadingSinceRef.current === null) loadingSinceRef.current = now;
+      // The grace runs from the last move of the view, so a zoom or pan under
+      // way is never greyed while it still moves.
+      const viewMoved = loadingViewRef.current.zoom !== viewZoomPower || loadingViewRef.current.offset !== viewOffset;
+      if (viewMoved) loadingViewRef.current = { zoom: viewZoomPower, offset: viewOffset };
+      if (loadingSinceRef.current === null || viewMoved) loadingSinceRef.current = now;
       const fade = (now - loadingSinceRef.current - DISPLAY_LOADING_GRACE_MS) / DISPLAY_LOADING_FADE_MS;
       uniforms.displayLoading.value = Math.min(1, Math.max(0, fade));
       if (fade < 1) invalidateRef.current?.();
@@ -1024,6 +1038,7 @@ const FileRendererInner = memo(
           spectrogram: spectrogramData,
           renderer: () => strokeRendererRef.current,
           readCurrent: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
+          readCurrentTaps: (runs) => getHistoryManager(fileId).currentTaps(runs),
           readRoot: (ranges) => getHistoryManager(fileId).rootRanges(ranges),
           readCurrentBlock: (index) => getHistoryManager(fileId).currentBlock(index),
           readRootBlock: (index) => getHistoryManager(fileId).rootBlock(index),
@@ -1726,6 +1741,7 @@ const FileRendererInner = memo(
             end = dabEnd;
           }
         }
+        viewAimedRef.current = start <= visible.start && end >= visible.end;
         // A stroke pages ahead of the brush every frame. Everything else — a
         // pointer crossing the file, a pan under way — waits until the aim
         // stops, and takes a frame at the moment it does.
