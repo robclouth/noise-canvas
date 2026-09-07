@@ -367,6 +367,9 @@ export class WindowedCanvas {
    * hold exactly the pixels of `ranges` in range order, go back on top.
    */
   holdPaint(ranges: Uint32Array, values: Promise<Float32Array>): () => void {
+    // A display tile cut from the store while the stroke was painted lacks
+    // its dabs; the canvas has them all now.
+    this.deps.renderer()?.refreshDisplayFromStroke();
     const paint: PendingPaint = {
       ranges,
       values: null,
@@ -382,6 +385,26 @@ export class WindowedCanvas {
       const at = this.pending.indexOf(paint);
       if (at >= 0) this.pending.splice(at, 1);
     };
+  }
+
+  /**
+   * The committed pixels of `ranges` as the file stands: the store's values
+   * with the paint of every stroke still committing over them, newest stroke
+   * on top. Null when the store cannot serve the range.
+   */
+  async readCommitted(ranges: Uint32Array): Promise<Float32Array | null> {
+    const stored = await this.deps.readCurrent(ranges);
+    if (!stored || this.pending.length === 0) return stored;
+    await Promise.all(this.pending.map((paint) => paint.landed));
+    const layers: { ranges: Uint32Array; values: Float32Array }[] = [];
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      const paint = this.pending[i];
+      if (!paint.values || pixelRangeCount(intersectPixelRanges(paint.ranges, ranges)) === 0) continue;
+      layers.push({ ranges: paint.ranges, values: paint.values });
+    }
+    if (layers.length === 0) return stored;
+    layers.push({ ranges, values: stored });
+    return composePixelRangeValues(ranges, layers);
   }
 
   /** Drops the slots of the blocks over the named file pixels, so the store serves them next. */

@@ -370,6 +370,44 @@ describe("display pyramid parity", () => {
       expect(maxChannelDiff(after, v.render(false, FINE_ZOOM))).toBeLessThanOrEqual(1);
     });
 
+    it("greys what the pyramid serves in place of a finer picture", () => {
+      const v = ringView();
+      const u = v.material.uniforms;
+      const plain = v.render(true, FINE_ZOOM);
+      u.displayFinerWanted.value = true;
+      u.displayLoading.value = 1;
+      const greyed = v.render(true, FINE_ZOOM);
+      expect(maxChannelDiff(plain, greyed)).toBeGreaterThan(20);
+      // The greyed picture is flat: no channel of any pixel reads near white.
+      expect(Math.max(...greyed.filter((_, i) => i % 4 !== 3))).toBeLessThan(180);
+
+      // The canvas holding the view serves it, so nothing there is loading.
+      u.displayCanvasFirst.value = true;
+      expect(maxChannelDiff(v.render(true, FINE_ZOOM), v.render(false, FINE_ZOOM))).toBeLessThanOrEqual(1);
+      u.displayCanvasFirst.value = false;
+
+      // A resident tile is the finer picture, so it is not greyed either.
+      u.displayFinerWanted.value = true;
+      u.displayLoading.value = 1;
+      expect(maxChannelDiff(v.renderFromRing(FINE_ZOOM), v.render(false, FINE_ZOOM))).toBeLessThanOrEqual(1);
+
+      // With the fade at zero the pyramid's picture stands as it is.
+      u.displayLoading.value = 0;
+      expect(maxChannelDiff(v.render(true, FINE_ZOOM), plain)).toBe(0);
+      u.displayFinerWanted.value = false;
+    });
+
+    it("greys the whole view while the pyramid serves a coarser level than asked", () => {
+      const v = ringView();
+      const u = v.material.uniforms;
+      const plain = v.render(true, 0);
+      u.displayLoadingAll.value = true;
+      u.displayLoading.value = 1;
+      expect(maxChannelDiff(plain, v.render(true, 0))).toBeGreaterThan(20);
+      u.displayLoadingAll.value = false;
+      u.displayLoading.value = 0;
+    });
+
     it("composites a preview the same way the canvas path does, edges included", () => {
       const v = ringView();
       // Per band, a preview range whose edges fall inside the view, so the

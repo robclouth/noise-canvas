@@ -248,6 +248,11 @@ export interface FileRendererHandle {
   ) => Promise<HTMLCanvasElement | null>;
 }
 
+// A region the display cannot serve finely yet is greyed only once it has been
+// missing this long, then fades in over the second span.
+const DISPLAY_LOADING_GRACE_MS = 120;
+const DISPLAY_LOADING_FADE_MS = 160;
+
 /**
  * The `FileRenderer` component is responsible for rendering the spectrogram of an audio file
  * and handling real-time brush interactions for editing the spectrogram data.
@@ -484,6 +489,9 @@ const FileRendererInner = memo(
           displayLevelBlend: { value: 0.0 },
           displayPyramidActive: { value: false },
           displayCanvasFirst: { value: false },
+          displayFinerWanted: { value: false },
+          displayLoadingAll: { value: false },
+          displayLoading: { value: 0.0 },
           displayTileTex: { value: null as Texture | null },
           displayTileMetaTex: { value: null as Texture | null },
           displayTileFirst: { value: 0.0 },
@@ -513,6 +521,8 @@ const FileRendererInner = memo(
     const disposeCanvasRef = useRef<(() => void) | null>(null);
     // Ring tiles being read out of the store, keyed by level and tile.
     const ringRequestsRef = useRef<Set<string>>(new Set());
+    // When the display last began waiting for a finer picture, or null while it has one.
+    const loadingSinceRef = useRef<number | null>(null);
 
     // Cleanup StrokeRenderer on unmount or when textures change
     useEffect(() => {
@@ -699,6 +709,7 @@ const FileRendererInner = memo(
     /**
      * Holds the tiles the view needs and binds them. The ring stays empty
      * wherever the pyramid already has bins as fine as the screen asks for.
+     * Returns true while a tile the view needs is still being read.
      */
     const applyDisplayTileUniforms = (
       pyramidStepLog2: number,
@@ -706,14 +717,14 @@ const FileRendererInner = memo(
       viewZoomPower: number,
       viewOffset: number,
       viewportWidth: number,
-    ): void => {
+    ): boolean => {
       const uniforms = displayMaterial.uniforms;
       const gl = glRef.current;
       const strokeRenderer = strokeRendererRef.current;
       const tiles = strokeRenderer?.getDisplayTiles();
       if (!gl || !strokeRenderer || !tiles) {
         uniforms.displayTileCount.value = 0;
-        return;
+        return false;
       }
       const zoom = Math.pow(2, viewZoomPower);
       const span = spectrogramData.numFrames / zoom;
@@ -724,10 +735,13 @@ const FileRendererInner = memo(
         endFrame: startFrame + span,
         viewportPixels: Math.max(1, viewportWidth),
       };
+      let lacking = false;
       if (canvasCoversFile()) {
         tiles.update(gl, strokeRenderer.committedSource(), ringView, pyramidStepLog2);
       } else {
-        requestRingTiles(tiles, tiles.aim(ringView, pyramidStepLog2));
+        const missing = tiles.aim(ringView, pyramidStepLog2);
+        requestRingTiles(tiles, missing);
+        lacking = missing.length > 0;
       }
 
       const ring = tiles.uniforms();
@@ -739,12 +753,15 @@ const FileRendererInner = memo(
       uniforms.displayTileTexels.value = ring.tileTexels;
       uniforms.displayTileBlend.value = ring.blend;
       uniforms.displayTileLevel.value = ring.level;
+      return lacking;
     };
 
     /**
-     * Reads the tiles the ring is missing out of the block store and cuts
-     * them in as they land. A tile whose level has moved on, or whose slot
-     * the bound window took back, is dropped: the next aim asks again.
+     * Reads the tiles the ring is missing out of the committed state and cuts
+     * them in as they land. The read goes through the canvas, which lays the
+     * paint of a stroke still committing over the store's values. A tile
+     * whose level has moved on, or whose slot the bound window took back, is
+     * dropped: the next aim asks again.
      */
     const requestRingTiles = (tiles: DisplayTileRing, missing: number[]): void => {
       if (missing.length === 0) return;
@@ -754,8 +771,10 @@ const FileRendererInner = memo(
         if (ringRequestsRef.current.has(key)) continue;
         ringRequestsRef.current.add(key);
         const ranges = tiles.tileSourcePixelRanges(tile);
-        void getHistoryManager(fileId)
-          .currentRanges(ranges)
+        const read = canvasRef.current
+          ? canvasRef.current.readCommitted(ranges)
+          : getHistoryManager(fileId).currentRanges(ranges);
+        void read
           .then((values) => {
             ringRequestsRef.current.delete(key);
             const gl = glRef.current;
@@ -763,6 +782,10 @@ const FileRendererInner = memo(
             if (!values || !gl || live !== tiles) return;
             if (tiles.gridLevel() !== level || !tiles.canCutTile(tile)) return;
             tiles.cutTileFromPacked(gl, tile, values);
+            // A tile cut mid-stroke came from a store without the dabs so far.
+            if (canvasRef.current?.isStroking && tiles.uniforms().tileCount > 0) {
+              strokeRendererRef.current?.refreshDisplayFromStroke();
+            }
             invalidateRef.current();
           })
           .catch(() => ringRequestsRef.current.delete(key));
@@ -781,16 +804,25 @@ const FileRendererInner = memo(
         uniforms.displayPyramidActive.value = false;
         uniforms.displayCanvasFirst.value = false;
         uniforms.displayTileCount.value = 0;
+        uniforms.displayLoading.value = 0;
+        loadingSinceRef.current = null;
         return;
       }
       const framesPerPixel = spectrogramData.numFrames / (Math.pow(2, viewZoomPower) * Math.max(1, viewportWidth));
       const finestStepLog2 = pyramid.levels[0].stepLog2;
-      applyDisplayTileUniforms(finestStepLog2, framesPerPixel, viewZoomPower, viewOffset, viewportWidth);
+      const ringLacks = applyDisplayTileUniforms(
+        finestStepLog2,
+        framesPerPixel,
+        viewZoomPower,
+        viewOffset,
+        viewportWidth,
+      );
 
       // Past the pyramid's finest level the canvas is the sharp picture, and
       // the finest level stands in wherever the canvas does not reach yet.
       const finerThanPyramid = 2 ** finestStepLog2 > Math.max(framesPerPixel, 1);
-      uniforms.displayCanvasFirst.value = finerThanPyramid && (canvasRef.current?.holdsView() ?? true);
+      const canvasHolds = canvasRef.current?.holdsView() ?? true;
+      uniforms.displayCanvasFirst.value = finerThanPyramid && canvasHolds;
       const ready = pyramid.readyLevel;
       const choice = finerThanPyramid
         ? { fine: ready, coarse: ready, blend: 0 }
@@ -801,6 +833,23 @@ const FileRendererInner = memo(
       uniforms.displayCoarseMetaTex.value = pyramid.metadataTexture(choice.coarse);
       uniforms.displayLevelBlend.value = choice.blend;
       uniforms.displayPyramidActive.value = true;
+
+      // A region the pyramid serves in place of something finer is greyed as
+      // loading, after a grace so a zoom whose tiles land at once never flashes.
+      const levelsLoading = !finerThanPyramid && displayLevelChoice(pyramid.levels, framesPerPixel).fine < ready;
+      uniforms.displayFinerWanted.value = finerThanPyramid;
+      uniforms.displayLoadingAll.value = levelsLoading;
+      const lacking = levelsLoading || (finerThanPyramid && !canvasHolds && ringLacks);
+      if (!lacking) {
+        loadingSinceRef.current = null;
+        uniforms.displayLoading.value = 0;
+        return;
+      }
+      const now = performance.now();
+      if (loadingSinceRef.current === null) loadingSinceRef.current = now;
+      const fade = (now - loadingSinceRef.current - DISPLAY_LOADING_GRACE_MS) / DISPLAY_LOADING_FADE_MS;
+      uniforms.displayLoading.value = Math.min(1, Math.max(0, fade));
+      if (fade < 1) invalidateRef.current?.();
     };
 
     const applyStaticDisplayUniforms = (state: State, viewportWidth: number, viewportHeight: number): void => {

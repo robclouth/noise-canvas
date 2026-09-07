@@ -15,7 +15,7 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockOfFrame, blockPixelRanges, type BlockGrid } from "../block-grid";
 import { fileRangesToView } from "../canvas-view";
-import { float32BitsEqual, gatherPixelRanges } from "../pixel-ranges";
+import { float32BitsEqual, gatherPixelRanges, scatterCompactPixelRanges, subtractPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { WindowedCanvas } from "../windowed-canvas";
 import { CoarseStripBuilder } from "../coarse-strip";
@@ -552,6 +552,54 @@ describe("a canvas that holds a window of the file", () => {
     rig.canvas.aim(0, 1);
     await until(() => rig.canvas.holdsFrames(0, 1), "the first block a third time");
     expect(float32BitsEqual(await canvasBlock0(), original)).toBe(true);
+  });
+
+  it("serves a committing stroke's paint to a reader of the committed state", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.02)).toBe(true);
+    const dirty = rig.canvas.dirtyPixelRanges();
+    expect(dirty).not.toBeNull();
+    const painted = await rig.canvas.readPixelRanges(dirty!);
+    const original = gatherPixelRanges(data.packedData, dirty!);
+    expect(float32BitsEqual(painted, original)).toBe(false);
+
+    // Until the pen lifts the store speaks for the file.
+    expect(float32BitsEqual((await rig.canvas.readCommitted(dirty!))!, original)).toBe(true);
+
+    const release = rig.canvas.holdPaint(dirty!, rig.canvas.readPixelRanges(dirty!));
+    rig.canvas.endStroke();
+    expect(float32BitsEqual((await rig.canvas.readCommitted(dirty!))!, painted)).toBe(true);
+
+    // A wider read gets the paint inside the stroke and the store around it.
+    const block0 = blockPixelRanges(grid, 0);
+    const block0Ranges = block0.ranges.slice(0, block0.count * 2);
+    const wide = await rig.canvas.readCommitted(block0Ranges);
+    expect(wide).not.toBeNull();
+    const whole = new Float32Array(data.packedData.length);
+    scatterCompactPixelRanges(whole, wide!, block0Ranges);
+    expect(float32BitsEqual(gatherPixelRanges(whole, dirty!), painted)).toBe(true);
+    const rest = subtractPixelRanges(block0Ranges, dirty!);
+    expect(float32BitsEqual(gatherPixelRanges(whole, rest), gatherPixelRanges(data.packedData, rest))).toBe(true);
+
+    release();
+    expect(float32BitsEqual((await rig.canvas.readCommitted(dirty!))!, original)).toBe(true);
+  });
+
+  it("re-encodes the stroke into the display when its paint is held", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.02)).toBe(true);
+    const dirty = rig.canvas.dirtyPixelRanges();
+    expect(dirty).not.toBeNull();
+    const pyramid = rig.renderer().getDisplayPyramid();
+    expect(pyramid).not.toBeNull();
+    const refresh = vi.spyOn(pyramid!, "refreshFromCanvas");
+    const release = rig.canvas.holdPaint(dirty!, rig.canvas.readPixelRanges(dirty!));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    release();
   });
 
   it("keeps every dab of a stroke that outran the window, live ones and held ones alike", async () => {

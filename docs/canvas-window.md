@@ -122,6 +122,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    The stroke ends the moment the commit has read it, not when the commit
    lands: a commit takes seconds, and a stroke begun meanwhile would
    otherwise be ended mid-way, its slides carrying nothing.
+   The display's tile ring reads the committed state through the canvas for
+   the same reason (`readCommitted`): a tile cut while a commit is landing
+   takes the held paint over the store's values, so a zoom across a level
+   never shows the state before the stroke; and holding the paint re-encodes
+   the stroke's footprint from the canvas, so a tile cut while the stroke was
+   painted shows its dabs.
 5. **Any whole-state move installs a fresh carry.** After a history hop, a
    restore or phase turns, the old carry no longer speaks for the file. A
    commit already reading the old one keeps the object it took.
@@ -186,7 +192,11 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     taps that level's decimation would take, so the picture shows at that
     level the moment the view mounts and the finer levels are drawn in
     underneath it; the level choice never goes below the pyramid's
-    `readyLevel` until that draw finishes. `scanOnsets` and `synthesiseInChunks`
+    `readyLevel` until that draw finishes. Wherever the pyramid stands in for
+    a finer picture — a tile still being read, a coarser level while the
+    finer ones are drawn — the display greys that region after a short grace
+    (`displayLoading`), so a reader sees it is loading rather than taking the
+    stand-in for the state. `scanOnsets` and `synthesiseInChunks`
     read the store back a chunk at a time, each through a view. Both need what
     only the whole file can give — every band's loudest moment, and the loudest
     moment of the detection function — so the analysis carries the first and a

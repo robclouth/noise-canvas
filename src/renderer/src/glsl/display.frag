@@ -68,6 +68,13 @@ uniform bool displayPyramidActive;
 // True when the canvas is finer than the pyramid and holds every block of its
 // view, so a texel inside the view reads the canvas before the pyramid.
 uniform bool displayCanvasFirst;
+// True when the screen asks for a finer picture than the pyramid holds, so a
+// texel the pyramid ends up serving is still loading.
+uniform bool displayFinerWanted;
+// True while the pyramid serves a coarser level than the view asked for.
+uniform bool displayLoadingAll;
+// How far the loading regions are greyed, 0 to 1.
+uniform float displayLoading;
 
 // The tile ring: the committed picture around the view, in dB, at a level fine
 // enough for the screen. Tile `t` lives in slot `t mod displayTileSlots`, and
@@ -200,17 +207,24 @@ bool canvasSpans(vec2 uv) {
 
 // Left and right magnitudes of the picture at an unpacked UV: a resident
 // tile, else the canvas where it is the finest picture there, else the
-// pyramid, else the canvas.
-vec2 sampleDisplayMags(vec2 uv) {
+// pyramid, else the canvas. `loading` is 1 where the pyramid stands in for
+// a finer picture that has not landed.
+vec2 sampleDisplayMags(vec2 uv, out float loading) {
+    loading = displayLoadingAll ? 1.0 : 0.0;
     vec2 db;
     bool have = sampleRingDb(uv, db);
     if (!have && displayCanvasFirst && canvasSpans(uv)) {
+        loading = 0.0;
         vec4 packedValue = sampleDisplayInterp(uv);
         return vec2(packedValue.r, packedValue.b);
     }
-    if (!have && !samplePyramidDb(uv, db)) {
-        vec4 packedValue = sampleDisplayInterp(uv);
-        return vec2(packedValue.r, packedValue.b);
+    if (!have) {
+        if (!samplePyramidDb(uv, db)) {
+            loading = 0.0;
+            vec4 packedValue = sampleDisplayInterp(uv);
+            return vec2(packedValue.r, packedValue.b);
+        }
+        if (displayFinerWanted) loading = 1.0;
     }
     vec2 preview;
     if (previewDbAt(uv, preview)) db = preview;
@@ -276,7 +290,9 @@ void main() {
     // Time axis samples edge-aligned: the stored coefficient for bin k is the
     // analysis atom centered at frame k * 2^step, so an impulse reads as a
     // vertical ridge at the same time in every band regardless of bin stride.
-    vec2 mags = mix(sampleDisplayMags(uv0), sampleDisplayMags(uv1), bandFrac);
+    float loading0, loading1;
+    vec2 mags = mix(sampleDisplayMags(uv0, loading0), sampleDisplayMags(uv1, loading1), bandFrac);
+    float loading = mix(loading0, loading1, bandFrac) * displayLoading;
 
     float leftDb = magnitudeToDb(mags.x);
 
@@ -289,6 +305,15 @@ void main() {
         vec3 leftColor = vec3(leftDb, leftDb * 0.5, 0.0);
         vec3 rightColor = vec3(0.0, rightDb * 0.5, rightDb);
         color = leftColor + rightColor;
+    }
+
+    // A region still loading is flattened to a mid grey with faint diagonal
+    // stripes, the picture showing through it dimly.
+    if (loading > 0.0) {
+        float luma = dot(color, vec3(0.299, 0.587, 0.114));
+        float stripe = 0.5 + 0.5 * sin((gl_FragCoord.x + gl_FragCoord.y) * 0.45);
+        vec3 greyed = vec3(0.2 + 0.3 * luma + 0.04 * stripe);
+        color = mix(color, greyed, loading * 0.85);
     }
 
     // Faint grid lines. Adaptive contrast (brighten by delta, or darken if that

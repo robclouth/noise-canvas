@@ -1607,6 +1607,50 @@ the analysis itself, which is one core per channel.
 
 ---
 
+## Phase 10 — the picture never shows the state before a stroke (2026-09-07)
+
+Rob, on dev after the merge: zooming in and out while brushing a long file,
+"parts of it flickered in and out of what had changed". The display's tile
+ring cut its tiles from the block store, which does not hold a stroke until
+the commit lands. A zoom across a ring level right after pen-up re-cut every
+tile from the pre-stroke state, and nothing dropped them when the commit
+landed — the coarser pyramid levels, refreshed from the canvas at every dab,
+showed the stroke, so the paint came and went with the zoom.
+
+### What was built
+
+- The ring reads through the canvas (`WindowedCanvas.readCommitted`): the
+  store's values with the paint of every stroke still committing laid over
+  them, newest first, after each stroke's readback has landed.
+- Holding the paint re-encodes the stroke's footprint from the canvas
+  (`refreshDisplayFromStroke`), and so does a tile cut while the stroke is
+  still under the pen, so a tile cut from a store without the dabs so far
+  takes them.
+- Where the pyramid stands in for a finer picture that has not landed — a
+  tile still being read, a coarser level while the finer ones are drawn — the
+  display greys that region (`displayFinerWanted`, `displayLoadingAll`,
+  `displayLoading`), a flat mid grey with faint stripes, after a grace of
+  120 ms and a fade of 160 ms so a zoom whose tiles land at once never
+  flashes. Rob asked for this: neither black nor white, something that says
+  the section is loading.
+
+### Measured (M4 Pro, 280 s stereo, built app, `stale-drive.mjs`)
+
+One stroke zoomed in, then four ticks out at once; erased columns in the
+brush band at the zoomed-out view, against the count after another zoom in
+and out (the settled truth).
+
+| round | settled | before: 0.25 s … 12 s | after: 0.25 s | after: 1.2 s … 12 s |
+| ----- | ------- | --------------------- | ------------- | ------------------- |
+| 0     | 536     | 0                     | 536           | 536                 |
+| 1     | 584     | 0                     | 584           | 584                 |
+| 2     | 736     | 0                     | 712           | 736                 |
+
+Before the fix the zoomed-out view held the pre-stroke picture for the whole
+12 s, until the next level change re-cut its tiles.
+
+---
+
 ## Risks
 
 - MAX blending on R16F on ANGLE/Metal and ANGLE/GL (Task 0.2) — the capability

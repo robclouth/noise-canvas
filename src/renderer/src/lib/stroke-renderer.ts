@@ -1954,6 +1954,21 @@ export class StrokeRenderer {
   }
 
   /**
+   * Re-encodes the stroke's footprint into the display's levels and tiles from
+   * the canvas, so a tile cut from a store that does not hold the stroke yet
+   * shows its dabs.
+   */
+  refreshDisplayFromStroke(): void {
+    if (!this.displayPyramid && !this.displayTiles) return;
+    const ranges = this.getDirtyPixelRanges();
+    if (!ranges) return;
+    const changed = { ranges, count: ranges.length >> 1 };
+    const source = this.committedSource();
+    this.displayPyramid?.refreshFromCanvas(this.gl, source, changed);
+    this.displayTiles?.refreshFromCanvas(this.gl, source, changed);
+  }
+
+  /**
    * Encodes the whole packed state into the display's committed levels. It is
    * how a canvas holding part of the file gets a picture of all of it.
    */
