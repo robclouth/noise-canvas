@@ -50,6 +50,7 @@ export class DisplayPyramid {
   private readonly layout: BandLayout;
   private readonly uploadChunkBins: number;
   private seeded = false;
+  private marked = false;
   private readyFrom = 0;
 
   constructor(layout: BandLayout, opts?: { maxTexels?: number; uploadChunkBins?: number }) {
@@ -102,7 +103,7 @@ export class DisplayPyramid {
   seedLevelFromStrip(gl: WebGLRenderer, strip: CoarseStrip): boolean {
     const index = this.levels.findIndex((level) => level.stepLog2 === strip.level.stepLog2);
     if (index < 0) return false;
-    if (!this.seeded) this.markUnknown(gl);
+    this.markUnknown(gl);
     const bins = strip.values.length / 2;
     for (let start = 0; start < bins; start += this.uploadChunkBins) {
       const count = Math.min(this.uploadChunkBins, bins - start);
@@ -134,9 +135,13 @@ export class DisplayPyramid {
   /**
    * Marks every bin of every level as one nothing has drawn yet. Without it an
    * undrawn bin reads as 0 dB — the loudest value there is — and a level being
-   * filled in shows white where it has not been reached.
+   * filled in shows white where it has not been reached. Runs before the first
+   * write of any kind, `refreshFromCanvas` included: that one writes the bins
+   * of the canvas's window alone, and the rest of the file is not known yet.
    */
   private markUnknown(gl: WebGLRenderer): void {
+    if (this.marked) return;
+    this.marked = true;
     const context = gl.getContext() as WebGL2RenderingContext;
     const previous = gl.getRenderTarget();
     for (const target of this.targets) {
@@ -162,7 +167,7 @@ export class DisplayPyramid {
    * nothing samples them.
    */
   seedFromPacked(gl: WebGLRenderer, data: Float32Array): void {
-    if (!this.seeded) this.markUnknown(gl);
+    this.markUnknown(gl);
     const instances: DecimateInstance[] = [];
     for (let band = 0; band < this.layout.numBands; band++) {
       const instance = this.finestInstance(band, 0, this.layout.metadata[band * 4 + 1]);
@@ -193,7 +198,7 @@ export class DisplayPyramid {
    * and a patch into a pyramid holding nothing is skipped.
    */
   seedingFromCompact(gl: WebGLRenderer): void {
-    if (!this.seeded) this.markUnknown(gl);
+    this.markUnknown(gl);
     this.seeded = true;
   }
 
@@ -256,6 +261,7 @@ export class DisplayPyramid {
    * tap, so its encoded value is already current.
    */
   refreshFromCanvas(gl: WebGLRenderer, source: CommittedSource, changed: PixelRangeList): void {
+    this.markUnknown(gl);
     const { view } = source;
     const viewSpans = sourceBinRanges(view.layout, changed.ranges.subarray(0, changed.count * 2));
     const spans = new Uint32Array(this.layout.numBands * 2);

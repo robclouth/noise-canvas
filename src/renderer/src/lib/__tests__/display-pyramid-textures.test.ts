@@ -1,4 +1,5 @@
 import {
+  DataTexture,
   FloatType,
   GLSL3,
   Mesh,
@@ -16,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { blockGrid, blockPixelRanges } from "../block-grid";
+import { canvasViewOf } from "../canvas-view";
 import { CoarseStripBuilder } from "../coarse-strip";
 import { DisplayPyramid } from "../display-pyramid-textures";
 import {
@@ -188,6 +190,36 @@ describe("display pyramid textures", () => {
     for (let i = 0; i < drawn.length; i += 4) if (drawn[i] !== DISPLAY_DB_UNKNOWN) known++;
     expect(known).toBeGreaterThan(0);
     expect(known).toBeLessThan(drawn.length / 4);
+  });
+
+  it("marks the levels before a canvas refresh writes the window it holds", () => {
+    // The canvas of a windowed file covers one window, so the refresh that
+    // draws it must not leave the rest of the file reading as full scale.
+    const pyramid = makePyramid();
+    const grid = blockGrid(layout, data.numFrames, data.sampleRate, 1);
+    const view = canvasViewOf(grid, 0, 0);
+    const padded = new Float32Array(view.textureWidth * view.textureHeight * 4);
+    padded.set(gatherPixelRanges(data.packedData, view.ranges));
+    const texture = new DataTexture(padded, view.textureWidth, view.textureHeight, RGBAFormat, FloatType);
+    texture.internalFormat = "RGBA32F";
+    texture.minFilter = NearestFilter;
+    texture.magFilter = NearestFilter;
+    texture.needsUpdate = true;
+
+    pyramid.refreshFromCanvas(gl, { texture, view }, { ranges: Uint32Array.of(0, view.texels), count: 1 });
+    texture.dispose();
+    expect(pyramid.texture(0)).not.toBeNull();
+
+    const pixels = readLevel(pyramid, 0);
+    let unknown = 0;
+    let loud = 0;
+    let known = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i] === DISPLAY_DB_UNKNOWN) unknown++;
+      else if (pixels[i] === 0) loud++;
+      else known++;
+    }
+    expect([loud, unknown > 0, known > 0]).toEqual([0, true, true]);
   });
 
   it("refuses a strip cut for a level the stack does not hold", () => {
