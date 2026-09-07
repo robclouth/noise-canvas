@@ -22,11 +22,16 @@ import type {
 import { getModelPath } from "./ai-separation";
 import { loadNativeAddon } from "./native-addon";
 import {
+  finishOnsets,
   ONSET_CHUNK_SECONDS,
+  onsetCurvesOfSpan,
   onsetPassesInFlight,
   scanOnsetChunk,
   scanOnsets,
+  type OnsetCurvesSlice,
   type OnsetDetection,
+  type OnsetPasses,
+  type PackedView,
 } from "./onset-scan";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
 export type { FourStemName, TwoStemName } from "./ai-separation";
@@ -397,6 +402,17 @@ export async function openAnalysisStream(filePath: string, params: AnalysisParam
  * pass over the whole file arrived at. Without one, the whole file is scanned
  * and the gate comes out of the scan.
  */
+/** The onset passes the addon answers. */
+function onsetPasses(): OnsetPasses {
+  const gab = init();
+  return {
+    detect: (packed, meta, rate, options) => gab.detectOnsets(packed, meta, rate, options),
+    curves: (packed, meta, rate, options) => gab.detectOnsets(packed, meta, rate, { ...options, curvesOnly: true }),
+    pick: (odf, energy, numFrames, rate, odfGate) => gab.pickOnsets(odf, energy, numFrames, rate, odfGate),
+    salience: (packed, meta, rate, options) => gab.onsetSalience(packed, meta, rate, options),
+  };
+}
+
 export function scanFileOnsets(
   read: (ranges: Uint32Array) => Promise<Float32Array>,
   analysisMetadata: PackedLayout,
@@ -404,12 +420,10 @@ export function scanFileOnsets(
   bandMax: Float32Array,
   region?: { startSec: number; endSec: number; odfReference: number },
 ): Promise<OnsetDetection> {
-  const gab = init();
-  const detect = (packed: Float32Array, meta: PackedLayout, rate: number, options: unknown) =>
-    gab.detectOnsets(packed, meta, rate, options);
+  const passes = onsetPasses();
   if (!region) {
     return scanOnsets(
-      detect,
+      passes,
       read,
       analysisMetadata,
       sampleRate,
@@ -419,7 +433,7 @@ export function scanFileOnsets(
     );
   }
   return scanOnsetChunk(
-    detect,
+    passes.detect,
     read,
     analysisMetadata,
     sampleRate,
@@ -427,6 +441,49 @@ export function scanFileOnsets(
     region.odfReference,
     Math.max(0, Math.floor(region.startSec * sampleRate)),
     Math.min(analysisMetadata.numFrames, Math.ceil(region.endSec * sampleRate)),
+  );
+}
+
+/**
+ * The detection curves of [startFrame, endFrame) from coefficients a caller
+ * already holds — a synthesis chunk's, read wide enough for the whitening's
+ * warm-up — so a file is read once for its audio and its onsets.
+ */
+export function onsetCurvesOfChunk(
+  packed: Float32Array,
+  analysisMetadata: PackedLayout,
+  sampleRate: number,
+  bandMax: Float32Array,
+  view: PackedView,
+  startFrame: number,
+  endFrame: number,
+): Promise<OnsetCurvesSlice> {
+  const passes = onsetPasses();
+  const read = () => Promise.reject(new Error("the chunk's coefficients were handed over"));
+  return onsetCurvesOfSpan(passes, read, analysisMetadata, sampleRate, bandMax, startFrame, endFrame, {
+    values: packed,
+    view,
+  });
+}
+
+/** The file's onsets from the curves of every chunk, measured a chunk at a time through `read`. */
+export function finishFileOnsets(
+  read: (ranges: Uint32Array) => Promise<Float32Array>,
+  analysisMetadata: PackedLayout,
+  sampleRate: number,
+  slices: OnsetCurvesSlice[],
+  spans: Array<[number, number]>,
+  bandMax: Float32Array,
+): Promise<OnsetDetection> {
+  return finishOnsets(
+    onsetPasses(),
+    read,
+    analysisMetadata,
+    sampleRate,
+    slices,
+    bandMax,
+    onsetPassesInFlight(totalmem()),
+    spans,
   );
 }
 

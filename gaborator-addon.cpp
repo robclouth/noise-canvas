@@ -2129,19 +2129,38 @@ static void onsetReadSpanSec(const OnsetRegion *region, double durationSec, doub
     readEndSec = region ? std::min(durationSec, emitEndSec + trailSec) : durationSec;
 }
 
-static std::vector<DetectedOnset> computeOnsets(const float *packed,
-                                                size_t packedFloats,
-                                                const OnsetBandLayout &layout,
-                                                int64_t numFrames,
-                                                double sampleRate,
-                                                const OnsetRegion *region = nullptr,
-                                                double *odfMaxOut = nullptr,
-                                                std::vector<float> *bandMaxOut = nullptr,
-                                                bool gateOnly = false)
+/**
+ * The detection curves of a pass, at ONSET_BIN_SEC per bin over the whole
+ * file, valid from the span the pass reports on less the lead the peak
+ * picking reads. `prefix` is the running sum of `odf`.
+ */
+struct OnsetCurves
 {
-    std::vector<DetectedOnset> onsets;
+    int64_t numBins = 0;
+    double durationSec = 0.0;
+    double emitStartSec = 0.0;
+    double emitEndSec = 0.0;
+    double maxOdf = 0.0;
+    std::vector<double> odf;
+    std::vector<double> energy;
+    std::vector<double> prefix;
+};
+
+/**
+ * Whitens the coefficients and accumulates the detection curves. Returns
+ * false when there is nothing to read.
+ */
+static bool computeOnsetCurves(const float *packed,
+                               size_t packedFloats,
+                               const OnsetBandLayout &layout,
+                               int64_t numFrames,
+                               double sampleRate,
+                               const OnsetRegion *region,
+                               std::vector<float> *bandMaxOut,
+                               OnsetCurves &out)
+{
     if (!packed || layout.numBands <= 0 || numFrames <= 0 || sampleRate <= 0.0)
-        return onsets;
+        return false;
 
     // The four floats of one coefficient, or null when it is out of bounds.
     // With a view, the absolute index translates into the windowed buffer.
@@ -2172,7 +2191,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     const double emitStartSec = region ? std::max(0.0, region->startSec) : 0.0;
     const double emitEndSec = region ? std::min(durationSec, region->endSec) : durationSec;
     if (emitEndSec <= emitStartSec)
-        return onsets;
+        return false;
     double readStartSec, readEndSec;
     onsetReadSpanSec(region, durationSec, maxStrideSec, readStartSec, readEndSec);
     // The detection curves only have to be right where candidates are picked
@@ -2478,15 +2497,32 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         prefix[bin + 1] = prefix[bin] + odf[bin];
         maxOdf = std::max(maxOdf, odf[bin]);
     }
-    // A regional pass only sees its own part of the curve, so the gate comes
-    // from the whole-file value it was handed, raised if what was painted into
-    // the region turns out to be louder than anything the file had before.
-    const double odfGate = region ? std::max(maxOdf, region->odfReference) : maxOdf;
-    if (odfMaxOut)
-        *odfMaxOut = odfGate;
-    if (odfGate <= 0.0 || gateOnly)
-        return onsets;
+    out.numBins = numBins;
+    out.durationSec = durationSec;
+    out.emitStartSec = emitStartSec;
+    out.emitEndSec = emitEndSec;
+    out.maxOdf = maxOdf;
+    out.odf = std::move(odf);
+    out.energy = std::move(energy);
+    out.prefix = std::move(prefix);
+    return true;
+}
 
+/**
+ * Where the events are: every peak of the detection function above the
+ * gate's floor and its own surroundings, each moved to the foot of its
+ * attack, in seconds. A regional pick looks a little either side of the
+ * span the curves report on; a whole-file pick walks every bin.
+ */
+static std::vector<double> pickOnsetCandidates(const OnsetCurves &curves, double odfGate, bool regional)
+{
+    const std::vector<double> &odf = curves.odf;
+    std::vector<double> energy(curves.energy);
+    const std::vector<double> &prefix = curves.prefix;
+    const int64_t numBins = curves.numBins;
+    const double durationSec = curves.durationSec;
+    const double emitStartSec = curves.emitStartSec;
+    const double emitEndSec = curves.emitEndSec;
     // Smoothed for choosing which bin the top of an attack is, kept raw for
     // measuring where that attack began: smoothing spreads a rise across its
     // own width, so walking down a smoothed one lands a smoothing-width early —
@@ -2524,14 +2560,14 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     // accepted before this span, so the minimum gap between events carries into
     // it rather than starting again at the edge.
     const int64_t pickLo =
-        region ? std::max<int64_t>(0, emitLo - (int64_t)std::llround((ONSET_MIN_GAP_SEC +
+        regional ? std::max<int64_t>(0, emitLo - (int64_t)std::llround((ONSET_MIN_GAP_SEC +
                                                                      ONSET_PEAK_WINDOW_SEC +
                                                                      ONSET_RIDGE_SEARCH_SEC +
                                                                      ONSET_ATTACK_SEARCH_SEC) /
                                                                     ONSET_BIN_SEC))
                : 0;
     const int64_t pickHi =
-        region ? std::min<int64_t>(numBins, emitHi + (int64_t)std::llround(ONSET_LEVEL_POST_SEC / ONSET_BIN_SEC))
+        regional ? std::min<int64_t>(numBins, emitHi + (int64_t)std::llround(ONSET_LEVEL_POST_SEC / ONSET_BIN_SEC))
                : numBins;
     int64_t lastBin = pickLo - minGap;
 
@@ -2616,6 +2652,39 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         lastBin = n;
     }
 
+    return candidates;
+}
+
+/**
+ * How big each event is, read off the coefficients around it. With
+ * `bounded`, only the candidates inside [emitStartSec, emitEndSec) are
+ * reported; the rest are there to bound the ones inside.
+ */
+static std::vector<DetectedOnset> measureOnsets(const float *packed,
+                                                size_t packedFloats,
+                                                const OnsetBandLayout &layout,
+                                                double sampleRate,
+                                                double durationSec,
+                                                const std::vector<double> &candidates,
+                                                double emitStartSec,
+                                                double emitEndSec,
+                                                bool bounded)
+{
+    // The four floats of one coefficient, or null when it is out of bounds.
+    // With a view, the absolute index translates into the windowed buffer.
+    const auto pixelAt = [&](int b, int64_t k) -> const float * {
+        const int64_t rel = k - (layout.viewK0 ? layout.viewK0[b] : 0);
+        if (layout.viewLens && (rel < 0 || (size_t)rel >= (size_t)layout.viewLens[b]))
+            return nullptr;
+        const size_t base = layout.viewOffsets ? (size_t)layout.viewOffsets[b] : (size_t)layout.bandOffsets[b];
+        const size_t px = (base + (size_t)rel) * 4;
+        if (px + 3 >= packedFloats)
+            return nullptr;
+        return packed + px;
+    };
+
+    const int channels = std::max(1, layout.numChannels);
+    const float channelScale = 1.0f / (float)channels;
     // How big each event is: the power that arrives with it. Per band, the peak
     // power reached between this onset and the next, less the power just before
     // it, counted only where it rises — so a sound stopping scores nothing
@@ -2627,6 +2696,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     // kick and a hi-hat 24 dB apart come out in the ratio of their true levels
     // to within a few percent, where bare magnitudes read 5:1 — and reported as
     // an amplitude, so saliences stand in the same ratios as the hits do.
+    std::vector<DetectedOnset> onsets;
     onsets.reserve(candidates.size());
     for (size_t i = 0; i < candidates.size(); ++i)
     {
@@ -2635,7 +2705,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         // down the attack landed before it, are here only to bound the ones
         // inside it: the caller replaces exactly that span and keeps its own
         // onsets either side.
-        if (region && (tSec < emitStartSec || tSec >= emitEndSec))
+        if (bounded && (tSec < emitStartSec || tSec >= emitEndSec))
             continue;
         double tEndSec = std::min(durationSec, tSec + ONSET_LEVEL_POST_SEC);
         if (i + 1 < candidates.size())
@@ -2693,6 +2763,34 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 
     return onsets;
 }
+static std::vector<DetectedOnset> computeOnsets(const float *packed,
+                                                size_t packedFloats,
+                                                const OnsetBandLayout &layout,
+                                                int64_t numFrames,
+                                                double sampleRate,
+                                                const OnsetRegion *region = nullptr,
+                                                double *odfMaxOut = nullptr,
+                                                std::vector<float> *bandMaxOut = nullptr,
+                                                bool gateOnly = false)
+{
+    std::vector<DetectedOnset> onsets;
+    OnsetCurves curves;
+    if (!computeOnsetCurves(packed, packedFloats, layout, numFrames, sampleRate, region, bandMaxOut, curves))
+        return onsets;
+    const double maxOdf = curves.maxOdf;
+    // A regional pass only sees its own part of the curve, so the gate comes
+    // from the whole-file value it was handed, raised if what was painted into
+    // the region turns out to be louder than anything the file had before.
+    const double odfGate = region ? std::max(maxOdf, region->odfReference) : maxOdf;
+    if (odfMaxOut)
+        *odfMaxOut = odfGate;
+    if (odfGate <= 0.0 || gateOnly)
+        return onsets;
+
+    const std::vector<double> candidates = pickOnsetCandidates(curves, odfGate, region != nullptr);
+    return measureOnsets(packed, packedFloats, layout, sampleRate, curves.durationSec, candidates,
+                         curves.emitStartSec, curves.emitEndSec, region != nullptr);
+}
 
 class OnsetWorker : public Napi::AsyncWorker
 {
@@ -2722,6 +2820,7 @@ public:
                 hasRegion = true;
             }
             gateOnly = options.Has("gateOnly") && options.Get("gateOnly").ToBoolean().Value();
+            curvesOnly = options.Has("curvesOnly") && options.Get("curvesOnly").ToBoolean().Value();
             // The packed buffer holds only the coefficients of the region's own
             // span, so the pass needs the map back into the file. Reading a
             // view without a bandMax reference would judge every band by what
@@ -2778,6 +2877,28 @@ public:
             layout.viewLens = viewLens.data();
             layout.viewK0 = viewK0.data();
         }
+        if (curvesOnly)
+        {
+            // The curves of the span this pass reports on, cut on bin edges so
+            // the spans of a file tile without a gap or an overlap.
+            OnsetCurves curves;
+            if (!computeOnsetCurves(packed, packedFloats, layout, numFrames, sampleRate,
+                                    hasRegion ? &region : nullptr, &bandMaxOut, curves))
+                return;
+            const int64_t lo = std::max<int64_t>(
+                0, std::min(curves.numBins, (int64_t)std::floor(curves.emitStartSec / ONSET_BIN_SEC)));
+            const int64_t hi =
+                curves.emitEndSec >= curves.durationSec
+                    ? curves.numBins
+                    : std::max(lo, std::min(curves.numBins, (int64_t)std::floor(curves.emitEndSec / ONSET_BIN_SEC)));
+            sliceLo = lo;
+            odfSlice.assign(curves.odf.begin() + lo, curves.odf.begin() + hi);
+            energySlice.assign(curves.energy.begin() + lo, curves.energy.begin() + hi);
+            odfMax = 0.0;
+            for (double v : odfSlice)
+                odfMax = std::max(odfMax, v);
+            return;
+        }
         onsets = computeOnsets(packed, packedFloats, layout, numFrames, sampleRate, hasRegion ? &region : nullptr,
                                &odfMax, &bandMaxOut, gateOnly);
     }
@@ -2792,10 +2913,24 @@ public:
         // the next regional one so it judges its own span on the same terms.
         result.Set("odfMax", Napi::Number::New(env, odfMax));
         result.Set("bandMax", packBandMax(env, bandMaxOut));
+        if (curvesOnly)
+        {
+            result.Set("odf", packCurve(env, odfSlice));
+            result.Set("energy", packCurve(env, energySlice));
+            result.Set("binStart", Napi::Number::New(env, (double)sliceLo));
+        }
         deferred.Resolve(result);
     }
 
     void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+    static Napi::Float64Array packCurve(Napi::Env env, const std::vector<double> &curve)
+    {
+        Napi::Float64Array out = Napi::Float64Array::New(env, curve.size());
+        if (!curve.empty())
+            memcpy(out.Data(), curve.data(), curve.size() * sizeof(double));
+        return out;
+    }
 
     static Napi::Float32Array packBandMax(Napi::Env env, const std::vector<float> &bandMax)
     {
@@ -2823,11 +2958,15 @@ private:
     bool hasRegion = false;
     bool hasView = false;
     bool gateOnly = false;
+    bool curvesOnly = false;
     std::vector<uint32_t> viewOffsets;
     std::vector<uint32_t> viewLens;
     std::vector<int64_t> viewK0;
     std::vector<float> bandMaxIn;
     std::vector<float> bandMaxOut;
+    std::vector<double> odfSlice;
+    std::vector<double> energySlice;
+    int64_t sliceLo = 0;
     double odfMax = 0.0;
     Napi::Reference<Napi::Float32Array> packedRef;
     const float *packed = nullptr;
@@ -2857,6 +2996,217 @@ Napi::Value DetectOnsetsAsync(const Napi::CallbackInfo &info)
                                           info[1].As<Napi::Object>(),
                                           info[2].As<Napi::Number>().DoubleValue(),
                                           info.Length() > 3 ? info[3] : env.Undefined());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+/** Reads the packed band layout a worker needs out of `meta` and an optional `view`. */
+struct OnsetLayoutIn
+{
+    int numBands = 0;
+    int numChannels = 1;
+    int64_t numFrames = 0;
+    std::vector<uint32_t> bandOffsets;
+    std::vector<uint32_t> bandLengths;
+    std::vector<int32_t> bandStepLog2s;
+    bool hasView = false;
+    std::vector<uint32_t> viewOffsets;
+    std::vector<uint32_t> viewLens;
+    std::vector<int64_t> viewK0;
+
+    void read(const Napi::Object &metaJs, const Napi::Value &viewJs)
+    {
+        numBands = metaJs.Get("numBands").As<Napi::Number>().Int32Value();
+        numChannels = metaJs.Get("numChannels").As<Napi::Number>().Int32Value();
+        numFrames = metaJs.Get("numFrames").As<Napi::Number>().Int64Value();
+        Napi::Uint32Array bo = metaJs.Get("bandOffsets").As<Napi::Uint32Array>();
+        bandOffsets.assign(bo.Data(), bo.Data() + bo.ElementLength());
+        Napi::Uint32Array bl = metaJs.Get("bandLengths").As<Napi::Uint32Array>();
+        bandLengths.assign(bl.Data(), bl.Data() + bl.ElementLength());
+        Napi::Int32Array bs = metaJs.Get("bandStepLog2s").As<Napi::Int32Array>();
+        bandStepLog2s.assign(bs.Data(), bs.Data() + bs.ElementLength());
+        if (viewJs.IsObject())
+        {
+            Napi::Object view = viewJs.As<Napi::Object>();
+            Napi::Uint32Array offsets = view.Get("offsets").As<Napi::Uint32Array>();
+            Napi::Uint32Array lens = view.Get("lens").As<Napi::Uint32Array>();
+            Napi::Float64Array k0 = view.Get("k0").As<Napi::Float64Array>();
+            viewOffsets.assign(offsets.Data(), offsets.Data() + offsets.ElementLength());
+            viewLens.assign(lens.Data(), lens.Data() + lens.ElementLength());
+            viewK0.resize(k0.ElementLength());
+            for (size_t i = 0; i < viewK0.size(); ++i)
+                viewK0[i] = (int64_t)k0[i];
+            hasView = true;
+        }
+    }
+
+    OnsetBandLayout layout() const
+    {
+        OnsetBandLayout out;
+        out.numBands = std::min<int>(numBands, (int)std::min(bandOffsets.size(),
+                                                              std::min(bandLengths.size(), bandStepLog2s.size())));
+        out.numChannels = numChannels;
+        out.bandOffsets = bandOffsets.data();
+        out.bandLengths = bandLengths.data();
+        out.bandStepLog2s = bandStepLog2s.data();
+        if (hasView)
+        {
+            out.viewOffsets = viewOffsets.data();
+            out.viewLens = viewLens.data();
+            out.viewK0 = viewK0.data();
+        }
+        return out;
+    }
+};
+
+/**
+ * Picks the events off detection curves that cover the whole file, against
+ * the gate given. The curves come from `detectOnsets` in curvesOnly mode, one
+ * span of the file at a time, laid end to end.
+ */
+class PickOnsetsWorker : public Napi::AsyncWorker
+{
+public:
+    PickOnsetsWorker(Napi::Env env, const Napi::Float64Array &odfJs, const Napi::Float64Array &energyJs,
+                     int64_t numFrames, double sampleRate, double odfGate)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), odfGate(odfGate)
+    {
+        curves.odf.assign(odfJs.Data(), odfJs.Data() + odfJs.ElementLength());
+        curves.energy.assign(energyJs.Data(), energyJs.Data() + energyJs.ElementLength());
+        curves.durationSec = sampleRate > 0.0 ? (double)numFrames / sampleRate : 0.0;
+        curves.numBins = std::max<int64_t>(1, (int64_t)std::ceil(curves.durationSec / ONSET_BIN_SEC));
+        curves.emitStartSec = 0.0;
+        curves.emitEndSec = curves.durationSec;
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+    void Execute() override
+    {
+        if ((int64_t)curves.odf.size() != curves.numBins || curves.energy.size() != curves.odf.size())
+        {
+            SetError("pickOnsets: the curves do not cover the file");
+            return;
+        }
+        curves.prefix.assign((size_t)curves.numBins + 1, 0.0);
+        for (int64_t i = 0; i < curves.numBins; ++i)
+        {
+            curves.prefix[i + 1] = curves.prefix[i] + curves.odf[i];
+            curves.maxOdf = std::max(curves.maxOdf, curves.odf[i]);
+        }
+        if (odfGate <= 0.0)
+            return;
+        candidates = pickOnsetCandidates(curves, odfGate, false);
+    }
+
+    void OnOK() override
+    {
+        Napi::Env env = Env();
+        Napi::HandleScope scope(env);
+        Napi::Float64Array out = Napi::Float64Array::New(env, candidates.size());
+        if (!candidates.empty())
+            memcpy(out.Data(), candidates.data(), candidates.size() * sizeof(double));
+        deferred.Resolve(out);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    OnsetCurves curves;
+    double odfGate;
+    std::vector<double> candidates;
+};
+
+Napi::Value PickOnsetsAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 5 || !info[0].IsTypedArray() || !info[1].IsTypedArray() || !info[2].IsNumber() ||
+        !info[3].IsNumber() || !info[4].IsNumber())
+    {
+        Napi::TypeError::New(env, "Expected: odf (Float64Array), energy (Float64Array), numFrames, sampleRate, odfGate")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    PickOnsetsWorker *worker =
+        new PickOnsetsWorker(env, info[0].As<Napi::Float64Array>(), info[1].As<Napi::Float64Array>(),
+                             info[2].As<Napi::Number>().Int64Value(), info[3].As<Napi::Number>().DoubleValue(),
+                             info[4].As<Napi::Number>().DoubleValue());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+/**
+ * Measures the events whose times fall in [startSec, endSec) against the
+ * coefficients handed over, which have to reach a little before each and up
+ * to the moment after it that its level is read over. Every candidate of the
+ * file is given, because how long an event is measured for depends on where
+ * the next one starts.
+ */
+class OnsetSalienceWorker : public Napi::AsyncWorker
+{
+public:
+    OnsetSalienceWorker(Napi::Env env, const Napi::Float32Array &packedJs, const Napi::Object &metaJs,
+                        double sampleRate, const Napi::Object &options)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate)
+    {
+        in.read(metaJs, options.Get("view"));
+        Napi::Float64Array times = options.Get("times").As<Napi::Float64Array>();
+        candidates.assign(times.Data(), times.Data() + times.ElementLength());
+        startSec = options.Get("startSec").ToNumber().DoubleValue();
+        endSec = options.Get("endSec").ToNumber().DoubleValue();
+        packedRef = Napi::Reference<Napi::Float32Array>::New(packedJs, 1);
+        packed = packedJs.Data();
+        packedFloats = packedJs.ElementLength();
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+    void Execute() override
+    {
+        const OnsetBandLayout layout = in.layout();
+        const double durationSec = sampleRate > 0.0 ? (double)in.numFrames / sampleRate : 0.0;
+        if (!packed || layout.numBands <= 0 || durationSec <= 0.0)
+            return;
+        onsets = measureOnsets(packed, packedFloats, layout, sampleRate, durationSec, candidates, startSec, endSec,
+                               true);
+    }
+
+    void OnOK() override
+    {
+        Napi::Env env = Env();
+        Napi::HandleScope scope(env);
+        deferred.Resolve(OnsetWorker::packOnsets(env, onsets));
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    OnsetLayoutIn in;
+    Napi::Reference<Napi::Float32Array> packedRef;
+    const float *packed = nullptr;
+    size_t packedFloats = 0;
+    double sampleRate;
+    double startSec = 0.0;
+    double endSec = 0.0;
+    std::vector<double> candidates;
+    std::vector<DetectedOnset> onsets;
+};
+
+Napi::Value OnsetSalienceAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 4 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() ||
+        !info[3].IsObject())
+    {
+        Napi::TypeError::New(env, "Expected: packedData (Float32Array), meta (Object), sampleRate (Number), options (Object)")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    OnsetSalienceWorker *worker =
+        new OnsetSalienceWorker(env, info[0].As<Napi::Float32Array>(), info[1].As<Napi::Object>(),
+                                info[2].As<Napi::Number>().DoubleValue(), info[3].As<Napi::Object>());
     worker->Queue();
     return worker->GetPromise();
 }
@@ -3114,8 +3464,24 @@ public:
                        : PackedCoefs{inputData,  inputDataLen, bandOffsets.data(), bandLengths.data(),
                                      bandStepLog2s.data(), numBands};
 
-        for (int ch = 0; ch < channels; ++ch)
+        // Onsets read the coefficients only, so they are found while the
+        // channels are synthesised, each on a thread of its own.
+        std::thread onsetThread;
+        std::exception_ptr onsetFailure;
+        if (detectOnsets)
         {
+            onsetThread = std::thread([&]() {
+                try
+                {
+                    findOnsets();
+                }
+                catch (...)
+                {
+                    onsetFailure = std::current_exception();
+                }
+            });
+        }
+        const std::string synthFailure = forEachChannel(channels, [&](int ch) {
             DEBUG_LOG << "[C++] Processing channel " << ch << std::endl << std::flush;
             gaborator::coefs<float> channelCoefs(analyzer);
             fillCoefsFromPacked(packedView, ch, band_begin, band_end, fillStart, fillEnd, channelCoefs);
@@ -3125,6 +3491,30 @@ public:
             synthesizedBuffers[ch].resize(synthLength);
             analyzer.synthesize(channelCoefs, synthStart, synthEnd, synthesizedBuffers[ch].data());
             DEBUG_LOG << "[C++] Channel " << ch << " - synthesized " << synthLength << " samples" << std::endl << std::flush;
+        });
+        if (onsetThread.joinable())
+            onsetThread.join();
+        if (!synthFailure.empty())
+        {
+            SetError(synthFailure);
+            return;
+        }
+        if (onsetFailure)
+        {
+            try
+            {
+                std::rethrow_exception(onsetFailure);
+            }
+            catch (const std::exception &e)
+            {
+                SetError(std::string("onset detection failed: ") + e.what());
+                return;
+            }
+            catch (...)
+            {
+                SetError("onset detection failed");
+                return;
+            }
         }
 
         // Prepare output
@@ -3199,33 +3589,35 @@ public:
         }
         DEBUG_LOG << "[C++] Peak value: " << peakValue << std::endl << std::flush;
 
-        if (detectOnsets)
-        {
-            OnsetBandLayout layout;
-            layout.numBands = std::min<int>(numBands, (int)std::min(bandOffsets.size(),
-                                                                    std::min(bandLengths.size(), bandStepLog2s.size())));
-            layout.numChannels = channels;
-            layout.bandOffsets = bandOffsets.data();
-            layout.bandLengths = bandLengths.data();
-            layout.bandStepLog2s = bandStepLog2s.data();
-            if (windowed())
-            {
-                layout.viewOffsets = viewOffsets.data();
-                layout.viewLens = viewLens.data();
-                layout.viewK0 = viewK0.data();
-            }
-            // A stroke changes one span of the file, so only that span's onsets
-            // are worth finding again; the caller splices them into the ones it
-            // already has. Without a region — the first pass over a file — the
-            // whole of it is read.
-            onsets = computeOnsets(inputData, inputDataLen, layout, (int64_t)numFrames, sampleRate,
-                                   hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut);
-            DEBUG_LOG << "[C++] Detected " << onsets.size() << " onsets" << std::endl << std::flush;
-        }
-
         outputWritten = writeOutputAudio(audioChannels, outputAudio, outputAudioLens);
 
         DEBUG_LOG << "[C++] Execute() complete" << std::endl << std::flush;
+    }
+
+    /**
+     * Finds the onsets of the span the pass reports on. A stroke changes one
+     * span of the file, so only that span's onsets are worth finding again;
+     * the caller splices them into the ones it already has. Without a region
+     * — the first pass over a file — the whole of it is read.
+     */
+    void findOnsets()
+    {
+        OnsetBandLayout layout;
+        layout.numBands = std::min<int>(numBands, (int)std::min(bandOffsets.size(),
+                                                                std::min(bandLengths.size(), bandStepLog2s.size())));
+        layout.numChannels = channels;
+        layout.bandOffsets = bandOffsets.data();
+        layout.bandLengths = bandLengths.data();
+        layout.bandStepLog2s = bandStepLog2s.data();
+        if (windowed())
+        {
+            layout.viewOffsets = viewOffsets.data();
+            layout.viewLens = viewLens.data();
+            layout.viewK0 = viewK0.data();
+        }
+        onsets = computeOnsets(inputData, inputDataLen, layout, (int64_t)numFrames, sampleRate,
+                               hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut);
+        DEBUG_LOG << "[C++] Detected " << onsets.size() << " onsets" << std::endl << std::flush;
     }
 
     void OnOK()
@@ -3597,27 +3989,70 @@ public:
             }
         }
 
-        // 1. Synthesize the window and splice it into the audio there was.
-        audioChannels.resize(channels);
+        // The onsets answer to the coefficients that are kept. A projection
+        // rewrites them, so then the onsets wait for it; otherwise they are
+        // read from the packed buffer while the audio is synthesised.
+        const bool onsetsAlongside = detectOnsets && !projectEnabled;
+        std::thread onsetThread;
+        std::exception_ptr onsetFailure;
+        if (onsetsAlongside)
         {
-            std::vector<float> synth((size_t)(w1 - w0));
-            for (int ch = 0; ch < channels; ++ch)
+            onsetThread = std::thread([&]() {
+                try
+                {
+                    findOnsets();
+                }
+                catch (...)
+                {
+                    onsetFailure = std::current_exception();
+                }
+            });
+        }
+        const auto joinOnsets = [&]() -> bool {
+            if (onsetThread.joinable())
+                onsetThread.join();
+            if (!onsetFailure)
+                return true;
+            try
             {
-                gaborator::coefs<float> coefs(analyzer);
-                fillCoefsFromPacked(src, ch, bandBegin, bandEnd, fillStart, fillEnd, coefs);
-                analyzer.synthesize(coefs, w0, w1, synth.data());
-
-                if (partial)
-                {
-                    audioChannels[ch].assign(existingAudio[ch], existingAudio[ch] + existingAudioLens[ch]);
-                    crossfadeSpliceInto(audioChannels[ch], existingAudio[ch], synth, w0, w1, numFrames,
-                                        crossfadeSamples);
-                }
-                else
-                {
-                    audioChannels[ch] = synth;
-                }
+                std::rethrow_exception(onsetFailure);
             }
+            catch (const std::exception &e)
+            {
+                SetError(std::string("onset detection failed: ") + e.what());
+            }
+            catch (...)
+            {
+                SetError("onset detection failed");
+            }
+            return false;
+        };
+
+        // 1. Synthesize the window and splice it into the audio there was,
+        //    each channel on a thread of its own.
+        audioChannels.resize(channels);
+        const std::string synthFailure = forEachChannel(channels, [&](int ch) {
+            std::vector<float> synth((size_t)(w1 - w0));
+            gaborator::coefs<float> coefs(analyzer);
+            fillCoefsFromPacked(src, ch, bandBegin, bandEnd, fillStart, fillEnd, coefs);
+            analyzer.synthesize(coefs, w0, w1, synth.data());
+
+            if (partial)
+            {
+                audioChannels[ch].assign(existingAudio[ch], existingAudio[ch] + existingAudioLens[ch]);
+                crossfadeSpliceInto(audioChannels[ch], existingAudio[ch], synth, w0, w1, numFrames,
+                                    crossfadeSamples);
+            }
+            else
+            {
+                audioChannels[ch] = std::move(synth);
+            }
+        });
+        if (!synthFailure.empty())
+        {
+            joinOnsets();
+            SetError(synthFailure);
+            return;
         }
 
         // 2. Hard time edges, made exact in the time domain.
@@ -3634,7 +4069,10 @@ public:
         // 4. Project the canvas through the audio. Skipped when the stroke
         //    keeps its painted coefficients; the patch then comes back empty.
         if (projectEnabled && !project(analyzer, bandBegin, bandEnd, w0, w1))
+        {
+            joinOnsets();
             return;
+        }
 
         peakValue = 0.0f;
         for (const auto &channel : audioChannels)
@@ -3643,25 +4081,10 @@ public:
 
         // 5. Onsets, read from the packed buffer the projection wrote, so they
         //    answer to the coefficients that are kept.
-        if (detectOnsets)
-        {
-            OnsetBandLayout layout;
-            layout.numBands = std::min<int>(numBands, (int)std::min(bandOffsets.size(),
-                                                                    std::min(bandLengths.size(), bandStepLog2s.size())));
-            layout.numChannels = channels;
-            layout.bandOffsets = bandOffsets.data();
-            layout.bandLengths = bandLengths.data();
-            layout.bandStepLog2s = bandStepLog2s.data();
-            if (windowed)
-            {
-                layout.viewOffsets = viewOffsets.data();
-                layout.viewLens = viewLens.data();
-                layout.viewK0 = viewK0.data();
-            }
-
-            onsets = computeOnsets(packed, packedLen, layout, numFrames, sampleRate,
-                                   hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut);
-        }
+        if (detectOnsets && !onsetsAlongside)
+            findOnsets();
+        if (!joinOnsets())
+            return;
 
         // 6. Output levels over the window.
         computeLevels(w0, w1, weightedGain);
@@ -3669,6 +4092,26 @@ public:
         audioWindowEnd = w1;
 
         outputWritten = writeOutputAudio(audioChannels, outputAudio, outputAudioLens);
+    }
+
+    /** Finds the onsets of the span the commit reports on, from the packed buffer as it stands. */
+    void findOnsets()
+    {
+        OnsetBandLayout layout;
+        layout.numBands = std::min<int>(numBands, (int)std::min(bandOffsets.size(),
+                                                                std::min(bandLengths.size(), bandStepLog2s.size())));
+        layout.numChannels = channels;
+        layout.bandOffsets = bandOffsets.data();
+        layout.bandLengths = bandLengths.data();
+        layout.bandStepLog2s = bandStepLog2s.data();
+        if (windowed)
+        {
+            layout.viewOffsets = viewOffsets.data();
+            layout.viewLens = viewLens.data();
+            layout.viewK0 = viewK0.data();
+        }
+        onsets = computeOnsets(packed, packedLen, layout, numFrames, sampleRate,
+                               hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut);
     }
 
     void OnOK()
@@ -6515,6 +6958,8 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("commitStroke", Napi::Function::New(env, CommitStrokeAsync));
     exports.Set("detectOnsets", Napi::Function::New(env, DetectOnsetsAsync));
+    exports.Set("pickOnsets", Napi::Function::New(env, PickOnsetsAsync));
+    exports.Set("onsetSalience", Napi::Function::New(env, OnsetSalienceAsync));
     exports.Set("applyLimiter", Napi::Function::New(env, ApplyLimiterTest));
     exports.Set("hpss", Napi::Function::New(env, HpssAsync));
     exports.Set("nmf", Napi::Function::New(env, NmfAsync));

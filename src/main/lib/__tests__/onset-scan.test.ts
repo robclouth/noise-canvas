@@ -2,7 +2,13 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { gatherPixelRanges } from "../../../renderer/src/lib/pixel-ranges";
-import { onsetPassesInFlight, scanOnsets, type DetectRegional, type OnsetDetection } from "../onset-scan";
+import {
+  onsetPassesInFlight,
+  scanOnsets,
+  type OnsetCurvesSlice,
+  type OnsetDetection,
+  type OnsetPasses,
+} from "../onset-scan";
 import type { GaboratorAnalysisResult, PackedLayout } from "../types";
 
 // Onsets can be found a chunk of the file at a time, each pass reading only its
@@ -25,7 +31,9 @@ const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon
     meta: PackedLayout,
     sampleRate: number,
     options?: unknown,
-  ) => Promise<OnsetDetection>;
+  ) => Promise<OnsetDetection & OnsetCurvesSlice>;
+  pickOnsets: OnsetPasses["pick"];
+  onsetSalience: OnsetPasses["salience"];
 };
 
 const SAMPLE_RATE = 44100;
@@ -92,8 +100,13 @@ function layoutOf(result: GaboratorAnalysisResult): PackedLayout {
   };
 }
 
-const detect: DetectRegional = (packed, meta, sampleRate, options) =>
-  addon.detectOnsets(packed, meta, sampleRate, options);
+const detect: OnsetPasses = {
+  detect: (packed, meta, sampleRate, options) => addon.detectOnsets(packed, meta, sampleRate, options),
+  curves: (packed, meta, sampleRate, options) =>
+    addon.detectOnsets(packed, meta, sampleRate, { ...options, curvesOnly: true }),
+  pick: (odf, energy, numFrames, sampleRate, odfGate) => addon.pickOnsets(odf, energy, numFrames, sampleRate, odfGate),
+  salience: (packed, meta, sampleRate, options) => addon.onsetSalience(packed, meta, sampleRate, options),
+};
 
 async function analysed(seconds: number, times: Hit[], params = COARSE) {
   const result = await addon.analyze([hits(seconds, times)], 1, SAMPLE_RATE, params);

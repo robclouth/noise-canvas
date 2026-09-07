@@ -1,7 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { IpcRenderer } from "electron";
 import type { AnalysisStream } from "../main/lib/audio-analysis";
-import type { OnsetDetection } from "../main/lib/onset-scan";
+import type { OnsetCurvesSlice, OnsetDetection, PackedView } from "../main/lib/onset-scan";
 import {
   AnalysisParams,
   CommitStroke,
@@ -89,6 +89,29 @@ declare global {
         sampleRate: number,
         bandMax: Float32Array,
         region?: { startSec: number; endSec: number; odfReference: number },
+      ) => Promise<OnsetDetection>;
+      /**
+       * The detection curves of [startFrame, endFrame) from coefficients the
+       * caller holds — a synthesis chunk's, read wide enough for the
+       * whitening's warm-up — so a file is read once for audio and onsets.
+       */
+      onsetCurvesOfChunk?: (
+        packed: Float32Array,
+        analysisMetadata: PackedLayout,
+        sampleRate: number,
+        bandMax: Float32Array,
+        view: PackedView,
+        startFrame: number,
+        endFrame: number,
+      ) => Promise<OnsetCurvesSlice>;
+      /** The file's onsets from the curves of every chunk, measured a chunk at a time through `read`. */
+      finishFileOnsets?: (
+        read: (ranges: Uint32Array) => Promise<Float32Array>,
+        analysisMetadata: PackedLayout,
+        sampleRate: number,
+        slices: OnsetCurvesSlice[],
+        spans: Array<[number, number]>,
+        bandMax: Float32Array,
       ) => Promise<OnsetDetection>;
       /** The splice grid in samples; edits quantise their lengths to it. */
       spliceQuantSamples: (sampleRate: number) => number;

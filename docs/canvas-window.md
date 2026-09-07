@@ -212,12 +212,23 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     a finer picture — a tile still being read, a coarser level while the
     finer ones are drawn — the display greys that region after a short grace
     (`displayLoading`), so a reader sees it is loading rather than taking the
-    stand-in for the state. `scanOnsets` and `synthesiseInChunks`
-    read the store back a chunk at a time, each through a view. Both need what
-    only the whole file can give — every band's loudest moment, and the loudest
-    moment of the detection function — so the analysis carries the first and a
-    round of its own finds the second, and a pass handed neither takes a round
-    for each. A host that answers whole passes only keeps the whole-run path.
+    stand-in for the state. `synthesiseInChunks` reads the store back a chunk
+    at a time through a view, and the onsets come out of the same read: each
+    chunk's detection curves (`onsetCurvesOfChunk`) are found while the chunk
+    is synthesised, from a view widened to the whitening's warm-up, and once
+    the audio is there the events are picked off the curves of the whole file
+    at once and measured a chunk at a time (`finishFileOnsets`). The detector
+    needs two things only the whole file can give — every band's loudest
+    moment, which the analysis carries, and the loudest moment of the
+    detection function, which is the gate the pick is held to — and one more
+    the curves cannot carry: an event's size is read off the coefficients
+    around it, up to where the next event starts, so the measuring round
+    reads again, only around the events. `scanOnsets` is the same three
+    stages for a caller with no synthesis to ride on, and a pass handed no
+    band maxima takes a round to find them first. A windowed file opens with
+    no onsets and no gate; its first synthesis brings both, and the root node
+    stores them then. A host that answers whole passes only keeps the
+    whole-run path.
 
     Deriving a file from another is the same rule again. A duplicate seeds its
     store from the old file's a block at a time, and a merge sums the parts a

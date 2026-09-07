@@ -154,9 +154,10 @@ export interface FileRendererHandle {
    * Paints a batch of strokes into the FBO, each from its own state snapshot,
    * as part of the stroke already opened with beginStrokePreview(). A stroke
    * on frames the canvas does not hold waits for its window; `settleStroke`
-   * lands what is waiting. Returns how many were taken.
+   * lands what is waiting. The blocks under `ahead`, the strokes that follow
+   * this batch, are read towards while it lands. Returns how many were taken.
    */
-  renderStrokeBatch: (strokes: StrokeDispatch[]) => number;
+  renderStrokeBatch: (strokes: StrokeDispatch[], ahead?: StrokeDispatch[]) => number;
   /**
    * Paints one stroke from an explicit state, optionally sampling a spectrogram
    * that is not an open file. A preview goes to the partner buffer and can be
@@ -179,6 +180,11 @@ export interface FileRendererHandle {
   beginStrokePreview: () => void;
   /** Puts back the pixels from before the preview. Resolves false if none were saved. */
   discardStrokePreview: () => Promise<boolean>;
+  /**
+   * The longest stroke the canvas takes at once, in seconds, while it holds a
+   * window of the file; null while it holds all of it.
+   */
+  maxStrokeSeconds: () => number | null;
   /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
   keepStrokePreview: () => void;
   /** The whole packed state from the frame buffer, or null when the canvas view does not hold the whole file. */
@@ -1620,10 +1626,11 @@ const FileRendererInner = memo(
               label: "Opened",
               spectrogram: spectrogramData,
             });
-            // Analysis has already found this state's onsets, so they are stored
-            // with it rather than found again the next time the file is opened.
+            // Onsets the analysis found are stored with the state rather than
+            // found again the next time the file is opened. A windowed file's
+            // are found by its first synthesis and stored once that lands.
             const opened = openFiles[fileId];
-            if (id && opened?.onsets) {
+            if (id && opened?.onsets && (opened.onsetReference?.odfMax ?? 0) > 0) {
               void historyManager
                 .setNodeOnsets(id, packOnsetState({ onsets: opened.onsets, reference: opened.onsetReference }))
                 .catch((error) => console.error("Storing onsets for history node failed:", error));
@@ -1640,10 +1647,16 @@ const FileRendererInner = memo(
             await historyManager.restoreCurrentAudio();
             return;
           }
+          const gateBefore = openFiles[fileId]?.onsetReference?.odfMax ?? 0;
           await state.synthesizeFile(fileId, undefined, packed);
           const updated = openFiles[fileId];
           if (nodeId && updated?.audioBuffer) {
             historyManager.setStateAudio(nodeId, updated.audioBuffer, updated.audioPeak ?? 1);
+          }
+          if (nodeId && gateBefore <= 0 && updated?.onsets && (updated.onsetReference?.odfMax ?? 0) > 0) {
+            void historyManager
+              .setNodeOnsets(nodeId, packOnsetState({ onsets: updated.onsets, reference: updated.onsetReference }))
+              .catch((error) => console.error("Storing onsets for history node failed:", error));
           }
         })();
       }
@@ -2214,10 +2227,18 @@ const FileRendererInner = memo(
         source.textures.metadata.dispose();
         source.textures.original?.dispose();
       },
-      renderStrokeBatch: (strokes: StrokeDispatch[]) => {
+      renderStrokeBatch: (strokes: StrokeDispatch[], ahead?: StrokeDispatch[]) => {
         const strokeRenderer = strokeRendererRef.current;
         const canvas = canvasRef.current;
         if (!strokeRenderer?.getIsInitialized() || !canvas) return 0;
+        if (ahead && ahead.length > 0) {
+          // Strokes come in time order, so the first and the last bound the span.
+          const first = ahead[0];
+          const last = ahead[ahead.length - 1];
+          const from = dabSpan(first.state, new Vector2(first.aimX, first.aimY), canvas);
+          const to = dabSpan(last.state, new Vector2(last.aimX, last.aimY), canvas);
+          canvas.prefetch(Math.min(from.startFrame, to.startFrame), Math.max(from.endFrame, to.endFrame));
+        }
         let painted = 0;
         for (const stroke of strokes) {
           // A dab blends out of the canvas, so one on a block the canvas has
@@ -2244,6 +2265,12 @@ const FileRendererInner = memo(
         canvasRef.current?.beginStroke();
       },
       discardStrokePreview,
+      maxStrokeSeconds: () => {
+        const canvas = canvasRef.current;
+        if (!canvas || canvas.wholeFile) return null;
+        // Half the window, so an effect's reach either side of the stroke fits too.
+        return canvas.windowSeconds() / 2;
+      },
       keepStrokePreview: () => strokeRendererRef.current?.releaseRollback(),
       getFBOData,
       readPixelRanges,

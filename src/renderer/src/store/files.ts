@@ -25,7 +25,12 @@ import { blockBandLayout, blockGrid, blockTexels, frameRangeOfBlock, type BlockG
 import { destroyBlockStore, openBlockStore } from "../lib/block-stores";
 import { needsCanvasWindow } from "../lib/canvas-window";
 import { viewCoversFile } from "../lib/canvas-view";
-import { synthesiseInChunks, type SynthesiseView } from "../../../main/lib/synthesis-chunks";
+import {
+  SYNTHESIS_CHUNK_SECONDS,
+  synthesiseInChunks,
+  type ChunkOnsetPass,
+  type SynthesiseView,
+} from "../../../main/lib/synthesis-chunks";
 import { toChannelCount } from "../lib/channel-mix";
 import { mixdown } from "../lib/mixdown";
 import { resampleChannels } from "../lib/resample";
@@ -461,12 +466,17 @@ async function wholeFileInverseMap(
   );
 }
 
-/** Rebuilds the whole file's audio from the store, a chunk of coefficients at a time. */
+/**
+ * Rebuilds the whole file's audio from the store, a chunk of coefficients at a
+ * time. With `onsets`, each chunk's detection curves are found from the same
+ * read while the chunk is synthesised, and come back with the audio.
+ */
 function synthesiseFromSpans(
   read: (ranges: Uint32Array) => Promise<Float32Array | null>,
   layout: PackedLayout,
   sampleRate: number,
   params: AnalysisParams,
+  onsets?: ChunkOnsetPass,
 ) {
   const pass: SynthesiseView = (packed, meta, existingAudio, startFrame, endFrame) =>
     host.analysis.synthesize(
@@ -481,7 +491,29 @@ function synthesiseFromSpans(
       0,
       layout.numBands,
     );
-  return synthesiseInChunks(pass, spanReader(read), layout, sampleRate);
+  return synthesiseInChunks(pass, spanReader(read), layout, sampleRate, SYNTHESIS_CHUNK_SECONDS, onsets);
+}
+
+/** True while the file's onsets were judged against a gate a pass over the whole file arrived at. */
+function hasOnsetGate(file: Pick<OpenFile, "onsets" | "onsetReference">): boolean {
+  return file.onsets !== undefined && file.onsetReference !== undefined && file.onsetReference.odfMax > 0;
+}
+
+/**
+ * The onset pass a chunked synthesis runs alongside itself, or null when the
+ * host cannot fold the two, or the file's band maxima are unknown.
+ */
+function chunkOnsetPass(
+  layout: PackedLayout,
+  sampleRate: number,
+  bandMax: Float32Array | undefined,
+): ChunkOnsetPass | null {
+  const curves = host.analysis.onsetCurvesOfChunk;
+  if (!curves || !bandMax || bandMax.length < layout.numBands) return null;
+  return {
+    curves: (packed, view, startFrame, endFrame) =>
+      curves(packed, layout, sampleRate, bandMax, view, startFrame, endFrame),
+  };
 }
 
 /** A range reader that refuses rather than answering with a gap. */
@@ -510,7 +542,7 @@ async function scanOnsetsFromSpans(
   if (!scan) return null;
   const reference = file.onsetReference;
   const region =
-    reference && params.onsetStartSec !== undefined && params.onsetEndSec !== undefined
+    reference && reference.odfMax > 0 && params.onsetStartSec !== undefined && params.onsetEndSec !== undefined
       ? { startSec: params.onsetStartSec, endSec: params.onsetEndSec, odfReference: reference.odfMax }
       : undefined;
   const bandMax = reference?.bandMax ?? new Float32Array(0);
@@ -578,9 +610,13 @@ async function analyseIntoBlocks(
     bandStepLog2s: shape.bandStepLog2s,
     bandLengths: shape.bandLengths,
   };
+  // A windowed file's first synthesis reads every block again, and finds the
+  // onsets from that read; the analysis leaves it the band maxima and no gate.
   const scan = host.analysis.scanFileOnsets;
-  const detected =
-    whole || !scan
+  const alongside = !whole && host.analysis.onsetCurvesOfChunk && host.analysis.finishFileOnsets;
+  const detected = alongside
+    ? { onsets: new Float32Array(0), odfMax: 0, bandMax: summary.onsetBandMax }
+    : whole || !scan
       ? await host.analysis.detectOnsets(whole ?? (await store.readAll()), packedLayout, shape.sampleRate)
       : await scan((ranges) => store.readRanges(ranges), packedLayout, shape.sampleRate, summary.onsetBandMax);
   diag.timing("file", "open phases", performance.now() - openStart, {
@@ -2548,7 +2584,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         );
         analysisParams.onsetOdfReference = onsetReference.odfMax;
         analysisParams.onsetBandMax = onsetReference.bandMax;
-      } else if (!file.onsets || !onsetReference) {
+      } else if (!hasOnsetGate(file)) {
         // Nothing to work from yet, so this pass reads the whole file and
         // produces the reference the ones after it go on. A synthesis that
         // changed nothing — arriving at a history state, say — leaves the
@@ -2560,13 +2596,42 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const cppSynthStart = performance.now();
       try {
         if (readSpans) {
-          synthesisResult = await synthesiseFromSpans(
+          // A whole-file onset pass reads each chunk with the synthesis and
+          // finishes off the curves once the audio is there; a regional one
+          // reads its span on its own afterwards.
+          const wholeFileOnsets = analysisParams.detectOnsets && analysisParams.onsetStartSec === undefined;
+          const finish = host.analysis.finishFileOnsets;
+          const alongside = wholeFileOnsets
+            ? chunkOnsetPass(packedLayout, originalAnalysis.sampleRate, file.onsetReference?.bandMax)
+            : null;
+          const chunked = await synthesiseFromSpans(
             readSpans,
             packedLayout,
             originalAnalysis.sampleRate,
             analysisParams,
+            alongside ?? undefined,
           );
-          if (analysisParams.detectOnsets) {
+          synthesisResult = chunked;
+          if (alongside && finish && chunked.curves && chunked.spans) {
+            const onsetsStart = performance.now();
+            const found = await finish(
+              spanReader(readSpans),
+              packedLayout,
+              originalAnalysis.sampleRate,
+              chunked.curves,
+              chunked.spans,
+              file.onsetReference!.bandMax,
+            );
+            diag.timing("timing", "onsets finished from curves", performance.now() - onsetsStart, {
+              onsets: found.onsets.length / 2,
+            });
+            synthesisResult = {
+              ...chunked,
+              onsets: found.onsets,
+              onsetOdfMax: found.odfMax,
+              onsetBandMax: found.bandMax,
+            };
+          } else if (analysisParams.detectOnsets) {
             const found = await scanOnsetsFromSpans(
               readSpans,
               packedLayout,
@@ -2574,7 +2639,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
               file,
               analysisParams,
             );
-            if (found) synthesisResult = { ...synthesisResult, ...found };
+            if (found) synthesisResult = { ...chunked, ...found };
           }
         } else {
           // The native call references the packed buffer and existing audio in
@@ -2731,7 +2796,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     // measured for a moment after it. Without a reference from a whole-file
     // pass this reads everything, and produces one.
     const onsetReference = file.onsetReference;
-    if (onsetReference && window) {
+    if (onsetReference && hasOnsetGate(file) && window) {
       params.detectOnsets = true;
       params.onsetStartSec = Math.max(0, window.startFrame / spec.sampleRate - ONSET_REGION_PAD_SEC);
       params.onsetEndSec = Math.min(
@@ -2740,7 +2805,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
       params.onsetOdfReference = onsetReference.odfMax;
       params.onsetBandMax = onsetReference.bandMax;
-    } else if (!file.onsets || !onsetReference || wholeFile) {
+    } else if (!hasOnsetGate(file) || wholeFile) {
       params.detectOnsets = true;
     }
 
