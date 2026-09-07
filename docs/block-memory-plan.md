@@ -1911,14 +1911,27 @@ block at a time.
   It needs no grace period, unlike the loading grey: there is no picture to
   flash away from.
 
+### The half that was missed, and how it was found
+
+Marking the levels was guarded by the pyramid's `seeded` flag, and
+`refreshFromCanvas` — the canvas draw — sets that flag while writing the
+bins of the canvas's window alone. On a restore it runs first, so the clear
+was skipped: white everywhere but the window. Colouring each branch of
+`sampleDisplayMags` and shooting the app named the culprit in one run (the
+whole view came back green, the pyramid's own branch, holding 0 dB). The
+flag is now `marked`, of its own, and every entry that writes into a level
+marks first.
+
 ### Measured
 
 `display-pyramid-parity.test.ts` renders a pyramid nothing has drawn into.
 Without the store half it reads 255 — Rob's white; without the shader half
-it is flat black; with both it is a hatch under 60 with visible stripes. The
-normal open path is unchanged: a 900 s stereo file still shows its picture
-from the first frame the view exists (`white-open.mjs`, white fraction
-0.001 either side).
+it is flat black; with both it is a hatch under 60 with visible stripes. `display-pyramid-textures.test.ts` pins the canvas refresh: no bin
+reads full scale after it. In the app, a 280 s stereo file restored from a
+saved session went from 89 % of the view white for 1.5 s to none, with the
+hatch in its place (`restore-open.mjs --restore`). The normal open path is
+unchanged: a 900 s stereo file still shows its picture from the first frame
+the view exists.
 
 ---
 
