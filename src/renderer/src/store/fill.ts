@@ -1,5 +1,6 @@
 import { notifications } from "@mantine/notifications";
-import type { StrokeDispatch } from "@renderer/components/file-renderer";
+import { diag } from "@renderer/lib/diag-log";
+import type { FileRendererHandle, StrokeDispatch } from "@renderer/components/file-renderer";
 import { resolveGridFill, type GridFillTarget } from "@renderer/lib/grid/grid-fill";
 import { activeLoopRegion, openFiles } from "./files";
 import type { State, ZustandGet, ZustandSet } from "./types";
@@ -8,7 +9,7 @@ import type { State, ZustandGet, ZustandSet } from "./types";
 export const FILL_PROGRESS_THRESHOLD = 256;
 
 /** Strokes painted between yields to the browser. */
-const FILL_CHUNK = 64;
+const FILL_CHUNK = 256;
 
 export interface FillProgress {
   done: number;
@@ -72,10 +73,12 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
 
     cancelRequested = false;
     set({ isFilling: true });
+    let renderer: FileRendererHandle | null = null;
     try {
       const resolved = resolveTarget(get());
       if (!resolved) return;
-      const { renderer, target } = resolved;
+      renderer = resolved.renderer;
+      const { target } = resolved;
 
       const { anchors, state: painted } = resolveGridFill(get(), target);
       if (anchors.length === 0) return;
@@ -88,22 +91,33 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
       if (showProgress) set({ fillProgress: { done: 0, total } });
 
       let strokesPainted = 0;
+      let settleMs = 0;
+      const paintStart = performance.now();
       for (let start = 0; start < total; start += FILL_CHUNK) {
         const chunk: StrokeDispatch[] = anchors
           .slice(start, start + FILL_CHUNK)
           .map((anchor) => ({ aimX: anchor.aimX, aimY: anchor.aimY, state: painted }));
         strokesPainted += renderer.renderStrokeBatch(chunk);
-        if (!showProgress) continue;
-
-        set({ fillProgress: { done: Math.min(start + FILL_CHUNK, total), total } });
-        await nextFrame();
+        // A canvas holding a window of the file takes the chunk's strokes as
+        // the window reaches them, so each chunk lands before the next is given.
+        const settleStart = performance.now();
+        await renderer.settleStroke();
+        settleMs += performance.now() - settleStart;
+        if (showProgress) {
+          set({ fillProgress: { done: Math.min(start + FILL_CHUNK, total), total } });
+          await nextFrame();
+        }
         if (cancelRequested) {
-          renderer.discardStrokePreview();
+          await renderer.discardStrokePreview();
           return;
         }
       }
+      diag.timing("timing", "fill grid painted", performance.now() - paintStart, {
+        strokes: strokesPainted,
+        settleMs: Math.round(settleMs),
+      });
       if (strokesPainted === 0) {
-        renderer.discardStrokePreview();
+        await renderer.discardStrokePreview();
         return;
       }
 
@@ -116,8 +130,8 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
         "Fill Grid",
         false,
       );
-      renderer.endStroke();
     } finally {
+      renderer?.endStroke();
       cancelRequested = false;
       set({ isFilling: false, fillProgress: null });
     }

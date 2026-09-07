@@ -8,7 +8,7 @@ import { AimRest, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { canvasWindowBlocks } from "@renderer/lib/gpu-budget";
 import { ExportSourceWindow, exportBlockGrid } from "@renderer/lib/export-window";
 import { sourceReadSpan, type SourceWindowTextures } from "@renderer/lib/source-window";
-import { WindowedCanvas, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
+import { WindowedCanvas, type DabNeeds, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
 import { strokeReach, type ReachContext } from "@renderer/lib/effect-reach";
 import { strokeRefusal as refusalFor } from "@renderer/lib/whole-file-gate";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
@@ -128,13 +128,33 @@ function resolveStepSourceFile(state: State, step: BrushStep | undefined): OpenF
 /**
  * Handle for the FileRenderer component, exposing methods to parent components.
  */
+/** The union of the steps' brush rectangles for one aim, in file UV. */
+interface BrushUnionUv {
+  min: Vector2;
+  max: Vector2;
+  sizeUv: Vector2;
+  fullTime: boolean;
+  fullPitch: boolean;
+  wrapsTime: boolean;
+  wrapsPitch: boolean;
+  hasSteps: boolean;
+}
+
+/** The frames a dab reads and writes, with what it reads of other files. */
+interface DabSpan {
+  startFrame: number;
+  endFrame: number;
+  needs: DabNeeds;
+}
+
 export interface FileRendererHandle {
   /** Renders a brush stroke at the current cursor position. */
   renderStroke: (preview: boolean) => void;
   /**
-   * Paints a batch of strokes into the FBO immediately, each from its own state
-   * snapshot, as part of the stroke already opened with beginStroke(). Returns
-   * how many were painted.
+   * Paints a batch of strokes into the FBO, each from its own state snapshot,
+   * as part of the stroke already opened with beginStrokePreview(). A stroke
+   * on frames the canvas does not hold waits for its window; `settleStroke`
+   * lands what is waiting. Returns how many were taken.
    */
   renderStrokeBatch: (strokes: StrokeDispatch[]) => number;
   /**
@@ -152,12 +172,13 @@ export interface FileRendererHandle {
   ) => SourceFileInfo | null;
   disposeRegionSource: (source: SourceFileInfo) => void;
   /**
-   * Saves the spectrogram (or restores an already-saved one) so the strokes
-   * painted next can be taken back without touching history.
+   * Opens a stroke and saves the spectrogram (or restores an already-saved
+   * one), so the strokes painted next can be taken back without touching
+   * history.
    */
   beginStrokePreview: () => void;
-  /** Puts back the pixels from before the preview. Returns false if none were saved. */
-  discardStrokePreview: () => boolean;
+  /** Puts back the pixels from before the preview. Resolves false if none were saved. */
+  discardStrokePreview: () => Promise<boolean>;
   /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
   keepStrokePreview: () => void;
   /** The whole packed state from the frame buffer, or null when the canvas view does not hold the whole file. */
@@ -1240,6 +1261,69 @@ const FileRendererInner = memo(
         .filter((need) => responseIsWindowed(need.fileId));
 
     /**
+     * The rectangle the brush paints inside for one aim point, in file UV: the
+     * union of the steps' own rectangles, since size and anchor mode are
+     * per-step. A snapped Grid-mode time brush fills the swung cell under the
+     * aim, so the union takes that cell's width.
+     */
+    const brushUnionAt = (state: State, cursorPos: Vector2, bpm: number, totalDuration: number): BrushUnionUv => {
+      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+      const min = new Vector2(Infinity, Infinity);
+      const max = new Vector2(-Infinity, -Infinity);
+      let fullTime = false;
+      let fullPitch = false;
+      let wrapsTime = false;
+      let wrapsPitch = false;
+      for (let i = 0; i < steps.length; i++) {
+        const stepState = createStepStateView(state, i);
+        const stepFp = resolveBrushFootprint({
+          brushSizeTime: stepState.brushSizeTime,
+          brushSizePitch: stepState.brushSizePitch,
+          gridSizeBeats: stepState.gridSizeBeats,
+          gridSizeSemis: stepState.gridSizeSemis,
+          bpm,
+          totalDuration,
+          bandsPerOctave: spectrogramData.bandsPerOctave,
+          numBands: spectrogramData.numBands,
+        });
+        if (cursorPos.x >= 0 && !stepFp.fullTime) {
+          const swungTimeUv = swungGridCellWidthUv(
+            cursorPos.x,
+            {
+              brushSizeTime: stepState.brushSizeTime,
+              gridSizeBeats: stepState.gridSizeBeats,
+              gridSwing: stepState.gridSwing,
+              snapTime: stepState.snapTime,
+              onsets: getFileOnsets(fileId),
+            },
+            bpm,
+            totalDuration,
+          );
+          if (swungTimeUv !== null) stepFp.sizeUv.x = swungTimeUv;
+        }
+        const { blX, blY } = footprintAimToBlUv(cursorPos.x, cursorPos.y, stepFp, {
+          anchorMode: stepState.brushAnchorMode as number,
+          brushSizeTime: stepState.brushSizeTime,
+          gridSizeBeats: stepState.gridSizeBeats,
+          snapTime: stepState.snapTime,
+        });
+        const stepAnchor = resolveBrushAnchor(new Vector2(blX, blY), stepFp.fullTime, stepFp.fullPitch);
+        min.x = Math.min(min.x, stepAnchor.x);
+        min.y = Math.min(min.y, stepAnchor.y);
+        max.x = Math.max(max.x, stepAnchor.x + stepFp.sizeUv.x);
+        max.y = Math.max(max.y, stepAnchor.y + stepFp.sizeUv.y);
+        if (stepFp.fullTime) fullTime = true;
+        if (stepFp.fullPitch) fullPitch = true;
+        const stepWrap = stepState.brushWrapMode as number;
+        if (stepWrap === 1 || stepWrap === 3) wrapsTime = true;
+        if (stepWrap === 2 || stepWrap === 3) wrapsPitch = true;
+      }
+      const hasSteps = steps.length > 0;
+      const sizeUv = hasSteps ? new Vector2(max.x - min.x, max.y - min.y) : new Vector2(0, 0);
+      return { min, max, sizeUv, fullTime, fullPitch, wrapsTime, wrapsPitch, hasSteps };
+    };
+
+    /**
      * Paints one stroke into the FBO from an explicit state snapshot. The frame
      * loop calls it with the live store and the cursor's brush origin; batch
      * a grid fill calls it once per stroke with a shared state. Returns false
@@ -1578,69 +1662,15 @@ const FileRendererInner = memo(
 
       clearingPreview.current = false;
 
-      // Helper to calculate brush footprint from a step state (handles Grid/Full modes)
-      const calculateBrushFootprint = (stepState: State) =>
-        resolveBrushFootprint({
-          brushSizeTime: stepState.brushSizeTime,
-          brushSizePitch: stepState.brushSizePitch,
-          gridSizeBeats: stepState.gridSizeBeats,
-          gridSizeSemis: stepState.gridSizeSemis,
-          bpm,
-          totalDuration,
-          bandsPerOctave: spectrogramData.bandsPerOctave,
-          numBands: spectrogramData.numBands,
-        });
-
       // The rectangle the brush paints inside: the union of the steps' own
       // rectangles, since size and anchor mode are per-step. Wrapping is a
       // union too — the rectangle tiles on an axis any step wraps.
-      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-      const brushUnionMin = new Vector2(Infinity, Infinity);
-      const brushUnionMax = new Vector2(-Infinity, -Infinity);
-      const displayFullAxes = { fullTime: false, fullPitch: false };
-      let displayWrapsTime = false;
-      let displayWrapsPitch = false;
-      for (let i = 0; i < steps.length; i++) {
-        const stepState = createStepStateView(state, i);
-        const stepFp = calculateBrushFootprint(stepState);
-        // Match the painted footprint: a snapped Grid-mode time brush fills the
-        // swung cell under the cursor, so the preview rectangle must too.
-        if (cursorPos.x >= 0 && !stepFp.fullTime) {
-          const swungTimeUv = swungGridCellWidthUv(
-            cursorPos.x,
-            {
-              brushSizeTime: stepState.brushSizeTime,
-              gridSizeBeats: stepState.gridSizeBeats,
-              gridSwing: stepState.gridSwing,
-              snapTime: stepState.snapTime,
-              onsets: getFileOnsets(fileId),
-            },
-            bpm,
-            totalDuration,
-          );
-          if (swungTimeUv !== null) stepFp.sizeUv.x = swungTimeUv;
-        }
-        const { blX, blY } = footprintAimToBlUv(cursorPos.x, cursorPos.y, stepFp, {
-          anchorMode: stepState.brushAnchorMode as number,
-          brushSizeTime: stepState.brushSizeTime,
-          gridSizeBeats: stepState.gridSizeBeats,
-          snapTime: stepState.snapTime,
-        });
-        const stepAnchor = resolveBrushAnchor(new Vector2(blX, blY), stepFp.fullTime, stepFp.fullPitch);
-        brushUnionMin.x = Math.min(brushUnionMin.x, stepAnchor.x);
-        brushUnionMin.y = Math.min(brushUnionMin.y, stepAnchor.y);
-        brushUnionMax.x = Math.max(brushUnionMax.x, stepAnchor.x + stepFp.sizeUv.x);
-        brushUnionMax.y = Math.max(brushUnionMax.y, stepAnchor.y + stepFp.sizeUv.y);
-        if (stepFp.fullTime) displayFullAxes.fullTime = true;
-        if (stepFp.fullPitch) displayFullAxes.fullPitch = true;
-        const stepWrap = stepState.brushWrapMode as number;
-        if (stepWrap === 1 || stepWrap === 3) displayWrapsTime = true;
-        if (stepWrap === 2 || stepWrap === 3) displayWrapsPitch = true;
-      }
-      const brushSizeUv = steps.length
-        ? new Vector2(brushUnionMax.x - brushUnionMin.x, brushUnionMax.y - brushUnionMin.y)
-        : new Vector2(0, 0);
-      const brushOriginUv = steps.length ? brushUnionMin : cursorPos;
+      const union = brushUnionAt(state, cursorPos, bpm, totalDuration);
+      const displayFullAxes = { fullTime: union.fullTime, fullPitch: union.fullPitch };
+      const displayWrapsTime = union.wrapsTime;
+      const displayWrapsPitch = union.wrapsPitch;
+      const brushSizeUv = union.sizeUv;
+      const brushOriginUv = union.hasSteps ? union.min : cursorPos;
 
       // For source file: compute the sampling position in this file's UV space.
       let sourceDisplayPos = new Vector2(-1, -1);
@@ -1753,13 +1783,7 @@ const FileRendererInner = memo(
       // Render brush stroke if requested
       if (applyStroke.current && cursorPos.x >= 0) {
         const preview = strokePreview.current;
-        const dabStart = cursorPos.x * spectrogramData.numFrames - reach.before;
-        const dabEnd = (cursorPos.x + brushSizeUv.x) * spectrogramData.numFrames + reach.after;
-        const needs = {
-          sources: sourceNeedsFor(state, cursorPos),
-          impulses: windowedImpulseNeeds(state),
-          original,
-        };
+        const { startFrame: dabStart, endFrame: dabEnd, needs } = dabSpan(state, cursorPos, canvas);
         for (const need of needs.sources) canvas.aimSource(need);
         for (const need of needs.impulses) canvas.aimImpulse(need);
         canvas.dropSourcesExcept(needs.sources);
@@ -1937,21 +1961,61 @@ const FileRendererInner = memo(
       };
     };
 
-    const strokeRefusal = (state: State): string | null => refusalFor(state, reachContext(state));
+    /**
+     * What the brush reads past its dab, and whether a window can serve it,
+     * kept per state object: every dab of a grid fill shares one state, and
+     * the frame loop reads one until the store moves.
+     */
+    const reachByState = new WeakMap<State, { refusal: string | null; frames: { before: number; after: number } }>();
+    const reachOf = (state: State): { refusal: string | null; frames: { before: number; after: number } } => {
+      const known = reachByState.get(state);
+      if (known) return known;
+      const ctx = reachContext(state);
+      const refusal = refusalFor(state, ctx);
+      let frames = { before: 0, after: 0 };
+      if (ctx) {
+        const reach = strokeReach(state, ctx);
+        const { numFrames, sampleRate } = spectrogramData;
+        frames = {
+          before: Math.min(reach.before * sampleRate, numFrames),
+          after: Math.min(reach.after * sampleRate, numFrames),
+        };
+      }
+      const entry = { refusal, frames };
+      // Before the canvas exists the context is empty, and that answer must not outlive it.
+      if (canvasRef.current) reachByState.set(state, entry);
+      return entry;
+    };
+
+    const strokeRefusal = (state: State): string | null => reachOf(state).refusal;
 
     /**
      * Frames of the file the effect chain reads either side of the dab's own
      * span. Capped at the file, because an effect that reads without bound is
      * refused rather than aimed at.
      */
-    const reachFrames = (state: State): { before: number; after: number } => {
-      const ctx = reachContext(state);
-      if (!ctx) return { before: 0, after: 0 };
-      const reach = strokeReach(state, ctx);
+    const reachFrames = (state: State): { before: number; after: number } => reachOf(state).frames;
+
+    /**
+     * The frames a dab at `cursorPos` covers, widened by what its effects read
+     * past the brush, and what it reads of other files. A canvas holding the
+     * whole file reaches nothing.
+     */
+    const dabSpan = (state: State, cursorPos: Vector2, canvas: WindowedCanvas): DabSpan => {
+      const file = openFiles[fileId];
+      const bpm = state.filepathsBpm[file.filePath] || 120;
       const { numFrames, sampleRate } = spectrogramData;
+      const totalDuration = numFrames / sampleRate;
+      const reach = canvas.wholeFile ? { before: 0, after: 0 } : reachFrames(state);
+      const union = brushUnionAt(state, cursorPos, bpm, totalDuration);
       return {
-        before: Math.min(reach.before * sampleRate, numFrames),
-        after: Math.min(reach.after * sampleRate, numFrames),
+        startFrame: cursorPos.x * numFrames - reach.before,
+        endFrame: (cursorPos.x + union.sizeUv.x) * numFrames + reach.after,
+        needs: {
+          sources: sourceNeedsFor(state, cursorPos),
+          impulses: windowedImpulseNeeds(state),
+          original: !canvas.wholeFile && wantsOriginal(state),
+        },
       };
     };
 
@@ -2081,8 +2145,9 @@ const FileRendererInner = memo(
       spectrogramData.inverseMap = undefined;
     };
 
-    const discardStrokePreview = (): boolean => {
-      const restored = strokeRendererRef.current?.restoreRollback() ?? false;
+    const discardStrokePreview = async (): Promise<boolean> => {
+      const canvas = canvasRef.current;
+      const restored = canvas ? await canvas.discardStroke() : (strokeRendererRef.current?.restoreRollback() ?? false);
       if (restored) {
         displayMode.current = "committed";
         invalidateRef.current?.();
@@ -2093,7 +2158,7 @@ const FileRendererInner = memo(
 
     const beginStroke = () => {
       // Painting by hand supersedes a pattern preview rather than stacking on it.
-      discardStrokePreview();
+      void discardStrokePreview();
       canvasRef.current?.beginStroke();
     };
 
@@ -2151,10 +2216,21 @@ const FileRendererInner = memo(
       },
       renderStrokeBatch: (strokes: StrokeDispatch[]) => {
         const strokeRenderer = strokeRendererRef.current;
-        if (!strokeRenderer?.getIsInitialized()) return 0;
+        const canvas = canvasRef.current;
+        if (!strokeRenderer?.getIsInitialized() || !canvas) return 0;
         let painted = 0;
         for (const stroke of strokes) {
-          if (dispatchStroke(stroke.state, new Vector2(stroke.aimX, stroke.aimY), false)) painted++;
+          // A dab blends out of the canvas, so one on a block the canvas has
+          // no content for waits for its window, as a pointer's dab does.
+          if (strokeRefusal(stroke.state) !== null) continue;
+          const aim = new Vector2(stroke.aimX, stroke.aimY);
+          const span = dabSpan(stroke.state, aim, canvas);
+          const dabState = stroke.state;
+          if (
+            canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () => dispatchStroke(dabState, aim, false))
+          ) {
+            painted++;
+          }
         }
         if (painted > 0) displayMode.current = "committed";
         invalidateRef.current?.();
@@ -2165,7 +2241,7 @@ const FileRendererInner = memo(
         const strokeRenderer = strokeRendererRef.current;
         if (!strokeRenderer?.getIsInitialized()) return;
         strokeRenderer.captureRollback();
-        strokeRenderer.beginStroke();
+        canvasRef.current?.beginStroke();
       },
       discardStrokePreview,
       keepStrokePreview: () => strokeRendererRef.current?.releaseRollback(),

@@ -480,6 +480,42 @@ describe("a canvas that holds a window of the file", () => {
     expect({ missing, wrong, painted: expected.size }).toEqual({ missing: 0, wrong: 0, painted: expected.size });
   });
 
+  it("puts the store's values back over a discarded stroke that walked the file", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
+    rig.renderer().captureRollback();
+    rig.canvas.beginStroke();
+
+    const touched: number[] = [];
+    for (const at of [0.02, 0.27, 0.52, 0.77, 0.9]) {
+      const frames = dabFrames(at);
+      rig.canvas.aim(frames.start, frames.end);
+      await until(() => rig.canvas.holdsFrames(frames.start, frames.end), `the block under ${at}`);
+      expect(rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => rig.dab(at))).toBe(true);
+      touched.push(blockOfFrame(grid, frames.start));
+    }
+    await rig.canvas.settle();
+    const dirty = rig.canvas.dirtyPixelRanges();
+    expect(dirty).not.toBeNull();
+    const painted = await rig.canvas.readPixelRanges(dirty!);
+    expect(float32BitsEqual(painted, gatherPixelRanges(data.packedData, dirty!))).toBe(false);
+
+    expect(await rig.canvas.discardStroke()).toBe(true);
+    rig.canvas.endStroke();
+
+    // Every block the stroke touched reads as the store holds it, whether it
+    // is on the canvas now or comes back to it.
+    for (const block of touched) {
+      const start = block * grid.blockFrames;
+      rig.canvas.aim(start, start + grid.blockFrames);
+      await until(() => rig.canvas.holdsFrames(start, start + 1), `block ${block} back on the canvas`);
+      const list = blockPixelRanges(grid, block);
+      const ranges = list.ranges.slice(0, list.count * 2);
+      const read = await rig.canvas.readPixelRanges(ranges);
+      expect(float32BitsEqual(read, gatherPixelRanges(data.packedData, ranges))).toBe(true);
+    }
+  });
+
   it("shows what the canvas last held on a block that leaves after the pen lifts", async () => {
     const rig = harness(1);
     await until(() => rig.canvas.holdsFrames(0, 1), "the first window");

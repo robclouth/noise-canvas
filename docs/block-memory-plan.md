@@ -1697,6 +1697,52 @@ file frame cost 0.55 ms on average, so what remained was not the GPU. The
 diag cadence line's `maxMs` still reads 430 ms: that is the pause between
 gestures, under its 500 ms idle cut-off, not a slow frame.
 
+## Phase 12 — Fill Grid covers the file, not the window (2026-09-07)
+
+Rob: "fill grid doesn't seem to do the full file". `renderStrokeBatch`
+painted every anchor straight through `dispatchStroke`, so on a windowed
+canvas an anchor outside the window landed off the canvas and was counted as
+painted. Cancelling had the same blind spot: `restoreRollback` blitted a
+window-sized snapshot back onto whatever window the canvas was on by then.
+
+### What was built
+
+- A fill's dab goes through `paintWhenHeld` like a pointer's, with the span
+  and needs `dabSpan` works out (the frame loop shares it), and the fill
+  settles every chunk before it gives the next. The window walks the file
+  behind the anchors; the carry keeps what leaves; the commit reads it all.
+  `beginStrokePreview` opens the canvas's stroke, so the aim follows the
+  held dabs and a fresh carry is installed.
+- `WindowedCanvas.discardStroke`: a whole-file canvas restores its snapshot;
+  a windowed one drops the held dabs and the carry and patches the store's
+  values over the stroke's footprint, with any commit still landing laid back
+  on top. `discardStrokePreview` awaits it, and the fill ends its stroke on
+  every path.
+- Two per-dab costs that were the same for every dab of a fill:
+  `strokeRefusal`/`reachFrames` are kept per state object (`reachOf`), and
+  `hasActiveModulatorRouting` is kept per state object too. Fill chunks are
+  256 strokes, so one settle serves a window's worth of dabs.
+- `fill grid painted` diag line: paint time, strokes, and the settle share.
+
+### Measured (M4 Pro under Rob's Live session, 280 s stereo, `fill-drive.mjs`, 1-beat grid, 3360 strokes)
+
+| measure                             | before     | held dabs      | + reach memo, 256-chunk | + routing memo |
+| ----------------------------------- | ---------- | -------------- | ----------------------- | -------------- |
+| columns erased zoomed out (of 1958) | one window | 1958           | 1958                    | 1958           |
+| dark columns inside at 8/50/92 %    | —          | 1934/1928/1934 | same                    | same           |
+| paint phase                         | —          | 18.9 s         | 12.5 s                  | 10.5 s         |
+| of which settle (reads + held dabs) | —          | 7.2 s          | 9.7 s                   | 8.8 s          |
+| commit (whole-state path)           | —          | 31 s           | 23 s                    | 24 s           |
+
+Cancelled at 1536 of 3360 strokes (`--cancel`): zoomed out, no column stayed
+dark; the three zoomed-in views matched their before-shots column for column.
+
+The commit is the whole-state path — `getFBOData` is null on a window, so
+the store's state is read whole and the stroke's pixels scattered over it,
+then the whole file is resynthesised — and now costs more than the paint.
+Reads could overlap painting by prefetching the next chunk's blocks into
+spare slots; not done.
+
 ---
 
 ## Risks

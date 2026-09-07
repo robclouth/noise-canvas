@@ -591,6 +591,44 @@ export class WindowedCanvas {
     this.deps.renderer()?.endStroke();
   }
 
+  /**
+   * Takes back everything the stroke painted since `captureRollback`: the
+   * dabs still waiting, the paint carried off the canvas, and the paint on
+   * it. A canvas holding the whole file puts its snapshot back; one holding a
+   * window has slid since the snapshot, so the store's values replace the
+   * stroke's footprint instead. Resolves false when nothing was saved.
+   */
+  async discardStroke(): Promise<boolean> {
+    const renderer = this.deps.renderer();
+    if (!renderer?.hasRollback()) return false;
+    this.held.length = 0;
+    if (this.coversFile()) return renderer.restoreRollback();
+    const ranges = this.dirtyPixelRanges();
+    renderer.releaseRollback();
+    renderer.clearDirtyRegion();
+    this.carried = new CarriedPaint();
+    if (!ranges || ranges.length === 0) return true;
+    const values = await this.deps.readCurrent(ranges);
+    if (!values) return false;
+    const live = this.deps.renderer();
+    if (!live?.getIsInitialized()) return false;
+    this.patchFBODataCompact(values, ranges);
+    // A stroke still committing is not in the store yet, so its paint goes
+    // back over the store's values.
+    await Promise.all(this.pending.map((paint) => paint.landed));
+    for (const paint of this.pending) {
+      if (!paint.values) continue;
+      const within = intersectPixelRanges(paint.ranges, ranges);
+      if (pixelRangeCount(within) === 0) continue;
+      this.patchFBODataCompact(
+        composePixelRangeValues(within, [{ ranges: paint.ranges, values: paint.values }]),
+        within,
+      );
+    }
+    live.clearDirtyRegion();
+    return true;
+  }
+
   // ---------- reading the state, in file coordinates ----------
 
   /** The whole packed state, or null when the canvas holds only part of the file. */

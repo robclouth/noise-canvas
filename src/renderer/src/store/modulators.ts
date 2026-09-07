@@ -221,18 +221,28 @@ export function getModAmountValuesNormalized(state: ModulatorsState, paramKey: P
   return keys.map((key) => (state[key] as number) / 100);
 }
 
+// The answer is kept per state object; a store update or a step view is a new object.
+const activeRoutingByState = new WeakMap<ModulatorsState, boolean>();
+
 // True when any modulatable parameter routes to a modulator with a nonzero
 // amount. When false, every modulator output is multiplied by zero at every
 // consumer, so the precomputed modulator textures are never read and the
 // precompute pass can be skipped. Macro and contextual modulation do not use
 // those textures, so they are unaffected by this check.
 export function hasActiveModulatorRouting(state: ModulatorsState): boolean {
+  const known = activeRoutingByState.get(state);
+  if (known !== undefined) return known;
+  let active = false;
   for (const [key, def] of Object.entries(parameterDefs)) {
     if (def.kind !== "number" || !def.modulatable) continue;
     const amounts = getModAmountValuesNormalized(state, key as ParameterKey);
-    if (amounts.some((amount) => amount !== 0)) return true;
+    if (amounts.some((amount) => amount !== 0)) {
+      active = true;
+      break;
+    }
   }
-  return false;
+  activeRoutingByState.set(state, active);
+  return active;
 }
 
 let modAmountKeySet: Set<string> | null = null;

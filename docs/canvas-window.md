@@ -98,6 +98,15 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    it. Held dabs run in the order they were given, so one the canvas could
    take does not overtake one still waiting. `settle` drains what is left
    before the commit reads the stroke.
+   A grid fill is a stroke like any other: each of its dabs goes through
+   `paintWhenHeld`, and the fill settles every chunk before it gives the
+   next, so the window walks the file behind the anchors and the carry keeps
+   what it leaves. A fill that painted straight into the canvas covered only
+   the window it happened to be on. Cancelling such a fill cannot put a
+   snapshot back either, because the window has slid since it was taken:
+   `discardStroke` drops the held dabs and the carry and patches the store's
+   values over the stroke's footprint, with the paint of any commit still
+   landing laid back on top.
 2. **The original is read only for a dab that samples it.** The window over
    the original is built the first time a step in Original mode asks for it,
    and such a dab lands only once that window holds the canvas's view, because
