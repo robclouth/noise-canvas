@@ -2921,6 +2921,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         bandRanges: result.patch.ranges.length / 3,
         windowed: usedView ? 1 : 0,
         viewFromStore: viewFromStore ? 1 : 0,
+        ...result.phases,
       });
 
       if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;

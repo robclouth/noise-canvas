@@ -150,6 +150,16 @@ export interface CommitStrokeResult {
   onsets?: PackedOnsets;
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
+  /** Milliseconds each step of the pass took, and the frames the synthesis covered. */
+  phases?: {
+    synth: number;
+    edges: number;
+    limit: number;
+    project: number;
+    onsets: number;
+    levels: number;
+    frames: number;
+  };
 }
 
 /**

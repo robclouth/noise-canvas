@@ -15,6 +15,7 @@
 #include <fstream>  // For file logging
 #include <cstdint>
 #include <exception>
+#include <chrono>
 #include <functional>
 #include <thread>
 #include "gaborator/gaborator.h"
@@ -73,6 +74,39 @@ static std::ostream &getDebugLog()
 // smoothing shifts the peak reduction slightly; the margin covers both.
 static constexpr float LIMITER_CEILING = 0.794f;
 
+/**
+ * Runs `work` over [0, count) split into equal blocks, one thread each. Fewer
+ * items than `minPerThread` run on the calling thread alone.
+ */
+static void forEachBlock(size_t count, size_t minPerThread, const std::function<void(size_t, size_t)> &work)
+{
+    if (!count)
+        return;
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    const size_t wanted = std::max<size_t>(1, count / std::max<size_t>(1, minPerThread));
+    const size_t threads = std::min<size_t>(wanted, cores);
+    if (threads <= 1)
+    {
+        work(0, count);
+        return;
+    }
+    const size_t per = (count + threads - 1) / threads;
+    std::vector<std::thread> others;
+    for (size_t t = 1; t < threads; ++t)
+    {
+        const size_t lo = std::min(count, t * per);
+        const size_t hi = std::min(count, lo + per);
+        if (lo < hi)
+            others.emplace_back(work, lo, hi);
+    }
+    work(0, std::min(count, per));
+    for (auto &thread : others)
+        thread.join();
+}
+
+// Samples one thread of the true-peak scan takes at least.
+static constexpr size_t TRUE_PEAK_BLOCK = 1 << 16;
+
 // Channel-linked per-sample true peak. Detection follows ITU-R BS.1770:
 // oversample with a polyphase windowed-sinc FIR and take the peak of the
 // reconstructed signal. Both the oversampling factor and the FIR length must be
@@ -104,30 +138,34 @@ static std::vector<float> truePeakPerSample(const std::vector<std::vector<float>
         }
     }
 
-    for (size_t i = 0; i < blockLen; ++i)
-    {
-        float peak = 0.0f;
-        const bool interior = i >= static_cast<size_t>(HT) && i + HT < blockLen;
-        for (int ch = 0; ch < channelCount; ++ch)
+    // Each sample's peak reads its neighbours and writes only its own slot,
+    // so the run splits across threads by sample.
+    forEachBlock(blockLen, TRUE_PEAK_BLOCK, [&](size_t from, size_t to) {
+        for (size_t i = from; i < to; ++i)
         {
-            const float here = std::abs(channels[ch][i]);
-            float chPeak = here;
-            const float next = (i + 1 < blockLen) ? std::abs(channels[ch][i + 1]) : 0.0f;
-            // Only reconstruct between samples that are loud enough to overshoot.
-            if (interior && std::max(here, next) > 0.25f)
+            float peak = 0.0f;
+            const bool interior = i >= static_cast<size_t>(HT) && i + HT < blockLen;
+            for (int ch = 0; ch < channelCount; ++ch)
             {
-                for (int ph = 1; ph < OS; ++ph)
+                const float here = std::abs(channels[ch][i]);
+                float chPeak = here;
+                const float next = (i + 1 < blockLen) ? std::abs(channels[ch][i + 1]) : 0.0f;
+                // Only reconstruct between samples that are loud enough to overshoot.
+                if (interior && std::max(here, next) > 0.25f)
                 {
-                    float acc = 0.0f;
-                    for (int t = 0; t < 2 * HT; ++t)
-                        acc += channels[ch][i + t - HT + 1] * kernels[ph][t];
-                    chPeak = std::max(chPeak, std::abs(acc));
+                    for (int ph = 1; ph < OS; ++ph)
+                    {
+                        float acc = 0.0f;
+                        for (int t = 0; t < 2 * HT; ++t)
+                            acc += channels[ch][i + t - HT + 1] * kernels[ph][t];
+                        chPeak = std::max(chPeak, std::abs(acc));
+                    }
                 }
+                peak = std::max(peak, chPeak);
             }
-            peak = std::max(peak, chPeak);
+            truePeak[i] = peak;
         }
-        truePeak[i] = peak;
-    }
+    });
     return truePeak;
 }
 
@@ -589,28 +627,28 @@ static void downsampleByTwo(const std::vector<float> &x, const std::vector<doubl
 }
 
 /**
- * Runs `work` for every channel at once, on a thread of its own for each
- * channel past the first. Returns the message of the first failure, or an
- * empty string when every channel finished.
+ * Runs `work` for every job below `count` at once, on a thread of its own for
+ * each job past the first. Returns the message of the first failure, or an
+ * empty string when every job finished.
  */
-static std::string forEachChannel(int channels, const std::function<void(int)> &work)
+static std::string forEachChannel(int count, const std::function<void(int)> &work)
 {
-    std::vector<std::exception_ptr> failures((size_t)std::max(channels, 0));
-    auto guarded = [&](int ch)
+    std::vector<std::exception_ptr> failures((size_t)std::max(count, 0));
+    auto guarded = [&](int job)
     {
         try
         {
-            work(ch);
+            work(job);
         }
         catch (...)
         {
-            failures[(size_t)ch] = std::current_exception();
+            failures[(size_t)job] = std::current_exception();
         }
     };
     std::vector<std::thread> others;
-    for (int ch = 1; ch < channels; ++ch)
-        others.emplace_back(guarded, ch);
-    if (channels > 0)
+    for (int job = 1; job < count; ++job)
+        others.emplace_back(guarded, job);
+    if (count > 0)
         guarded(0);
     for (auto &thread : others)
         thread.join();
@@ -3799,6 +3837,15 @@ static constexpr float COMMIT_OVER_TOLERANCE_DB = 1.0f;
 /** Longest analysis margin a band is given, however wide its filter. */
 static constexpr double COMMIT_MAX_ANALYSIS_MARGIN_SEC = 2.0;
 
+/** Milliseconds since the given mark, and the mark moved to now. */
+static double millisSince(std::chrono::steady_clock::time_point &mark)
+{
+    const auto now = std::chrono::steady_clock::now();
+    const double ms = std::chrono::duration<double, std::milli>(now - mark).count();
+    mark = now;
+    return ms;
+}
+
 class CommitStrokeWorker : public Napi::AsyncWorker
 {
 public:
@@ -3993,6 +4040,7 @@ public:
         // rewrites them, so then the onsets wait for it; otherwise they are
         // read from the packed buffer while the audio is synthesised.
         const bool onsetsAlongside = detectOnsets && !projectEnabled;
+        auto mark = std::chrono::steady_clock::now();
         std::thread onsetThread;
         std::exception_ptr onsetFailure;
         if (onsetsAlongside)
@@ -4031,7 +4079,23 @@ public:
         // 1. Synthesize the window and splice it into the audio there was,
         //    each channel on a thread of its own.
         audioChannels.resize(channels);
-        const std::string synthFailure = forEachChannel(channels, [&](int ch) {
+
+        // The stem the hard time edges take back out is a synthesis of its
+        // own, so it is built beside the window's rather than after it.
+        int64_t f0 = 0, f1 = 0;
+        int bandLo = 0, bandHi = 0;
+        const bool wantEdges = partial && (hardEdgeStart || hardEdgeEnd) &&
+                               hardEdgeSpan(w0, w1, f0, f1, bandLo, bandHi);
+        std::vector<std::vector<float>> stems((size_t)channels);
+
+        const std::string synthFailure = forEachChannel(wantEdges ? channels * 2 : channels, [&](int job) {
+            const int ch = job % channels;
+            if (job >= channels)
+            {
+                synthesiseEdgeStem(analyzer, src, bandBegin, bandEnd, ch, bandLo, bandHi, f0, f1, fillStart, fillEnd,
+                                   stems[(size_t)ch]);
+                return;
+            }
             std::vector<float> synth((size_t)(w1 - w0));
             gaborator::coefs<float> coefs(analyzer);
             fillCoefsFromPacked(src, ch, bandBegin, bandEnd, fillStart, fillEnd, coefs);
@@ -4054,10 +4118,13 @@ public:
             SetError(synthFailure);
             return;
         }
+        phaseSynthMs = millisSince(mark);
 
         // 2. Hard time edges, made exact in the time domain.
-        if (partial && (hardEdgeStart || hardEdgeEnd))
-            applyHardEdges(analyzer, src, bandBegin, bandEnd, w0, w1, fillStart, fillEnd);
+        if (wantEdges)
+            for (int ch = 0; ch < channels; ++ch)
+                applyEdgeStem(ch, stems[(size_t)ch], w0, w1, f0, f1);
+        phaseEdgesMs = millisSince(mark);
 
         // 3. Limiting, applied to the stroke's contribution so it belongs to
         //    the stroke rather than to the file.
@@ -4065,6 +4132,7 @@ public:
         if (applyLimiter)
             limitWindow(w0, w1, partial && hardEdgeStart && footStart > 0,
                         partial && hardEdgeEnd && footEnd < numFrames, weightedGain);
+        phaseLimitMs = millisSince(mark);
 
         // 4. Project the canvas through the audio. Skipped when the stroke
         //    keeps its painted coefficients; the patch then comes back empty.
@@ -4073,6 +4141,7 @@ public:
             joinOnsets();
             return;
         }
+        phaseProjectMs = millisSince(mark);
 
         peakValue = 0.0f;
         for (const auto &channel : audioChannels)
@@ -4085,6 +4154,7 @@ public:
             findOnsets();
         if (!joinOnsets())
             return;
+        phaseOnsetsMs = millisSince(mark);
 
         // 6. Output levels over the window.
         computeLevels(w0, w1, weightedGain);
@@ -4092,7 +4162,17 @@ public:
         audioWindowEnd = w1;
 
         outputWritten = writeOutputAudio(audioChannels, outputAudio, outputAudioLens);
+        phaseLevelsMs = millisSince(mark);
+        synthesisFrames = (double)((w1 - w0) * channels);
     }
+
+    double phaseSynthMs = 0.0;
+    double phaseEdgesMs = 0.0;
+    double phaseLimitMs = 0.0;
+    double phaseProjectMs = 0.0;
+    double phaseOnsetsMs = 0.0;
+    double phaseLevelsMs = 0.0;
+    double synthesisFrames = 0.0;
 
     /** Finds the onsets of the span the commit reports on, from the packed buffer as it stands. */
     void findOnsets()
@@ -4198,6 +4278,17 @@ public:
         levels.Set("overDb", overDbJs);
         result.Set("levels", levels);
 
+        Napi::Object phases = Napi::Object::New(env);
+        const auto tenth = [](double ms) { return std::round(ms * 10.0) / 10.0; };
+        phases.Set("synth", Napi::Number::New(env, tenth(phaseSynthMs)));
+        phases.Set("edges", Napi::Number::New(env, tenth(phaseEdgesMs)));
+        phases.Set("limit", Napi::Number::New(env, tenth(phaseLimitMs)));
+        phases.Set("project", Napi::Number::New(env, tenth(phaseProjectMs)));
+        phases.Set("onsets", Napi::Number::New(env, tenth(phaseOnsetsMs)));
+        phases.Set("levels", Napi::Number::New(env, tenth(phaseLevelsMs)));
+        phases.Set("frames", Napi::Number::New(env, synthesisFrames));
+        result.Set("phases", phases);
+
         if (detectOnsets)
         {
             result.Set("onsets", OnsetWorker::packOnsets(env, onsets));
@@ -4295,62 +4386,67 @@ private:
      * subtracted; without that, an erase keeps an audible pre-tail before the
      * audio comes back and a tail after it cuts.
      */
-    void applyHardEdges(gaborator::analyzer<float> &analyzer, const PackedCoefs &src, int bandBegin, int bandEnd,
-                        int64_t w0, int64_t w1, int64_t fillStart, int64_t fillEnd)
+    /** Empty when the pass ran, otherwise what went wrong. */
+    /**
+     * True when the stroke's hard time edges need the exterior stem taken out
+     * of the window, and the span and bands it covers.
+     */
+    bool hardEdgeSpan(int64_t w0, int64_t w1, int64_t &f0, int64_t &f1, int &bandLo, int &bandHi) const
     {
-        const int64_t f0 = std::max(w0, footStart);
-        const int64_t f1 = std::min(w1, footEnd);
-        if (f1 <= f0)
-            return;
-
-        const int bandLo = std::max(0, (int)winStartBand);
-        const int bandHi = std::min(numBands - 1, (int)winEndBand - 1);
-        if (bandLo > bandHi)
-            return;
-
+        f0 = std::max(w0, footStart);
+        f1 = std::min(w1, footEnd);
+        bandLo = std::max(0, (int)winStartBand);
+        bandHi = std::min(numBands - 1, (int)winEndBand - 1);
         const bool gateStart = hardEdgeStart && footStart > 0;
         const bool gateEnd = hardEdgeEnd && footEnd < numFrames;
-        if (!gateStart && !gateEnd)
-            return;
+        return f1 > f0 && bandLo <= bandHi && (gateStart || gateEnd);
+    }
 
-        for (int ch = 0; ch < channels; ++ch)
-        {
-            // The stem reads the same coefficient range the synthesis read, so
-            // what it subtracts is exactly what the synthesis put in.
-            gaborator::coefs<float> exterior(analyzer);
-            gaborator::fill(
-                [&](int b, int64_t t, std::complex<float> &coef)
-                {
-                    coef = {0.0f, 0.0f};
-                    const int bi = b - bandBegin;
-                    if (bi < bandLo || bi > bandHi)
-                        return;
-                    if (t >= footStart && t < footEnd)
-                        return;
-                    const int64_t k = (t >> src.bandStepLog2s[bi]) - (src.kStarts ? src.kStarts[bi] : 0);
-                    if (k < 0 || (size_t)k >= (size_t)src.bandLengths[bi])
-                        return;
-                    const size_t off = ((size_t)src.bandOffsets[bi] + (size_t)k) * 4 + (size_t)ch * 2;
-                    if (off + 1 >= src.len)
-                        return;
-                    const float mag = src.data[off];
-                    const float ph = src.data[off + 1];
-                    coef = {mag * std::cos(ph), mag * std::sin(ph)};
-                },
-                bandBegin, bandEnd, fillStart, fillEnd, exterior);
+    /**
+     * The audio the coefficients outside the footprint make over [f0, f1).
+     * The stem reads the same coefficient range the synthesis read, so what it
+     * subtracts is exactly what the synthesis put in.
+     */
+    void synthesiseEdgeStem(gaborator::analyzer<float> &analyzer, const PackedCoefs &src, int bandBegin, int bandEnd,
+                            int ch, int bandLo, int bandHi, int64_t f0, int64_t f1, int64_t fillStart,
+                            int64_t fillEnd, std::vector<float> &stem)
+    {
+        stem.assign((size_t)(f1 - f0), 0.0f);
+        gaborator::coefs<float> exterior(analyzer);
+        gaborator::fill(
+            [&](int b, int64_t t, std::complex<float> &coef)
+            {
+                coef = {0.0f, 0.0f};
+                const int bi = b - bandBegin;
+                if (bi < bandLo || bi > bandHi)
+                    return;
+                if (t >= footStart && t < footEnd)
+                    return;
+                const int64_t k = (t >> src.bandStepLog2s[bi]) - (src.kStarts ? src.kStarts[bi] : 0);
+                if (k < 0 || (size_t)k >= (size_t)src.bandLengths[bi])
+                    return;
+                const size_t off = ((size_t)src.bandOffsets[bi] + (size_t)k) * 4 + (size_t)ch * 2;
+                if (off + 1 >= src.len)
+                    return;
+                const float mag = src.data[off];
+                const float ph = src.data[off + 1];
+                coef = {mag * std::cos(ph), mag * std::sin(ph)};
+            },
+            bandBegin, bandEnd, fillStart, fillEnd, exterior);
+        analyzer.synthesize(exterior, f0, f1, stem.data());
+    }
 
-            std::vector<float> ringIn((size_t)(f1 - f0));
-            analyzer.synthesize(exterior, f0, f1, ringIn.data());
-            for (int64_t t = f0; t < f1; ++t)
-                audioChannels[ch][(size_t)t] -= ringIn[(size_t)(t - f0)];
-
-            if (gateStart)
-                for (int64_t t = w0; t < f0; ++t)
-                    audioChannels[ch][(size_t)t] = existingAudio[ch][t];
-            if (gateEnd)
-                for (int64_t t = f1; t < w1; ++t)
-                    audioChannels[ch][(size_t)t] = existingAudio[ch][t];
-        }
+    /** Takes the stem out of the window and hands the audio outside each gated edge back unchanged. */
+    void applyEdgeStem(int ch, const std::vector<float> &stem, int64_t w0, int64_t w1, int64_t f0, int64_t f1)
+    {
+        for (int64_t t = f0; t < f1; ++t)
+            audioChannels[ch][(size_t)t] -= stem[(size_t)(t - f0)];
+        if (hardEdgeStart && footStart > 0)
+            for (int64_t t = w0; t < f0; ++t)
+                audioChannels[ch][(size_t)t] = existingAudio[ch][t];
+        if (hardEdgeEnd && footEnd < numFrames)
+            for (int64_t t = f1; t < w1; ++t)
+                audioChannels[ch][(size_t)t] = existingAudio[ch][t];
     }
 
     /**
