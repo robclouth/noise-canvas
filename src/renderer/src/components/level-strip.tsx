@@ -6,9 +6,7 @@ import { Vector2 } from "three";
 import { shallow } from "zustand/shallow";
 import { getMaxPyramid, queryMax } from "../lib/max-pyramid";
 import { screenToZoomed } from "../lib/utils";
-import { ONSET_LEGEND_HEIGHT } from "./onset-legend";
-
-const LEVEL_STRIP_HEIGHT = Math.round(ONSET_LEGEND_HEIGHT / 2);
+import { LEVEL_STRIP_HEIGHT } from "@renderer/lib/file-view-metrics";
 
 /** Level the ramp starts to lift off the floor. */
 const FLOOR_DB = -60;

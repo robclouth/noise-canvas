@@ -113,6 +113,7 @@ describe("file colours", () => {
       layerIds: ["file_0", "file_1", "file_2"],
       hue: 200,
       syncView: true,
+      layout: "overlaid" as const,
     };
     const state = { layerStacks: { g1: group }, stackOfLayer: { file_0: "g1", file_1: "g1", file_2: "g1" } };
     expect(selectFileColor(state, "file_1")).toBe(layerColor(200, 1, 3));

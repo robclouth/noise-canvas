@@ -797,6 +797,12 @@ Every split makes a stack of its parts. To stack files yourself, use **Edit → 
 
 A stack holds any number of layers, down to one, so a stack you have emptied out to a single layer is still there to drag files back into. Merge needs two.
 
+#### Overlaid and stacked
+
+A stack draws its layers **overlaid** by default: one canvas, one grid, one set of legends, and a tab per layer across the top. Each layer takes a colour of its own, and where two layers hold energy at the same time and pitch the picture adds towards white. Click a tab to bring that layer to the top, which is where your brush lands.
+
+The layers icon in the stack header switches to **stacked**, which gives each layer a box of its own. Stacked shows one layer at a time in full detail, in the usual orange and blue for the stereo image; overlaid trades some of that colour away to say which layer you are looking at. **Link views** appears only in the stacked view, since overlaid layers already share one viewport.
+
 #### Mixing a stack
 
 The layers of a stack play at the same time. Each header carries its own **Vol** box, and a stack of two or more also carries **S** and **M**:

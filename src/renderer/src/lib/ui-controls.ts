@@ -164,6 +164,16 @@ export const UI_CONTROLS = {
   },
 
   // Layer stacks
+  "stack-layout": {
+    label: "Overlay layers",
+    description: "Draws every layer in one canvas, each in its own colour.",
+    manualSection: "layers",
+  },
+  "stack-layer-tab": {
+    label: "Layer",
+    description: "Brings this layer to the top, where your brush lands.",
+    manualSection: "layers",
+  },
   "stack-sync-view": {
     label: "Link views",
     description: "Ties zoom and scroll together across the layers of the stack.",

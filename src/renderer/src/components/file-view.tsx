@@ -22,6 +22,9 @@ import { lassoSelection, unionSelections, type LassoPoint } from "../lib/selecti
 import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
 import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
 import FileHeader from "./file-header";
+import { FILE_VIEW_BODY_HEIGHT } from "@renderer/lib/file-view-metrics";
+import { layerTint, type LayerTint } from "@renderer/lib/layer-tint";
+import type { RawShaderMaterial } from "three";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
 import { SelectionRegion } from "./selection-region";
@@ -46,6 +49,13 @@ export interface FileViewProps {
   fileId: string;
   isFullscreen?: boolean;
   isMinimized: boolean;
+  /**
+   * Every layer of an overlaid stack, in stack order, drawn into this one
+   * canvas. Only `fileId` takes strokes, the grid and the legends; the rest are
+   * drawn behind it. A layer's hue comes from its place in this list, so it
+   * keeps its colour whichever layer is on top.
+   */
+  stackLayerIds?: string[];
 }
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
@@ -107,7 +117,7 @@ function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): numbe
   return aimToBrushRectBlUv(aim, fileId, bpm).blX * totalDuration;
 }
 
-export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: FileViewProps) => {
+export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stackLayerIds }: FileViewProps) => {
   const file = openFiles[fileId];
   const filePath = file?.filePath || "";
 
@@ -193,7 +203,11 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: Fil
 
   const trySnapshot = useCallback(() => {
     if (captureInFlightRef.current) return;
-    const capture = rendererRef.current?.captureSnapshot();
+    // In stack order, so the still sums the layers the way the live view does.
+    const behindMaterials = behindOrderRef.current
+      .map((id) => behindRefs.current.get(id)?.getDisplayMaterial())
+      .filter((material): material is RawShaderMaterial => material !== undefined);
+    const capture = rendererRef.current?.captureSnapshot(behindMaterials);
     if (!capture) return;
     captureInFlightRef.current = true;
     capture
@@ -392,6 +406,29 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: Fil
         filterTaps: true,
       },
     },
+  );
+
+  // A layer's hue is its place in the stack, so it does not move when another
+  // layer is brought to the top.
+  const behindIds = useMemo(() => (stackLayerIds ?? []).filter((id) => id !== fileId), [stackLayerIds, fileId]);
+  // Held by identity, so the renderers do not see a new tint every render.
+  const tints = useMemo(() => {
+    const byLayer = new Map<string, LayerTint>();
+    (stackLayerIds ?? []).forEach((id, index) => byLayer.set(id, layerTint(index, stackLayerIds!.length)));
+    return byLayer;
+  }, [stackLayerIds]);
+  const tintOf = useCallback((id: string) => tints.get(id), [tints]);
+
+  // The handles of the layers drawn behind this one, so a still can paint them.
+  const behindRefs = useRef(new Map<string, FileRendererHandle>());
+  const behindOrderRef = useRef<string[]>([]);
+  behindOrderRef.current = behindIds;
+  const behindRefCallback = useCallback(
+    (id: string) => (handle: FileRendererHandle | null) => {
+      if (handle) behindRefs.current.set(id, handle);
+      else behindRefs.current.delete(id);
+    },
+    [],
   );
 
   const refCallback = useCallback(
@@ -1053,88 +1090,114 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: Fil
       {...layerAnchorProps(fileId)}
     >
       <FileHeader fileId={fileId} />
-      {loadingMessage || !file.spectrogramData ? (
-        <Box
-          h={isFullscreen ? undefined : 400}
-          style={{
-            ...(isFullscreen ? { flex: 1 } : {}),
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-          }}
-          pos="relative"
-        >
-          <Loader size="sm" />
-          {loadingMessage && (
-            <Text size="xs" c="dimmed">
-              {loadingMessage}
-            </Text>
-          )}
-        </Box>
-      ) : (
-        <>
-          <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
-            <LevelStrip fileId={fileId} />
-          </Box>
-          <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
-            <OnsetLegend fileId={fileId} />
-          </Box>
+      {/* The body keeps one height whether the file is loading or drawn, so
+          nothing below it jumps when the analysis lands. */}
+      <Box
+        h={isFullscreen ? undefined : FILE_VIEW_BODY_HEIGHT}
+        style={{
+          ...(isFullscreen ? { flex: 1 } : {}),
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+        }}
+      >
+        {loadingMessage || !file.spectrogramData ? (
           <Box
-            h={isFullscreen ? undefined : 400}
             style={{
-              ...(isFullscreen ? { flex: 1 } : {}),
+              flex: 1,
               display: "flex",
-              flexDirection: "row",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
             }}
+            pos="relative"
           >
-            <PitchLegend fileId={fileId} />
-            <Box
-              ref={viewRef}
-              data-file-view-id={fileId}
-              style={{ flex: 1, ...cursorStyle }}
-              pos="relative"
-              onPointerEnter={handleMouseEnter}
-              onPointerMove={handleMouseMove}
-              onPointerLeave={handleMouseLeave}
-              onPointerDown={handleCanvasMouseDown}
-              onPointerUp={handleCanvasMouseUp}
-              onContextMenu={(e) => e.preventDefault()}
-            >
-              <View style={viewStyle} visible={phase !== "static"}>
-                <FileRenderer
-                  fileId={fileId}
-                  ref={refCallback}
-                  isLive={phase !== "static"}
-                  parked={isMinimized}
-                  snapshotCanvasRef={snapshotCanvasRef}
-                  onLiveFrame={handleLiveFrame}
-                />
-              </View>
-              <canvas
-                ref={snapshotCanvasRef}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: "100%",
-                  zIndex: 2,
-                  pointerEvents: "none",
-                  visibility: phase === "live" ? "hidden" : "visible",
-                }}
-              />
-              {isActive && <LoopRegion fileId={fileId} />}
-              <SelectionRegion fileId={fileId} />
-              {isActive && <PlaybackLine fileId={fileId} />}
+            <Loader size="sm" />
+            {loadingMessage && (
+              <Text size="xs" c="dimmed">
+                {loadingMessage}
+              </Text>
+            )}
+          </Box>
+        ) : (
+          <>
+            <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
+              <LevelStrip fileId={fileId} />
             </Box>
-          </Box>
-          <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
-            <TimeLegend fileId={fileId} />
-          </Box>
-        </>
-      )}
+            <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
+              <OnsetLegend fileId={fileId} />
+            </Box>
+            <Box
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "row",
+              }}
+            >
+              <PitchLegend fileId={fileId} />
+              <Box
+                ref={viewRef}
+                data-file-view-id={fileId}
+                style={{ flex: 1, ...cursorStyle }}
+                pos="relative"
+                onPointerEnter={handleMouseEnter}
+                onPointerMove={handleMouseMove}
+                onPointerLeave={handleMouseLeave}
+                onPointerDown={handleCanvasMouseDown}
+                onPointerUp={handleCanvasMouseUp}
+                onContextMenu={(e) => e.preventDefault()}
+              >
+                <View style={viewStyle} visible={phase !== "static"}>
+                  {behindIds.map((behindId) => (
+                    <FileRenderer
+                      key={behindId}
+                      ref={behindRefCallback(behindId)}
+                      fileId={behindId}
+                      isLive={phase !== "static"}
+                      parked={isMinimized}
+                      snapshotCanvasRef={snapshotCanvasRef}
+                      tint={tintOf(behindId)}
+                      overlaid
+                      behind
+                    />
+                  ))}
+                  <FileRenderer
+                    fileId={fileId}
+                    ref={refCallback}
+                    isLive={phase !== "static"}
+                    parked={isMinimized}
+                    snapshotCanvasRef={snapshotCanvasRef}
+                    onLiveFrame={handleLiveFrame}
+                    tint={tintOf(fileId)}
+                    overlaid={behindIds.length > 0}
+                  />
+                </View>
+                <canvas
+                  ref={snapshotCanvasRef}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: "100%",
+                    zIndex: 2,
+                    pointerEvents: "none",
+                    visibility: phase === "live" ? "hidden" : "visible",
+                  }}
+                />
+                {isActive && <LoopRegion fileId={fileId} />}
+                <SelectionRegion fileId={fileId} />
+                {isActive && <PlaybackLine fileId={fileId} />}
+              </Box>
+            </Box>
+            <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
+              <TimeLegend fileId={fileId} />
+            </Box>
+          </>
+        )}
+      </Box>
       {isSynthesizing && <Loader size="xs" pos="absolute" bottom={25} right={10} />}
       {/* The view stays visible under a splice; this layer just badges it and
           soaks up pointer input until the rebuild lands. */}

@@ -30,6 +30,7 @@ import {
   useState,
 } from "react";
 import {
+  AdditiveBlending,
   Camera,
   ClampToEdgeWrapping,
   Color,
@@ -38,6 +39,7 @@ import {
   GLSL3,
   Mesh,
   NearestFilter,
+  NormalBlending,
   RawShaderMaterial,
   RGBAFormat,
   RGFormat,
@@ -46,6 +48,7 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
+import { LONE_LAYER_TINT, type LayerTint } from "@renderer/lib/layer-tint";
 import { effects } from "../effects";
 import { deriveSideData, getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
@@ -99,6 +102,22 @@ interface FileRendererProps {
   parked: boolean;
   snapshotCanvasRef: RefObject<HTMLCanvasElement | null>;
   onLiveFrame?: () => void;
+  /**
+   * The hue pair this layer paints its left and right channels in. Defaults to
+   * the orange and blue a layer on its own has always used.
+   */
+  tint?: LayerTint;
+  /**
+   * One layer of an overlaid stack. Every layer of one adds into the picture,
+   * including the layer on top, or the top layer's opaque output would wipe the
+   * layers already drawn.
+   */
+  overlaid?: boolean;
+  /**
+   * Drawn behind the layer on top: spectrogram only. The layer on top keeps the
+   * grid, the brush preview and the rectangles, so a stack carries one of each.
+   */
+  behind?: boolean;
 }
 
 /** One stroke of a batch: where it is aimed, and the state to paint it with. */
@@ -261,7 +280,14 @@ export interface FileRendererHandle {
    * snapshot canvas at its current on-screen size. Resolves false when the
    * renderer isn't ready yet or the view has no usable size.
    */
-  captureSnapshot: () => Promise<boolean>;
+  /**
+   * Paints the view into the snapshot canvas. An overlaid stack passes the
+   * materials of the layers behind this one, drawn first, or the still would
+   * show the top layer alone.
+   */
+  captureSnapshot: (behindMaterials?: RawShaderMaterial[]) => Promise<boolean>;
+  /** This layer's display material, so a stack can capture every layer at once. */
+  getDisplayMaterial: () => RawShaderMaterial;
   /** Schedules a throttled snapshot re-capture (no-op while the view is live). */
   refreshSnapshot: () => void;
   /**
@@ -296,7 +322,7 @@ export const FileRenderer = memo(
 
 const FileRendererInner = memo(
   forwardRef<FileRendererHandle, FileRendererProps>((props, ref) => {
-    const { fileId, isLive, parked, snapshotCanvasRef, onLiveFrame } = props;
+    const { fileId, isLive, parked, snapshotCanvasRef, onLiveFrame, tint, overlaid = false, behind = false } = props;
     const spectrogramData = openFiles[fileId].spectrogramData!;
 
     // Don't subscribe to these during render - access them via refs or useFrame instead
@@ -332,7 +358,7 @@ const FileRendererInner = memo(
     const snapshotTimerRef = useRef<number | null>(null);
     // Latest-closure indirection: subscriptions and timers are created once
     // but must call the capture with current textures and spectrogram data.
-    const captureSnapshotRef = useRef<() => Promise<boolean>>(async () => false);
+    const captureSnapshotRef = useRef<(behind?: RawShaderMaterial[]) => Promise<boolean>>(async () => false);
 
     const scheduleSnapshotRefresh = useCallback(() => {
       if (isLiveRef.current) return;
@@ -491,6 +517,11 @@ const FileRendererInner = memo(
           scaleGridEnabled: { value: false },
           scaleOffsets: { value: new Float32Array(12) },
           pitchOffsetSemisFromC0: { value: 0.0 },
+          leftTint: { value: new Color(LONE_LAYER_TINT.left[0], LONE_LAYER_TINT.left[1], LONE_LAYER_TINT.left[2]) },
+          rightTint: {
+            value: new Color(LONE_LAYER_TINT.right[0], LONE_LAYER_TINT.right[1], LONE_LAYER_TINT.right[2]),
+          },
+          drawOverlays: { value: true },
           showTargetRectangle: { value: false },
           showSourceRectangle: { value: false },
           targetRectPulse: { value: 1.0 },
@@ -535,6 +566,21 @@ const FileRendererInner = memo(
     }, []);
 
     const mesh = useRef<Mesh>(null!);
+
+    // A layer behind another adds into the picture already there and draws no
+    // chrome, so a stack carries one grid and one brush rectangle however many
+    // layers it holds. The frame loop only runs on demand, so a renderer that
+    // mounts onto a file already analysed has to ask for the frame itself.
+    useEffect(() => {
+      const { left, right } = tint ?? LONE_LAYER_TINT;
+      (displayMaterial.uniforms.leftTint.value as Color).setRGB(left[0], left[1], left[2]);
+      (displayMaterial.uniforms.rightTint.value as Color).setRGB(right[0], right[1], right[2]);
+      displayMaterial.uniforms.drawOverlays.value = !behind;
+      displayMaterial.blending = overlaid ? AdditiveBlending : NormalBlending;
+      displayMaterial.depthWrite = !overlaid;
+      displayMaterial.needsUpdate = true;
+      invalidateRef.current?.();
+    }, [displayMaterial, tint, overlaid, behind]);
 
     // Stroke params for render loop
     const strokePreview = useRef(false);
@@ -980,7 +1026,7 @@ const FileRendererInner = memo(
      * WebGL view, and re-run (throttled) when display state changes while
      * static.
      */
-    const captureSnapshot = async (): Promise<boolean> => {
+    const captureSnapshot = async (behindMaterials: RawShaderMaterial[] = []): Promise<boolean> => {
       const gl = glRef.current;
       const strokeRenderer = strokeRendererRef.current;
       const canvas = snapshotCanvasRef.current;
@@ -999,7 +1045,7 @@ const FileRendererInner = memo(
       displayMaterial.uniforms.showTargetRectangle.value = false;
       displayMaterial.uniforms.showSourceRectangle.value = false;
 
-      const ok = await captureMaterialToCanvas(gl, displayMaterial, canvas, width, height);
+      const ok = await captureMaterialToCanvas(gl, [...behindMaterials, displayMaterial], canvas, width, height);
       // Display state that changed while the capture was in flight isn't in
       // the pixels we just painted; go around again.
       if (snapshotStaleRef.current) scheduleSnapshotRefresh();
@@ -2306,6 +2352,7 @@ const FileRendererInner = memo(
       expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) =>
         canvasRef.current?.expandDirtyRegion(startX, endX, startY, endY),
       captureSnapshot,
+      getDisplayMaterial: () => displayMaterial,
       refreshSnapshot: scheduleSnapshotRefresh,
       renderExportImage,
     }));
@@ -2322,7 +2369,7 @@ const FileRendererInner = memo(
 
     // The component renders a mesh with a plane geometry and the custom `displayMaterial`.
     return (
-      <mesh ref={mesh}>
+      <mesh ref={mesh} renderOrder={behind ? 0 : 1}>
         <planeGeometry args={[2, 2]} />
         <primitive object={displayMaterial} attach="material" />
       </mesh>

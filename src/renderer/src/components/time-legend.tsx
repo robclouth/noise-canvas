@@ -1,3 +1,4 @@
+import { TIME_LEGEND_HEIGHT } from "@renderer/lib/file-view-metrics";
 import { useStore } from "@/store";
 import { Box } from "@mantine/core";
 import { openFiles } from "@renderer/store/files";
@@ -230,7 +231,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       data-time-legend
       style={{
         width: "100%",
-        height: 15,
+        height: TIME_LEGEND_HEIGHT,
         backgroundColor: "rgba(0, 0, 0, 0.3)",
         position: "relative",
         cursor: "col-resize",

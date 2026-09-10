@@ -56,21 +56,31 @@ export function createByteTarget(width: number, height: number): WebGLRenderTarg
 }
 
 /**
- * Renders `material` as a fullscreen quad into `target` and reads the result
- * back asynchronously (PBO + fence). Rows run bottom-to-top, the order
- * readPixels returns them in.
+ * Renders `materials` as fullscreen quads into `target`, in order, and reads
+ * the result back asynchronously (PBO + fence). Several materials are how an
+ * overlaid stack is captured: each one's own blending sums it into the picture
+ * the ones before it left. Rows run bottom-to-top, the order readPixels
+ * returns them in.
  */
 export async function renderMaterialToBytes(
   gl: WebGLRenderer,
-  material: RawShaderMaterial,
+  materials: RawShaderMaterial | RawShaderMaterial[],
   target: WebGLRenderTarget,
 ): Promise<Uint8Array> {
   const { scene, mesh, camera } = ensureQuad();
-  mesh.material = material;
+  const list = Array.isArray(materials) ? materials : [materials];
 
   const prevTarget = gl.getRenderTarget();
+  const prevAutoClear = gl.autoClear;
   gl.setRenderTarget(target);
-  gl.render(scene, camera);
+  // The first pass starts from a cleared target; the rest add into it.
+  gl.autoClear = false;
+  gl.clear(true, false, false);
+  for (const material of list) {
+    mesh.material = material;
+    gl.render(scene, camera);
+  }
+  gl.autoClear = prevAutoClear;
   gl.setRenderTarget(prevTarget);
 
   return readRenderTargetBytesAsync(gl, target, 0, 0, target.width, target.height);
@@ -84,7 +94,7 @@ export async function renderMaterialToBytes(
  */
 export async function captureMaterialToCanvas(
   gl: WebGLRenderer,
-  material: RawShaderMaterial,
+  materials: RawShaderMaterial | RawShaderMaterial[],
   canvas: HTMLCanvasElement,
   width: number,
   height: number,
@@ -93,7 +103,7 @@ export async function captureMaterialToCanvas(
   if (!ctx) return false;
 
   const target = ensureCaptureResources(width, height);
-  const pixels = await renderMaterialToBytes(gl, material, target);
+  const pixels = await renderMaterialToBytes(gl, materials, target);
 
   canvas.width = width;
   canvas.height = height;

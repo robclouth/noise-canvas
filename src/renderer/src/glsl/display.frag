@@ -7,6 +7,17 @@ uniform float maxDb;
 uniform float bpm;
 uniform float gridSize;
 
+// The colour a layer takes. Left and right sit a hue apart either side of the
+// layer's own hue, so a centred signal reads as that hue and the layers of a
+// stack add towards white where they overlap. One layer alone is hsv(30) and
+// hsv(210) — the orange and blue the picture has always used.
+uniform vec3 leftTint;
+uniform vec3 rightTint;
+
+// False on a layer drawn behind another, which shows only its spectrogram: the
+// grid, the brush preview and the rectangles belong to the layer on top.
+uniform bool drawOverlays;
+
 uniform bool showTargetRectangle;
 uniform bool showSourceRectangle;
 uniform float targetRectPulse;
@@ -310,14 +321,19 @@ void main() {
 
     vec3 color;
     if (sourceChannelCount == 1) {
-        color = vec3(leftDb);
+        // One channel takes both sides of the layer's hue pair, which sums to
+        // the layer's own hue — white for the pair a lone layer uses.
+        color = leftDb * (leftTint + rightTint);
     } else {
         float rightDb = magnitudeToDb(mags.y);
-
-        vec3 leftColor = vec3(leftDb, leftDb * 0.5, 0.0);
-        vec3 rightColor = vec3(0.0, rightDb * 0.5, rightDb);
-        color = leftColor + rightColor;
+        color = leftTint * leftDb + rightTint * rightDb;
     }
+
+    // Everything from here is chrome over the picture: the hatch, the loading
+    // tint, the grid and the brush rectangles. A layer drawn behind another
+    // contributes only its spectrogram, or a stack would carry one grid per
+    // layer.
+    if (drawOverlays) {
 
     // Where nothing holds the picture yet the ground is a dark hatch, so an
     // undrawn region reads as "not known" rather than as a loud one. It needs
@@ -442,6 +458,8 @@ void main() {
 
         float rectAlpha = 1.0 - smoothstep(0.0, fwidth(distToBorder), abs(distToBorder));
         color = mix(color, targetRectColor, rectAlpha * targetRectPulse);
+    }
+
     }
 
     outColor = vec4(color, 1.0);

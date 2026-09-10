@@ -5,6 +5,15 @@ import type { State, ZustandGet, ZustandSet } from "./types";
 export type LayerStackMethod = "hpss" | "ai" | "nmf" | "user";
 
 /**
+ * How a stack shows its layers. Overlaid draws them into one canvas, each in
+ * its own hue; stacked gives each a box of its own, in full stereo colour.
+ */
+export type LayerStackLayout = "overlaid" | "stacked";
+
+/** A split drops you straight into one canvas with the parts laid over it. */
+export const DEFAULT_LAYER_STACK_LAYOUT: LayerStackLayout = "overlaid";
+
+/**
  * A set of layers held together on the canvas. A layer is an ordinary file —
  * every brush and effect works on one unchanged — but the layers of a stack
  * share a colour, sound together, can move their views together, and can be
@@ -23,6 +32,8 @@ export type LayerStack = {
   hue: number;
   /** Whether zoom and scroll follow each other across the layers. */
   syncView: boolean;
+  /** Overlaid draws every layer in one canvas; stacked gives each its own box. */
+  layout: LayerStackLayout;
 };
 
 export const LAYER_STACKS_PERSISTED_KEYS = ["layerStacks", "stackOfLayer"] as const;
@@ -31,8 +42,12 @@ export interface LayerStacksState {
   layerStacks: Record<string, LayerStack>;
   /** Reverse index: layer id → stack id, for the per-layer lookups the UI does. */
   stackOfLayer: Record<string, string>;
-  createLayerStack: (stack: Omit<LayerStack, "id" | "syncView"> & { syncView?: boolean }) => string;
+  createLayerStack: (
+    stack: Omit<LayerStack, "id" | "syncView" | "layout"> & { syncView?: boolean; layout?: LayerStackLayout },
+  ) => string;
   setLayerStackSyncView: (stackId: string, syncView: boolean) => void;
+  /** Switches a stack between one overlaid canvas and a box per layer. */
+  setLayerStackLayout: (stackId: string, layout: LayerStackLayout) => void;
   /**
    * Drop a layer from whatever stack it belongs to. A stack holds any number of
    * layers, down to one, so only emptying it discards it.
@@ -142,7 +157,12 @@ export const createLayerStacksSlice = (set: ZustandSet, get: ZustandGet): LayerS
     const id = nextLayerStackId();
     set(
       produce((state: State) => {
-        state.layerStacks[id] = { ...stack, id, syncView: stack.syncView ?? true };
+        state.layerStacks[id] = {
+          ...stack,
+          id,
+          syncView: stack.syncView ?? true,
+          layout: stack.layout ?? DEFAULT_LAYER_STACK_LAYOUT,
+        };
         for (const layerId of stack.layerIds) {
           state.stackOfLayer[layerId] = id;
         }
@@ -156,6 +176,15 @@ export const createLayerStacksSlice = (set: ZustandSet, get: ZustandGet): LayerS
       produce((state: State) => {
         const stack = state.layerStacks[stackId];
         if (stack) stack.syncView = syncView;
+      }),
+    );
+  },
+
+  setLayerStackLayout: (stackId, layout) => {
+    set(
+      produce((state: State) => {
+        const stack = state.layerStacks[stackId];
+        if (stack) stack.layout = layout;
       }),
     );
   },

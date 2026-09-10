@@ -4,8 +4,9 @@ import { openFiles, selectFileColor } from "@renderer/store/files";
 import { getLayerSegments, stackColor } from "@renderer/store/layers";
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { useUiSize } from "@renderer/lib/ui-density";
+import { layerTint } from "@renderer/lib/layer-tint";
 import { helpProps } from "@renderer/lib/ui-controls";
-import { Layers, Link2, Link2Off, Merge, Ungroup, X } from "lucide-react";
+import { Layers, Link2, Link2Off, Merge, Rows3, Ungroup, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { FileReorderProvider } from "@renderer/contexts/file-reorder";
 import { type FileDropTarget } from "@renderer/lib/file-reorder";
@@ -109,27 +110,31 @@ Dock.displayName = "Dock";
 
 type LayerBoxProps = {
   fileId: string;
+  /** Every layer of an overlaid stack, so one box can draw them all. */
+  stackLayerIds?: string[];
   activeFileId: string | null;
   activeRef: RefObject<HTMLDivElement | null>;
   fullscreenFileId: string | null;
   minimizedFileIds: string[];
 };
 
-const LayerBox = memo(({ fileId, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: LayerBoxProps) => {
-  const isFullscreen = fullscreenFileId === fileId;
-  const isMinimized = minimizedFileIds.includes(fileId);
-  const hidden = (fullscreenFileId !== null && !isFullscreen) || isMinimized;
-  return (
-    <Box
-      ref={fileId === activeFileId ? activeRef : undefined}
-      style={{ display: hidden ? "none" : undefined, minHeight: isFullscreen ? 0 : undefined }}
-      h={isFullscreen ? "100%" : undefined}
-      flex={isFullscreen ? 1 : undefined}
-    >
-      <FileView fileId={fileId} isFullscreen={isFullscreen} isMinimized={isMinimized} />
-    </Box>
-  );
-});
+const LayerBox = memo(
+  ({ fileId, stackLayerIds, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: LayerBoxProps) => {
+    const isFullscreen = fullscreenFileId === fileId;
+    const isMinimized = minimizedFileIds.includes(fileId);
+    const hidden = (fullscreenFileId !== null && !isFullscreen) || isMinimized;
+    return (
+      <Box
+        ref={fileId === activeFileId ? activeRef : undefined}
+        style={{ display: hidden ? "none" : undefined, minHeight: isFullscreen ? 0 : undefined }}
+        h={isFullscreen ? "100%" : undefined}
+        flex={isFullscreen ? 1 : undefined}
+      >
+        <FileView fileId={fileId} isFullscreen={isFullscreen} isMinimized={isMinimized} stackLayerIds={stackLayerIds} />
+      </Box>
+    );
+  },
+);
 LayerBox.displayName = "LayerBox";
 
 /**
@@ -137,6 +142,49 @@ LayerBox.displayName = "LayerBox";
  * the operations that act on the whole stack. The rail is what makes the layers
  * read as connected rather than as files that happen to be adjacent.
  */
+/**
+ * The tabs of an overlaid stack: one per layer, in its own hue, with the layer
+ * on top lit. Clicking one moves where you paint without stopping the mix.
+ */
+const LayerTabs = memo(({ layerIds, currentId }: { layerIds: string[]; currentId: string }) => {
+  return (
+    <Group gap={2} wrap="nowrap" px={4} pb={4} style={{ overflowX: "auto" }}>
+      {layerIds.map((layerId, index) => {
+        const file = openFiles[layerId];
+        if (!file) return null;
+        const { left, right } = layerTint(index, layerIds.length);
+        const hue = `rgb(${left.map((c, i) => Math.round((c + right[i]) * 127.5)).join(",")})`;
+        const isCurrent = layerId === currentId;
+        return (
+          <Tooltip key={layerId} help="stack-layer-tab" detail={file.displayName}>
+            <Box
+              {...helpProps("stack-layer-tab")}
+              onClick={() => void useStore.getState().setActiveFileId(layerId)}
+              px={8}
+              py={2}
+              style={{
+                cursor: "pointer",
+                borderRadius: 3,
+                borderBottom: `2px solid ${hue}`,
+                backgroundColor: isCurrent ? "var(--mantine-color-dark-5)" : "transparent",
+                opacity: isCurrent ? 1 : 0.6,
+                whiteSpace: "nowrap",
+                maxWidth: 180,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                fontSize: 11,
+              }}
+            >
+              {file.displayName}
+            </Box>
+          </Tooltip>
+        );
+      })}
+    </Group>
+  );
+});
+LayerTabs.displayName = "LayerTabs";
+
 const LayerStackSection = memo(
   ({
     stackId,
@@ -160,6 +208,11 @@ const LayerStackSection = memo(
         </>
       );
     }
+
+    // Overlaid needs a layer on top: the active file when it is in this stack,
+    // and otherwise the first layer.
+    const overlaid = stack.layout === "overlaid" && fileIds.length > 1;
+    const currentId = fileIds.includes(laneProps.activeFileId ?? "") ? laneProps.activeFileId! : fileIds[0];
 
     const color = stackColor(stack.hue);
 
@@ -188,15 +241,28 @@ const LayerStackSection = memo(
             </Text>
             {anyLoading && <Loader size={10} color="gray" />}
             <HelpActionIcon
-              help="stack-sync-view"
-              detail={stack.syncView ? "Linked" : "Unlinked"}
+              help="stack-layout"
+              detail={overlaid ? "Overlaid" : "Stacked"}
               size={uiSize}
               variant="subtle"
-              color={stack.syncView ? "gray" : "dark.3"}
-              onClick={() => useStore.getState().setLayerStackSyncView(stackId, !stack.syncView)}
+              color="gray"
+              onClick={() => useStore.getState().setLayerStackLayout(stackId, overlaid ? "stacked" : "overlaid")}
             >
-              {stack.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
+              {overlaid ? <Layers size={16} /> : <Rows3 size={16} />}
             </HelpActionIcon>
+            {/* Overlaid layers share one viewport, so the link has nothing to tie. */}
+            {!overlaid && (
+              <HelpActionIcon
+                help="stack-sync-view"
+                detail={stack.syncView ? "Linked" : "Unlinked"}
+                size={uiSize}
+                variant="subtle"
+                color={stack.syncView ? "gray" : "dark.3"}
+                onClick={() => useStore.getState().setLayerStackSyncView(stackId, !stack.syncView)}
+              >
+                {stack.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
+              </HelpActionIcon>
+            )}
             <HelpActionIcon
               help="stack-merge"
               detail={`${stack.layerIds.length} layers`}
@@ -232,11 +298,18 @@ const LayerStackSection = memo(
             </HelpActionIcon>
           </Group>
         )}
-        <Stack gap="xs" h={chromeHidden ? "100%" : undefined} style={chromeHidden ? { minHeight: 0 } : undefined}>
-          {fileIds.map((fileId) => (
-            <LayerBox key={fileId} fileId={fileId} {...laneProps} />
-          ))}
-        </Stack>
+        {overlaid ? (
+          <>
+            {!chromeHidden && <LayerTabs layerIds={fileIds} currentId={currentId} />}
+            <LayerBox fileId={currentId} stackLayerIds={fileIds} {...laneProps} />
+          </>
+        ) : (
+          <Stack gap="xs" h={chromeHidden ? "100%" : undefined} style={chromeHidden ? { minHeight: 0 } : undefined}>
+            {fileIds.map((fileId) => (
+              <LayerBox key={fileId} fileId={fileId} {...laneProps} />
+            ))}
+          </Stack>
+        )}
       </Box>
     );
   },

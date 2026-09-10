@@ -1,3 +1,4 @@
+import { ONSET_LEGEND_HEIGHT } from "@renderer/lib/file-view-metrics";
 import { useStore } from "@/store";
 import { Box } from "@mantine/core";
 import { openFiles } from "@renderer/store/files";
@@ -8,8 +9,6 @@ import { getMaxPyramid, queryMax } from "../lib/max-pyramid";
 import { getOnsetStrengthBins } from "../lib/onset-map";
 import { screenToZoomed } from "../lib/utils";
 import { Vector2 } from "three";
-
-export const ONSET_LEGEND_HEIGHT = 15;
 
 // Mantine orange[6]-ish, matching the transient-aware effects' accent.
 const MARKER_COLOR = "255, 140, 51";
