@@ -98,10 +98,14 @@ import {
  */
 interface FileRendererProps {
   fileId: string;
+  /** The layer whose zoom and scroll place this display in an overlaid view. */
+  viewFileId?: string;
   isLive: boolean;
   parked: boolean;
   snapshotCanvasRef: RefObject<HTMLCanvasElement | null>;
   onLiveFrame?: () => void;
+  /** Requests a capture of every layer sharing the snapshot canvas. */
+  onSnapshotRefresh?: () => void;
   /**
    * The hue pair this layer paints its left and right channels in. Defaults to
    * the orange and blue a layer on its own has always used.
@@ -287,7 +291,7 @@ export interface FileRendererHandle {
    */
   captureSnapshot: (behindMaterials?: RawShaderMaterial[]) => Promise<boolean>;
   /** This layer's display material, so a stack can capture every layer at once. */
-  getDisplayMaterial: () => RawShaderMaterial;
+  getDisplayMaterial: () => RawShaderMaterial | null;
   /** Schedules a throttled snapshot re-capture (no-op while the view is live). */
   refreshSnapshot: () => void;
   /**
@@ -316,18 +320,23 @@ export const FileRenderer = memo(
   forwardRef<FileRendererHandle, FileRendererProps>((props, ref) => {
     const { spectrogramData } = openFiles[props.fileId];
     if (!spectrogramData) return null;
-    return <FileRendererInner {...props} ref={ref} />;
+    return <FileRendererInner key={props.fileId} {...props} ref={ref} />;
   }),
 );
 
-// Frames a layer may ask for before its first picture lands, at roughly 60 a
-// second. Long enough for an analysis to reach the GPU, short enough that a
-// layer which can never draw stops asking.
-const FIRST_DRAW_MAX_FRAMES = 900;
-
 const FileRendererInner = memo(
   forwardRef<FileRendererHandle, FileRendererProps>((props, ref) => {
-    const { fileId, isLive, parked, snapshotCanvasRef, onLiveFrame, tint, overlaid = false, behind = false } = props;
+    const {
+      fileId,
+      viewFileId = fileId,
+      isLive,
+      parked,
+      snapshotCanvasRef,
+      onLiveFrame,
+      tint,
+      overlaid = false,
+      behind = false,
+    } = props;
     const spectrogramData = openFiles[fileId].spectrogramData!;
 
     // Don't subscribe to these during render - access them via refs or useFrame instead
@@ -365,12 +374,18 @@ const FileRendererInner = memo(
     // but must call the capture with current textures and spectrogram data.
     const captureSnapshotRef = useRef<(behind?: RawShaderMaterial[]) => Promise<boolean>>(async () => false);
 
+    const snapshotRefreshRef = useRef(props.onSnapshotRefresh);
+    snapshotRefreshRef.current = props.onSnapshotRefresh;
+
     const scheduleSnapshotRefresh = useCallback(() => {
       if (isLiveRef.current) return;
       if (snapshotTimerRef.current !== null) return;
       snapshotTimerRef.current = window.setTimeout(() => {
         snapshotTimerRef.current = null;
-        if (!isLiveRef.current) void captureSnapshotRef.current();
+        if (!isLiveRef.current) {
+          if (snapshotRefreshRef.current) snapshotRefreshRef.current();
+          else void captureSnapshotRef.current();
+        }
       }, 150);
     }, []);
 
@@ -414,7 +429,6 @@ const FileRendererInner = memo(
     // Whether the display material has been populated at least once for the
     // current StrokeRenderer. Reset whenever the StrokeRenderer is recreated.
     const hasDrawnDisplayRef = useRef(false);
-    const firstDrawTriesRef = useRef(0);
 
     // Subscriptions to global state - consolidated into fewer subscriptions for efficiency
     useEffect(() => {
@@ -431,10 +445,10 @@ const FileRendererInner = memo(
           const file = openFiles[fileId];
           return {
             bpm: file && state.filepathsBpm[file.filePath],
-            zoom: state.filesZoom[fileId],
-            offset: state.filesOffset[fileId],
-            zoomY: state.filesZoomY[fileId],
-            offsetY: state.filesOffsetY[fileId],
+            zoom: state.filesZoom[viewFileId],
+            offset: state.filesOffset[viewFileId],
+            zoomY: state.filesZoomY[viewFileId],
+            offsetY: state.filesOffsetY[viewFileId],
             gridBeats: state.gridSizeBeats,
             gridSemis: state.gridSizeSemis,
             gridSwing: state.gridSwing,
@@ -500,7 +514,7 @@ const FileRendererInner = memo(
         unsubActiveFileId();
         if (aimRestTimer.current !== null) clearTimeout(aimRestTimer.current);
       };
-    }, [fileId, scheduleSnapshotRefresh]);
+    }, [fileId, viewFileId, scheduleSnapshotRefresh]);
 
     // Materials and scene objects for rendering
     const displayMaterial = useMemo(() => {
@@ -622,6 +636,8 @@ const FileRendererInner = memo(
     // Captured from the spectrogram once, so releasing the spectrogram's
     // arrays later does not retrigger the texture effect with nothing to
     // build from.
+    // A remounted canvas takes its committed state after the pristine texture seeds it.
+    const currentSeedRef = useRef<Float32Array | null>(null);
     const packedSeedRef = useRef<Float32Array | null>(null);
     if (spectrogramData.packedData) packedSeedRef.current = spectrogramData.packedData;
     const inverseSeedRef = useRef<Float32Array | null>(null);
@@ -717,7 +733,30 @@ const FileRendererInner = memo(
     // Effect to create and manage spectrogram textures
     useEffect(() => {
       if (parked) return;
-      installTextures(createTextures());
+      let cancelled = false;
+      const prepare = async () => {
+        const { numBands, metadata, numFrames, sampleRate, texels } = spectrogramData;
+        const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
+        if (!packedSeedRef.current && !needsCanvasWindow(grid, canvasWindowBlocks(grid))) {
+          await serializeFileTask(fileId, async () => {
+            const history = getHistoryManager(fileId);
+            await history.initialize();
+            const manifest = history.getManifest();
+            if (!manifest || cancelled) return;
+            const current =
+              (await history.currentBlockState()) ?? (await history.reconstruct(manifest.currentId)).packedData;
+            const original = await history.rootRanges(new Uint32Array([0, texels]));
+            const anchor = history.nearestFullAnchor(manifest.currentId);
+            const side = anchor ? await deriveSideData(anchor) : null;
+            if (cancelled) return;
+            currentSeedRef.current = current;
+            packedSeedRef.current = original ?? current;
+            inverseSeedRef.current = side?.inverseMap ?? null;
+          });
+        }
+        if (!cancelled) installTextures(createTextures());
+      };
+      void prepare().catch((error: unknown) => console.error("Preparing renderer textures failed:", error));
 
       // Reset StrokeRenderer when textures change
       if (strokeRendererRef.current) {
@@ -727,6 +766,7 @@ const FileRendererInner = memo(
       disposeCanvasRef.current?.();
 
       return () => {
+        cancelled = true;
         // Whatever is live now, not what this run created: reloadTextures
         // replaces them outside the effect, and those must be freed too.
         disposeLiveTextures();
@@ -951,10 +991,10 @@ const FileRendererInner = memo(
 
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
-      const viewZoomPower = state.filesZoom[fileId];
-      const viewOffset = state.filesOffset[fileId];
-      const viewZoomPowerY = state.filesZoomY[fileId] ?? 0;
-      const viewOffsetY = state.filesOffsetY[fileId] ?? 0;
+      const viewZoomPower = state.filesZoom[viewFileId];
+      const viewOffset = state.filesOffset[viewFileId];
+      const viewZoomPowerY = state.filesZoomY[viewFileId] ?? 0;
+      const viewOffsetY = state.filesOffsetY[viewFileId] ?? 0;
 
       const uniforms = displayMaterial.uniforms;
       uniforms.sourceInverseMapTex.value = inverseMapTex;
@@ -1103,9 +1143,9 @@ const FileRendererInner = memo(
     /** The frames the file's view shows at its current zoom and offset. */
     const visibleFrameRange = (state: State): { start: number; end: number } => {
       const { numFrames } = spectrogramData;
-      const zoom = Math.pow(2, state.filesZoom[fileId] ?? 0);
+      const zoom = Math.pow(2, state.filesZoom[viewFileId] ?? 0);
       const span = numFrames / zoom;
-      const start = zoom > 1 ? (state.filesOffset[fileId] ?? 0) * (numFrames - span) : 0;
+      const start = zoom > 1 ? (state.filesOffset[viewFileId] ?? 0) * (numFrames - span) : 0;
       return { start, end: start + span };
     };
 
@@ -1213,8 +1253,6 @@ const FileRendererInner = memo(
           installTextures(createTextures());
 
           hasDrawnDisplayRef.current = false;
-          firstDrawTriesRef.current = 0;
-          firstDrawTriesRef.current = 0;
           invalidateRef.current?.();
           snapshotStaleRef.current = true;
           scheduleSnapshotRefresh();
@@ -1521,10 +1559,10 @@ const FileRendererInner = memo(
               preview,
               bpm,
               totalDuration: dabDuration,
-              viewZoomPower: state.filesZoom[fileId],
-              viewOffset: state.filesOffset[fileId],
-              viewZoomPowerY: state.filesZoomY[fileId] ?? 0,
-              viewOffsetY: state.filesOffsetY[fileId] ?? 0,
+              viewZoomPower: state.filesZoom[viewFileId],
+              viewOffset: state.filesOffset[viewFileId],
+              viewZoomPowerY: state.filesZoomY[viewFileId] ?? 0,
+              viewOffsetY: state.filesOffsetY[viewFileId] ?? 0,
               pressure: penState.pressure,
               tiltX: penState.tiltX,
               tiltY: penState.tiltY,
@@ -1565,16 +1603,6 @@ const FileRendererInner = memo(
       cameraRef.current = camera;
 
       if (parked) return;
-
-      // Until this layer has put a picture up, keep asking for frames. The
-      // frame loop runs on demand, and a renderer that mounts onto a file
-      // already analysed — a layer joining a stack — gets one frame before its
-      // textures are ready and would otherwise never draw again. Capped, so a
-      // layer that can never draw does not spin for ever.
-      if (!hasDrawnDisplayRef.current && firstDrawTriesRef.current < FIRST_DRAW_MAX_FRAMES) {
-        firstDrawTriesRef.current++;
-        invalidate();
-      }
 
       if (!spectrogramData || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
 
@@ -1651,6 +1679,10 @@ const FileRendererInner = memo(
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
         canvasFor(gl).initialize(packedSeedRef.current, spectrogramData.coarseStrip ?? null);
+        if (currentSeedRef.current) {
+          strokeRenderer.setFBOData(currentSeedRef.current);
+          currentSeedRef.current = null;
+        }
         if (historyHookedRef.current) {
           releaseAnalysisData();
         }
@@ -1661,11 +1693,9 @@ const FileRendererInner = memo(
       // recreates the StrokeRenderer but must not re-run history rehydration.
       //
       // Two flows:
-      // - Existing tree: reopenPersistedFiles already populated
-      //   spectrogramData (and seeded HistoryManager.currentPacked) by reading
-      //   the history root + replaying deltas. The StrokeRenderer's FBO is
-      //   already at the correct currentId state; we only need to restore the
-      //   audio for that node.
+      // - Existing tree: a reopen or the texture preparation supplies the
+      //   current coefficients and side data. The FBO holds the current node;
+      //   restore its audio only when the file has no buffer.
       // - New file: the in-memory spectrogramData is the initial state, so
       //   seed history with it as the root snapshot, then synthesise + cache
       //   the initial audio.
@@ -1708,7 +1738,7 @@ const FileRendererInner = memo(
           // is released; the local copy still feeds this first synthesis.
           releaseAnalysisData();
           if (nodeId === null) {
-            await historyManager.restoreCurrentAudio();
+            if (!openFiles[fileId]?.audioBuffer) await historyManager.restoreCurrentAudio();
             return;
           }
           const gateBefore = openFiles[fileId]?.onsetReference?.odfMax ?? 0;
@@ -2002,7 +2032,6 @@ const FileRendererInner = memo(
       }
 
       hasDrawnDisplayRef.current = true;
-      firstDrawTriesRef.current = 0;
       onLiveFrame?.();
 
       // Flag-gated: optionally force a GPU sync so the recorded frame time
@@ -2371,7 +2400,17 @@ const FileRendererInner = memo(
       expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) =>
         canvasRef.current?.expandDirtyRegion(startX, endX, startY, endY),
       captureSnapshot,
-      getDisplayMaterial: () => displayMaterial,
+      getDisplayMaterial: () => {
+        const gl = glRef.current;
+        const renderer = strokeRendererRef.current;
+        if (!gl || !renderer?.getIsInitialized()) return null;
+        applyStaticDisplayUniforms(useStore.getState(), gl.domElement.width, gl.domElement.height);
+        displayMaterial.uniforms.sourceSpectrogramTex.value = renderer.getDisplayTexture();
+        displayMaterial.uniforms.previewActive.value = false;
+        displayMaterial.uniforms.showTargetRectangle.value = false;
+        displayMaterial.uniforms.showSourceRectangle.value = false;
+        return displayMaterial;
+      },
       refreshSnapshot: scheduleSnapshotRefresh,
       renderExportImage,
     }));

@@ -36,6 +36,24 @@ export type LayerStack = {
   layout: LayerStackLayout;
 };
 
+/** Converts persisted file groups and supplies the layout of a saved stack. */
+export function migrateLayerStacks(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  const result: Record<string, unknown> = {};
+  for (const [id, entry] of Object.entries(value)) {
+    if (!entry || typeof entry !== "object") continue;
+    const { memberIds, ...stack } = entry as Record<string, unknown>;
+    const layerIds = stack.layerIds ?? memberIds;
+    if (!Array.isArray(layerIds)) continue;
+    result[id] = {
+      ...stack,
+      layerIds: layerIds.filter((layerId): layerId is string => typeof layerId === "string"),
+      layout: stack.layout ?? DEFAULT_LAYER_STACK_LAYOUT,
+    };
+  }
+  return result;
+}
+
 export const LAYER_STACKS_PERSISTED_KEYS = ["layerStacks", "stackOfLayer"] as const;
 
 export interface LayerStacksState {

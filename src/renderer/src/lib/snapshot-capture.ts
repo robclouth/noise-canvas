@@ -72,16 +72,19 @@ export async function renderMaterialToBytes(
 
   const prevTarget = gl.getRenderTarget();
   const prevAutoClear = gl.autoClear;
-  gl.setRenderTarget(target);
-  // The first pass starts from a cleared target; the rest add into it.
-  gl.autoClear = false;
-  gl.clear(true, false, false);
-  for (const material of list) {
-    mesh.material = material;
-    gl.render(scene, camera);
+  try {
+    gl.setRenderTarget(target);
+    // The first pass starts from a cleared target; the rest add into it.
+    gl.autoClear = false;
+    gl.clear(true, false, false);
+    for (const material of list) {
+      mesh.material = material;
+      gl.render(scene, camera);
+    }
+  } finally {
+    gl.autoClear = prevAutoClear;
+    gl.setRenderTarget(prevTarget);
   }
-  gl.autoClear = prevAutoClear;
-  gl.setRenderTarget(prevTarget);
 
   return readRenderTargetBytesAsync(gl, target, 0, 0, target.width, target.height);
 }

@@ -17,6 +17,8 @@ export interface AudioState {
   getMixBus: () => Tone.Gain;
   /** Pushes every layer's mute, solo and volume onto the running mix. */
   applyLayerGains: () => void;
+  /** Reconciles the voices with the active file and its current stack. */
+  reconcileLayerPlayback: () => void;
   /** Position the player is at, at `atTime` on the audio clock (default now). */
   getPlaybackTime: (atTime?: number) => number;
   getPlayer: () => Tone.Player;
@@ -97,10 +99,11 @@ function mixOf(state: {
 function disposeVoice(fileId: string): void {
   const voice = layerVoices.get(fileId);
   if (!voice) return;
+  layerVoices.delete(fileId);
+  voice.player.onstop = () => {};
   voice.player.stop();
   voice.player.dispose();
   voice.gain.dispose();
-  layerVoices.delete(fileId);
 }
 
 /** Drops every layer's player and gain, leaving the mix bus in place. */
@@ -155,6 +158,7 @@ function startOtherLayers(
   window: PlaybackWindow,
   loop: boolean,
   rate: number,
+  restartExisting = true,
 ): void {
   if (holdOtherLayers) return;
   const state = get();
@@ -170,7 +174,10 @@ function startOtherLayers(
   for (const fileId of ids) {
     if (fileId === activeFileId) continue;
     const buffer = openFiles[fileId]?.audioBuffer;
-    if (!buffer) continue;
+    if (!buffer) {
+      disposeVoice(fileId);
+      continue;
+    }
 
     const voice = getVoice(get, fileId);
     if (voice.player.buffer.get() !== buffer) voice.player.buffer = new Tone.ToneAudioBuffer(buffer);
@@ -178,6 +185,7 @@ function startOtherLayers(
     voice.player.playbackRate = rate;
 
     const started = voice.player.state === "started";
+    if (started && !restartExisting) continue;
     // A layer too short to cover a looped window would loop at its own end and
     // walk away from the rest, so it plays through once instead.
     if (loop && buffer.duration >= window.end) {
@@ -280,6 +288,35 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const voice = getVoice(get, get().activeFileId ?? "");
     if (get().player !== voice.player) set({ player: voice.player });
     return voice.player;
+  },
+
+  reconcileLayerPlayback: () => {
+    const state = get();
+    const activeId = state.activeFileId;
+    const ids = activeId ? selectStackLayerIds(state, activeId).filter((id) => !!openFiles[id]) : [];
+    const activeVoice = activeId ? layerVoices.get(activeId) : undefined;
+    const clockVoice = [...layerVoices.entries()].find(([, voice]) => voice.player === state.player);
+    const staysInMix = clockVoice && ids.includes(clockVoice[0]);
+    if (state.isPlaying && (!staysInMix || activeVoice?.player.state !== "started")) state.stopAudio();
+    releaseVoices(new Set(ids));
+    set({ player: activeVoice?.player ?? null });
+    if (get().isPlaying && activeVoice) {
+      const now = Tone.now();
+      const offset = get().getPlaybackTime(now);
+      startOtherLayers(
+        get,
+        now,
+        offset,
+        {
+          start: state.playerClock.loopStart,
+          end: state.playerClock.loopEnd,
+        },
+        state.loop,
+        activeVoice.player.playbackRate,
+        false,
+      );
+    }
+    get().applyLayerGains();
   },
 
   applyLayerGains: () => {
@@ -655,22 +692,17 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   stopAudio: () => {
     const { activeFileId, filesPlaybackStartTime } = get();
 
-    if (!activeFileId) {
-      return;
-    }
-
-    for (const voice of layerVoices.values()) voice.player.stop();
-    // The active layer's voice stays, because `player` points at it.
-    releaseVoices(new Set([activeFileId]));
-
     set((s) => ({
       isPlaying: false,
       selectionAudition: false,
       playerClock: {
         ...s.playerClock,
         startAt: null,
-        startOffset: filesPlaybackStartTime[activeFileId],
+        startOffset: activeFileId ? (filesPlaybackStartTime[activeFileId] ?? 0) : 0,
       },
     }));
+    for (const voice of layerVoices.values()) voice.player.stop();
+    releaseVoices(new Set(activeFileId ? [activeFileId] : []));
+    if (!activeFileId) set({ player: null });
   },
 });

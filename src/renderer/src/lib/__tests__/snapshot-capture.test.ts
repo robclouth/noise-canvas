@@ -1,7 +1,7 @@
-import { GLSL3, RawShaderMaterial, WebGLRenderer } from "three";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AdditiveBlending, GLSL3, RawShaderMaterial, WebGLRenderer } from "three";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import passThroughVert from "../../glsl/pass-through.vert";
-import { captureMaterialToCanvas } from "../snapshot-capture";
+import { captureMaterialToCanvas, createByteTarget, renderMaterialToBytes } from "../snapshot-capture";
 
 /**
  * Verifies the snapshot pipeline end-to-end on a real WebGL context: a
@@ -88,5 +88,37 @@ describe("captureMaterialToCanvas", () => {
     gl.setRenderTarget(null);
     await captureMaterialToCanvas(gl, material, canvas, 16, 16);
     expect(gl.getRenderTarget()).toBeNull();
+  });
+  it("adds every material and restores the render state", async () => {
+    const target = createByteTarget(8, 8);
+    const previous = createByteTarget(4, 4);
+    material.blending = AdditiveBlending;
+    gl.autoClear = false;
+    gl.setRenderTarget(previous);
+    try {
+      const pixels = await renderMaterialToBytes(gl, [material, material], target);
+      expect(pixels[2]).toBeCloseTo(128, -1);
+      expect(gl.autoClear).toBe(false);
+      expect(gl.getRenderTarget()).toBe(previous);
+    } finally {
+      gl.setRenderTarget(null);
+      target.dispose();
+      previous.dispose();
+    }
+  });
+
+  it("restores the render state if drawing throws", async () => {
+    const target = createByteTarget(8, 8);
+    const render = vi.spyOn(gl, "render").mockImplementationOnce(() => {
+      throw new Error("draw failed");
+    });
+    try {
+      await expect(renderMaterialToBytes(gl, material, target)).rejects.toThrow("draw failed");
+      expect(gl.autoClear).toBe(true);
+      expect(gl.getRenderTarget()).toBeNull();
+    } finally {
+      render.mockRestore();
+      target.dispose();
+    }
   });
 });

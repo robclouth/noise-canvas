@@ -284,4 +284,72 @@ describe("playing a stack of layers", () => {
     expect(second.disposed).toBe(true);
     expect(third.disposed).toBe(true);
   });
+  it("releases voices removed from the playing stack", async () => {
+    const { get } = makeStore();
+    await get().togglePlayback();
+    const [active, second, third] = playersByLayer();
+    get().layerStacks = { g1: { ...get().layerStacks.g1, layerIds: ["f1", "f3"] } };
+    get().reconcileLayerPlayback();
+    expect(second.disposed).toBe(true);
+    expect(active.state).toBe("started");
+    expect(third.state).toBe("started");
+  });
+
+  it("releases a closed background file and keeps the mix playing", async () => {
+    const { get } = makeStore();
+    await get().togglePlayback();
+    const [, second] = playersByLayer();
+    delete files.openFiles.f2;
+    get().reconcileLayerPlayback();
+    expect(second.disposed).toBe(true);
+    expect(get().isPlaying).toBe(true);
+  });
+
+  it("stops and releases the previous stack when the active file leaves it", async () => {
+    const { get } = makeStore();
+    await get().togglePlayback();
+    const players = playersByLayer();
+    get().activeFileId = "outside";
+    get().reconcileLayerPlayback();
+    expect(get().isPlaying).toBe(false);
+    expect(get().player).toBeNull();
+    expect(players.every((player) => player.disposed)).toBe(true);
+  });
+
+  it("stops every voice even after the last file closes", async () => {
+    const { get } = makeStore();
+    await get().togglePlayback();
+    const players = playersByLayer();
+    get().activeFileId = null;
+    get().stopAudio();
+    expect(get().isPlaying).toBe(false);
+    expect(players.every((player) => player.stopped && player.disposed)).toBe(true);
+    expect(get().player).toBeNull();
+  });
+
+  it("keeps sibling playback running when the paint target changes", async () => {
+    const { get } = makeStore();
+    await get().togglePlayback();
+    const [, second] = playersByLayer();
+    get().activeFileId = "f2";
+    get().reconcileLayerPlayback();
+    expect(get().isPlaying).toBe(true);
+    expect(get().player).toBe(second);
+    expect(playersByLayer().every((player) => !player.disposed)).toBe(true);
+  });
+
+  it("releases the other-layer hold when a buffer swap throws", async () => {
+    const { get } = makeStore();
+    await get().togglePlayback();
+    const [, second] = playersByLayer();
+    const seek = get().setPlaybackTime;
+    get().setPlaybackTime = () => {
+      throw new Error("seek failed");
+    };
+    expect(() => get().swapPlayingBufferRaw(fakeBuffer(10) as AudioBuffer)).toThrow("seek failed");
+    get().setPlaybackTime = seek;
+    const before = second.started.length;
+    get().setPlaybackTime(2);
+    expect(second.started.length).toBe(before + 1);
+  });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createLayerStacksSlice,
+  migrateLayerStacks,
   getLayerSegments,
   selectLayerStack,
   stackColor,
@@ -186,5 +187,17 @@ describe("stack colours", () => {
     expect(stackMethodLabel("nmf")).toBe("NMF");
     expect(stackMethodLabel("ai")).toBe("AI stems");
     expect(stackMethodLabel("user")).toBe("Stack");
+  });
+});
+
+describe("saved layer stacks", () => {
+  it("converts group members and supplies an overlaid layout", () => {
+    expect(migrateLayerStacks({ old: { id: "old", memberIds: ["a", "b"], label: "parts" } })).toEqual({
+      old: { id: "old", layerIds: ["a", "b"], label: "parts", layout: "overlaid" },
+    });
+  });
+  it("preserves the layout and layers of a current stack", () => {
+    const saved = { current: { layerIds: ["a"], layout: "stacked" } };
+    expect(migrateLayerStacks(saved)).toEqual(saved);
   });
 });

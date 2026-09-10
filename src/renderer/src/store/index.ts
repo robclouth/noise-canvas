@@ -33,7 +33,7 @@ import { createPalettesSlice, makeDefaultPalette, PALETTES_PERSISTED_KEYS } from
 import { DEFAULT_PALETTE_ID } from "./palette-id";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import { createSectionPresetsSlice } from "./section-presets";
-import { createLayerStacksSlice, LAYER_STACKS_PERSISTED_KEYS } from "./layers";
+import { createLayerStacksSlice, LAYER_STACKS_PERSISTED_KEYS, selectStackLayerIds, migrateLayerStacks } from "./layers";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
 import { seedLinkedEffectParam, seedLinkedStepParam, writeEffectParam } from "./effect-param-linking";
 import type { ParameterKey, State } from "./types";
@@ -357,6 +357,7 @@ export const useStore = create<State>()(
             stored.layerStacks = priorStacks;
             stored.stackOfLayer = priorOf;
           }
+          stored.layerStacks = migrateLayerStacks(stored.layerStacks);
           delete stored.stemGroups;
           delete stored.stemGroupOfFile;
           delete stored.fileGroups;
@@ -439,6 +440,20 @@ export const useStore = create<State>()(
       },
     ),
   ),
+);
+
+useStore.subscribe(
+  (state) => ({
+    activeFileId: state.activeFileId,
+    ids: state.activeFileId ? selectStackLayerIds(state, state.activeFileId) : [],
+  }),
+  () => useStore.getState().reconcileLayerPlayback(),
+  {
+    equalityFn: (a, b) =>
+      a.activeFileId === b.activeFileId &&
+      a.ids.length === b.ids.length &&
+      a.ids.every((id, index) => id === b.ids[index]),
+  },
 );
 
 // Dev-only: expose the store on window so a CDP-attached driver can read state

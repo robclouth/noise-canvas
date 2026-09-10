@@ -1398,9 +1398,10 @@ function createStemPlaceholders(
   sourceFileId: string,
   labels: string[],
   loadingMessage: string,
+  baseName?: string,
 ): string[] {
   const sourceFile = openFiles[sourceFileId];
-  const baseLabel = stripExtensionForLabel(sourceFile.displayName);
+  const baseLabel = baseName ?? stripExtensionForLabel(sourceFile.displayName);
   const ids = labels.map(() => generateFileId());
   const sourceBpm = get().filepathsBpm[sourceFile.filePath];
 
@@ -1907,7 +1908,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     const stack = selectLayerStack(get(), fileId);
     const label = `layer ${(stack?.layerIds.length ?? 1) + 1}`;
-    const ids = createStemPlaceholders(set, get, fileId, [label], "Adding layer...");
+    const baseName = stripExtensionForLabel(
+      (stack?.originId && openFiles[stack.originId]?.displayName) ||
+        (stack && openFiles[stack.layerIds[0]]?.displayName) ||
+        source.displayName,
+    );
+    const ids = createStemPlaceholders(set, get, fileId, [label], "Adding layer...", baseName);
 
     try {
       // Zeroed coefficients on the source's own grid: silence the brush can be
@@ -2507,7 +2513,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           disposeOnsetTexture(fileId);
 
           const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
-          state.activeFileId = nextFileId || null;
+          if (state.activeFileId === fileId) state.activeFileId = nextFileId;
         }
       }),
     );

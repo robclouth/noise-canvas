@@ -130,7 +130,13 @@ const LayerBox = memo(
         h={isFullscreen ? "100%" : undefined}
         flex={isFullscreen ? 1 : undefined}
       >
-        <FileView fileId={fileId} isFullscreen={isFullscreen} isMinimized={isMinimized} stackLayerIds={stackLayerIds} />
+        <FileView
+          key={fileId}
+          fileId={fileId}
+          isFullscreen={isFullscreen}
+          isMinimized={isMinimized}
+          stackLayerIds={stackLayerIds}
+        />
       </Box>
     );
   },
