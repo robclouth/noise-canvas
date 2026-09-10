@@ -133,17 +133,17 @@ import { createAudioSlice, releaseLayerVoices } from "../../store/audio";
 import type { State, ZustandGet, ZustandSet } from "../../store/types";
 
 /**
- * The layers of one group sound together. Each takes its own player behind its
+ * The layers of one stack sound together. Each takes its own player behind its
  * own gain, and every one of them starts on the same instant.
  */
 
-const GROUP = {
+const STACK = {
   g1: {
     id: "g1",
     method: "hpss" as const,
     label: "loop",
     originId: null,
-    memberIds: ["f1", "f2", "f3"],
+    layerIds: ["f1", "f2", "f3"],
     hue: 200,
     syncView: true,
   },
@@ -165,8 +165,8 @@ function makeStore(overrides: Partial<State> = {}) {
   state = {
     ...audio,
     activeFileId: "f1",
-    fileGroups: GROUP,
-    fileGroupOfFile: { f1: "g1", f2: "g1", f3: "g1" },
+    layerStacks: STACK,
+    stackOfLayer: { f1: "g1", f2: "g1", f3: "g1" },
     filesMuted: {},
     filesSoloed: {},
     filesVolumeDb: {},

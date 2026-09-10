@@ -45,9 +45,9 @@ export const UI_AREAS = {
     blurb: "Playback, the grid and scale your strokes snap to, meters, and the limiter.",
     manualSection: "transport-and-output",
   },
-  "file-lane": {
+  "file-layer": {
     title: "Canvas",
-    blurb: "One open file. Beats across, semitones up, orange and blue for the stereo image.",
+    blurb: "One layer. Beats across, semitones up, orange and blue for the stereo image.",
     manualSection: "navigating-the-canvas",
   },
   "file-header": {

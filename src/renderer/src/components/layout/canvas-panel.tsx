@@ -1,7 +1,7 @@
 import { useStore } from "@/store";
 import { Box, Group, Loader, Stack, Text } from "@mantine/core";
 import { openFiles, selectFileColor } from "@renderer/store/files";
-import { getFileSegments, fileGroupColor } from "@renderer/store/file-groups";
+import { getLayerSegments, stackColor } from "@renderer/store/layers";
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { useUiSize } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
@@ -107,7 +107,7 @@ export const Dock = memo(() => {
 });
 Dock.displayName = "Dock";
 
-type FileLaneProps = {
+type LayerBoxProps = {
   fileId: string;
   activeFileId: string | null;
   activeRef: RefObject<HTMLDivElement | null>;
@@ -115,7 +115,7 @@ type FileLaneProps = {
   minimizedFileIds: string[];
 };
 
-const FileLane = memo(({ fileId, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: FileLaneProps) => {
+const LayerBox = memo(({ fileId, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: LayerBoxProps) => {
   const isFullscreen = fullscreenFileId === fileId;
   const isMinimized = minimizedFileIds.includes(fileId);
   const hidden = (fullscreenFileId !== null && !isFullscreen) || isMinimized;
@@ -130,38 +130,38 @@ const FileLane = memo(({ fileId, activeFileId, activeRef, fullscreenFileId, mini
     </Box>
   );
 });
-FileLane.displayName = "FileLane";
+LayerBox.displayName = "LayerBox";
 
 /**
- * Wraps the lanes of one group in a rail carrying its colour, with a header for
- * the operations that act on the whole group. The rail is what makes the members
+ * Wraps the layers of one stack in a rail carrying its colour, with a header for
+ * the operations that act on the whole stack. The rail is what makes the layers
  * read as connected rather than as files that happen to be adjacent.
  */
-const FileGroupSection = memo(
+const LayerStackSection = memo(
   ({
-    groupId,
+    stackId,
     fileIds,
     isDropTarget,
     ...laneProps
-  }: { groupId: string; fileIds: string[]; isDropTarget: boolean } & Omit<FileLaneProps, "fileId">) => {
-    const group = useStore((state) => state.fileGroups[groupId]);
+  }: { stackId: string; fileIds: string[]; isDropTarget: boolean } & Omit<LayerBoxProps, "fileId">) => {
+    const stack = useStore((state) => state.layerStacks[stackId]);
     const anyLoading = useStore((state) => fileIds.some((id) => !!state.filesLoading[id] || !!state.filesBusy[id]));
     const uiSize = useUiSize();
 
-    // Fullscreen takes over the canvas, so the group chrome would just be a
+    // Fullscreen takes over the canvas, so the stack chrome would just be a
     // stray bar above it.
     const chromeHidden = laneProps.fullscreenFileId !== null;
-    if (!group) {
+    if (!stack) {
       return (
         <>
           {fileIds.map((fileId) => (
-            <FileLane key={fileId} fileId={fileId} {...laneProps} />
+            <LayerBox key={fileId} fileId={fileId} {...laneProps} />
           ))}
         </>
       );
     }
 
-    const color = fileGroupColor(group.hue);
+    const color = stackColor(stack.hue);
 
     return (
       <Box
@@ -169,10 +169,10 @@ const FileGroupSection = memo(
           borderLeft: chromeHidden ? undefined : `2px solid ${color}`,
           paddingLeft: chromeHidden ? undefined : 6,
           borderRadius: 2,
-          // A drag heading into this group tints the whole section, so the
+          // A drag heading into this stack tints the whole section, so the
           // indicator line reads as "inside here" rather than "somewhere near".
           outline: isDropTarget ? `1px solid ${color}` : undefined,
-          backgroundColor: isDropTarget ? `hsl(${group.hue}, 62%, 57%, 0.08)` : undefined,
+          backgroundColor: isDropTarget ? `hsl(${stack.hue}, 62%, 57%, 0.08)` : undefined,
         }}
         h={laneProps.fullscreenFileId !== null ? "100%" : undefined}
         flex={laneProps.fullscreenFileId !== null ? 1 : undefined}
@@ -184,49 +184,49 @@ const FileGroupSection = memo(
           <Group gap="xs" wrap="nowrap" pb="xs" px={4} style={{ minHeight: 24 }}>
             <Layers size={16} color={color} style={{ flexShrink: 0 }} />
             <Text size="xs" c="dimmed" truncate="end" style={{ minWidth: 0, flex: 1 }}>
-              {group.label}
+              {stack.label}
             </Text>
             {anyLoading && <Loader size={10} color="gray" />}
             <HelpActionIcon
-              help="group-sync-view"
-              detail={group.syncView ? "Linked" : "Unlinked"}
+              help="stack-sync-view"
+              detail={stack.syncView ? "Linked" : "Unlinked"}
               size={uiSize}
               variant="subtle"
-              color={group.syncView ? "gray" : "dark.3"}
-              onClick={() => useStore.getState().setFileGroupSyncView(groupId, !group.syncView)}
+              color={stack.syncView ? "gray" : "dark.3"}
+              onClick={() => useStore.getState().setLayerStackSyncView(stackId, !stack.syncView)}
             >
-              {group.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
+              {stack.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
             </HelpActionIcon>
             <HelpActionIcon
-              help="group-merge"
-              detail={`${group.memberIds.length} files`}
+              help="stack-merge"
+              detail={`${stack.layerIds.length} layers`}
               size={uiSize}
               variant="subtle"
               color="gray"
               loading={anyLoading}
               // One file has nothing to sum with.
-              disabled={group.memberIds.length < 2}
-              onClick={() => useStore.getState().mergeFileGroup(groupId)}
+              disabled={stack.layerIds.length < 2}
+              onClick={() => useStore.getState().mergeLayerStack(stackId)}
             >
               <Merge size={16} />
             </HelpActionIcon>
             <HelpActionIcon
-              help="group-ungroup"
-              detail={`${group.memberIds.length} files`}
+              help="stack-unstack"
+              detail={`${stack.layerIds.length} layers`}
               size={uiSize}
               variant="subtle"
               color="gray"
-              onClick={() => useStore.getState().ungroupFiles(groupId)}
+              onClick={() => useStore.getState().unstackLayers(stackId)}
             >
               <Ungroup size={16} />
             </HelpActionIcon>
             <HelpActionIcon
-              help="group-close"
-              detail={`${group.memberIds.length} files`}
+              help="stack-close"
+              detail={`${stack.layerIds.length} layers`}
               size={uiSize}
               variant="subtle"
               color="gray"
-              onClick={() => useStore.getState().closeFileGroup(groupId)}
+              onClick={() => useStore.getState().closeLayerStack(stackId)}
             >
               <X size={16} />
             </HelpActionIcon>
@@ -234,21 +234,21 @@ const FileGroupSection = memo(
         )}
         <Stack gap="xs" h={chromeHidden ? "100%" : undefined} style={chromeHidden ? { minHeight: 0 } : undefined}>
           {fileIds.map((fileId) => (
-            <FileLane key={fileId} fileId={fileId} {...laneProps} />
+            <LayerBox key={fileId} fileId={fileId} {...laneProps} />
           ))}
         </Stack>
       </Box>
     );
   },
 );
-FileGroupSection.displayName = "FileGroupSection";
+LayerStackSection.displayName = "LayerStackSection";
 
 export const CanvasPanel = memo(() => {
   const openFileIds = useStore((state) => state.openFileIds);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const minimizedFileIds = useStore((state) => state.minimizedFileIds);
   const activeFileId = useStore((state) => state.activeFileId);
-  const fileGroupOfFile = useStore((state) => state.fileGroupOfFile);
+  const stackOfLayer = useStore((state) => state.stackOfLayer);
 
   // Bring the active file into view when it changes (e.g. opening a file that's
   // already open further down the list). `nearest` keeps already-visible files put.
@@ -261,7 +261,7 @@ export const CanvasPanel = memo(() => {
   const [dropTarget, setDropTarget] = useState<FileDropTarget | null>(null);
   const handleTargetChange = useCallback((target: FileDropTarget | null) => setDropTarget(target), []);
 
-  const segments = useMemo(() => getFileSegments(openFileIds, fileGroupOfFile), [openFileIds, fileGroupOfFile]);
+  const segments = useMemo(() => getLayerSegments(openFileIds, stackOfLayer), [openFileIds, stackOfLayer]);
   const laneProps = useMemo(
     () => ({ activeFileId, activeRef, fullscreenFileId, minimizedFileIds }),
     [activeFileId, fullscreenFileId, minimizedFileIds],
@@ -278,24 +278,24 @@ export const CanvasPanel = memo(() => {
         gap={"xs"}
       >
         {segments.map((segment, index) =>
-          segment.groupId !== null ? (
-            <FileGroupSection
-              key={`${segment.groupId}-${index}`}
-              groupId={segment.groupId}
+          segment.stackId !== null ? (
+            <LayerStackSection
+              key={`${segment.stackId}-${index}`}
+              stackId={segment.stackId}
               fileIds={segment.fileIds}
-              isDropTarget={dropTarget?.groupId === segment.groupId}
+              isDropTarget={dropTarget?.stackId === segment.stackId}
               {...laneProps}
             />
           ) : (
-            segment.fileIds.map((fileId) => <FileLane key={fileId} fileId={fileId} {...laneProps} />)
+            segment.fileIds.map((fileId) => <LayerBox key={fileId} fileId={fileId} {...laneProps} />)
           ),
         )}
         {dropTarget && (
           <Box
             pos="absolute"
-            // Inset to the group's own content edge when the drop joins one, so
-            // the line sits where the lane will.
-            left={dropTarget.groupId ? 8 : 0}
+            // Inset to the stack's own content edge when the drop joins one, so
+            // the line sits where the layer will.
+            left={dropTarget.stackId ? 8 : 0}
             right={0}
             top={dropTarget.y - 1}
             h={2}

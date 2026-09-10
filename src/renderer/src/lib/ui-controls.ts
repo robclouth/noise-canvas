@@ -100,21 +100,21 @@ export const UI_CONTROLS = {
   "file-volume": {
     label: "Volume",
     description: "Sets how loud this file plays in the mix.",
-    manualSection: "grouping-files",
+    manualSection: "layers",
   },
   "file-solo": {
     label: "Solo",
     description: "Plays this file alone, along with any other file that is soloed.",
-    manualSection: "grouping-files",
+    manualSection: "layers",
   },
   "file-mute": {
     label: "Mute",
     description: "Drops this file out of the mix, leaving the rest playing.",
-    manualSection: "grouping-files",
+    manualSection: "layers",
   },
   "file-split": {
     label: "Split",
-    description: "Separates the file into parts, each in its own lane.",
+    description: "Separates the file into parts, each on its own layer.",
     manualSection: "splitting-a-file",
   },
   "file-fill-grid": {
@@ -124,7 +124,7 @@ export const UI_CONTROLS = {
   },
   "file-duplicate": {
     label: "Duplicate",
-    description: "Copies the file into a new lane you can edit on its own.",
+    description: "Copies the file onto a new layer you can edit on its own.",
     manualSection: "working-with-files",
   },
   "file-reorder": {
@@ -163,26 +163,26 @@ export const UI_CONTROLS = {
     manualSection: "navigating-the-canvas",
   },
 
-  // File groups
-  "group-sync-view": {
+  // Layer stacks
+  "stack-sync-view": {
     label: "Link views",
-    description: "Ties zoom and scroll together across the files in the group.",
-    manualSection: "grouping-files",
+    description: "Ties zoom and scroll together across the layers of the stack.",
+    manualSection: "layers",
   },
-  "group-merge": {
+  "stack-merge": {
     label: "Merge",
-    description: "Sums every file in the group into one new file, leaving them open.",
-    manualSection: "grouping-files",
+    description: "Sums every layer of the stack into one new file, leaving them open.",
+    manualSection: "layers",
   },
-  "group-ungroup": {
-    label: "Ungroup",
-    description: "Drops the bracket, leaving every file open on its own.",
-    manualSection: "grouping-files",
+  "stack-unstack": {
+    label: "Unstack",
+    description: "Drops the stack, leaving every layer open as a file on its own.",
+    manualSection: "layers",
   },
-  "group-close": {
-    label: "Close group",
-    description: "Closes every file in the group at once.",
-    manualSection: "grouping-files",
+  "stack-close": {
+    label: "Close stack",
+    description: "Closes every layer of the stack at once.",
+    manualSection: "layers",
   },
 
   // History

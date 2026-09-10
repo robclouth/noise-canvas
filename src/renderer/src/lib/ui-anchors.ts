@@ -15,8 +15,8 @@ export const UI_ANCHORS = [
   "brush-panel",
   "sidebar",
   "transport",
-  // A single file's lane in the canvas column, and its header strip
-  "file-lane",
+  // A single file's layer in the canvas column, and its header strip
+  "file-layer",
   "file-header",
   // Brush panel sections, top to bottom
   "section-macros",
@@ -51,7 +51,7 @@ export type AnchorName = UiAnchor | EffectAnchor | ControlAnchor;
 export const ANCHOR_ATTR = "data-anchor";
 
 /**
- * Qualifies the one anchor that is not a singleton. `file-lane` exists once per
+ * Qualifies the one anchor that is not a singleton. `file-layer` exists once per
  * open file, so consumers that mean a particular file have to say which.
  */
 export const ANCHOR_FILE_ATTR = "data-anchor-file";
@@ -61,9 +61,9 @@ export function anchorProps(name: AnchorName): { "data-anchor": AnchorName } {
   return { [ANCHOR_ATTR]: name };
 }
 
-/** Spread onto a file lane so `laneSelector` can address that file's lane. */
-export function laneAnchorProps(fileId: string): { "data-anchor": AnchorName; "data-anchor-file": string } {
-  return { [ANCHOR_ATTR]: "file-lane", [ANCHOR_FILE_ATTR]: fileId };
+/** Spread onto a file layer so `layerSelector` can address that file's layer. */
+export function layerAnchorProps(fileId: string): { "data-anchor": AnchorName; "data-anchor-file": string } {
+  return { [ANCHOR_ATTR]: "file-layer", [ANCHOR_FILE_ATTR]: fileId };
 }
 
 /** CSS selector matching the element tagged with `name`. */
@@ -71,7 +71,7 @@ export function anchorSelector(name: AnchorName): string {
   return `[${ANCHOR_ATTR}="${name}"]`;
 }
 
-/** CSS selector matching one specific file's lane rather than the first one. */
-export function laneSelector(fileId: string): string {
-  return `${anchorSelector("file-lane")}[${ANCHOR_FILE_ATTR}="${fileId}"]`;
+/** CSS selector matching one specific file's layer rather than the first one. */
+export function layerSelector(fileId: string): string {
+  return `${anchorSelector("file-layer")}[${ANCHOR_FILE_ATTR}="${fileId}"]`;
 }

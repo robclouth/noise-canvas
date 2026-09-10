@@ -38,24 +38,24 @@ export interface PalettesState {
   initPalettes: () => Promise<void>;
   openPaletteFromLibrary: (libraryId: string) => void;
   addPalette: () => void;
-  closePalette: (groupId: string) => void;
-  renameOpenPalette: (groupId: string, name: string) => void;
+  closePalette: (stackId: string) => void;
+  renameOpenPalette: (stackId: string, name: string) => void;
   renameLibraryPalette: (libraryId: string, name: string) => Promise<void>;
-  togglePaletteCollapsed: (groupId: string) => void;
+  togglePaletteCollapsed: (stackId: string) => void;
   moveBrushToPalette: (brushId: string, toGroupId: string, toIndexInGroup: number) => void;
   movePalette: (fromIndex: number, toIndex: number) => void;
-  savePalette: (groupId: string) => Promise<void>;
-  savePaletteAs: (groupId: string, name: string) => Promise<void>;
+  savePalette: (stackId: string) => Promise<void>;
+  savePaletteAs: (stackId: string, name: string) => Promise<void>;
   deletePaletteFromLibrary: (libraryId: string) => Promise<void>;
 }
 
-export function selectOpenPalette(state: State, groupId: string): OpenPalette | undefined {
-  return state.openPalettes.find((palette) => palette.id === groupId);
+export function selectOpenPalette(state: State, stackId: string): OpenPalette | undefined {
+  return state.openPalettes.find((palette) => palette.id === stackId);
 }
 
 /** The brushes in one group, in the order the flat list holds them. */
-export function selectBrushesInPalette(state: State, groupId: string): Brush[] {
-  return state.brushes.filter((brush) => brush.paletteId === groupId);
+export function selectBrushesInPalette(state: State, stackId: string): Brush[] {
+  return state.brushes.filter((brush) => brush.paletteId === stackId);
 }
 
 /**
@@ -74,17 +74,17 @@ export function isPaletteDirty(
   return paletteFingerprint(brushesInPalette) !== paletteFingerprint(saved.brushes);
 }
 
-export function selectPaletteDirty(state: State, groupId: string): boolean {
+export function selectPaletteDirty(state: State, stackId: string): boolean {
   return isPaletteDirty(
-    selectOpenPalette(state, groupId),
-    selectBrushesInPalette(state, groupId),
+    selectOpenPalette(state, stackId),
+    selectBrushesInPalette(state, stackId),
     state.availablePalettes,
   );
 }
 
 /** The brushes in a group that no library preset holds, or that differ from one. */
-export function selectUnsavedBrushes(state: State, groupId: string): Brush[] {
-  return selectBrushesInPalette(state, groupId).filter((brush) => isBrushUnsaved(brush, state.availablePresets));
+export function selectUnsavedBrushes(state: State, stackId: string): Brush[] {
+  return selectBrushesInPalette(state, stackId).filter((brush) => isBrushUnsaved(brush, state.availablePresets));
 }
 
 /**
@@ -129,31 +129,31 @@ export function buildPresetPaletteIndex(palettes: readonly PaletteType[]): Map<s
   return index;
 }
 
-/** The last flat index held by `groupId`, or -1 when the group is empty. */
-function lastIndexOfGroup(brushes: readonly Brush[], groupId: string): number {
+/** The last flat index held by `stackId`, or -1 when the group is empty. */
+function lastIndexOfGroup(brushes: readonly Brush[], stackId: string): number {
   for (let i = brushes.length - 1; i >= 0; i--) {
-    if (brushes[i].paletteId === groupId) return i;
+    if (brushes[i].paletteId === stackId) return i;
   }
   return -1;
 }
 
 /**
- * Where a brush landing at `indexInGroup` of `groupId` goes in the flat list.
+ * Where a brush landing at `indexInGroup` of `stackId` goes in the flat list.
  * An empty group inserts after the group before it, so a drop into an empty
  * palette does not send the brush to the end of the sidebar.
  */
 export function flatInsertIndex(
   brushes: readonly Brush[],
   openPalettes: readonly OpenPalette[],
-  groupId: string,
+  stackId: string,
   indexInGroup: number,
 ): number {
-  const members = brushes.map((brush, index) => ({ brush, index })).filter((e) => e.brush.paletteId === groupId);
+  const members = brushes.map((brush, index) => ({ brush, index })).filter((e) => e.brush.paletteId === stackId);
   if (members.length > 0) {
     return indexInGroup >= members.length ? members[members.length - 1].index + 1 : members[indexInGroup].index;
   }
 
-  const order = openPalettes.findIndex((palette) => palette.id === groupId);
+  const order = openPalettes.findIndex((palette) => palette.id === stackId);
   for (let i = order - 1; i >= 0; i--) {
     const tail = lastIndexOfGroup(brushes, openPalettes[i].id);
     if (tail >= 0) return tail + 1;
@@ -277,16 +277,16 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
     );
   },
 
-  closePalette: (groupId: string) => {
+  closePalette: (stackId: string) => {
     set(
       produce((draft: State) => {
         if (draft.openPalettes.length <= 1) return;
         // Every active-brush consumer reads brushes[activeBrushIndex], so the
         // list must never empty — the other palettes have to hold something.
-        if (draft.brushes.every((brush) => brush.paletteId === groupId)) return;
+        if (draft.brushes.every((brush) => brush.paletteId === stackId)) return;
         const active = draft.brushes[draft.activeBrushIndex];
-        draft.openPalettes = draft.openPalettes.filter((palette) => palette.id !== groupId);
-        draft.brushes = draft.brushes.filter((brush) => brush.paletteId !== groupId);
+        draft.openPalettes = draft.openPalettes.filter((palette) => palette.id !== stackId);
+        draft.brushes = draft.brushes.filter((brush) => brush.paletteId !== stackId);
         const stillThere = active ? draft.brushes.indexOf(active) : -1;
         draft.activeBrushIndex = stillThere >= 0 ? stillThere : 0;
         draft.activeStepIndex = 0;
@@ -294,16 +294,16 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
     );
   },
 
-  renameOpenPalette: (groupId: string, name: string) => {
+  renameOpenPalette: (stackId: string, name: string) => {
     set(
       produce((draft: State) => {
-        const group = draft.openPalettes.find((palette) => palette.id === groupId);
+        const group = draft.openPalettes.find((palette) => palette.id === stackId);
         if (group) group.name = name;
       }),
     );
 
     // A group opened from a file carries the rename through to the file.
-    const libraryId = selectOpenPalette(get(), groupId)?.libraryId;
+    const libraryId = selectOpenPalette(get(), stackId)?.libraryId;
     if (libraryId) void get().renameLibraryPalette(libraryId, name);
   },
 
@@ -328,10 +328,10 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
     }
   },
 
-  togglePaletteCollapsed: (groupId: string) => {
+  togglePaletteCollapsed: (stackId: string) => {
     set(
       produce((draft: State) => {
-        const group = draft.openPalettes.find((palette) => palette.id === groupId);
+        const group = draft.openPalettes.find((palette) => palette.id === stackId);
         if (group) group.collapsed = !group.collapsed;
       }),
     );
@@ -367,9 +367,9 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
     );
   },
 
-  savePalette: async (groupId: string) => {
+  savePalette: async (stackId: string) => {
     const state = get();
-    const group = selectOpenPalette(state, groupId);
+    const group = selectOpenPalette(state, stackId);
     if (!group?.libraryId) return;
 
     const existing = state.availablePalettes.find((palette) => palette.id === group.libraryId);
@@ -383,7 +383,7 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
       return;
     }
 
-    const updated: PaletteType = { ...existing, brushes: toStoredBrushes(selectBrushesInPalette(state, groupId)) };
+    const updated: PaletteType = { ...existing, brushes: toStoredBrushes(selectBrushesInPalette(state, stackId)) };
 
     try {
       await writePalette(state, updated);
@@ -398,9 +398,9 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
     }
   },
 
-  savePaletteAs: async (groupId: string, name: string) => {
+  savePaletteAs: async (stackId: string, name: string) => {
     const state = get();
-    const group = selectOpenPalette(state, groupId);
+    const group = selectOpenPalette(state, stackId);
     if (!group) return;
 
     const palette: PaletteType = {
@@ -408,7 +408,7 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
       name,
       isFactory: false,
       version: CURRENT_PALETTE_VERSION,
-      brushes: toStoredBrushes(selectBrushesInPalette(state, groupId)),
+      brushes: toStoredBrushes(selectBrushesInPalette(state, stackId)),
     };
 
     try {
@@ -417,7 +417,7 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
         produce((draft: State) => {
           draft.availablePalettes.push(palette);
           draft.palettesDir = dir;
-          const open = draft.openPalettes.find((p) => p.id === groupId);
+          const open = draft.openPalettes.find((p) => p.id === stackId);
           if (open) {
             open.libraryId = palette.id;
             open.name = name;

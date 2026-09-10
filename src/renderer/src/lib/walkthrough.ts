@@ -4,7 +4,7 @@ import { getFileIdByPath } from "@renderer/store/files";
 import { driver, type DriveStep, type Driver } from "driver.js";
 import "driver.js/dist/driver.css";
 import "../assets/walkthrough.css";
-import { anchorSelector, laneSelector, type AnchorName } from "./ui-anchors";
+import { anchorSelector, layerSelector, type AnchorName } from "./ui-anchors";
 
 /** Opened at the start of every run so the tour has something to paint on. */
 const DEMO_FILE = "bundled://break-loop.mp3";
@@ -74,14 +74,14 @@ const STEPS: Step[] = [
       "A few things are easier to show than to explain, so this walks through where everything lives. Takes about a minute.",
   },
   {
-    anchor: "file-lane",
+    anchor: "file-layer",
     side: "top",
     title: "This is your sound",
     description:
       "Time runs left to right in <b>beats</b>, pitch runs bottom to top in <b>semitones</b>, and brightness is loudness. Colour shows the stereo image: orange leans left, blue leans right, grey is equal in both.",
   },
   {
-    anchor: "file-lane",
+    anchor: "file-layer",
     side: "top",
     title: "Getting around it",
     description:
@@ -123,7 +123,7 @@ const STEPS: Step[] = [
       "Try <b>Size ↔</b> at <b>Full</b> to see it span the whole file, then bring it down to around <b>4 beats</b> so the stroke covers a bar or so. Curve shapes its edges, from a sharp spike to a hard rectangle, and Skew moves the peak.",
   },
   {
-    anchor: "file-lane",
+    anchor: "file-layer",
     side: "top",
     title: "Now paint",
     description: "Drag across the spectrogram. The brush is applied wherever you take it.",
@@ -182,12 +182,12 @@ function clearGate(): void {
 }
 
 /**
- * `file-lane` is the one anchor that exists once per open file, so a bare
- * selector would spotlight whichever lane happens to be first. Every lane step
+ * `file-layer` is the one anchor that exists once per open file, so a bare
+ * selector would spotlight whichever layer happens to be first. Every layer step
  * means the demo file the tour just opened.
  */
 function selectorFor(anchor: AnchorName, fileId: string | null): string {
-  if (anchor === "file-lane" && fileId) return laneSelector(fileId);
+  if (anchor === "file-layer" && fileId) return layerSelector(fileId);
   return anchorSelector(anchor);
 }
 
@@ -226,14 +226,14 @@ function expandTourSections(): void {
 }
 
 /**
- * Waits for a file's lane to mount and brings it into view, so the tour's first
+ * Waits for a file's layer to mount and brings it into view, so the tour's first
  * spotlight lands on something the user can already see.
  */
-async function revealLane(fileId: string): Promise<void> {
+async function revealLayer(fileId: string): Promise<void> {
   for (let attempt = 0; attempt < 60; attempt++) {
-    const lane = document.querySelector(laneSelector(fileId));
-    if (lane) {
-      lane.scrollIntoView({ block: "start" });
+    const layer = document.querySelector(layerSelector(fileId));
+    if (layer) {
+      layer.scrollIntoView({ block: "start" });
       // One frame for the scroll to land before driver.js measures the element.
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
       return;
@@ -244,8 +244,8 @@ async function revealLane(fileId: string): Promise<void> {
 
 /**
  * Starts the walkthrough on the demo file, whatever else is open. Opening it
- * activates the existing lane if it is already loaded, so the tour always knows
- * which lane it means rather than touring whatever the user happened to load.
+ * activates the existing layer if it is already loaded, so the tour always knows
+ * which layer it means rather than touring whatever the user happened to load.
  */
 export async function startWalkthrough(): Promise<void> {
   if (active) return;
@@ -259,7 +259,7 @@ export async function startWalkthrough(): Promise<void> {
   const tourFileId = getFileIdByPath(DEMO_FILE) ?? null;
   if (tourFileId) {
     await useStore.getState().setActiveFileId(tourFileId);
-    await revealLane(tourFileId);
+    await revealLayer(tourFileId);
   }
   expandTourSections();
 

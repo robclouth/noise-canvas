@@ -42,7 +42,7 @@ vi.mock("../modals", () => ({
   openNewFilePrompt: vi.fn(),
   openInsertSilencePrompt: vi.fn(),
   openSetLengthPrompt: vi.fn(),
-  openGroupFilesPrompt: vi.fn(),
+  openStackFilesPrompt: vi.fn(),
   openReanalyzePrompt: vi.fn(),
 }));
 
@@ -178,9 +178,9 @@ function makeStore() {
     filepathsBpm: {},
     filesLoading: {},
     stopAudio: vi.fn(),
-    removeFileFromGroup: vi.fn(),
-    fileGroups: {},
-    fileGroupOfFile: {},
+    removeLayerFromStack: vi.fn(),
+    layerStacks: {},
+    stackOfLayer: {},
     setActiveFileId: vi.fn(async (activeFileId: string | null) => {
       set({ activeFileId });
     }),

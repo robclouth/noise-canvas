@@ -418,15 +418,15 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubHalveActiveFileLength);
 
-    const unsubGroupFiles = ipcOn("group-files", () => {
-      void useStore.getState().promptGroupFiles();
+    const unsubStackFiles = ipcOn("stack-files", () => {
+      void useStore.getState().promptStackFiles();
     });
-    unsubscribers.push(unsubGroupFiles);
+    unsubscribers.push(unsubStackFiles);
 
-    const unsubUngroupFiles = ipcOn("ungroup-files", () => {
-      useStore.getState().ungroupActiveFile();
+    const unsubUnstackFiles = ipcOn("unstack-files", () => {
+      useStore.getState().unstackActiveFile();
     });
-    unsubscribers.push(unsubUngroupFiles);
+    unsubscribers.push(unsubUnstackFiles);
 
     const unsubSetFileLength = ipcOn("set-file-length", () => {
       void useStore.getState().setActiveFileLength();
@@ -553,7 +553,7 @@ function App(): React.JSX.Element {
               style={{ flex: 1, minHeight: 0 }}
               viewportProps={{ style: { overflowY: fullscreenFileId ? "hidden" : undefined } }}
               // The scroll viewport's content wrapper sizes to its content, which
-              // breaks a percentage height chain, so a fullscreen lane gets a flex
+              // breaks a percentage height chain, so a fullscreen layer gets a flex
               // column to grow into instead.
               styles={
                 fullscreenFileId ? { content: { height: "100%", display: "flex", flexDirection: "column" } } : undefined

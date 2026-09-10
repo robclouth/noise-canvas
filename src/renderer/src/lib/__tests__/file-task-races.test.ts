@@ -59,7 +59,7 @@ vi.mock("../modals", () => ({
     if (gate.setLengthValues) opts.onConfirm(gate.setLengthValues);
     else opts.onClose?.();
   }),
-  openGroupFilesPrompt: vi.fn(),
+  openStackFilesPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
@@ -163,9 +163,9 @@ function makeStore(overrides: Partial<State> = {}) {
     brushes: [],
     filesDirty: {},
     stopAudio: vi.fn(),
-    removeFileFromGroup: vi.fn(),
-    fileGroups: {},
-    fileGroupOfFile: {},
+    removeLayerFromStack: vi.fn(),
+    layerStacks: {},
+    stackOfLayer: {},
     ...overrides,
   } as unknown as State;
 

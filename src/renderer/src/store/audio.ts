@@ -3,7 +3,7 @@ import { listAudioOutputs, resolveOutputId, SYSTEM_DEFAULT_OUTPUT_ID, type Audio
 import { diag } from "../lib/diag-log";
 import { host } from "../lib/host";
 import { clampPlaybackWindow, layerGain, type LayerMix, type PlaybackWindow } from "../lib/layer-mix";
-import { selectMixFileIds } from "./file-groups";
+import { selectStackLayerIds } from "./layers";
 import { activeLoopRegion, openFiles } from "./files";
 import type { LoopRegion, PlayerClock, ZustandGet, ZustandSet } from "./types";
 
@@ -161,7 +161,7 @@ function startOtherLayers(
   const { activeFileId } = state;
   if (!activeFileId) return;
 
-  const ids = selectMixFileIds(state, activeFileId);
+  const ids = selectStackLayerIds(state, activeFileId);
   releaseVoices(new Set(ids));
 
   const mix = mixOf(state);
@@ -287,7 +287,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const { activeFileId } = state;
     if (!activeFileId) return;
 
-    const ids = selectMixFileIds(state, activeFileId);
+    const ids = selectStackLayerIds(state, activeFileId);
     const mix = mixOf(state);
     for (const [fileId, voice] of layerVoices) {
       // A voice left over from another stack is on its way out; hold it down.

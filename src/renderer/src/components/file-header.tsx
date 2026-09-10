@@ -10,7 +10,7 @@ import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-d
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { useFileReorder } from "@renderer/contexts/file-reorder";
 import { openFiles, selectFileColor } from "@renderer/store/files";
-import { selectFileGroup } from "@renderer/store/file-groups";
+import { selectLayerStack } from "@renderer/store/layers";
 import { DEFAULT_LAYER_VOLUME_DB, MAX_LAYER_VOLUME_DB, MIN_LAYER_VOLUME_DB } from "@renderer/lib/layer-mix";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
@@ -206,16 +206,16 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const fileColor = useStore((state) => selectFileColor(state, fileId));
   const channelCount = useFileChannelCount(fileId);
   const reorder = useFileReorder();
-  const laneCount = useStore((state) => state.openFileIds.filter((id) => !state.minimizedFileIds.includes(id)).length);
+  const layerCount = useStore((state) => state.openFileIds.filter((id) => !state.minimizedFileIds.includes(id)).length);
   const volumeDb = useStore((state) => state.filesVolumeDb[fileId] ?? DEFAULT_LAYER_VOLUME_DB);
   const isMuted = useStore((state) => state.filesMuted[fileId] ?? false);
   const isSoloed = useStore((state) => state.filesSoloed[fileId] ?? false);
   // Solo and mute only mean something against siblings that sound at the same
   // time, so a file that plays alone shows neither.
-  const inMix = useStore((state) => (selectFileGroup(state, fileId)?.memberIds.length ?? 1) > 1);
+  const inMix = useStore((state) => (selectLayerStack(state, fileId)?.layerIds.length ?? 1) > 1);
 
   const isFullscreen = fullscreenFileId === fileId;
-  const canReorder = reorder !== null && laneCount > 1 && fullscreenFileId === null;
+  const canReorder = reorder !== null && layerCount > 1 && fullscreenFileId === null;
   // Tooltip shows full path for real files (helpful when basenames truncate);
   // for managed files the path is the opaque sentinel, so just show the label.
   const tooltipLabel = isManagedFilePath(filePath) ? displayName : filePath;

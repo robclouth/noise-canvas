@@ -311,7 +311,7 @@ export function SidebarPanel() {
         return;
       }
       const drop = resolveBrushDrop(destination);
-      moveBrushToPalette(draggableId, drop.groupId, drop.indexInGroup);
+      moveBrushToPalette(draggableId, drop.stackId, drop.indexInGroup);
     },
     [moveBrushToPalette, movePalette],
   );

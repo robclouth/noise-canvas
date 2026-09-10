@@ -33,7 +33,7 @@ import { createPalettesSlice, makeDefaultPalette, PALETTES_PERSISTED_KEYS } from
 import { DEFAULT_PALETTE_ID } from "./palette-id";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import { createSectionPresetsSlice } from "./section-presets";
-import { createFileGroupsSlice, FILE_GROUPS_PERSISTED_KEYS } from "./file-groups";
+import { createLayerStacksSlice, LAYER_STACKS_PERSISTED_KEYS } from "./layers";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
 import { seedLinkedEffectParam, seedLinkedStepParam, writeEffectParam } from "./effect-param-linking";
 import type { ParameterKey, State } from "./types";
@@ -57,7 +57,7 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...PALETTES_PERSISTED_KEYS,
   ...STEPS_PERSISTED_KEYS,
   ...LINK_PERSISTED_KEYS,
-  ...FILE_GROUPS_PERSISTED_KEYS,
+  ...LAYER_STACKS_PERSISTED_KEYS,
   ...APP_PERSISTED_KEYS,
   "randomizationAmounts",
   "excludedFromRandomization",
@@ -191,18 +191,18 @@ function persistProjection(state: State): Record<string, unknown> {
 
   // Groups follow their members: drop any member that isn't coming back,
   // and drop the group itself once nothing is left in it.
-  const groups = picked.fileGroups as Record<string, { memberIds: string[] }> | undefined;
+  const groups = picked.layerStacks as Record<string, { layerIds: string[] }> | undefined;
   if (groups && typeof groups === "object") {
     const keptGroups: Record<string, unknown> = {};
     const keptOfFile: Record<string, string> = {};
-    for (const [groupId, group] of Object.entries(groups)) {
-      const memberIds = (group.memberIds ?? []).filter((id) => realIds.has(id));
-      if (memberIds.length === 0) continue;
-      keptGroups[groupId] = { ...group, memberIds };
-      for (const id of memberIds) keptOfFile[id] = groupId;
+    for (const [stackId, group] of Object.entries(groups)) {
+      const layerIds = (group.layerIds ?? []).filter((id) => realIds.has(id));
+      if (layerIds.length === 0) continue;
+      keptGroups[stackId] = { ...group, layerIds };
+      for (const id of layerIds) keptOfFile[id] = stackId;
     }
-    picked.fileGroups = keptGroups;
-    picked.fileGroupOfFile = keptOfFile;
+    picked.layerStacks = keptGroups;
+    picked.stackOfLayer = keptOfFile;
   }
 
   return picked;
@@ -223,7 +223,7 @@ export const useStore = create<State>()(
         ...createSectionPresetsSlice(set, get),
         ...createStepsSlice(set, get),
         ...createLinkSlice(set, get),
-        ...createFileGroupsSlice(set, get),
+        ...createLayerStacksSlice(set, get),
         ...createFillSlice(set, get),
         ...createSelectionAuditionSlice(set, get),
         ...createSelectionClipboardSlice(set, get),
@@ -349,13 +349,18 @@ export const useStore = create<State>()(
             if (key in stored && !isStorableOptionValue(key, stored[key])) delete stored[key];
           }
 
-          // Groups were keyed as stems before they could hold any file.
-          if (stored.stemGroups && !stored.fileGroups) {
-            stored.fileGroups = stored.stemGroups;
-            stored.fileGroupOfFile = stored.stemGroupOfFile;
+          // Layer stacks were keyed as stems, then as file groups, before the
+          // files in one became the layers of a stack.
+          const priorStacks = stored.stemGroups ?? stored.fileGroups;
+          const priorOf = stored.stemGroupOfFile ?? stored.fileGroupOfFile;
+          if (priorStacks && !stored.layerStacks) {
+            stored.layerStacks = priorStacks;
+            stored.stackOfLayer = priorOf;
           }
           delete stored.stemGroups;
           delete stored.stemGroupOfFile;
+          delete stored.fileGroups;
+          delete stored.fileGroupOfFile;
 
           const merged = deepMerge(currentState, stored) as State;
 
@@ -422,7 +427,7 @@ export const useStore = create<State>()(
           // A group draws one bracket over one run of lanes, so a stored order
           // that leaves a group straddling another file closes back up.
           if (Array.isArray(merged.openFileIds)) {
-            merged.openFileIds = gatherFileGroups(merged.openFileIds, merged.fileGroupOfFile ?? {});
+            merged.openFileIds = gatherFileGroups(merged.openFileIds, merged.stackOfLayer ?? {});
           }
 
           return merged;

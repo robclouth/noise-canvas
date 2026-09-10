@@ -207,8 +207,8 @@ export interface IpcRendererEvents {
   "close-active-file": () => void;
   "double-active-file-length": () => void;
   "halve-active-file-length": () => void;
-  "group-files": () => void;
-  "ungroup-files": () => void;
+  "stack-files": () => void;
+  "unstack-files": () => void;
   "set-file-length": () => void;
   "insert-silence": () => void;
   "copy-selection": () => void;

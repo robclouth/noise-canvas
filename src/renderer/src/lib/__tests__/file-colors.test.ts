@@ -23,7 +23,7 @@ vi.mock("../modals", () => ({
   openNewFilePrompt: vi.fn(),
   openInsertSilencePrompt: vi.fn(),
   openSetLengthPrompt: vi.fn(),
-  openGroupFilesPrompt: vi.fn(),
+  openStackFilesPrompt: vi.fn(),
   openReanalyzePrompt: vi.fn(),
 }));
 
@@ -40,7 +40,7 @@ vi.mock("@renderer/store", () => ({
 }));
 
 import { getFileColor, getFileHue, openFiles, selectFileColor } from "../../store/files";
-import { groupMemberColor, type FileGroup } from "../../store/file-groups";
+import { layerColor, type LayerStack } from "../../store/layers";
 
 function openTestFiles(count: number): string[] {
   const paths: string[] = [];
@@ -105,22 +105,22 @@ describe("file colours", () => {
 
   it("dresses a stem in a shade of its group hue", () => {
     openTestFiles(3);
-    const group: FileGroup = {
+    const group: LayerStack = {
       id: "g1",
       method: "nmf",
       label: "take — 3 parts",
       originId: "file_0",
-      memberIds: ["file_0", "file_1", "file_2"],
+      layerIds: ["file_0", "file_1", "file_2"],
       hue: 200,
       syncView: true,
     };
-    const state = { fileGroups: { g1: group }, fileGroupOfFile: { file_0: "g1", file_1: "g1", file_2: "g1" } };
-    expect(selectFileColor(state, "file_1")).toBe(groupMemberColor(200, 1, 3));
+    const state = { layerStacks: { g1: group }, stackOfLayer: { file_0: "g1", file_1: "g1", file_2: "g1" } };
+    expect(selectFileColor(state, "file_1")).toBe(layerColor(200, 1, 3));
   });
 
   it("gives a file outside any group its own hue", () => {
     const paths = openTestFiles(2);
-    const state = { fileGroups: {}, fileGroupOfFile: {} };
+    const state = { layerStacks: {}, stackOfLayer: {} };
     expect(selectFileColor(state, "file_0")).toBe(getFileColor(paths[0]));
   });
 });

@@ -27,7 +27,7 @@ import { LoopRegion } from "./loop-region";
 import { SelectionRegion } from "./selection-region";
 import { LevelStrip } from "./level-strip";
 import { OnsetLegend } from "./onset-legend";
-import { laneAnchorProps } from "../lib/ui-anchors";
+import { layerAnchorProps } from "../lib/ui-anchors";
 import { PITCH_LEGEND_WIDTH, PitchLegend } from "./pitch-legend";
 import { PlaybackLine } from "./playback-line";
 import { TimeLegend } from "./time-legend";
@@ -127,7 +127,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: Fil
   );
   const cursorVisible = useTransientStore((state) => state.cursorVisible);
   const isStroking = useStore((state) => state.isStroking);
-  // Every step names its own source file, so any of them keeps this lane live.
+  // Every step names its own source file, so any of them keeps this layer live.
   const isExplicitSource = useStore((state) => {
     const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     return steps.some((step) => step.sourceFile?.path === filePath);
@@ -580,7 +580,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: Fil
   useEffect(() => stopRepeatClock, [stopRepeatClock]);
 
   // Select mode has no brush under the pointer, so the hover preview goes away
-  // with the mode rather than waiting for the pointer to leave the lane.
+  // with the mode rather than waiting for the pointer to leave the layer.
   useEffect(() => {
     if (editMode !== "select") return;
     useTransientStore.getState().setCursorVisible(false);
@@ -1050,7 +1050,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized }: Fil
           useStore.getState().setActiveFileId(fileId);
         }
       }}
-      {...laneAnchorProps(fileId)}
+      {...layerAnchorProps(fileId)}
     >
       <FileHeader fileId={fileId} />
       {loadingMessage || !file.spectrogramData ? (

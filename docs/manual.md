@@ -45,7 +45,7 @@ Every control has a tooltip and an entry in the `?` overlay.
 9. [Working with Files](#working-with-files)
    - [Mono and Stereo](#mono-and-stereo)
    - [Splitting a File](#splitting-a-file)
-   - [Grouping Files](#grouping-files)
+   - [Layers](#layers)
    - [Onsets](#onsets)
    - [The Level Strip](#the-level-strip)
    - [Navigating the Canvas](#navigating-the-canvas)
@@ -789,35 +789,35 @@ The split menu on each file header:
 - **Split into N Parts (NMF)…** – separates it into any number of components, learned from the file itself.
 - **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation. Not available on Intel Macs.
 
-### Grouping Files
+### Layers
 
-A **group** brackets a run of lanes together: they share a colour, and the header above them acts on all of them at once. The members stay ordinary files, and every brush and effect works on them unchanged.
+Every open file is a **layer**. A **stack** holds a run of layers together: they share a colour, they play at the same time, and the header above them acts on all of them at once. A layer stays an ordinary file, and every brush and effect works on one unchanged.
 
-Every split makes a group of its parts. To group files yourself, use **Edit → Group Files…** (`Cmd/Ctrl+G`) and tick the ones you want. They move together on the canvas, since a group is one bracket down a run of neighbouring lanes. **Edit → Ungroup** (`Cmd/Ctrl+Shift+G`) drops the bracket around the active file's group.
+Every split makes a stack of its parts. To stack files yourself, use **Edit → Stack Files…** (`Cmd/Ctrl+G`) and tick the ones you want. They move together on the canvas, since a stack is one run of neighbouring layers. **Edit → Unstack** (`Cmd/Ctrl+Shift+G`) drops the stack around the active file.
 
-A group holds any number of files, down to one, so a group you have emptied out to a single lane is still there to drag files back into. Merge needs two.
+A stack holds any number of layers, down to one, so a stack you have emptied out to a single layer is still there to drag files back into. Merge needs two.
 
-#### Mixing a group
+#### Mixing a stack
 
-The files in a group play at the same time. Each header carries its own **Vol** box, and a group of two or more also carries **S** and **M**:
+The layers of a stack play at the same time. Each header carries its own **Vol** box, and a stack of two or more also carries **S** and **M**:
 
-- **M** drops that file out of the mix. The rest keeps playing.
-- **S** plays that file alone. Solo several to hear just those. Mute wins over solo on the same file, so a file with both engaged stays silent.
-- **Vol** sets how loud the file sits, from -60 dB to +12 dB. At the bottom of the range it is silent.
+- **M** drops that layer out of the mix. The rest keeps playing.
+- **S** plays that layer alone. Solo several to hear just those. Mute wins over solo on the same layer, so a layer with both engaged stays silent.
+- **Vol** sets how loud the layer sits, from -60 dB to +12 dB. At the bottom of the range it is silent.
 
-Clicking another file in the same group moves where you paint without stopping the music. Clicking a file outside it starts that file's own timeline instead.
+Clicking another layer of the same stack moves where you paint without stopping the music. Clicking a file outside it starts that file's own timeline instead.
 
-Dragging a file by its grip also moves it in and out of groups, and the group it would land in lights up while you drag:
+Dragging a file by its grip also moves it in and out of stacks, and the stack it would land in lights up while you drag:
 
-- Drop it **over any member's lane** to join that group, at the point the line shows.
-- Drop it **on the group's header row** to leave it above the group, outside it.
-- Drop a member **anywhere outside its group** to take it out. A group left with one file stops being a group, and that file stays where it is.
-- Drop a member **straight onto another group** to move it across.
+- Drop it **over any layer** to join that stack, at the point the line shows.
+- Drop it **on the stack's header row** to leave it above the stack, outside it.
+- Drop a layer **anywhere outside its stack** to take it out. A stack left with one file stops being a stack, and that file stays where it is.
+- Drop a layer **straight onto another stack** to move it across.
 
 - **Link views** – zoom and scroll follow each other across all members.
-- **Merge** – adds every member together into one new file, which opens below the group. The members stay open.
-- **Ungroup** – drops the bracket and leaves the files where they are.
-- **Close group** – closes every member with one confirmation.
+- **Merge** – adds every layer together into one new file, which opens below the stack. The layers stay open.
+- **Unstack** – drops the stack and leaves the files where they are.
+- **Close stack** – closes every layer with one confirmation.
 
 Merging the parts of a split is exact: they add back up to the file they came from, so you can split, work heavily on one part, and merge back. Merging files that do not share a length, sample rate or resolution mixes their audio instead. Each one starts at the beginning, the mix runs as long as the longest, and mono material is copied into both sides of a stereo mix.
 
@@ -858,7 +858,7 @@ A thin strip sits directly above each file's spectrogram, showing how loud the f
 
 ### Navigating the Canvas
 
-![A file's canvas](images/ui/file-lane.webp)
+![A file's canvas](images/ui/file-layer.webp)
 
 Time axis, on the spectrogram itself:
 
@@ -879,7 +879,7 @@ On the **time legend** along the bottom:
 - **Click** – set the playback start position, snapped to the grid. The play state stays as it is: while playing, playback skips there and carries on.
 - **Drag** – select that stretch of time across every frequency, which sets the loop region and moves the playback start to its beginning.
 
-Zoom and scroll are remembered per file across restarts, and files in a [group](#grouping-files) with **Link views** on share all four: time zoom, time scroll, pitch zoom, pitch scroll.
+Zoom and scroll are remembered per file across restarts, and the layers of a [stack](#layers) with **Link views** on share all four: time zoom, time scroll, pitch zoom, pitch scroll.
 
 ### Selecting a Region
 
@@ -1024,8 +1024,8 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Fill Grid with Brush** (`Cmd/Ctrl+F`) – see [Fill Grid](#fill-grid).
 - **Restore Original** – reloads the unedited file.
 - **Duplicate File**.
-- **Group Files…** (`Cmd/Ctrl+G`) – brackets open files together. See [Grouping Files](#grouping-files).
-- **Ungroup** (`Cmd/Ctrl+Shift+G`) – drops the bracket around the active file's group.
+- **Stack Files…** (`Cmd/Ctrl+G`) – holds open files together as layers. See [Layers](#layers).
+- **Unstack** (`Cmd/Ctrl+Shift+G`) – drops the stack around the active file.
 - **Double Length / Half Length** – stretches or shrinks the file's length.
 - **Set Length…** – cuts the file short at a length you give, or pads it with silence to reach it. The dialog opens on what the file measures now, in beats or seconds.
 - **Insert Silence…** (`Cmd/Ctrl+Shift+I`) – pushes the file apart and drops empty time in. With a selection, the selection's own stretch opens up: its length of silence lands at its start, what was selected moves later, and the silence stays selected. With nothing selected, a dialog asks for a **Length** in beats or seconds, and the silence lands at the play start marker.

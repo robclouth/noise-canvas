@@ -1,33 +1,33 @@
 import { describe, expect, it } from "vitest";
 
-import { gatherFileGroups, gatherFileIds, reorderFileIds, resolveFileDrop, type LaneBounds } from "../file-reorder";
+import { gatherFileGroups, gatherFileIds, reorderFileIds, resolveFileDrop, type LayerBounds } from "../file-reorder";
 
-// Three lanes stacked from y=100, each 200 tall, in a container whose top is 50.
-const LANES: LaneBounds[] = [
-  { fileId: "a", top: 100, bottom: 300, groupId: null },
-  { fileId: "b", top: 300, bottom: 500, groupId: null },
-  { fileId: "c", top: 500, bottom: 700, groupId: null },
+// Three layers stacked from y=100, each 200 tall, in a container whose top is 50.
+const LANES: LayerBounds[] = [
+  { fileId: "a", top: 100, bottom: 300, stackId: null },
+  { fileId: "b", top: 300, bottom: 500, stackId: null },
+  { fileId: "c", top: 500, bottom: 700, stackId: null },
 ];
 
 describe("resolving a file drop", () => {
-  it("drops above the lane whose top half the pointer is in", () => {
+  it("drops above the layer whose top half the pointer is in", () => {
     expect(resolveFileDrop(150, LANES, 50)?.beforeFileId).toBe("a");
     expect(resolveFileDrop(350, LANES, 50)?.beforeFileId).toBe("b");
   });
 
-  it("drops below a lane once the pointer passes its middle", () => {
+  it("drops below a layer once the pointer passes its middle", () => {
     expect(resolveFileDrop(250, LANES, 50)?.beforeFileId).toBe("b");
   });
 
-  it("drops last when the pointer is past every lane", () => {
-    expect(resolveFileDrop(900, LANES, 50)).toEqual({ beforeFileId: null, groupId: null, y: 650 });
+  it("drops last when the pointer is past every layer", () => {
+    expect(resolveFileDrop(900, LANES, 50)).toEqual({ beforeFileId: null, stackId: null, y: 650 });
   });
 
   it("places the indicator relative to the container", () => {
     expect(resolveFileDrop(350, LANES, 50)?.y).toBe(250);
   });
 
-  it("has nowhere to drop when no lane is on screen", () => {
+  it("has nowhere to drop when no layer is on screen", () => {
     expect(resolveFileDrop(350, [], 50)).toBeNull();
   });
 });
@@ -74,52 +74,52 @@ describe("gathering files into one run", () => {
   });
 });
 
-// A loose lane, then a two-member group, then another loose lane. The 40 px
-// above the group's first member is its header strip, which is not a lane.
-const WITH_GROUP: LaneBounds[] = [
-  { fileId: "loose", top: 100, bottom: 300, groupId: null },
-  { fileId: "m1", top: 340, bottom: 540, groupId: "g1" },
-  { fileId: "m2", top: 540, bottom: 740, groupId: "g1" },
-  { fileId: "after", top: 740, bottom: 940, groupId: null },
+// A loose layer, then a two-member group, then another loose layer. The 40 px
+// above the group's first member is its header strip, which is not a layer.
+const WITH_GROUP: LayerBounds[] = [
+  { fileId: "loose", top: 100, bottom: 300, stackId: null },
+  { fileId: "m1", top: 340, bottom: 540, stackId: "g1" },
+  { fileId: "m2", top: 540, bottom: 740, stackId: "g1" },
+  { fileId: "after", top: 740, bottom: 940, stackId: null },
 ];
 
 describe("which group a drop lands in", () => {
   it("joins the group when the pointer is between its members", () => {
-    expect(resolveFileDrop(530, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "m2", groupId: "g1" });
+    expect(resolveFileDrop(530, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "m2", stackId: "g1" });
   });
 
   it("joins at the top when the pointer is in the first member's top half", () => {
-    expect(resolveFileDrop(360, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "m1", groupId: "g1" });
+    expect(resolveFileDrop(360, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "m1", stackId: "g1" });
   });
 
   it("joins at the end when the pointer is in the last member's bottom half", () => {
-    expect(resolveFileDrop(700, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "after", groupId: "g1" });
+    expect(resolveFileDrop(700, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "after", stackId: "g1" });
   });
 
   it("stays outside when the pointer is on the header strip above the group", () => {
-    expect(resolveFileDrop(320, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "m1", groupId: null });
+    expect(resolveFileDrop(320, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "m1", stackId: null });
   });
 
-  it("stays outside over a loose lane", () => {
-    expect(resolveFileDrop(150, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "loose", groupId: null });
-    expect(resolveFileDrop(800, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "after", groupId: null });
+  it("stays outside over a loose layer", () => {
+    expect(resolveFileDrop(150, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "loose", stackId: null });
+    expect(resolveFileDrop(800, WITH_GROUP, 0)).toMatchObject({ beforeFileId: "after", stackId: null });
   });
 
-  it("stays outside past the last lane", () => {
-    expect(resolveFileDrop(2000, WITH_GROUP, 0)).toMatchObject({ beforeFileId: null, groupId: null });
+  it("stays outside past the last layer", () => {
+    expect(resolveFileDrop(2000, WITH_GROUP, 0)).toMatchObject({ beforeFileId: null, stackId: null });
   });
 
   it("keeps two touching groups apart", () => {
-    const lanes: LaneBounds[] = [
-      { fileId: "a1", top: 0, bottom: 100, groupId: "g1" },
-      { fileId: "a2", top: 100, bottom: 200, groupId: "g1" },
-      { fileId: "b1", top: 240, bottom: 340, groupId: "g2" },
-      { fileId: "b2", top: 340, bottom: 440, groupId: "g2" },
+    const layers: LayerBounds[] = [
+      { fileId: "a1", top: 0, bottom: 100, stackId: "g1" },
+      { fileId: "a2", top: 100, bottom: 200, stackId: "g1" },
+      { fileId: "b1", top: 240, bottom: 340, stackId: "g2" },
+      { fileId: "b2", top: 340, bottom: 440, stackId: "g2" },
     ];
 
-    expect(resolveFileDrop(180, lanes, 0)?.groupId).toBe("g1");
-    expect(resolveFileDrop(220, lanes, 0)?.groupId).toBeNull();
-    expect(resolveFileDrop(260, lanes, 0)?.groupId).toBe("g2");
+    expect(resolveFileDrop(180, layers, 0)?.stackId).toBe("g1");
+    expect(resolveFileDrop(220, layers, 0)?.stackId).toBeNull();
+    expect(resolveFileDrop(260, layers, 0)?.stackId).toBe("g2");
   });
 });
 

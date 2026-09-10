@@ -119,8 +119,8 @@ describe("the menus' own accelerators", () => {
     const commandFor = (key: string) =>
       acceleratorCommands().find(({ accelerator }) => spell(accelerator) === key)?.command;
 
-    expect(commandFor("KeyG")).toBe("group-files");
-    expect(commandFor("shift+KeyG")).toBe("ungroup-files");
+    expect(commandFor("KeyG")).toBe("stack-files");
+    expect(commandFor("shift+KeyG")).toBe("unstack-files");
     expect(commandFor("KeyF")).toBe("fill-grid");
   });
 

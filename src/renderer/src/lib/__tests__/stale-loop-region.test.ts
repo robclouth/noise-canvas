@@ -100,8 +100,8 @@ function makeStore(overrides: Partial<State> = {}) {
   state = {
     ...audio,
     activeFileId: "f1",
-    fileGroups: {},
-    fileGroupOfFile: {},
+    layerStacks: {},
+    stackOfLayer: {},
     filesMuted: {},
     filesSoloed: {},
     filesVolumeDb: {},

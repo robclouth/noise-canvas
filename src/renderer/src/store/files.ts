@@ -1,7 +1,7 @@
 import { CoarseStripBuilder, coarseStripLevel } from "../lib/coarse-strip";
 import {
   openConfirm,
-  openGroupFilesPrompt,
+  openStackFilesPrompt,
   openInsertSilencePrompt,
   openNewFilePrompt,
   openSetLengthPrompt,
@@ -92,7 +92,7 @@ interface SynthesisAudioResult {
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
 }
-import { selectFileGroup, selectMixFileIds, groupMemberColor, type FileGroupMethod } from "./file-groups";
+import { selectLayerStack, selectStackLayerIds, layerColor, type LayerStackMethod } from "./layers";
 import { hasSupportedAudioExtension } from "../../../main/lib/audio-extensions";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
@@ -124,15 +124,15 @@ export interface FilesState {
   nmfFile: (fileId: string, numComponents: number) => Promise<void>;
   /** Sum the given files into a new one, leaving the originals open. */
   /** Asks which open files to bracket together, then brackets them. */
-  promptGroupFiles: () => Promise<void>;
+  promptStackFiles: () => Promise<void>;
   /** Brackets the given open files together, moving them into one run of lanes. */
-  groupFiles: (fileIds: string[]) => void;
+  stackFiles: (fileIds: string[]) => void;
   /** Drops the bracket around the active file's group, if it is in one. */
-  ungroupActiveFile: () => void;
+  unstackActiveFile: () => void;
   mergeFiles: (fileIds: string[]) => Promise<void>;
-  mergeFileGroup: (groupId: string) => Promise<void>;
+  mergeLayerStack: (stackId: string) => Promise<void>;
   /** Close every member of a group, after one confirmation covering all of them. */
-  closeFileGroup: (groupId: string) => Promise<void>;
+  closeLayerStack: (stackId: string) => Promise<void>;
   saveActiveFile: () => Promise<void>;
   saveActiveFileAs: () => Promise<void>;
   saveActiveFileVersion: () => Promise<void>;
@@ -263,9 +263,9 @@ export interface FilesState {
   setFileMinimized: (fileId: string, minimized: boolean) => void;
   /**
    * Settles a dragged file: before `beforeFileId` (or last when null), in
-   * `groupId` (or in no group when null).
+   * `stackId` (or in no group when null).
    */
-  dropFile: (fileId: string, beforeFileId: string | null, groupId: string | null) => void;
+  dropFile: (fileId: string, beforeFileId: string | null, stackId: string | null) => void;
   openFileMinimized: (filePath: string) => Promise<void>;
 }
 
@@ -914,9 +914,9 @@ export function getFileColor(filePath: string): string {
 }
 
 /** The colour a file wears everywhere: a shade of its group's hue if it is a stem, else its own. */
-export function selectFileColor(state: Pick<State, "fileGroups" | "fileGroupOfFile">, fileId: string): string {
-  const group = selectFileGroup(state, fileId);
-  if (group) return groupMemberColor(group.hue, group.memberIds.indexOf(fileId), group.memberIds.length);
+export function selectFileColor(state: Pick<State, "layerStacks" | "stackOfLayer">, fileId: string): string {
+  const group = selectLayerStack(state, fileId);
+  if (group) return layerColor(group.hue, group.layerIds.indexOf(fileId), group.layerIds.length);
   const file = openFiles[fileId];
   return getFileColor(file?.filePath ?? fileId);
 }
@@ -1473,21 +1473,21 @@ function clearLoading(set: ZustandSet, ids: string[]): void {
 // the file a split came from, or from the first member of a hand-made group, and
 // every member takes it, which keeps a group to one hue of the wheel however
 // many members it has.
-function registerFileGroup(
+function registerLayerStack(
   get: ZustandGet,
-  method: FileGroupMethod,
+  method: LayerStackMethod,
   originId: string | null,
-  memberIds: string[],
+  layerIds: string[],
   label: string,
 ): void {
-  const hueSourceId = originId ?? memberIds[0];
+  const hueSourceId = originId ?? layerIds[0];
   const hueSource = openFiles[hueSourceId];
   const hue = hueSource ? getFileHue(hueSource.filePath) : hashHue(hueSourceId);
-  for (const memberId of memberIds) {
-    const member = openFiles[memberId];
+  for (const layerId of layerIds) {
+    const member = openFiles[layerId];
     if (member) fileHues.set(member.filePath, hue);
   }
-  get().createFileGroup({ method, label, originId, memberIds, hue });
+  get().createLayerStack({ method, label, originId, layerIds, hue });
 }
 
 /** The active file's loop region, or null when there is no file or no region. */
@@ -1504,11 +1504,11 @@ export function activeSelection(state: Pick<State, "activeFileId" | "filesSelect
  * Files whose view a change to `fileId` should also move: itself, plus the rest
  * of its stem group while that group has view sync switched on.
  */
-export function viewSyncTargets(state: Pick<State, "fileGroupOfFile" | "fileGroups">, fileId: string): string[] {
-  const groupId = state.fileGroupOfFile[fileId];
-  const group = groupId ? state.fileGroups[groupId] : undefined;
+export function viewSyncTargets(state: Pick<State, "stackOfLayer" | "layerStacks">, fileId: string): string[] {
+  const stackId = state.stackOfLayer[fileId];
+  const group = stackId ? state.layerStacks[stackId] : undefined;
   if (!group?.syncView) return [fileId];
-  return group.memberIds.includes(fileId) ? group.memberIds : [fileId, ...group.memberIds];
+  return group.layerIds.includes(fileId) ? group.layerIds : [fileId, ...group.layerIds];
 }
 
 export const FILES_PERSISTED_KEYS = [
@@ -1807,7 +1807,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, ids);
-    registerFileGroup(get, "hpss", fileId, ids, `${baseLabel}: harmonic / percussive`);
+    registerLayerStack(get, "hpss", fileId, ids, `${baseLabel}: harmonic / percussive`);
   },
   nmfFile: async (fileId: string, numComponents: number) => {
     const originalFile = openFiles[fileId];
@@ -1844,12 +1844,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, ids);
-    registerFileGroup(get, "nmf", fileId, ids, `${baseLabel}: ${parts} parts`);
+    registerLayerStack(get, "nmf", fileId, ids, `${baseLabel}: ${parts} parts`);
   },
-  promptGroupFiles: async () => {
+  promptStackFiles: async () => {
     const openIds = get().openFileIds;
     if (openIds.length === 0) {
-      notifications.show({ title: "Nothing to group", message: "Open a file first.", color: "yellow" });
+      notifications.show({ title: "Nothing to stack", message: "Open a file first.", color: "yellow" });
       return;
     }
 
@@ -1857,7 +1857,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const activeFileId = get().activeFileId;
     const picked = await new Promise<string[] | null>((resolve) => {
       let confirmed = false;
-      openGroupFilesPrompt({
+      openStackFilesPrompt({
         options,
         initial: activeFileId ? [activeFileId] : [],
         onConfirm: (fileIds) => {
@@ -1869,31 +1869,31 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
       });
     });
-    if (picked) get().groupFiles(picked);
+    if (picked) get().stackFiles(picked);
   },
-  ungroupActiveFile: () => {
+  unstackActiveFile: () => {
     const fileId = get().activeFileId;
-    const groupId = fileId ? get().fileGroupOfFile[fileId] : undefined;
-    if (groupId) get().ungroupFiles(groupId);
+    const stackId = fileId ? get().stackOfLayer[fileId] : undefined;
+    if (stackId) get().unstackLayers(stackId);
   },
-  groupFiles: (fileIds: string[]) => {
+  stackFiles: (fileIds: string[]) => {
     const openIds = get().openFileIds;
     const wanted = new Set(fileIds);
     // In canvas order, not the order they were ticked, so the bracket runs down
     // the lanes the way they already read.
-    const memberIds = openIds.filter((id) => wanted.has(id));
-    if (memberIds.length === 0) return;
+    const layerIds = openIds.filter((id) => wanted.has(id));
+    if (layerIds.length === 0) return;
 
-    for (const id of memberIds) get().removeFileFromGroup(id);
+    for (const id of layerIds) get().removeLayerFromStack(id);
     set(
       produce((state: State) => {
-        state.openFileIds = gatherFileIds(state.openFileIds, memberIds);
+        state.openFileIds = gatherFileIds(state.openFileIds, layerIds);
       }),
     );
 
-    const first = stripExtensionForLabel(openFiles[memberIds[0]]?.displayName ?? "Group");
-    const label = memberIds.length > 1 ? `${first} + ${memberIds.length - 1} more` : first;
-    registerFileGroup(get, "user", null, memberIds, label);
+    const first = stripExtensionForLabel(openFiles[layerIds[0]]?.displayName ?? "Stack");
+    const label = layerIds.length > 1 ? `${first} + ${layerIds.length - 1} more` : first;
+    registerLayerStack(get, "user", null, layerIds, label);
   },
   mergeFiles: async (fileIds: string[]) => {
     if (fileIds.length < 2) return;
@@ -1925,8 +1925,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
     });
 
-    const groupId = get().fileGroupOfFile[fileIds[0]];
-    const group = groupId ? get().fileGroups[groupId] : undefined;
+    const stackId = get().stackOfLayer[fileIds[0]];
+    const group = stackId ? get().layerStacks[stackId] : undefined;
     const originFile = group?.originId ? openFiles[group.originId] : undefined;
     const displayName = `${stripExtensionForLabel(originFile?.displayName ?? files[0].displayName)} merged`;
 
@@ -1987,25 +1987,25 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     clearLoading(set, [newFileId]);
     await get().setActiveFileId(newFileId);
   },
-  mergeFileGroup: async (groupId: string) => {
-    const group = get().fileGroups[groupId];
+  mergeLayerStack: async (stackId: string) => {
+    const group = get().layerStacks[stackId];
     if (!group) return;
-    await get().mergeFiles(group.memberIds);
+    await get().mergeFiles(group.layerIds);
   },
-  closeFileGroup: async (groupId: string) => {
-    const group = get().fileGroups[groupId];
+  closeLayerStack: async (stackId: string) => {
+    const group = get().layerStacks[stackId];
     if (!group) return;
     // Closing a member dissolves the group once it drops below two, so the list
     // is snapshotted before anything is removed.
-    const memberIds = [...group.memberIds];
-    const unsaved = memberIds.filter((id) => get().filesDirty[id]).length;
+    const layerIds = [...group.layerIds];
+    const unsaved = layerIds.filter((id) => get().filesDirty[id]).length;
     const confirmed = await new Promise<boolean>((resolve) => {
       openConfirm({
         title: "Close all parts",
         message:
           unsaved > 0
-            ? `Close all ${memberIds.length} parts of this split? ${unsaved === 1 ? "One has" : `${unsaved} have`} unsaved changes.`
-            : `Close all ${memberIds.length} parts of this split?`,
+            ? `Close all ${layerIds.length} parts of this split? ${unsaved === 1 ? "One has" : `${unsaved} have`} unsaved changes.`
+            : `Close all ${layerIds.length} parts of this split?`,
         confirmLabel: "Close All",
         danger: true,
         onConfirm: () => resolve(true),
@@ -2014,7 +2014,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       });
     });
     if (!confirmed) return;
-    for (const id of memberIds) get().closeFile(id);
+    for (const id of layerIds) get().closeFile(id);
   },
   aiSeparateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
@@ -2131,7 +2131,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, stemIds);
-    registerFileGroup(get, "ai", fileId, stemIds, `${baseLabel}: drums / bass / other / vocals`);
+    registerLayerStack(get, "ai", fileId, stemIds, `${baseLabel}: drums / bass / other / vocals`);
     aiSeparatingFileIds.delete(fileId);
   },
   saveActiveFile: async () => {
@@ -2437,7 +2437,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     destroyHistoryManager(fileId).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
     fileSynthesisGeneration.delete(fileId);
 
-    state.removeFileFromGroup(fileId);
+    state.removeLayerFromStack(fileId);
 
     return set(
       produce((state: State) => {
@@ -3936,7 +3936,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // moves the paint target. Any other file is a different timeline, and
       // playback cannot carry across it.
       const previous = get().activeFileId;
-      const staysInMix = previous !== null && selectMixFileIds(get(), previous).includes(activeFileId);
+      const staysInMix = previous !== null && selectStackLayerIds(get(), previous).includes(activeFileId);
       if (!staysInMix) get().stopAudio();
     }
     set({ activeFileId });
@@ -3985,12 +3985,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }),
     );
   },
-  dropFile: (fileId, beforeFileId, groupId) => {
+  dropFile: (fileId, beforeFileId, stackId) => {
     set((state) => ({ openFileIds: reorderFileIds(state.openFileIds, fileId, beforeFileId) }));
-    get().setFileGroup(fileId, groupId, get().openFileIds);
+    get().setLayerStack(fileId, stackId, get().openFileIds);
     // Membership just changed, so a group can have been left straddling another
     // file; each one closes back up into the single run its bracket draws over.
-    set((state) => ({ openFileIds: gatherFileGroups(state.openFileIds, state.fileGroupOfFile) }));
+    set((state) => ({ openFileIds: gatherFileGroups(state.openFileIds, state.stackOfLayer) }));
   },
   openFileMinimized: async (filePath) => {
     // Check if already open

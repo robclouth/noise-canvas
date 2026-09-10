@@ -467,7 +467,7 @@ async function main() {
     },
     join(repoRoot, DEMO_FILE),
   );
-  await page.waitForSelector("[data-anchor='file-lane']", { timeout: 60_000 });
+  await page.waitForSelector("[data-anchor='file-layer']", { timeout: 60_000 });
   await page.waitForTimeout(3000);
 
   console.log(`Setting BPM to ${DEMO_BPM}…`);

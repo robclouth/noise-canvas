@@ -1,7 +1,7 @@
 import { NumberInput, SimpleGrid, Stack, Text, TextInput, type ModalProps } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
 import { type ReactNode, type RefObject } from "react";
-import { GroupFilesFields, type GroupFileOption } from "../components/group-files-fields";
+import { StackFilesFields, type StackLayerOption } from "../components/stack-files-fields";
 import { LengthFields } from "../components/length-fields";
 import { secondsToLength, type LengthValues } from "./length-values";
 
@@ -394,8 +394,8 @@ export function openSetLengthPrompt({
   });
 }
 
-type OpenGroupFilesPromptOptions = {
-  options: GroupFileOption[];
+type OpenStackFilesPromptOptions = {
+  options: StackLayerOption[];
   /** Files ticked when the dialog opens. */
   initial: string[];
   onConfirm: (fileIds: string[]) => void | Promise<void>;
@@ -403,29 +403,29 @@ type OpenGroupFilesPromptOptions = {
   onClose?: () => void;
 };
 
-export function openGroupFilesPrompt({
+export function openStackFilesPrompt({
   options,
   initial,
   onConfirm,
   onCancel,
   onClose,
-}: OpenGroupFilesPromptOptions): string {
+}: OpenStackFilesPromptOptions): string {
   const selection: RefObject<string[]> = { current: initial };
   const modalId: RefObject<string> = { current: "" };
-  // Nothing ticked has nothing to group, so the button says so rather than
+  // Nothing ticked has nothing to stack, so the button says so rather than
   // swallowing a click.
   const tooFew: RefObject<boolean> = { current: initial.length === 0 };
   const confirmProps = { size: "xs" } as const;
 
   modalId.current = openConfirmModal({
-    title: "Group Files",
+    title: "Stack Files",
     size: "sm",
     children: (
       <Stack gap="xs">
         <Text size="sm" c="dimmed">
           Brackets the files you pick, so they move their views together and can be merged into one.
         </Text>
-        <GroupFilesFields
+        <StackFilesFields
           options={options}
           selection={selection}
           onChange={(picked) => {
@@ -440,7 +440,7 @@ export function openGroupFilesPrompt({
         />
       </Stack>
     ),
-    labels: { confirm: "Group", cancel: "Cancel" },
+    labels: { confirm: "Stack", cancel: "Cancel" },
     confirmProps: { ...confirmProps, disabled: tooFew.current },
     cancelProps: { size: "xs" },
     onConfirm: async () => {

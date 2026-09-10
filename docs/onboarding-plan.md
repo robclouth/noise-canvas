@@ -104,7 +104,7 @@ anchorSelector(name); // "[data-anchor=…]"
 ```
 
 Tagged across 10 components: three layout columns (`brush-panel`, `sidebar`,
-`transport`), `file-lane`, `file-header`, the Steps strip, six brush-panel
+`transport`), `file-layer`, `file-header`, the Steps strip, six brush-panel
 sections, both sidebar sections, and effect cards keyed by effect type. `Section`
 gained an optional `anchor` prop; `EffectSection` gained `effectType`.
 
@@ -164,11 +164,11 @@ intro.js (dual AGPL/commercial — compatible today but forecloses relicensing).
 | #   | Step                                                  | Anchor               | Advance                   |
 | --- | ----------------------------------------------------- | -------------------- | ------------------------- |
 | 1   | Welcome to Noise Canvas                               | — (centred)          | Next                      |
-| 2   | This is your sound (axes + **colour = stereo image**) | `file-lane`          | Next                      |
+| 2   | This is your sound (axes + **colour = stereo image**) | `file-layer`         | Next                      |
 | 3   | This is your brush                                    | `brush-panel`        | Next                      |
 | 4   | Give it something to do — add Blur                    | `section-effects`    | **gated: effect added**   |
 | 5   | Decide where it lands                                 | `section-envelope`   | Next                      |
-| 6   | Now paint                                             | `file-lane`          | **gated: stroke painted** |
+| 6   | Now paint                                             | `file-layer`         | **gated: stroke painted** |
 | 7   | Hear it                                               | `transport`          | Next                      |
 | 8   | Nothing is lost                                       | `section-history`    | Next                      |
 | 9   | Start from a preset                                   | `section-brushes`    | Next                      |
@@ -261,8 +261,8 @@ of dimmed.
 
 ### 4.2 Open — blocks shipping the walkthrough
 
-**`file-lane` is not a unique anchor; the tour breaks with multiple files open.**
-Every other anchor is on a singleton region, but `file-lane` is per-file.
+**`file-layer` is not a unique anchor; the tour breaks with multiple files open.**
+Every other anchor is on a singleton region, but `file-layer` is per-file.
 `anchorSelector()` yields a plain CSS string, driver.js passes it to
 `querySelector`, and that returns the **first** match — so with three files open
 the tour spotlights lane #1 regardless of which file is active or where the canvas
@@ -316,7 +316,7 @@ definitely an unpackaged-run artifact, so the two may share a root cause.
 The smallest set of work that makes Phase 0 committable.
 
 1. **Always open the demo file** at tour start (D1), and scroll to it whether it
-   was already open or not. This also dissolves the `file-lane` uniqueness bug
+   was already open or not. This also dissolves the `file-layer` uniqueness bug
    from §4.2: the tour no longer has to work out _which_ lane it means, because
    it owns the one it just opened. `startWalkthrough()` currently opens the demo
    only when `openFileIds.length === 0` — that condition goes, and a
@@ -429,7 +429,7 @@ default. These are flat-UI screenshots — large areas of solid Mantine dark, ha
 text edges, a few gradient spectrogram crops. Lossless WebP typically wins big on
 that content and keeps text crisp; lossy at q80–90 wins bigger but can ring
 around 1 px text. Suggest lossless for the UI-chrome targets and lossy for the
-spectrogram-bearing ones (`window`, `file-lane`), decided by looking at the two
+spectrogram-bearing ones (`window`, `file-layer`), decided by looking at the two
 outputs side by side at 100%.
 
 **Also switch `images/screenshot.jpeg`** (the README hero, in the repo-root

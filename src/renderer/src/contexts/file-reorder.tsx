@@ -10,8 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { useStore } from "@/store";
-import { resolveFileDrop, type FileDropTarget, type LaneBounds } from "@renderer/lib/file-reorder";
-import { anchorSelector, laneSelector } from "@renderer/lib/ui-anchors";
+import { resolveFileDrop, type FileDropTarget, type LayerBounds } from "@renderer/lib/file-reorder";
+import { anchorSelector, layerSelector } from "@renderer/lib/ui-anchors";
 
 type FileReorderValue = {
   /** Starts dragging `fileId` from a press on its header handle. */
@@ -31,19 +31,19 @@ const SCROLL_EDGE_PX = 90;
 const SCROLL_SPEED_PX = 22;
 
 /**
- * Measures the lanes on screen, in stack order, skipping the dragged one. A
- * lane with no height is hidden behind a fullscreen file, so it has no place a
+ * Measures the layers on screen, in stack order, skipping the dragged one. A
+ * layer with no height is hidden behind a fullscreen file, so it has no place a
  * drop could land on.
  */
-function measureLanes(laneIds: string[], fileGroupOfFile: Record<string, string>): LaneBounds[] {
-  const lanes: LaneBounds[] = [];
-  for (const fileId of laneIds) {
-    const rect = document.querySelector(laneSelector(fileId))?.getBoundingClientRect();
+function measureLayers(layerIds: string[], stackOfLayer: Record<string, string>): LayerBounds[] {
+  const layers: LayerBounds[] = [];
+  for (const fileId of layerIds) {
+    const rect = document.querySelector(layerSelector(fileId))?.getBoundingClientRect();
     if (rect && rect.height > 0) {
-      lanes.push({ fileId, top: rect.top, bottom: rect.bottom, groupId: fileGroupOfFile[fileId] ?? null });
+      layers.push({ fileId, top: rect.top, bottom: rect.bottom, stackId: stackOfLayer[fileId] ?? null });
     }
   }
-  return lanes;
+  return layers;
 }
 
 /** The nearest ancestor that scrolls, which is the canvas column. */
@@ -59,13 +59,13 @@ type DragGhost = { follow: (dy: number) => void; remove: () => void };
 
 /**
  * Copies the dragged file's header into a floating layer that follows the
- * pointer, and fades the one it came from so the lane still shows where the file
+ * pointer, and fades the one it came from so the layer still shows where the file
  * is. A copy rather than the header itself: the header is a React tree with
  * menus and num-boxes in it, and driving it from style on every pointer move
  * would fight whatever React does to it next.
  */
 function raiseGhost(fileId: string): DragGhost | null {
-  const header = document.querySelector<HTMLElement>(`${laneSelector(fileId)} ${anchorSelector("file-header")}`);
+  const header = document.querySelector<HTMLElement>(`${layerSelector(fileId)} ${anchorSelector("file-header")}`);
   if (!header) return null;
   const rect = header.getBoundingClientRect();
 
@@ -134,18 +134,18 @@ export function FileReorderProvider({
       const container = containerRef.current;
       if (!container) return;
       ghost?.follow(pointerYRef.current - startYRef.current);
-      const { minimizedFileIds, openFileIds, fileGroupOfFile } = useStore.getState();
-      const laneIds = openFileIds.filter((id) => id !== draggingFileId && !minimizedFileIds.includes(id));
+      const { minimizedFileIds, openFileIds, stackOfLayer } = useStore.getState();
+      const layerIds = openFileIds.filter((id) => id !== draggingFileId && !minimizedFileIds.includes(id));
       const target = resolveFileDrop(
         pointerYRef.current,
-        measureLanes(laneIds, fileGroupOfFile),
+        measureLayers(layerIds, stackOfLayer),
         container.getBoundingClientRect().top,
       );
       targetRef.current = target;
       onTargetChange(target);
     };
 
-    // A lane is most of the column, so a drop two files away is off screen when
+    // A layer is most of the column, so a drop two files away is off screen when
     // the drag starts. Holding the pointer near either end scrolls the column,
     // faster the closer to the edge it is.
     let frame = 0;
@@ -166,7 +166,7 @@ export function FileReorderProvider({
     const end = (commit: boolean): void => {
       ghost?.remove();
       const target = targetRef.current;
-      if (commit && target) useStore.getState().dropFile(draggingFileId, target.beforeFileId, target.groupId);
+      if (commit && target) useStore.getState().dropFile(draggingFileId, target.beforeFileId, target.stackId);
       targetRef.current = null;
       setDraggingFileId(null);
       onTargetChange(null);
@@ -189,7 +189,7 @@ export function FileReorderProvider({
     window.addEventListener("pointerup", onUp);
     window.addEventListener("keydown", onKey);
     // The column also scrolls under the drag by wheel, so the line has to be
-    // re-placed against the lanes' new positions rather than the pointer's.
+    // re-placed against the layers' new positions rather than the pointer's.
     window.addEventListener("scroll", update, true);
     return () => {
       cancelAnimationFrame(frame);

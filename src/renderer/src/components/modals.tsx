@@ -75,8 +75,8 @@ export const FilePickerModal = ({
   resolve: (path: string | null) => void;
   currentPath: string | null;
 }>) => {
-  const fileGroups = useStore((state) => state.fileGroups);
-  const fileGroupOfFile = useStore((state) => state.fileGroupOfFile);
+  const layerStacks = useStore((state) => state.layerStacks);
+  const stackOfLayer = useStore((state) => state.stackOfLayer);
   const files = Object.values(openFiles);
 
   return (
@@ -110,7 +110,7 @@ export const FilePickerModal = ({
             className="effect-button"
             style={{
               borderRadius: "var(--mantine-radius-sm)",
-              borderLeft: `3px solid ${selectFileColor({ fileGroups, fileGroupOfFile }, file.id)}`,
+              borderLeft: `3px solid ${selectFileColor({ layerStacks, stackOfLayer }, file.id)}`,
               backgroundColor: selected ? "rgba(255, 140, 0, 0.08)" : undefined,
             }}
           >
