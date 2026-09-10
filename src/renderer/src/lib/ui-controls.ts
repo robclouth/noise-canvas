@@ -164,6 +164,11 @@ export const UI_CONTROLS = {
   },
 
   // Layer stacks
+  "stack-add-layer": {
+    label: "Add layer",
+    description: "Adds an empty layer on the same grid, ready to paint into.",
+    manualSection: "layers",
+  },
   "stack-layout": {
     label: "Overlay layers",
     description: "Draws every layer in one canvas, each in its own colour.",

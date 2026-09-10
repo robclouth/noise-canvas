@@ -6,7 +6,7 @@ import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { useUiSize } from "@renderer/lib/ui-density";
 import { layerTint } from "@renderer/lib/layer-tint";
 import { helpProps } from "@renderer/lib/ui-controls";
-import { Layers, Link2, Link2Off, Merge, Rows3, Ungroup, X } from "lucide-react";
+import { Layers, Link2, Link2Off, Merge, Plus, Rows3, Ungroup, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { FileReorderProvider } from "@renderer/contexts/file-reorder";
 import { type FileDropTarget } from "@renderer/lib/file-reorder";
@@ -263,6 +263,16 @@ const LayerStackSection = memo(
                 {stack.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
               </HelpActionIcon>
             )}
+            <HelpActionIcon
+              help="stack-add-layer"
+              size={uiSize}
+              variant="subtle"
+              color="gray"
+              loading={anyLoading}
+              onClick={() => void useStore.getState().addEmptyLayer(currentId)}
+            >
+              <Plus size={16} />
+            </HelpActionIcon>
             <HelpActionIcon
               help="stack-merge"
               detail={`${stack.layerIds.length} layers`}

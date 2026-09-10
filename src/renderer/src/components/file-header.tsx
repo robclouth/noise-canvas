@@ -14,7 +14,7 @@ import { selectLayerStack } from "@renderer/store/layers";
 import { DEFAULT_LAYER_VOLUME_DB, MAX_LAYER_VOLUME_DB, MIN_LAYER_VOLUME_DB } from "@renderer/lib/layer-mix";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
-import { ChevronDown, Copy, Grid3x3, GripVertical, Maximize2, Minimize2, Split, X } from "lucide-react";
+import { ChevronDown, Copy, Grid3x3, GripVertical, Maximize2, Minimize2, Plus, Split, X } from "lucide-react";
 import { memo, useCallback, useMemo, useSyncExternalStore } from "react";
 import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
@@ -321,6 +321,22 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        {/* A file on its own has no stack header to carry the button, so it
+            gets one here; adding a layer is what makes it a stack. */}
+        {!inMix && (
+          <HelpActionIcon
+            help="stack-add-layer"
+            size={uiSize}
+            variant="subtle"
+            color="gray"
+            onClick={(e) => {
+              e.stopPropagation();
+              void useStore.getState().addEmptyLayer(fileId);
+            }}
+          >
+            <Plus size={16} />
+          </HelpActionIcon>
+        )}
         {inMix && (
           <>
             <MixToggle

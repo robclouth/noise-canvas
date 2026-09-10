@@ -803,6 +803,12 @@ A stack draws its layers **overlaid** by default: one canvas, one grid, one set 
 
 The layers icon in the stack header switches to **stacked**, which gives each layer a box of its own. Stacked shows one layer at a time in full detail, in the usual orange and blue for the stereo image; overlaid trades some of that colour away to say which layer you are looking at. **Link views** appears only in the stacked view, since overlaid layers already share one viewport.
 
+#### Adding a layer
+
+The **+** in the stack header adds an empty layer on the same grid, and brings it to the top so your next stroke lands on it. A file on its own carries the same button in its header: pressing it makes a stack of that file and one empty layer.
+
+The new layer shares the grid, so **Merge** stays an exact sum.
+
 #### Mixing a stack
 
 The layers of a stack play at the same time. Each header carries its own **Vol** box, and a stack of two or more also carries **S** and **M**:

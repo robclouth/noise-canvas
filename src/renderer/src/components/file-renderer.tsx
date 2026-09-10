@@ -320,6 +320,11 @@ export const FileRenderer = memo(
   }),
 );
 
+// Frames a layer may ask for before its first picture lands, at roughly 60 a
+// second. Long enough for an analysis to reach the GPU, short enough that a
+// layer which can never draw stops asking.
+const FIRST_DRAW_MAX_FRAMES = 900;
+
 const FileRendererInner = memo(
   forwardRef<FileRendererHandle, FileRendererProps>((props, ref) => {
     const { fileId, isLive, parked, snapshotCanvasRef, onLiveFrame, tint, overlaid = false, behind = false } = props;
@@ -409,6 +414,7 @@ const FileRendererInner = memo(
     // Whether the display material has been populated at least once for the
     // current StrokeRenderer. Reset whenever the StrokeRenderer is recreated.
     const hasDrawnDisplayRef = useRef(false);
+    const firstDrawTriesRef = useRef(0);
 
     // Subscriptions to global state - consolidated into fewer subscriptions for efficiency
     useEffect(() => {
@@ -1207,6 +1213,8 @@ const FileRendererInner = memo(
           installTextures(createTextures());
 
           hasDrawnDisplayRef.current = false;
+          firstDrawTriesRef.current = 0;
+          firstDrawTriesRef.current = 0;
           invalidateRef.current?.();
           snapshotStaleRef.current = true;
           scheduleSnapshotRefresh();
@@ -1557,6 +1565,16 @@ const FileRendererInner = memo(
       cameraRef.current = camera;
 
       if (parked) return;
+
+      // Until this layer has put a picture up, keep asking for frames. The
+      // frame loop runs on demand, and a renderer that mounts onto a file
+      // already analysed — a layer joining a stack — gets one frame before its
+      // textures are ready and would otherwise never draw again. Capped, so a
+      // layer that can never draw does not spin for ever.
+      if (!hasDrawnDisplayRef.current && firstDrawTriesRef.current < FIRST_DRAW_MAX_FRAMES) {
+        firstDrawTriesRef.current++;
+        invalidate();
+      }
 
       if (!spectrogramData || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
 
@@ -1984,6 +2002,7 @@ const FileRendererInner = memo(
       }
 
       hasDrawnDisplayRef.current = true;
+      firstDrawTriesRef.current = 0;
       onLiveFrame?.();
 
       // Flag-gated: optionally force a GPU sync so the recorded frame time

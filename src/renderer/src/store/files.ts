@@ -127,6 +127,11 @@ export interface FilesState {
   promptStackFiles: () => Promise<void>;
   /** Brackets the given open files together, moving them into one run of lanes. */
   stackFiles: (fileIds: string[]) => void;
+  /**
+   * Adds a silent layer on `fileId`'s grid, in its stack, making one when the
+   * file has none. The shared grid is what keeps a merge an exact sum.
+   */
+  addEmptyLayer: (fileId: string) => Promise<void>;
   /** Drops the bracket around the active file's group, if it is in one. */
   unstackActiveFile: () => void;
   mergeFiles: (fileIds: string[]) => Promise<void>;
@@ -1895,6 +1900,43 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const label = layerIds.length > 1 ? `${first} + ${layerIds.length - 1} more` : first;
     registerLayerStack(get, "user", null, layerIds, label);
   },
+  addEmptyLayer: async (fileId: string) => {
+    const source = openFiles[fileId];
+    const spectrogramData = source?.spectrogramData;
+    if (!spectrogramData) return;
+
+    const stack = selectLayerStack(get(), fileId);
+    const label = `layer ${(stack?.layerIds.length ?? 1) + 1}`;
+    const ids = createStemPlaceholders(set, get, fileId, [label], "Adding layer...");
+
+    try {
+      // Zeroed coefficients on the source's own grid: silence the brush can be
+      // painted straight into.
+      const silence = new Float32Array(spectrogramData.texels * 4);
+      updateOpenFile(ids[0], { spectrogramData: await deriveSpectrogramData(spectrogramData, silence) });
+    } catch (error) {
+      console.error("Failed to add a layer:", error);
+      notifications.show({
+        title: "Could not add a layer",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+      discardFiles(set, ids);
+      return;
+    }
+
+    clearLoading(set, ids);
+
+    if (stack) {
+      const order = get().openFileIds;
+      get().setLayerStack(ids[0], stack.id, order);
+    } else {
+      const baseLabel = stripExtensionForLabel(source.displayName);
+      registerLayerStack(get, "user", fileId, [fileId, ids[0]], baseLabel);
+    }
+    await get().setActiveFileId(ids[0]);
+  },
+
   mergeFiles: async (fileIds: string[]) => {
     if (fileIds.length < 2) return;
     const files = fileIds.map((id) => openFiles[id]);
