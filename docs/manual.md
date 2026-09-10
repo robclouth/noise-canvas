@@ -797,6 +797,16 @@ Every split makes a group of its parts. To group files yourself, use **Edit → 
 
 A group holds any number of files, down to one, so a group you have emptied out to a single lane is still there to drag files back into. Merge needs two.
 
+#### Mixing a group
+
+The files in a group play at the same time. Each header carries its own **Vol** box, and a group of two or more also carries **S** and **M**:
+
+- **M** drops that file out of the mix. The rest keeps playing.
+- **S** plays that file alone. Solo several to hear just those. Mute wins over solo on the same file, so a file with both engaged stays silent.
+- **Vol** sets how loud the file sits, from -60 dB to +12 dB. At the bottom of the range it is silent.
+
+Clicking another file in the same group moves where you paint without stopping the music. Clicking a file outside it starts that file's own timeline instead.
+
 Dragging a file by its grip also moves it in and out of groups, and the group it would land in lights up while you drag:
 
 - Drop it **over any member's lane** to join that group, at the point the line shows.

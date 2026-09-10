@@ -10,7 +10,11 @@ const player = vi.hoisted(() => ({
   volume: { value: 0 },
   started: [] as number[][],
   onstop: (() => {}) as () => void,
-  connect: () => {},
+  stop: () => {},
+  dispose: () => {},
+  connect() {
+    return this;
+  },
   toDestination() {
     return this;
   },
@@ -31,6 +35,26 @@ vi.mock("tone", () => ({
     }
   },
   ToneAudioBuffer: class {},
+  Gain: class {
+    gain = {
+      value: 1,
+      rampTo(value: number) {
+        this.value = value;
+      },
+      setValueAtTime(value: number) {
+        this.value = value;
+      },
+    };
+    dispose() {
+      this.gain.value = 0;
+    }
+    connect() {
+      return this;
+    }
+    toDestination() {
+      return this;
+    }
+  },
   Meter: class {
     getValue() {
       return 0;
@@ -55,7 +79,7 @@ vi.mock("../../store/files", () => ({
     state.activeFileId ? (state.filesLoopRegion?.[state.activeFileId] ?? null) : null,
 }));
 
-import { createAudioSlice } from "../../store/audio";
+import { createAudioSlice, releaseLayerVoices } from "../../store/audio";
 import type { LoopRegion, State, ZustandGet, ZustandSet } from "../../store/types";
 
 /**
@@ -76,6 +100,11 @@ function makeStore(overrides: Partial<State> = {}) {
   state = {
     ...audio,
     activeFileId: "f1",
+    fileGroups: {},
+    fileGroupOfFile: {},
+    filesMuted: {},
+    filesSoloed: {},
+    filesVolumeDb: {},
     isPlaying: false,
     loop: true,
     linkEnabled: false,
@@ -106,6 +135,7 @@ function openFile(durationSeconds: number) {
 
 describe("playback with a loop region past the buffer", () => {
   beforeEach(() => {
+    releaseLayerVoices();
     player.started = [];
     player.loop = false;
     player.loopStart = 0;

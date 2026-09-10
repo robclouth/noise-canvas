@@ -92,7 +92,7 @@ interface SynthesisAudioResult {
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
 }
-import { selectFileGroup, groupMemberColor, type FileGroupMethod } from "./file-groups";
+import { selectFileGroup, selectMixFileIds, groupMemberColor, type FileGroupMethod } from "./file-groups";
 import { hasSupportedAudioExtension } from "../../../main/lib/audio-extensions";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
@@ -231,6 +231,14 @@ export interface FilesState {
   // one file's seconds against another's buffer.
   filesLoopRegion: Record<string, LoopRegion | null>;
   setFileLoopRegion: (fileId: string, region: LoopRegion | null) => void;
+  // Per-layer mix. Every file in a group sounds at the same time, so each one
+  // carries its own level and its own way out of the mix.
+  filesMuted: Record<string, boolean>;
+  setFileMuted: (fileId: string, muted: boolean) => void;
+  filesSoloed: Record<string, boolean>;
+  setFileSoloed: (fileId: string, soloed: boolean) => void;
+  filesVolumeDb: Record<string, number>;
+  setFileVolumeDb: (fileId: string, volumeDb: number) => void;
   // Selection rectangle per file. Setting one also writes its time span to the
   // loop region, so the transport always plays what the selection covers.
   // Clearing one leaves the loop region alone.
@@ -1440,6 +1448,9 @@ function discardFiles(set: ZustandSet, ids: string[]): void {
         delete state.filesOffsetY[id];
         delete state.filesPlaybackStartTime[id];
         delete state.filesLoopRegion[id];
+        delete state.filesMuted[id];
+        delete state.filesSoloed[id];
+        delete state.filesVolumeDb[id];
         delete state.filesSelection[id];
         delete state.filesDirty[id];
         delete state.filesLoading[id];
@@ -1516,6 +1527,9 @@ export const FILES_PERSISTED_KEYS = [
   "filesOffsetY",
   "filesPlaybackStartTime",
   "filesLoopRegion",
+  "filesMuted",
+  "filesSoloed",
+  "filesVolumeDb",
   // Persisted so the italic "unsaved" tab marker survives restart — managed
   // files in particular are always dirty until promoted via Save As.
   "filesDirty",
@@ -1677,6 +1691,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesLoopRegion[fileId];
+          delete state.filesMuted[fileId];
+          delete state.filesSoloed[fileId];
+          delete state.filesVolumeDb[fileId];
           delete state.filesSelection[fileId];
           delete state.persistedFilePaths[fileId];
           delete state.fileDisplayNames[fileId];
@@ -2433,6 +2450,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesLoopRegion[fileId];
+          delete state.filesMuted[fileId];
+          delete state.filesSoloed[fileId];
+          delete state.filesVolumeDb[fileId];
           delete state.filesSelection[fileId];
           delete state.filesDirty[fileId];
           delete state.filesLoading[fileId];
@@ -3837,6 +3857,34 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesLoopRegion[fileId] = region;
       }),
     ),
+
+  filesMuted: {},
+  setFileMuted: (fileId, muted) => {
+    set(
+      produce((state: State) => {
+        state.filesMuted[fileId] = muted;
+      }),
+    );
+    get().applyLayerGains();
+  },
+  filesSoloed: {},
+  setFileSoloed: (fileId, soloed) => {
+    set(
+      produce((state: State) => {
+        state.filesSoloed[fileId] = soloed;
+      }),
+    );
+    get().applyLayerGains();
+  },
+  filesVolumeDb: {},
+  setFileVolumeDb: (fileId, volumeDb) => {
+    set(
+      produce((state: State) => {
+        state.filesVolumeDb[fileId] = volumeDb;
+      }),
+    );
+    get().applyLayerGains();
+  },
   filesSelection: {},
   // The selection never writes the loop region; the time legend is the only
   // gesture that does.
@@ -3884,9 +3932,18 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         transport.setLoopPoints(0, file.audioBuffer.duration);
       }
 
-      get().stopAudio();
+      // Layers of one group already sound together, so moving between them only
+      // moves the paint target. Any other file is a different timeline, and
+      // playback cannot carry across it.
+      const previous = get().activeFileId;
+      const staysInMix = previous !== null && selectMixFileIds(get(), previous).includes(activeFileId);
+      if (!staysInMix) get().stopAudio();
     }
     set({ activeFileId });
+    if (activeFileId && openFiles[activeFileId]) {
+      get().getPlayer();
+      get().applyLayerGains();
+    }
   },
   fullscreenFileId: null,
   setFullscreenFileId: (fileId) => set({ fullscreenFileId: fileId }),

@@ -10,6 +10,8 @@ import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-d
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { useFileReorder } from "@renderer/contexts/file-reorder";
 import { openFiles, selectFileColor } from "@renderer/store/files";
+import { selectFileGroup } from "@renderer/store/file-groups";
+import { DEFAULT_LAYER_VOLUME_DB, MAX_LAYER_VOLUME_DB, MIN_LAYER_VOLUME_DB } from "@renderer/lib/layer-mix";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Grid3x3, GripVertical, Maximize2, Minimize2, Split, X } from "lucide-react";
@@ -131,6 +133,42 @@ function FileHeaderNumbox({
   );
 }
 
+/**
+ * One letter of the mix strip. Lit when engaged, so a stack reads at a glance.
+ */
+const MixToggle = memo(function MixToggle({
+  letter,
+  help,
+  engaged,
+  color,
+  onToggle,
+}: {
+  letter: string;
+  help: UiControlName;
+  engaged: boolean;
+  color: string;
+  onToggle: () => void;
+}) {
+  const uiSize = useUiSize();
+  return (
+    <Tooltip help={help}>
+      <ActionIcon
+        {...helpProps(help)}
+        size={uiSize}
+        color={engaged ? color : "dark.5"}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+      >
+        <Text size="xs" fw={700} lh={1}>
+          {letter}
+        </Text>
+      </ActionIcon>
+    </Tooltip>
+  );
+});
+
 // Component to display filename with middle truncation
 const TruncatedFilename = memo(function TruncatedFilename({
   displayName,
@@ -169,6 +207,12 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const channelCount = useFileChannelCount(fileId);
   const reorder = useFileReorder();
   const laneCount = useStore((state) => state.openFileIds.filter((id) => !state.minimizedFileIds.includes(id)).length);
+  const volumeDb = useStore((state) => state.filesVolumeDb[fileId] ?? DEFAULT_LAYER_VOLUME_DB);
+  const isMuted = useStore((state) => state.filesMuted[fileId] ?? false);
+  const isSoloed = useStore((state) => state.filesSoloed[fileId] ?? false);
+  // Solo and mute only mean something against siblings that sound at the same
+  // time, so a file that plays alone shows neither.
+  const inMix = useStore((state) => (selectFileGroup(state, fileId)?.memberIds.length ?? 1) > 1);
 
   const isFullscreen = fullscreenFileId === fileId;
   const canReorder = reorder !== null && laneCount > 1 && fullscreenFileId === null;
@@ -277,6 +321,34 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        {inMix && (
+          <>
+            <MixToggle
+              letter="S"
+              help="file-solo"
+              engaged={isSoloed}
+              color="yellow.5"
+              onToggle={() => useStore.getState().setFileSoloed(fileId, !isSoloed)}
+            />
+            <MixToggle
+              letter="M"
+              help="file-mute"
+              engaged={isMuted}
+              color="red.7"
+              onToggle={() => useStore.getState().setFileMuted(fileId, !isMuted)}
+            />
+          </>
+        )}
+        <FileHeaderNumbox
+          label="Vol"
+          help="file-volume"
+          value={volumeDb}
+          setValue={(v) => useStore.getState().setFileVolumeDb(fileId, v)}
+          min={MIN_LAYER_VOLUME_DB}
+          max={MAX_LAYER_VOLUME_DB}
+          step={1}
+          unit="dB"
+        />
         <FileHeaderNumbox
           label="Onsets"
           help="file-onsets"

@@ -5,7 +5,11 @@ const player = vi.hoisted(() => ({
   state: "started" as "started" | "stopped",
   onstop: (() => {}) as () => void,
   volume: { value: 0 },
-  connect: () => {},
+  stop: () => {},
+  dispose: () => {},
+  connect() {
+    return this;
+  },
   toDestination() {
     return this;
   },
@@ -15,6 +19,26 @@ vi.mock("tone", () => ({
   Player: class {
     constructor() {
       return player;
+    }
+  },
+  Gain: class {
+    gain = {
+      value: 1,
+      rampTo(value: number) {
+        this.value = value;
+      },
+      setValueAtTime(value: number) {
+        this.value = value;
+      },
+    };
+    dispose() {
+      this.gain.value = 0;
+    }
+    connect() {
+      return this;
+    }
+    toDestination() {
+      return this;
     }
   },
   Meter: class {
@@ -30,7 +54,7 @@ vi.mock("tone", () => ({
 vi.mock("../host", () => ({ host: { env: { platform: "darwin" }, link: undefined } }));
 vi.mock("../../store/files", () => ({ openFiles: {}, activeLoopRegion: () => null }));
 
-import { createAudioSlice } from "../../store/audio";
+import { createAudioSlice, releaseLayerVoices } from "../../store/audio";
 import type { State, ZustandGet, ZustandSet } from "../../store/types";
 
 /**
@@ -52,6 +76,11 @@ function makeStore(overrides: Partial<State> = {}) {
   state = {
     ...audio,
     activeFileId: "f1",
+    fileGroups: {},
+    fileGroupOfFile: {},
+    filesMuted: {},
+    filesSoloed: {},
+    filesVolumeDb: {},
     isPlaying: true,
     loop: false,
     stopAudio: vi.fn(),
@@ -63,6 +92,7 @@ function makeStore(overrides: Partial<State> = {}) {
 
 describe("the player's stop callback", () => {
   beforeEach(() => {
+    releaseLayerVoices();
     player.state = "started";
     player.onstop = () => {};
   });

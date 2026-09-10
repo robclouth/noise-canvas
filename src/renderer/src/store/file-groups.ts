@@ -81,6 +81,15 @@ export function selectFileGroup(
   return groupId ? state.fileGroups[groupId] : undefined;
 }
 
+/**
+ * Every file that sounds together with `fileId`: the members of its group, or
+ * just the file itself when it belongs to none. This is the set a mute, a solo
+ * and a volume are resolved against.
+ */
+export function selectMixFileIds(state: Pick<State, "fileGroups" | "fileGroupOfFile">, fileId: string): string[] {
+  return selectFileGroup(state, fileId)?.memberIds ?? [fileId];
+}
+
 /** How a group's method reads in the UI. */
 export function groupMethodLabel(method: FileGroupMethod): string {
   switch (method) {

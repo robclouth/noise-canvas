@@ -97,6 +97,21 @@ export const UI_CONTROLS = {
     description: "Sets the tempo of this file, which drives grid snapping and beat-based sizes.",
     manualSection: "working-with-files",
   },
+  "file-volume": {
+    label: "Volume",
+    description: "Sets how loud this file plays in the mix.",
+    manualSection: "grouping-files",
+  },
+  "file-solo": {
+    label: "Solo",
+    description: "Plays this file alone, along with any other file that is soloed.",
+    manualSection: "grouping-files",
+  },
+  "file-mute": {
+    label: "Mute",
+    description: "Drops this file out of the mix, leaving the rest playing.",
+    manualSection: "grouping-files",
+  },
   "file-split": {
     label: "Split",
     description: "Separates the file into parts, each in its own lane.",

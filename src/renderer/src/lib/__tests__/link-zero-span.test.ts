@@ -10,7 +10,11 @@ const player = vi.hoisted(() => ({
   volume: { value: 0 },
   started: [] as number[][],
   onstop: (() => {}) as () => void,
-  connect: () => {},
+  stop: () => {},
+  dispose: () => {},
+  connect() {
+    return this;
+  },
   toDestination() {
     return this;
   },
@@ -31,6 +35,26 @@ vi.mock("tone", () => ({
     }
   },
   ToneAudioBuffer: class {},
+  Gain: class {
+    gain = {
+      value: 1,
+      rampTo(value: number) {
+        this.value = value;
+      },
+      setValueAtTime(value: number) {
+        this.value = value;
+      },
+    };
+    dispose() {
+      this.gain.value = 0;
+    }
+    connect() {
+      return this;
+    }
+    toDestination() {
+      return this;
+    }
+  },
   Meter: class {
     getValue() {
       return 0;
@@ -57,7 +81,7 @@ vi.mock("../../store/files", () => ({
   activeLoopRegion: () => null,
 }));
 
-import { createAudioSlice } from "../../store/audio";
+import { createAudioSlice, releaseLayerVoices } from "../../store/audio";
 import type { State, ZustandGet, ZustandSet } from "../../store/types";
 
 /**
@@ -78,6 +102,11 @@ function makeStore(overrides: Partial<State> = {}) {
   state = {
     ...audio,
     activeFileId: "f1",
+    fileGroups: {},
+    fileGroupOfFile: {},
+    filesMuted: {},
+    filesSoloed: {},
+    filesVolumeDb: {},
     isPlaying: false,
     loop: false,
     linkEnabled: true,
@@ -110,6 +139,7 @@ function openFile(durationSeconds: number) {
 
 describe("Link start with a zero-length span", () => {
   beforeEach(() => {
+    releaseLayerVoices();
     player.started = [];
     for (const id of Object.keys(files.openFiles)) delete files.openFiles[id];
   });

@@ -2,13 +2,21 @@ import * as Tone from "tone";
 import { listAudioOutputs, resolveOutputId, SYSTEM_DEFAULT_OUTPUT_ID, type AudioOutput } from "../lib/audio-devices";
 import { diag } from "../lib/diag-log";
 import { host } from "../lib/host";
+import { clampPlaybackWindow, layerGain, type LayerMix, type PlaybackWindow } from "../lib/layer-mix";
+import { selectMixFileIds } from "./file-groups";
 import { activeLoopRegion, openFiles } from "./files";
 import type { LoopRegion, PlayerClock, ZustandGet, ZustandSet } from "./types";
 
 export interface AudioState {
   playerClock: PlayerClock;
+  /** The active layer's player: the one the clock and the buffer swaps act on. */
   player: Tone.Player | null;
   meter: Tone.Meter | null;
+  mixBus: Tone.Gain | null;
+  /** The bus every layer's gain feeds. The meter reads it, so it shows the mix. */
+  getMixBus: () => Tone.Gain;
+  /** Pushes every layer's mute, solo and volume onto the running mix. */
+  applyLayerGains: () => void;
   /** Position the player is at, at `atTime` on the audio clock (default now). */
   getPlaybackTime: (atTime?: number) => number;
   getPlayer: () => Tone.Player;
@@ -59,6 +67,140 @@ export const AUDIO_PERSISTED_KEYS = [
 // setting it later leaves the outgoing source stopping dead.
 const PLAYER_FADE_SEC = 0.01;
 
+// Seconds a gain change takes, so a mute or a volume drag does not click.
+const GAIN_RAMP_SEC = 0.01;
+
+/** One layer's way into the mix: its own player, behind its own gain. */
+interface LayerVoice {
+  player: Tone.Player;
+  gain: Tone.Gain;
+}
+
+// A voice per layer, made on demand. The active layer's player is also held in
+// state as `player`, which is what the clock, the buffer swaps and the selection
+// audition act on.
+const layerVoices = new Map<string, LayerVoice>();
+
+// True while a buffer hot-swap restarts the active layer. A commit replaces one
+// layer's audio, so restarting the rest of the mix here would click every other
+// layer on every stroke.
+let holdOtherLayers = false;
+
+function mixOf(state: {
+  filesMuted: Record<string, boolean>;
+  filesSoloed: Record<string, boolean>;
+  filesVolumeDb: Record<string, number>;
+}): LayerMix {
+  return { muted: state.filesMuted, soloed: state.filesSoloed, volumeDb: state.filesVolumeDb };
+}
+
+function disposeVoice(fileId: string): void {
+  const voice = layerVoices.get(fileId);
+  if (!voice) return;
+  voice.player.stop();
+  voice.player.dispose();
+  voice.gain.dispose();
+  layerVoices.delete(fileId);
+}
+
+/** Drops every layer's player and gain, leaving the mix bus in place. */
+export function releaseLayerVoices(): void {
+  releaseVoices();
+}
+
+/** Drops every voice except the ones named, which a change of stack leaves behind. */
+function releaseVoices(keep?: Set<string>): void {
+  for (const fileId of [...layerVoices.keys()]) {
+    if (keep?.has(fileId)) continue;
+    disposeVoice(fileId);
+  }
+}
+
+function getVoice(get: ZustandGet, fileId: string): LayerVoice {
+  const existing = layerVoices.get(fileId);
+  if (existing) return existing;
+
+  const gain = new Tone.Gain(1).connect(get().getMixBus());
+  const player = new Tone.Player({
+    loop: false,
+    autostart: false,
+    fadeIn: PLAYER_FADE_SEC,
+    fadeOut: PLAYER_FADE_SEC,
+  }).connect(gain);
+
+  // Restarting stops the outgoing source, so this fires for a buffer hot-swap
+  // or a scrub as well as for the end of the file. Only the end leaves no
+  // source running, and only the active layer's end stops the transport: a
+  // shorter layer running out must not take the rest of the mix with it.
+  player.onstop = () => {
+    const { loop, isPlaying, player: active } = get();
+    if (isPlaying && !loop && active === player && player.state !== "started") {
+      get().stopAudio();
+    }
+  };
+
+  const voice: LayerVoice = { player, gain };
+  layerVoices.set(fileId, voice);
+  return voice;
+}
+
+/**
+ * Puts every other layer of the active stack under the same clock as the active
+ * one: a single start time, offset, rate and pair of loop points.
+ */
+function startOtherLayers(
+  get: ZustandGet,
+  atTime: number,
+  offset: number,
+  window: PlaybackWindow,
+  loop: boolean,
+  rate: number,
+): void {
+  if (holdOtherLayers) return;
+  const state = get();
+  const { activeFileId } = state;
+  if (!activeFileId) return;
+
+  const ids = selectMixFileIds(state, activeFileId);
+  releaseVoices(new Set(ids));
+
+  const mix = mixOf(state);
+  layerVoices.get(activeFileId)?.gain.gain.setValueAtTime(layerGain(mix, ids, activeFileId), atTime);
+
+  for (const fileId of ids) {
+    if (fileId === activeFileId) continue;
+    const buffer = openFiles[fileId]?.audioBuffer;
+    if (!buffer) continue;
+
+    const voice = getVoice(get, fileId);
+    if (voice.player.buffer.get() !== buffer) voice.player.buffer = new Tone.ToneAudioBuffer(buffer);
+    voice.gain.gain.setValueAtTime(layerGain(mix, ids, fileId), atTime);
+    voice.player.playbackRate = rate;
+
+    const started = voice.player.state === "started";
+    // A layer too short to cover a looped window would loop at its own end and
+    // walk away from the rest, so it plays through once instead.
+    if (loop && buffer.duration >= window.end) {
+      voice.player.loop = true;
+      voice.player.loopStart = window.start;
+      voice.player.loopEnd = window.end;
+      if (started) voice.player.restart(atTime, offset);
+      else voice.player.start(atTime, offset);
+      continue;
+    }
+
+    voice.player.loop = false;
+    const span = Math.min(window.end, buffer.duration) - offset;
+    if (span <= 0) {
+      voice.player.stop(atTime);
+    } else if (started) {
+      voice.player.restart(atTime, offset, span);
+    } else {
+      voice.player.start(atTime, offset, span);
+    }
+  }
+}
+
 // False until the log carries a line for where playback goes. The first apply
 // writes one even when it changes nothing; later ones write only on a change.
 let outputRouteLogged = false;
@@ -66,6 +208,7 @@ let outputRouteLogged = false;
 export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState => ({
   player: null,
   meter: null,
+  mixBus: null,
   playerClock: {
     startAt: null,
     startOffset: 0,
@@ -120,35 +263,37 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     return [value, value];
   },
 
-  getPlayer: () => {
-    const p = get().player;
-    if (p) return p;
+  getMixBus: () => {
+    const existing = get().mixBus;
+    if (existing) return existing;
 
-    const newPlayer = new Tone.Player({
-      loop: false,
-      autostart: false,
-      fadeIn: PLAYER_FADE_SEC,
-      fadeOut: PLAYER_FADE_SEC,
-    }).toDestination();
-
-    // Fan the player output out to a stereo meter for the transport level display.
+    const bus = new Tone.Gain(1).toDestination();
+    // Fan the mix out to a stereo meter for the transport level display.
     const meter = new Tone.Meter({ channelCount: 2, normalRange: false, smoothing: 0.8 });
-    newPlayer.connect(meter);
-    set({ meter });
+    bus.connect(meter);
+    set({ mixBus: bus, meter });
+    return bus;
+  },
 
-    // Restarting stops the outgoing source, so this fires for a buffer hot-swap
-    // or a scrub as well as for the end of the file. Only the end leaves no
-    // source running, which a position test cannot tell apart from a restart
-    // that lands within a fade of the end.
-    newPlayer.onstop = () => {
-      const { loop, isPlaying } = get();
-      if (isPlaying && !loop && newPlayer.state !== "started") {
-        get().stopAudio();
-      }
-    };
+  getPlayer: () => {
+    // With no file open the voice is keyed on the empty id, and plays nothing.
+    const voice = getVoice(get, get().activeFileId ?? "");
+    if (get().player !== voice.player) set({ player: voice.player });
+    return voice.player;
+  },
 
-    set({ player: newPlayer });
-    return newPlayer;
+  applyLayerGains: () => {
+    const state = get();
+    const { activeFileId } = state;
+    if (!activeFileId) return;
+
+    const ids = selectMixFileIds(state, activeFileId);
+    const mix = mixOf(state);
+    for (const [fileId, voice] of layerVoices) {
+      // A voice left over from another stack is on its way out; hold it down.
+      const gain = ids.includes(fileId) ? layerGain(mix, ids, fileId) : 0;
+      voice.gain.gain.rampTo(gain, GAIN_RAMP_SEC);
+    }
   },
 
   isPlaying: false,
@@ -166,29 +311,33 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
       return;
     }
 
-    const currentTime = getPlaybackTime();
+    // One clock reading for the restart and for every other layer, so the whole
+    // mix lands on the same instant.
+    const now = Tone.now();
+    const currentTime = getPlaybackTime(now);
     set({ loop });
-    const end = loopRegion?.end ?? buffer.duration;
-    const loopStart = loopRegion?.start ?? 0;
+    const window = clampPlaybackWindow(loopRegion, buffer.duration);
 
     player.loop = loop;
 
     if (loop) {
-      player.loopStart = loopStart;
-      player.loopEnd = end;
-      player.restart(Tone.now(), currentTime);
+      player.loopStart = window.start;
+      player.loopEnd = window.end;
+      player.restart(now, currentTime);
     } else {
-      const remainingDuration = Math.max(0, end - currentTime);
-      player.restart(Tone.now(), currentTime, remainingDuration);
+      const remainingDuration = Math.max(0, window.end - currentTime);
+      player.restart(now, currentTime, remainingDuration);
     }
+
+    startOtherLayers(get, now, currentTime, window, loop, player.playbackRate ?? 1);
 
     set((s) => ({
       playerClock: {
         ...s.playerClock,
-        startAt: Tone.now(),
+        startAt: now,
         startOffset: currentTime,
-        loopStart,
-        loopEnd: end,
+        loopStart: window.start,
+        loopEnd: window.end,
       },
     }));
   },
@@ -218,22 +367,24 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const buffer = file?.audioBuffer;
     if (!buffer) return;
 
-    const loopStart = region.start;
-    const loopEnd = region.end;
+    const now = Tone.now();
+    const window = clampPlaybackWindow(region, buffer.duration);
 
     set({ loop: true });
     player.loop = true;
-    player.loopStart = loopStart;
-    player.loopEnd = loopEnd;
-    player.restart(Tone.now(), loopStart);
+    player.loopStart = window.start;
+    player.loopEnd = window.end;
+    player.restart(now, window.start);
+
+    startOtherLayers(get, now, window.start, window, true, player.playbackRate ?? 1);
 
     set((s) => ({
       playerClock: {
         ...s.playerClock,
-        startAt: Tone.now(),
-        startOffset: loopStart,
-        loopStart,
-        loopEnd,
+        startAt: now,
+        startOffset: window.start,
+        loopStart: window.start,
+        loopEnd: window.end,
       },
     }));
   },
@@ -248,30 +399,30 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     const player = getPlayer();
     const startAt = atTime ?? Tone.now();
-    const end = loopRegion?.end ?? buf.duration;
-    const loopStart = loopRegion?.start ?? 0;
-    const offset = Math.min(Math.max(playbackTime, 0), end);
+    const window = clampPlaybackWindow(loopRegion, buf.duration);
+    const offset = Math.min(Math.max(playbackTime, 0), window.end);
 
     set((s) => ({
       playerClock: {
         ...s.playerClock,
         startAt,
         startOffset: offset,
-        loopStart,
-        loopEnd: end,
+        loopStart: window.start,
+        loopEnd: window.end,
       },
     }));
 
     if (player.state === "started") {
       if (loop) {
         player.loop = true;
-        player.loopStart = loopStart;
-        player.loopEnd = end;
+        player.loopStart = window.start;
+        player.loopEnd = window.end;
         player.restart(startAt, offset);
       } else {
         player.loop = false;
-        player.restart(startAt, offset, Math.max(0, end - offset));
+        player.restart(startAt, offset, Math.max(0, window.end - offset));
       }
+      startOtherLayers(get, startAt, offset, window, loop, player.playbackRate ?? 1);
     }
   },
 
@@ -294,7 +445,12 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const playbackTime = getPlaybackTime(now);
     player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
     player.volume.value = 0;
-    setPlaybackTime(playbackTime, now);
+    holdOtherLayers = true;
+    try {
+      setPlaybackTime(playbackTime, now);
+    } finally {
+      holdOtherLayers = false;
+    }
   },
 
   togglePlayback: async () => {
@@ -340,8 +496,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     // The buffer bounds the window: a region measured against an older, longer
     // file cannot push the loop points past the end.
-    const end = Math.min(region?.end ?? playBuffer.duration, playBuffer.duration);
-    const loopStart = Math.min(region?.start ?? 0, end);
+    const window = clampPlaybackWindow(region, playBuffer.duration);
+    const { start: loopStart, end } = window;
 
     // When Link is enabled and active, phase-align and adjust playback rate
     const { linkEnabled, linkTempo, linkQuantum, filepathsBpm, linkLatencyMs } = get();
@@ -397,6 +553,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
           player.start(startTime, offset, Math.max(0, end - offset));
         }
 
+        startOtherLayers(get, startTime, offset, window, loop, rate);
+
         return set({
           isPlaying: true,
           player,
@@ -418,21 +576,25 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const marker = region && !(startTime >= region.start && startTime < region.end) ? region.start : startTime;
     const offset = Math.min(Math.max(marker, 0), end);
 
+    // One clock reading for every layer, so the mix starts together.
+    const startAt = Tone.now();
     if (loop) {
       player.loop = true;
       player.loopStart = loopStart;
       player.loopEnd = end;
-      player.start(Tone.now(), offset);
+      player.start(startAt, offset);
     } else {
       player.loop = false;
-      player.start(Tone.now(), offset, Math.max(0, end - offset));
+      player.start(startAt, offset, Math.max(0, end - offset));
     }
+
+    startOtherLayers(get, startAt, offset, window, loop, player.playbackRate ?? 1);
 
     return set({
       isPlaying: true,
       player,
       playerClock: {
-        startAt: Tone.now(),
+        startAt,
         startOffset: offset,
         loopStart,
         loopEnd: end,
@@ -491,14 +653,15 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   },
 
   stopAudio: () => {
-    const { getPlayer, activeFileId, filesPlaybackStartTime } = get();
+    const { activeFileId, filesPlaybackStartTime } = get();
 
     if (!activeFileId) {
       return;
     }
 
-    const player = getPlayer();
-    player.stop();
+    for (const voice of layerVoices.values()) voice.player.stop();
+    // The active layer's voice stays, because `player` points at it.
+    releaseVoices(new Set([activeFileId]));
 
     set((s) => ({
       isPlaying: false,
