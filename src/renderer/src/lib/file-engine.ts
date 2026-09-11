@@ -38,7 +38,7 @@ import { WindowedCanvas, type UvRegion } from "./windowed-canvas";
 type EngineTextures = { packed: DataTexture; inverse: DataTexture; meta: DataTexture };
 type FileEngineOperations = Omit<
   FileRendererHandle,
-  "renderStroke" | "clearPreview" | "applyStroke" | "captureSnapshot" | "getDisplayMaterial" | "refreshSnapshot"
+  "renderStroke" | "clearPreview" | "applyStroke" | "captureSnapshot" | "refreshSnapshot"
 >;
 export interface FileEngineServices {
   getHistoryManager: typeof getHistoryManager;
@@ -53,7 +53,6 @@ export interface FileEngineContext {
   spectrogramData: SpectrogramData;
   glRef: { current: WebGLRenderer };
   invalidateRef: { current: () => void };
-  hasDrawnDisplayRef: { current: boolean };
   modulatorScaleLut: StrokeTextures["modulatorScaleLut"];
   modulator1Texture: StrokeTextures["modulator1Texture"];
   modulator2Texture: StrokeTextures["modulator2Texture"];
@@ -82,7 +81,7 @@ export class FileEngine {
   private epoch = 0;
   private readonly listeners = new Set<() => void>();
   constructor(
-    private readonly fileId: string,
+    readonly fileId: string,
     private readonly services: FileEngineServices,
     parked?: boolean,
   ) {
@@ -99,9 +98,17 @@ export class FileEngine {
       this.listeners.delete(listener);
     };
   };
-  private visualChanged = (): void => {
+  contentRevision = 0;
+  residencyRevision = 0;
+  notifyContentChanged = (): void => {
+    this.contentRevision++;
     for (const listener of this.listeners) listener();
   };
+  notifyResidencyChanged = (): void => {
+    this.residencyRevision++;
+    for (const listener of this.listeners) listener();
+  };
+  private visualChanged = this.notifyContentChanged;
   createTextures = (spectrogramData = this.context.spectrogramData) => {
     const { packedSeedRef, inverseSeedRef, fileId } = this;
     const { getHistoryManager } = this.services;
@@ -228,7 +235,7 @@ export class FileEngine {
     };
   };
   canvasFor = (gl: WebGLRenderer): WindowedCanvas => {
-    const { strokeRendererRef, canvasRef, visualChanged, fileId } = this;
+    const { strokeRendererRef, canvasRef, fileId } = this;
     const { spectrogramData, invalidateRef } = this.context;
     const { getHistoryManager, openFiles } = this.services;
     if (!canvasRef.current) {
@@ -242,7 +249,7 @@ export class FileEngine {
         readCurrentBlock: (index) => getHistoryManager(fileId).currentBlock(index),
         readRootBlock: (index) => getHistoryManager(fileId).rootBlock(index),
         onChanged: () => {
-          visualChanged();
+          this.notifyResidencyChanged();
           invalidateRef.current?.();
         },
         sourceBlocks: (sourceId) => {
@@ -324,7 +331,7 @@ export class FileEngine {
       visualChanged,
       fileId,
     } = this;
-    const { spectrogramData, invalidateRef, hasDrawnDisplayRef } = this.context;
+    const { spectrogramData, invalidateRef } = this.context;
     const { getHistoryManager, serializeFileTask, openFiles } = this.services;
 
     if (!isParkedRef.current) return;
@@ -351,7 +358,6 @@ export class FileEngine {
 
       installTextures(createTextures(spectrogramData));
 
-      hasDrawnDisplayRef.current = false;
       invalidateRef.current?.();
       visualChanged();
 
@@ -382,7 +388,6 @@ export class FileEngine {
     const {
       spectrogramData,
       glRef,
-      hasDrawnDisplayRef,
       modulatorScaleLut,
       modulator1Texture,
       modulator2Texture,
@@ -420,7 +425,6 @@ export class FileEngine {
         return;
       }
       logFileFootprint(fileId, "textures allocated");
-      hasDrawnDisplayRef.current = false;
     }
 
     const strokeRenderer = strokeRendererRef.current;
@@ -675,6 +679,7 @@ export class FileEngine {
     const { invalidateRef } = this.context;
 
     canvasRef.current?.endStroke();
+    this.notifyContentChanged();
     invalidateRef.current?.();
   };
   fileOperations = (): FileEngineOperations => {

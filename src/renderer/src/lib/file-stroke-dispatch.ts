@@ -24,7 +24,6 @@ type FileStrokeFile = Pick<OpenFile, "id" | "filePath" | "displayName" | "spectr
 
 export interface FileStrokeContext {
   fileId: string;
-  viewFileId: string;
   spectrogramData: SpectrogramData;
   strokeRendererRef: { current: StrokeRenderer | null };
   canvasRef: { current: WindowedCanvas | null };
@@ -191,7 +190,7 @@ export function dispatchStroke(
   sourceOverride?: SourceFileInfo,
   preparedSpan?: DabSpan,
 ): boolean {
-  const { fileId, viewFileId, strokeRendererRef, canvasRef, openFiles, getOpenFileByPath } = context;
+  const { fileId, strokeRendererRef, canvasRef, openFiles, getOpenFileByPath } = context;
   const strokeRenderer = strokeRendererRef.current;
   const file = openFiles[fileId];
   if (!strokeRenderer || !file?.spectrogramData) return false;
@@ -296,10 +295,10 @@ export function dispatchStroke(
           preview,
           bpm,
           totalDuration: dabDuration,
-          viewZoomPower: state.filesZoom[viewFileId],
-          viewOffset: state.filesOffset[viewFileId],
-          viewZoomPowerY: state.filesZoomY[viewFileId] ?? 0,
-          viewOffsetY: state.filesOffsetY[viewFileId] ?? 0,
+          viewZoomPower: state.filesZoom[fileId],
+          viewOffset: state.filesOffset[fileId],
+          viewZoomPowerY: state.filesZoomY[fileId] ?? 0,
+          viewOffsetY: state.filesOffsetY[fileId] ?? 0,
           pressure: penState.pressure,
           tiltX: penState.tiltX,
           tiltY: penState.tiltY,

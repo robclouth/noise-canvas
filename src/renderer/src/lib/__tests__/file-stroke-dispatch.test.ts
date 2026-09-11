@@ -65,7 +65,6 @@ async function harness() {
   canvas.initialize(null);
   const context: FileStrokeContext = {
     fileId: "dispatch",
-    viewFileId: "view",
     spectrogramData: data,
     strokeRendererRef,
     canvasRef: { current: canvas },
@@ -104,8 +103,8 @@ async function harness() {
       filesSelection: {},
       filesZoomY: {},
       filesOffsetY: {},
-      filesZoom: { view: 3 },
-      filesOffset: { view: 0.2 },
+      filesZoom: { dispatch: 3 },
+      filesOffset: { dispatch: 0.2 },
     },
   });
   return { context, canvas, renderer, state, release };

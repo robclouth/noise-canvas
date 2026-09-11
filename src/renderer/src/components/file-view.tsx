@@ -23,9 +23,9 @@ import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
 import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
 import FileHeader from "./file-header";
 import { FILE_VIEW_BODY_HEIGHT } from "@renderer/lib/file-view-metrics";
-import { layerTint, type LayerTint } from "@renderer/lib/layer-tint";
-import type { RawShaderMaterial } from "three";
-import { FileRenderer } from "./file-renderer";
+import { ViewRenderer } from "./view-renderer";
+import { savedViewTransform } from "../lib/view-display";
+import { useShallow } from "zustand/react/shallow";
 import type { FileRendererHandle } from "../lib/file-renderer-types";
 import { LoopRegion } from "./loop-region";
 import { SelectionRegion } from "./selection-region";
@@ -157,6 +157,11 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   }, [pickingFileParam, isPanning, isZooming, editMode, shiftHeld]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
+  const transform = useStore(useShallow((state) => savedViewTransform(state, fileId)));
+  const descriptor = useMemo(
+    () => ({ topId: fileId, layerIds: stackLayerIds ?? [fileId], transform }),
+    [fileId, stackLayerIds, transform],
+  );
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);
@@ -206,11 +211,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   const trySnapshot = useCallback(function captureLatest() {
     if (captureInFlightRef.current) return;
     const revision = snapshotRevisionRef.current;
-    // In stack order, so the still sums the layers the way the live view does.
-    const behindMaterials = behindOrderRef.current.map((id) => behindRefs.current.get(id)?.getDisplayMaterial());
-    if (behindMaterials.some((material) => !material)) return;
-    const materials = behindMaterials.filter((material): material is RawShaderMaterial => !!material);
-    const capture = rendererRef.current?.captureSnapshot(materials);
+    const capture = rendererRef.current?.captureSnapshot();
     if (!capture) return;
     captureInFlightRef.current = true;
     capture
@@ -246,18 +247,6 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
       trySnapshot();
     }
   }, [trySnapshot]);
-
-  // A static snapshot is a fixed-size bitmap; when the view box resizes it
-  // stretches, so re-capture at the new size.
-  useEffect(() => {
-    const el = viewRef.current;
-    if (!el) return undefined;
-    const observer = new ResizeObserver(() => {
-      rendererRef.current?.refreshSnapshot();
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [loadingMessage]);
 
   const stopMomentum = useCallback(() => {
     if (momentumRef.current.raf !== null) {
@@ -415,33 +404,6 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
         filterTaps: true,
       },
     },
-  );
-
-  // A layer's hue is its place in the stack, so it does not move when another
-  // layer is brought to the top.
-  const behindIds = useMemo(() => (stackLayerIds ?? []).filter((id) => id !== fileId), [stackLayerIds, fileId]);
-  // Held by identity, so the renderers do not see a new tint every render.
-  const tints = useMemo(() => {
-    const byLayer = new Map<string, LayerTint>();
-    (stackLayerIds ?? []).forEach((id, index) => byLayer.set(id, layerTint(index, stackLayerIds!.length)));
-    return byLayer;
-  }, [stackLayerIds]);
-  const tintOf = useCallback((id: string) => tints.get(id), [tints]);
-  const snapshotDescriptor = JSON.stringify([fileId, (stackLayerIds ?? [fileId]).map((id) => [id, tintOf(id)])]);
-  useEffect(() => {
-    refreshSnapshot();
-  }, [snapshotDescriptor, refreshSnapshot]);
-
-  // The handles of the layers drawn behind this one, so a still can paint them.
-  const behindRefs = useRef(new Map<string, FileRendererHandle>());
-  const behindOrderRef = useRef<string[]>([]);
-  behindOrderRef.current = behindIds;
-  const behindRefCallback = useCallback(
-    (id: string) => (handle: FileRendererHandle | null) => {
-      if (handle) behindRefs.current.set(id, handle);
-      else behindRefs.current.delete(id);
-    },
-    [],
   );
 
   const refCallback = useCallback((handle: FileRendererHandle | null) => {
@@ -1156,31 +1118,14 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
                 onContextMenu={(e) => e.preventDefault()}
               >
                 <View style={viewStyle} visible={phase !== "static"}>
-                  {behindIds.map((behindId) => (
-                    <FileRenderer
-                      key={behindId}
-                      ref={behindRefCallback(behindId)}
-                      fileId={behindId}
-                      viewFileId={fileId}
-                      isLive={phase !== "static"}
-                      parked={isMinimized}
-                      snapshotCanvasRef={snapshotCanvasRef}
-                      onSnapshotRefresh={refreshSnapshot}
-                      tint={tintOf(behindId)}
-                      overlaid
-                      behind
-                    />
-                  ))}
-                  <FileRenderer
-                    fileId={fileId}
-                    ref={refCallback}
+                  <ViewRenderer
+                    descriptor={descriptor}
+                    onFileHandle={refCallback}
                     isLive={phase !== "static"}
                     parked={isMinimized}
                     snapshotCanvasRef={snapshotCanvasRef}
                     onSnapshotRefresh={refreshSnapshot}
                     onLiveFrame={handleLiveFrame}
-                    tint={tintOf(fileId)}
-                    overlaid={behindIds.length > 0}
                   />
                 </View>
                 <canvas

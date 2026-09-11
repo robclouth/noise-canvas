@@ -1,5 +1,5 @@
 import type { RawShaderMaterial, WebGLRenderer } from "three";
-import type { State, SpectrogramData } from "../store/types";
+import type { SpectrogramData } from "../store/types";
 import type { AimRest } from "./canvas-window";
 import { displayLevelChoice } from "./display-pyramid";
 import type { DisplayTileRing } from "./display-tiles-textures";
@@ -7,7 +7,7 @@ import type { StrokeRenderer } from "./stroke-renderer";
 import type { WindowedCanvas } from "./windowed-canvas";
 
 export interface FileDisplayResidencyContext {
-  viewFileId: string;
+  transform: { viewZoomPower: number; viewOffset: number };
   spectrogramData: SpectrogramData;
   displayMaterial: RawShaderMaterial;
   glRef: { current: WebGLRenderer };
@@ -19,7 +19,9 @@ export interface FileDisplayResidencyContext {
   loadingViewRef: { current: { zoom: number; offset: number } };
   aimRest: { current: AimRest };
   aimRestTimer: { current: ReturnType<typeof setTimeout> | null };
-  getState: () => State;
+  contentRevision?: () => number;
+  isDisposed?: () => boolean;
+  residencyChanged?: () => void;
   currentTaps: (runs: Uint32Array) => Promise<Float32Array | null>;
 }
 
@@ -88,18 +90,21 @@ function requestRingTiles(context: FileDisplayResidencyContext, tiles: DisplayTi
     if (ringRequestsRef.current.has(key)) continue;
     ringRequestsRef.current.add(key);
     const runs = tiles.tileTapRuns(tile);
+    const revision = context.contentRevision?.();
     const read = canvasRef.current ? canvasRef.current.readCommittedTaps(runs) : context.currentTaps(runs);
     void read
       .then((values) => {
         ringRequestsRef.current.delete(key);
         const gl = glRef.current;
         const live = strokeRendererRef.current?.getDisplayTiles();
-        if (!values || !gl || live !== tiles) return;
+        if (!values || !gl || live !== tiles || context.isDisposed?.() || revision !== context.contentRevision?.())
+          return;
         if (tiles.gridLevel() !== level || !tiles.canCutTile(tile)) return;
         tiles.cutTileFromTaps(gl, tile, values);
         if (canvasRef.current?.isStroking && tiles.uniforms().tileCount > 0) {
           strokeRendererRef.current?.refreshDisplayFromStroke();
         }
+        context.residencyChanged?.();
         invalidateRef.current();
       })
       .catch(() => ringRequestsRef.current.delete(key));
@@ -143,7 +148,7 @@ export function applyDisplayPyramidUniforms(
   );
   const finerThanPyramid = 2 ** finestStepLog2 > Math.max(framesPerPixel, 1);
   const canvas = canvasRef.current;
-  const visible = visibleFrameRange(context, context.getState());
+  const visible = visibleFrameRange(context);
   const visibleRangeCovered = canvas?.holdsFrames(visible.start, visible.end) ?? true;
   uniforms.displayCanvasFirst.value = finerThanPyramid && (canvas?.isPopulated() ?? true);
   const ready = pyramid.readyLevel;
@@ -171,18 +176,18 @@ export function applyDisplayPyramidUniforms(
   if (loadingSinceRef.current === null || viewMoved) loadingSinceRef.current = now;
   const fade = (now - loadingSinceRef.current - DISPLAY_LOADING_GRACE_MS) / DISPLAY_LOADING_FADE_MS;
   uniforms.displayLoading.value = Math.min(1, Math.max(0, fade));
-  if (fade < 1) invalidateRef.current?.();
+  if (fade < 1 && uniforms.drawOverlays.value) invalidateRef.current?.();
 }
 
-export function visibleFrameRange(
-  context: Pick<FileDisplayResidencyContext, "spectrogramData" | "viewFileId">,
-  state: State,
-): { start: number; end: number } {
-  const { spectrogramData, viewFileId } = context;
+export function visibleFrameRange(context: Pick<FileDisplayResidencyContext, "spectrogramData" | "transform">): {
+  start: number;
+  end: number;
+} {
+  const { spectrogramData, transform } = context;
   const { numFrames } = spectrogramData;
-  const zoom = Math.pow(2, state.filesZoom[viewFileId] ?? 0);
+  const zoom = Math.pow(2, transform.viewZoomPower);
   const span = numFrames / zoom;
-  const start = zoom > 1 ? (state.filesOffset[viewFileId] ?? 0) * (numFrames - span) : 0;
+  const start = zoom > 1 ? transform.viewOffset * (numFrames - span) : 0;
   return { start, end: start + span };
 }
 
@@ -202,7 +207,6 @@ function scheduleAimRest(context: FileDisplayResidencyContext, wait: number): vo
 export function prepareVisibleRegion(
   context: FileDisplayResidencyContext,
   canvas: WindowedCanvas,
-  state: State,
   cursorPos: { x: number },
   dabStart: number,
   dabEnd: number,
@@ -210,7 +214,7 @@ export function prepareVisibleRegion(
 ): void {
   const { aimRest } = context;
   if (!canvas.wholeFile) {
-    const visible = visibleFrameRange(context, state);
+    const visible = visibleFrameRange(context);
     let start = visible.start;
     let end = visible.end;
     if (cursorPos.x >= 0) {

@@ -8,6 +8,7 @@ import {
   UnsignedByteType,
   WebGLRenderer,
   WebGLRenderTarget,
+  Vector4,
 } from "three";
 import { readRenderTargetBytesAsync } from "./async-readpixels";
 
@@ -69,7 +70,24 @@ export async function renderMaterialToBytes(
 ): Promise<Uint8Array> {
   const { scene, mesh, camera } = ensureQuad();
   const list = Array.isArray(materials) ? materials : [materials];
+  return renderCompositionToBytes(
+    gl,
+    () => {
+      for (const material of list) {
+        mesh.material = material;
+        gl.render(scene, camera);
+      }
+    },
+    target,
+  );
+}
 
+/** Draws a prepared composition and issues its PBO read before waiting for the fence. */
+export async function renderCompositionToBytes(
+  gl: WebGLRenderer,
+  draw: () => void,
+  target: WebGLRenderTarget,
+): Promise<Uint8Array> {
   const context = gl.getContext();
   const readTarget = "READ_FRAMEBUFFER" in context ? context.READ_FRAMEBUFFER : context.FRAMEBUFFER;
   const drawTarget = "DRAW_FRAMEBUFFER" in context ? context.DRAW_FRAMEBUFFER : context.FRAMEBUFFER;
@@ -79,18 +97,21 @@ export async function renderMaterialToBytes(
   const prevDrawFramebuffer: WebGLFramebuffer | null = context.getParameter(context.FRAMEBUFFER_BINDING);
   const prevTarget = gl.getRenderTarget();
   const prevAutoClear = gl.autoClear;
+  const viewport = gl.getViewport(new Vector4());
+  const scissor = gl.getScissor(new Vector4());
+  const scissorTest = gl.getScissorTest();
   try {
     gl.setRenderTarget(target);
-    // The first pass starts from a cleared target; the rest add into it.
+    gl.setScissorTest(false);
     gl.autoClear = false;
     gl.clear(true, false, false);
-    for (const material of list) {
-      mesh.material = material;
-      gl.render(scene, camera);
-    }
+    draw();
   } finally {
     gl.autoClear = prevAutoClear;
     gl.setRenderTarget(prevTarget);
+    gl.setViewport(viewport);
+    gl.setScissor(scissor);
+    gl.setScissorTest(scissorTest);
     context.bindFramebuffer(readTarget, prevReadFramebuffer);
     context.bindFramebuffer(drawTarget, prevDrawFramebuffer);
   }
@@ -111,11 +132,36 @@ export async function captureMaterialToCanvas(
   width: number,
   height: number,
 ): Promise<boolean> {
+  return captureCompositionToCanvas(
+    gl,
+    () => {
+      const { scene, mesh, camera } = ensureQuad();
+      for (const material of Array.isArray(materials) ? materials : [materials]) {
+        mesh.material = material;
+        gl.render(scene, camera);
+      }
+    },
+    canvas,
+    width,
+    height,
+  );
+}
+
+/** Captures a prepared view into its DOM still. */
+export async function captureCompositionToCanvas(
+  gl: WebGLRenderer,
+  draw: () => void,
+  canvas: HTMLCanvasElement,
+  width: number,
+  height: number,
+  canPublish: () => boolean = () => true,
+): Promise<boolean> {
   const ctx = canvas.getContext("2d");
   if (!ctx) return false;
 
   const target = ensureCaptureResources(width, height);
-  const pixels = await renderMaterialToBytes(gl, materials, target);
+  const pixels = await renderCompositionToBytes(gl, draw, target);
+  if (!canPublish()) return false;
 
   canvas.width = width;
   canvas.height = height;

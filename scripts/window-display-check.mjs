@@ -68,6 +68,12 @@ try {
   if (await noThanks.count()) await noThanks.first().click();
   await page.evaluate(async () => {
     const { WindowedCanvas } = await import("/src/lib/windowed-canvas.ts");
+    const { ViewDisplay } = await import("/src/lib/view-display.ts");
+    const prepare = ViewDisplay.prototype.prepare;
+    ViewDisplay.prototype.prepare = function (...args) {
+      window.checkDisplay = this;
+      return prepare.apply(this, args);
+    };
     window.checkFiles = (await import("/src/store/files.ts")).openFiles;
     window.checkRequests = [];
     const initialize = WindowedCanvas.prototype.initialize;
@@ -128,16 +134,17 @@ try {
   );
   writeFileSync(join(directory, "fine-live.png"), Buffer.from(capture, "base64"));
   const pixels = await page.evaluate(async () => {
-    const { createByteTarget, renderMaterialToBytes } = await import("/src/lib/snapshot-capture.ts");
+    const { createByteTarget, renderCompositionToBytes } = await import("/src/lib/snapshot-capture.ts");
     const gl = window.checkCanvas.deps.gl;
     if (!gl) throw new Error("no shared renderer");
-    const file = window.checkFiles[window.__store.getState().activeFileId];
-    const material = file.rendererRef.current.getDisplayMaterial();
+    const display = window.checkDisplay;
+    display.prepare(window.__store.getState());
+    const material = display.top.material;
     const target = createByteTarget(128, 128);
     const overlays = material.uniforms.drawOverlays.value;
     material.uniforms.drawOverlays.value = false;
     try {
-      const bytes = await renderMaterialToBytes(gl, material, target);
+      const bytes = await renderCompositionToBytes(gl, () => display.compose(gl, "capture"), target);
       return {
         bright: bytes.filter((value, index) => index % 4 !== 3 && value > 20).length,
         tiles: material.uniforms.displayTileCount.value,

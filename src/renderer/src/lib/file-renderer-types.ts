@@ -1,49 +1,10 @@
-import type { RefObject } from "react";
-import type { DataTexture, RawShaderMaterial, Texture, Vector2, WebGLRenderTarget } from "three";
+import type { DataTexture, Texture, Vector2, WebGLRenderTarget } from "three";
 import type { State, SpectrogramData } from "../store/types";
 import type { CanvasView } from "./canvas-view";
 import type { ImageExportOptions } from "./image-export";
 import type { PosterInfo } from "./image-export-poster";
-import type { LayerTint } from "./layer-tint";
 import type { SourceFileInfo } from "./stroke-renderer";
 import type { DabNeeds } from "./windowed-canvas";
-
-/**
- * Props for the FileRenderer component.
- * @param fileId - The open file to render.
- * @param isLive - Whether this file's view is live-rendered. When false the
- *   frame loop skips the file entirely (its DOM snapshot covers the view) and
- *   display-state changes refresh the snapshot instead.
- * @param snapshotCanvasRef - The 2D canvas that snapshot captures paint into.
- * @param onLiveFrame - Called after each fully drawn live frame.
- */
-export interface FileRendererProps {
-  fileId: string;
-  /** The layer whose zoom and scroll place this display in an overlaid view. */
-  viewFileId?: string;
-  isLive: boolean;
-  parked: boolean;
-  snapshotCanvasRef: RefObject<HTMLCanvasElement | null>;
-  onLiveFrame?: () => void;
-  /** Requests a capture of every layer sharing the snapshot canvas. */
-  onSnapshotRefresh?: () => void;
-  /**
-   * The hue pair this layer paints its left and right channels in. Defaults to
-   * the orange and blue a layer on its own has always used.
-   */
-  tint?: LayerTint;
-  /**
-   * One layer of an overlaid stack. Every layer of one adds into the picture,
-   * including the layer on top, or the top layer's opaque output would wipe the
-   * layers already drawn.
-   */
-  overlaid?: boolean;
-  /**
-   * Drawn behind the layer on top: spectrogram only. The layer on top keeps the
-   * grid, the brush preview and the rectangles, so a stack carries one of each.
-   */
-  behind?: boolean;
-}
 
 /** One stroke of a batch: where it is aimed, and the state to paint it with. */
 /** A stroke over one region, painted from a state built for it. */
@@ -193,19 +154,8 @@ export interface FileRendererHandle {
   getStrokeGeneration: () => number;
   /** Widens the dirty region to cover pixels changed outside the painted rect. */
   expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) => void;
-  /**
-   * Renders the committed spectrogram (no cursor/preview overlays) into the
-   * snapshot canvas at its current on-screen size. Resolves false when the
-   * renderer isn't ready yet or the view has no usable size.
-   */
-  /**
-   * Paints the view into the snapshot canvas. An overlaid stack passes the
-   * materials of the layers behind this one, drawn first, or the still would
-   * show the top layer alone.
-   */
-  captureSnapshot: (behindMaterials?: RawShaderMaterial[]) => Promise<boolean>;
-  /** This layer's display material, so a stack can capture every layer at once. */
-  getDisplayMaterial: () => RawShaderMaterial | null;
+  /** Captures the view containing this top layer. */
+  captureSnapshot: () => Promise<boolean>;
   /** Schedules a throttled snapshot re-capture (no-op while the view is live). */
   refreshSnapshot: () => void;
   /**

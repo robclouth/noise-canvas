@@ -6,7 +6,7 @@ import type { FileRendererHandle } from "./file-renderer-types";
 
 type ViewOperations = Pick<
   FileRendererHandle,
-  "renderStroke" | "clearPreview" | "applyStroke" | "captureSnapshot" | "getDisplayMaterial" | "refreshSnapshot"
+  "renderStroke" | "clearPreview" | "applyStroke" | "captureSnapshot" | "refreshSnapshot"
 >;
 interface Entry {
   engine: FileEngine;
@@ -76,7 +76,6 @@ export class FileEngineRegistry {
     const entry = this.entries.get(id);
     if (!entry) return;
     context.resourcesChanged = entry.context.resourcesChanged;
-    context.strokeContext.viewFileId = entry.context.strokeContext.viewFileId;
     entry.context = context;
     entry.engine.updateContext(context);
     if (entry.adapter) entry.operations = entry.engine.fileOperations();
@@ -90,10 +89,13 @@ export class FileEngineRegistry {
   }
   private resourcesChanged(id: string, entry: Entry): void {
     if (this.entries.get(id) !== entry) return;
-    const renderer = entry.engine.initialise(
-      () => visibleFrameRange(entry.context.strokeContext, this.services.getState()),
-      !entry.reloading,
-    );
+    const renderer = entry.engine.initialise(() => {
+      const state = this.services.getState();
+      return visibleFrameRange({
+        spectrogramData: entry.context.spectrogramData,
+        transform: { viewZoomPower: state.filesZoom[id] ?? 0, viewOffset: state.filesOffset[id] ?? 0 },
+      });
+    }, !entry.reloading);
     if (renderer && !entry.adapter) {
       entry.operations = entry.engine.fileOperations();
       const viewOperations = {
@@ -101,9 +103,7 @@ export class FileEngineRegistry {
         renderStroke: (preview: boolean) => entry.view?.renderStroke(preview),
         clearPreview: () => entry.view?.clearPreview(),
         applyStroke: () => entry.view?.applyStroke(),
-        captureSnapshot: (materials?: Parameters<FileRendererHandle["captureSnapshot"]>[0]) =>
-          entry.view?.captureSnapshot(materials) ?? Promise.resolve(false),
-        getDisplayMaterial: () => entry.view?.getDisplayMaterial() ?? null,
+        captureSnapshot: () => entry.view?.captureSnapshot() ?? Promise.resolve(false),
         refreshSnapshot: () => entry.view?.refreshSnapshot(),
       };
       entry.adapter = new Proxy(
@@ -115,17 +115,16 @@ export class FileEngineRegistry {
       );
       this.register(id, entry.adapter);
     }
+    entry.engine.notifyResidencyChanged();
     this.changed();
   }
-  bindView(id: string, viewFileId: string, view: ViewOperations): () => void {
+  bindView(id: string, view: ViewOperations): () => void {
     const entry = this.entries.get(id);
     if (!entry) return () => {};
     entry.view = view;
-    entry.context.strokeContext.viewFileId = viewFileId;
     return () => {
       if (entry.view !== view) return;
       entry.view = null;
-      entry.context.strokeContext.viewFileId = id;
     };
   }
   setParked(id: string, parked: boolean): void {

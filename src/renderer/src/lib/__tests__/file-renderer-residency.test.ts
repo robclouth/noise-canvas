@@ -10,6 +10,7 @@ import { createElement, createRef } from "react";
 import { createRoot, extend } from "@react-three/fiber";
 import * as THREE from "three";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ViewRendererHandle } from "../../components/view-renderer";
 import type { FileRendererHandle } from "../file-renderer-types";
 import type { State } from "../../store/types";
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
@@ -90,14 +91,16 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   disposers.push(() => {
     Object.assign(w, previous);
   });
-  const [{ FileRenderer }, { useStore }, { openFiles }, { useTransientStore }, { FileEngineProvider }] =
+  const [{ ViewRenderer }, { useStore }, { openFiles }, { useTransientStore }, { FileEngineProvider }] =
     await Promise.all([
-      import("../../components/file-renderer"),
+      import("../../components/view-renderer"),
       import("../../store"),
       import("../../store/files"),
       import("../../store/transient"),
       import("../../components/file-engine-provider"),
     ]);
+  const { savedViewTransform } = await import("../view-display");
+  const { useShallow } = await import("zustand/react/shallow");
   const initialState = useStore.getState();
   useStore.setState({
     ...state,
@@ -126,6 +129,16 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   }
   grid = blockGrid(data, data.numFrames, data.sampleRate);
   const ref = createRef<FileRendererHandle>();
+  const viewRef = createRef<ViewRendererHandle>();
+  const snapshot = createRef<HTMLCanvasElement>();
+  snapshot.current = document.createElement("canvas");
+  snapshot.current.style.width = "100px";
+  snapshot.current.style.height = "100px";
+  document.body.append(snapshot.current);
+  disposers.push(() => snapshot.current?.remove());
+  const onFileHandle = (handle: FileRendererHandle | null) => {
+    ref.current = handle;
+  };
   openFiles.residency = {
     id: "residency",
     filePath: "/residency.wav",
@@ -142,23 +155,25 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   await root.configure({ gl, frameloop: "never", size: { width: 100, height: 100, top: 0, left: 0 } });
   const initializeSpy = vi.spyOn(WindowedCanvas.prototype, "initialize");
   const displaySpy = vi.spyOn(StrokeRenderer.prototype, "getDisplayPyramid");
-  const render = (parked: boolean, instance = 0, session = 0, visible = true, viewFileId = "residency") => {
+  function TestView({ parked, selected }: { parked: boolean; selected: string }) {
+    const transform = useStore(useShallow((state) => savedViewTransform(state, selected)));
+    const ids = useStore((state) => state.openFileIds);
+    return createElement(ViewRenderer, {
+      descriptor: { topId: "residency", layerIds: ids, transform },
+      isLive: true,
+      parked,
+      snapshotCanvasRef: snapshot,
+      ref: viewRef,
+      onFileHandle,
+    });
+  }
+  const render = (parked: boolean, instance = 0, session = 0, visible = true, selected = "residency") => {
     useStore.setState({ minimizedFileIds: parked ? ["residency"] : [] });
     return root.render(
       createElement(
         FileEngineProvider,
         { key: session },
-        visible
-          ? createElement(FileRenderer, {
-              key: instance,
-              fileId: "residency",
-              viewFileId,
-              isLive: true,
-              parked,
-              snapshotCanvasRef: createRef<HTMLCanvasElement>(),
-              ref,
-            })
-          : null,
+        visible ? createElement(TestView, { key: instance, parked, selected }) : null,
       ),
     );
   };
@@ -180,6 +195,9 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   if (!(strokeRenderer instanceof StrokeRenderer)) throw new Error("no display renderer");
   return {
     ref,
+    viewRef,
+    snapshot,
+    getMaterial: () => viewRef.current?.display.top?.material ?? null,
     data,
     frame,
     canvas,
@@ -234,7 +252,7 @@ describe("anchored dab residency", () => {
     const [beats, pitch] = uvToUnits(aim, 0.5, 120, 300, rig.data.bandsPerOctave, rig.data.numBands);
     rig.useTransientStore.setState({ cursorPosition: { beats, pitch }, cursorVisible: true });
     rig.frame();
-    const material = rig.ref.current!.getDisplayMaterial()!;
+    const material = rig.getMaterial()!;
     const origin = material.uniforms.brushBottomLeftUv.value as THREE.Vector2;
     const size = material.uniforms.brushSizeUv.value as THREE.Vector2;
     const held = vi.spyOn(canvas, "paintWhenHeld");
@@ -262,7 +280,7 @@ describe("anchored dab residency", () => {
     rig.ref.current!.beginStroke();
     rig.ref.current!.renderStroke(false);
     rig.frame();
-    const material = rig.ref.current!.getDisplayMaterial()!;
+    const material = rig.getMaterial()!;
     const origin = material.uniforms.brushBottomLeftUv.value as THREE.Vector2;
     const size = material.uniforms.brushSizeUv.value as THREE.Vector2;
     const reach = strokeReach(rig.state, {
@@ -389,10 +407,11 @@ describe("visible screen residency", () => {
     const read = vi.spyOn(rig.canvas, "readCommittedTaps");
     const aim = vi.spyOn(rig.canvas, "aim");
     rig.useStore.setState({ filesZoom: { residency: zoom }, filesOffset: { residency: 0.75 } });
+    await vi.waitFor(() => expect(rig.viewRef.current?.display.descriptor.transform.viewZoomPower).toBe(zoom));
     rig.frame();
     expect(aim).not.toHaveBeenCalled();
     expect(read).toHaveBeenCalled();
-    const material = rig.ref.current!.getDisplayMaterial()!;
+    const material = rig.getMaterial()!;
     await vi.waitFor(() => {
       rig.frame();
       expect(material.uniforms.displayTileCount.value).toBeGreaterThan(0);
@@ -447,7 +466,7 @@ it("disposes each display material and releases its renderer properties across r
       rig.frame();
       expect(rig.ref.current?.getTextures()).toBeTruthy();
     });
-    const material = rig.ref.current!.getDisplayMaterial()!;
+    const material = rig.getMaterial()!;
     expect(rig.gl.properties.has(material)).toBe(true);
     const disposed = vi.fn();
     material.addEventListener("dispose", disposed);
@@ -508,9 +527,12 @@ describe("pending frame dab settlement", () => {
 
 function displayContext(rig: Awaited<ReturnType<typeof mount>>): FileDisplayResidencyContext {
   return {
-    viewFileId: "residency",
+    get transform() {
+      const state = rig.useStore.getState();
+      return { viewZoomPower: state.filesZoom.residency ?? 0, viewOffset: state.filesOffset.residency ?? 0 };
+    },
     spectrogramData: rig.data,
-    displayMaterial: rig.ref.current!.getDisplayMaterial()!,
+    displayMaterial: rig.getMaterial()!,
     glRef: { current: rig.gl },
     strokeRendererRef: { current: rig.strokeRenderer },
     canvasRef: { current: rig.canvas },
@@ -520,7 +542,6 @@ function displayContext(rig: Awaited<ReturnType<typeof mount>>): FileDisplayResi
     loadingViewRef: { current: { zoom: 0, offset: 0 } },
     aimRest: { current: new AimRest() },
     aimRestTimer: { current: null },
-    getState: rig.useStore.getState,
     currentTaps: async (runs) => gatherTaps(seed, runs),
   };
 }
@@ -569,6 +590,11 @@ describe("display residency completion", () => {
     applyDisplayPyramidUniforms(context, 5, 0.75, 100);
     expect(loading.value).toBe(0);
     expect(context.invalidateRef.current).toHaveBeenCalled();
+    context.displayMaterial.uniforms.drawOverlays.value = false;
+    vi.mocked(context.invalidateRef.current).mockClear();
+    applyDisplayPyramidUniforms(context, 5, 0.75, 100);
+    expect(context.invalidateRef.current).not.toHaveBeenCalled();
+    context.displayMaterial.uniforms.drawOverlays.value = true;
     now.mockReturnValue(1200);
     applyDisplayPyramidUniforms(context, 5, 0.75, 100);
     expect(loading.value).toBeGreaterThan(0);
@@ -594,14 +620,14 @@ describe("display residency completion", () => {
     rig.useStore.setState({ filesZoom: { residency: 8 }, filesOffset: { residency: 0.75 } });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      prepareVisibleRegion(context, rig.canvas, context.getState(), { x: -1 }, 0, 0, false);
+      prepareVisibleRegion(context, rig.canvas, { x: -1 }, 0, 0, false);
       expect(aim).not.toHaveBeenCalled();
       expect(context.aimRestTimer.current).not.toBeNull();
       vi.advanceTimersByTime(1000);
       expect(context.invalidateRef.current).toHaveBeenCalledTimes(1);
       expect(context.aimRestTimer.current).toBeNull();
       rig.useStore.setState({ filesOffset: { residency: 0.25 } });
-      prepareVisibleRegion(context, rig.canvas, context.getState(), { x: -1 }, 0, 0, false);
+      prepareVisibleRegion(context, rig.canvas, { x: -1 }, 0, 0, false);
       expect(context.aimRestTimer.current).not.toBeNull();
       disposeDisplayResidency(context.aimRestTimer);
       vi.advanceTimersByTime(1000);
@@ -673,7 +699,7 @@ describe("session-owned file engine", () => {
     await vi.waitFor(() => expect(rig.ref.current).toBeNull());
     expect(rig.file.rendererRef!.current).toBe(adapter);
     expect(await adapter.getFBOData()).toEqual(current);
-    expect(adapter.getDisplayMaterial()).toBeNull();
+    expect(rig.viewRef.current).toBeNull();
     for (let instance = 1; instance <= 8; instance++) {
       rig.render(false, instance);
       await vi.waitFor(() => {
@@ -699,13 +725,13 @@ describe("session-owned file engine", () => {
     };
     rig.useStore.setState(saved);
     for (const [instance, id] of ["selected", "residency", "selected", "residency"].entries()) {
-      const previous = rig.ref.current!.getDisplayMaterial();
+      const previous = rig.getMaterial();
       rig.render(false, instance + 1, 0, true, id);
       await vi.waitFor(() => {
         rig.frame();
-        expect(rig.ref.current!.getDisplayMaterial()).not.toBe(previous);
+        expect(rig.getMaterial()).not.toBe(previous);
       });
-      const material = rig.ref.current!.getDisplayMaterial()!;
+      const material = rig.getMaterial()!;
       const key = id === "selected" ? "selected" : "residency";
       expect(material.uniforms.viewZoomPower.value).toBe(saved.filesZoom[key]);
       expect(material.uniforms.viewOffset.value).toBe(saved.filesOffset[key]);
@@ -822,4 +848,176 @@ describe("session-owned file engine", () => {
       expect(engine.borrowDisplaySource()).toBeNull();
     },
   );
+});
+
+async function stackedView(count: number) {
+  const rig = await mount(brush(0), Infinity, 8);
+  const { openFiles } = await import("../../store/files");
+  const ids = ["residency"];
+  for (let i = 1; i < count; i++) {
+    const id = `background-${i}`;
+    const data = createConstantQMockSpectrogramData({ durationSeconds: 8, sampleRate: 800, bandsPerOctave: 1 });
+    data.packedData.set(seed);
+    openFiles[id] = {
+      id,
+      filePath: `/${id}.wav`,
+      displayName: id,
+      spectrogramData: data,
+      rendererRef: { current: null },
+    };
+    disposers.push(() => {
+      delete openFiles[id];
+    });
+    ids.push(id);
+  }
+  rig.useStore.setState({ openFileIds: ids });
+  await vi.waitFor(() => {
+    rig.frame();
+    expect(rig.viewRef.current?.display.layers).toHaveLength(count);
+    expect(rig.viewRef.current?.display.layers.every((layer) => layer.ready)).toBe(true);
+  });
+  return rig;
+}
+
+describe("one direct display per view", () => {
+  it("draws a background whose history seed arrives after its record mounts", async () => {
+    const rig = await stackedView(1);
+    const { openFiles } = await import("../../store/files");
+    const data = createConstantQMockSpectrogramData({ durationSeconds: 8, sampleRate: 800, bandsPerOctave: 1 });
+    const fileData = { ...data, packedData: undefined };
+    let release: () => void = () => {};
+    historyInitialize.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = () => resolve(true);
+        }),
+    );
+    openFiles.delayed = {
+      id: "delayed",
+      filePath: "/delayed.wav",
+      displayName: "delayed",
+      spectrogramData: fileData,
+      rendererRef: { current: null },
+    };
+    disposers.push(() => {
+      delete openFiles.delayed;
+    });
+    rig.useStore.setState({ openFileIds: ["residency", "delayed"] });
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(rig.viewRef.current?.display.layers).toHaveLength(2);
+    });
+    const layer = rig.viewRef.current!.display.layers[0];
+    expect(layer.ready).toBe(false);
+    release();
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(layer.ready).toBe(true);
+    });
+    expect(layer.material.uniforms.drawOverlays.value).toBe(false);
+    expect(layer.material.blending).toBe(THREE.AdditiveBlending);
+  });
+
+  it("rejects an old-size capture after the view resizes", async () => {
+    const rig = await stackedView(1);
+    const view = rig.viewRef.current!;
+    const capture = view.captureSnapshot();
+    rig.snapshot.current!.style.width = "81px";
+    rig.snapshot.current!.style.height = "45px";
+    view.display.resize(81, 45);
+    expect(await capture).toBe(false);
+  });
+
+  it("coalesces background changes and keeps editor work on the top layer", async () => {
+    const rig = await stackedView(4);
+    const display = rig.viewRef.current!.display;
+    const background = display.layers[0];
+    const prepare = vi.spyOn(background.engine, "initialise");
+    const dispatch = vi.spyOn(background.engine, "strokeDispatch");
+    const bind = vi.spyOn(display, "bind");
+    for (let i = 0; i < 5; i++) rig.frame();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(bind.mock.calls.filter(([layer]) => layer === background)).toHaveLength(0);
+    const content = background.engine.contentRevision;
+    const residency = background.engine.residencyRevision;
+    for (let i = 0; i < 3; i++) background.engine.notifyResidencyChanged();
+    rig.frame();
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(bind.mock.calls.filter(([layer]) => layer === background)).toHaveLength(1);
+    expect(background.engine.contentRevision).toBe(content);
+    expect(background.engine.residencyRevision).toBe(residency + 3);
+    background.engine.notifyContentChanged();
+    rig.frame();
+    expect(background.engine.contentRevision).toBe(content + 1);
+    expect(bind.mock.calls.filter(([layer]) => layer === background)).toHaveLength(2);
+    rig.useStore.setState({ gridSizeSemis: 12, pickingFileParam: null });
+    rig.frame();
+    expect(bind.mock.calls.filter(([layer]) => layer === background)).toHaveLength(2);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2, 4, 8])("keeps the ordered byte composition at %i layers", async (count) => {
+    const rig = await stackedView(count);
+    const display = rig.viewRef.current!.display;
+    const { createByteTarget, renderCompositionToBytes, renderMaterialToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(80, 40);
+    disposers.push(() => target.dispose());
+    const top = display.top!;
+    top.material.uniforms.previewActive.value = false;
+    top.material.uniforms.showSourceRectangle.value = false;
+    top.material.uniforms.showTargetRectangle.value = false;
+    const before = rig.gl.info.render.calls;
+    const live = await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "live"), target);
+    expect(rig.gl.info.render.calls - before).toBe(count);
+    const still = await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "capture"), target);
+    const oracle = await renderMaterialToBytes(
+      rig.gl,
+      display.layers.map((layer) => layer.material),
+      target,
+    );
+    expect(live).toEqual(oracle);
+    expect(still).toEqual(oracle);
+    expect(live.some((value, i) => i % 4 !== 3 && value > 0)).toBe(true);
+    for (const layer of display.layers) {
+      expect(layer.material.uniforms.drawOverlays.value).toBe(layer === top);
+      if (layer !== top) expect(layer.material.uniforms.leftTint).not.toBe(top.material.uniforms.leftTint);
+    }
+    top.material.uniforms.showTargetRectangle.value = true;
+    await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "capture"), target);
+    expect(top.material.uniforms.showTargetRectangle.value).toBe(true);
+  });
+
+  it("preserves the caller's scissor and view rectangle across direct capture", async () => {
+    const rig = await stackedView(2);
+    const { createByteTarget, renderCompositionToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(80, 40);
+    disposers.push(() => target.dispose());
+    rig.gl.setViewport(7, 8, 33, 22);
+    rig.gl.setScissor(10, 11, 20, 15);
+    rig.gl.setScissorTest(true);
+    const viewport = rig.gl.getViewport(new THREE.Vector4());
+    const scissor = rig.gl.getScissor(new THREE.Vector4());
+    const pixels = await renderCompositionToBytes(
+      rig.gl,
+      () => rig.viewRef.current!.display.compose(rig.gl, "capture"),
+      target,
+    );
+    expect(pixels.some((v, i) => i % 4 !== 3 && v > 0)).toBe(true);
+    expect(rig.gl.getViewport(new THREE.Vector4())).toEqual(viewport);
+    expect(rig.gl.getScissor(new THREE.Vector4())).toEqual(scissor);
+    expect(rig.gl.getScissorTest()).toBe(true);
+    await expect(
+      renderCompositionToBytes(
+        rig.gl,
+        () => {
+          throw new Error("draw failed");
+        },
+        target,
+      ),
+    ).rejects.toThrow("draw failed");
+    expect(rig.gl.getViewport(new THREE.Vector4())).toEqual(viewport);
+    expect(rig.gl.getScissor(new THREE.Vector4())).toEqual(scissor);
+    expect(rig.gl.getScissorTest()).toBe(true);
+  });
 });

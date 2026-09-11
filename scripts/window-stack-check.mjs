@@ -116,7 +116,7 @@ try {
   await page.waitForTimeout(2200);
   await page.evaluate((top) => {
     window.checkView = document.querySelector(`[data-file-view-id="${top}"]`);
-    window.checkTopMaterial = window.checkFiles[top].rendererRef.current.getDisplayMaterial();
+    window.checkTopHandle = window.checkFiles[top].rendererRef.current;
     window.checkStill = () => {
       const canvas = window.checkView.querySelector("canvas");
       if (canvas.style.visibility !== "visible") throw new Error("the pointer-away check must see the DOM still");
@@ -130,23 +130,11 @@ try {
   await page.waitForTimeout(2200);
   const changed = await page.evaluate(async (ids) => {
     const top = window.checkFiles[ids[2]].rendererRef.current;
-    if (
-      document.querySelector(`[data-file-view-id="${ids[2]}"]`) !== window.checkView ||
-      top.getDisplayMaterial() !== window.checkTopMaterial
-    )
+    if (document.querySelector(`[data-file-view-id="${ids[2]}"]`) !== window.checkView || top !== window.checkTopHandle)
       throw new Error("the top view remounted");
-    const { layerTint } = await import("/src/lib/layer-tint.ts");
-    for (const [index, id] of [ids[0], ids[2]].entries()) {
-      const material = window.checkFiles[id].rendererRef.current.getDisplayMaterial();
-      const tint = layerTint(index, 2);
-      for (const channel of ["left", "right"]) {
-        const actual = material.uniforms[`${channel}Tint`].value.toArray();
-        if (actual.some((value, i) => Math.abs(value - tint[channel][i]) > 1e-6)) throw new Error("old layer tint");
-      }
-    }
     const actual = window.checkStill();
     const changed = actual.filter((value, i) => value !== window.checkBefore[i]).length;
-    await top.captureSnapshot([window.checkFiles[ids[0]].rendererRef.current.getDisplayMaterial()]);
+    await top.captureSnapshot();
     const expected = window.checkStill();
     return { changed, mismatches: actual.filter((value, i) => Math.abs(value - expected[i]) > 1).length };
   }, ids);
@@ -177,9 +165,7 @@ try {
   await page.waitForTimeout(300);
   const pendingMismatches = await page.evaluate(async (ids) => {
     const actual = window.checkStill();
-    await window.checkFiles[ids[2]].rendererRef.current.captureSnapshot([
-      window.checkFiles[ids[0]].rendererRef.current.getDisplayMaterial(),
-    ]);
+    await window.checkFiles[ids[2]].rendererRef.current.captureSnapshot();
     return window.checkStill().filter((value, i) => Math.abs(value - actual[i]) > 1).length;
   }, ids);
   assert.equal(pendingMismatches, 0, "the pending revision must capture the reordered tints");

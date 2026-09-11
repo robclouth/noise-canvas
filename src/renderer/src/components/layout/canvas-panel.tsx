@@ -122,6 +122,7 @@ const LayerBox = memo(
   ({ fileId, stackLayerIds, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: LayerBoxProps) => {
     const isFullscreen = fullscreenFileId === fileId;
     const isMinimized = minimizedFileIds.includes(fileId);
+    const displayLayerIds = useMemo(() => stackLayerIds ?? [fileId], [stackLayerIds, fileId]);
     const hidden = (fullscreenFileId !== null && !isFullscreen) || isMinimized;
     return (
       <Box
@@ -135,7 +136,7 @@ const LayerBox = memo(
           fileId={fileId}
           isFullscreen={isFullscreen}
           isMinimized={isMinimized}
-          stackLayerIds={stackLayerIds}
+          stackLayerIds={displayLayerIds}
         />
       </Box>
     );
