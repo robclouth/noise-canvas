@@ -24,14 +24,24 @@ const footprintModule = buildSync({
   format: "esm",
   platform: "node",
 }).outputFiles[0].text;
-const { fixture, scriptedPositions, committedFootprints, expectedStrokeSpan, strokeSpanFailure } = await import(
+const { fixture, scriptedPositions, committedFootprints, expectedStrokeSpan } = await import(
   `data:text/javascript;base64,${Buffer.from(footprintModule).toString("base64")}`
+);
+
+const inputModule = buildSync({
+  entryPoints: [join(root, "scripts/window-check-input.ts")],
+  bundle: true,
+  write: false,
+  format: "esm",
+  platform: "browser",
+}).outputFiles[0].text;
+const { installInputMonitor, runCleanLeg, cleanStrokeFailures } = await import(
+  `data:text/javascript;base64,${Buffer.from(inputModule).toString("base64")}`
 );
 
 const blocks = process.argv[2] ?? "8";
 const SECONDS = fixture.seconds;
 const SAMPLE_RATE = fixture.sampleRate;
-const REFERENCE_MIN_PIXELS = 2_100_000;
 
 /** A tone long enough to need many blocks, written where the app can open it. */
 function writeTone(path) {
@@ -97,6 +107,79 @@ async function columnBrightness(app, page, rect) {
   );
 }
 
+async function proveInputOrigin(page, monitor, box, origin) {
+  const cover = await page.evaluateHandle(() => {
+    const element = document.createElement("div");
+    element.style.cssText = "position:fixed;inset:0;z-index:2147483647";
+    document.body.append(element);
+    return element;
+  });
+  try {
+    await monitor.evaluate((input) => input.begin());
+    const y = box.y + box.height * 0.45;
+    const points = scriptedPositions.map((position) => ({ x: box.x + box.width * position, y }));
+    await page.mouse.move(points[0].x, y);
+    await page.mouse.down();
+    for (const point of points.slice(1)) await page.mouse.move(point.x, y);
+    await cover.evaluate(
+      (element, { origin, point }) => {
+        const init = {
+          bubbles: true,
+          buttons: 0,
+          clientX: Math.floor(point.x),
+          clientY: Math.floor(point.y),
+          screenX: Math.floor(point.x) + origin.x,
+          screenY: Math.floor(point.y) + origin.y,
+        };
+        element.dispatchEvent(new PointerEvent("pointermove", init));
+        element.dispatchEvent(new MouseEvent("mousemove", init));
+      },
+      { origin, point: points.at(-1) },
+    );
+    await page.mouse.up();
+    await monitor.evaluate((input) => input.end());
+    const records = await monitor.evaluate((input) => input.read());
+    const expected = [];
+    const pair = (action, point, buttons) => {
+      for (const prefix of ["pointer", "mouse"]) expected.push({ type: prefix + action, ...point, buttons });
+    };
+    pair("move", points[0], 0);
+    pair("down", points[0], 1);
+    for (const point of points.slice(1)) pair("move", point, 1);
+    pair("up", points.at(-1), 0);
+    const scripted = records.filter(
+      (event) => event.origin === "scripted" && /^(pointer|mouse)(move|down|up)$/.test(event.type),
+    );
+    if (
+      scripted.length !== expected.length ||
+      expected.some((event, i) => {
+        const actual = scripted[i];
+        return (
+          actual.type !== event.type ||
+          actual.buttons !== event.buttons ||
+          !actual.isTrusted ||
+          Math.abs(actual.clientX - event.x) >= 1 ||
+          Math.abs(actual.clientY - event.y) >= 1
+        );
+      })
+    ) {
+      throw new Error(`the input discriminator did not recognise the scripted path: ${JSON.stringify(records)}`);
+    }
+    const injected = records.filter((event) => !event.isTrusted);
+    if (injected.length !== 2 || injected.some((event) => event.origin !== "native" || !event.duringStroke)) {
+      throw new Error(`the input discriminator missed the injected native-looking moves: ${JSON.stringify(injected)}`);
+    }
+    console.log(
+      `input proof: ${scripted.length} scripted events recognised; two injected native-looking moves detected at content origin (${origin.x}, ${origin.y}).`,
+    );
+  } finally {
+    await page.mouse.up();
+    await monitor.evaluate((input) => input.end());
+    await cover.evaluate((element) => element.remove());
+    await cover.dispose();
+  }
+}
+
 async function run(label, windowBlocks, wav) {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -106,102 +189,127 @@ async function run(label, windowBlocks, wav) {
 
   process.stdout.write(`${label}: building… `);
   execFileSync("npx", ["electron-vite", "build"], { cwd: root, env, stdio: "pipe" });
-  process.stdout.write("opening… ");
+  process.stdout.write("built.\n");
+  const result = await runCleanLeg(
+    label,
+    (attempt) => runAttempt(`${label}, attempt ${attempt}`, wav, env),
+    console.log,
+  );
+  const failures = cleanStrokeFailures(result.footprints);
+  for (const error of result.errors) failures.push(`console: ${error}`);
+  if (failures.length) throw new Error(`${label}: ${failures.join("\n")}`);
+  return result;
+}
 
+async function runAttempt(label, wav, env) {
+  process.stdout.write(`${label}: opening… `);
   const profile = mkdtempSync(join(tmpdir(), "nc-window-check-"));
   const app = await _electron.launch({ args: [root, `--user-data-dir=${profile}`], cwd: root, env });
-  const page = await app.firstWindow();
-  const logs = [];
-  const errors = [];
-  page.on("console", (message) => {
-    logs.push(message.text());
-    if (message.type() === "error" && !/HRTF/.test(message.text())) errors.push(message.text());
-  });
-  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+  try {
+    const page = await app.firstWindow();
+    const logs = [];
+    const errors = [];
+    page.on("console", (message) => {
+      logs.push(message.text());
+      if (message.type() === "error" && !/HRTF/.test(message.text())) errors.push(message.text());
+    });
+    page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
 
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(4000);
-  const noThanks = page.getByText("No thanks", { exact: false });
-  if (await noThanks.count())
-    await noThanks
-      .first()
-      .click()
-      .catch(() => {});
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForTimeout(4000);
+    const noThanks = page.getByText("No thanks", { exact: false });
+    if (await noThanks.count())
+      await noThanks
+        .first()
+        .click()
+        .catch(() => {});
 
-  await app.evaluate(({ BrowserWindow }, path) => {
-    BrowserWindow.getAllWindows()[0].webContents.send("open-file", path);
-  }, wav);
-  await page.waitForSelector("[data-file-view-id]", { timeout: 300000 });
-  await page.waitForTimeout(20000);
+    await app.evaluate(({ BrowserWindow }, path) => {
+      BrowserWindow.getAllWindows()[0].webContents.send("open-file", path);
+    }, wav);
+    await page.waitForSelector("[data-file-view-id]", { timeout: 300000 });
+    await page.waitForTimeout(20000);
 
-  const box = await page.locator("[data-file-view-id]").first().boundingBox();
-  if (!box) throw new Error("no file view to paint on");
-  const strip = {
-    x: box.x + box.width * 0.05,
-    y: box.y + box.height * 0.2,
-    width: box.width * 0.9,
-    height: box.height * 0.6,
-  };
+    const box = await page.locator("[data-file-view-id]").first().boundingBox();
+    if (!box) throw new Error("no file view to paint on");
+    const strip = {
+      x: box.x + box.width * 0.05,
+      y: box.y + box.height * 0.2,
+      width: box.width * 0.9,
+      height: box.height * 0.6,
+    };
 
-  process.stdout.write("painting… ");
-  // A drag across most of the file, so the window has to slide several times.
-  // The frame loop paints the cursor's position once per frame, so the steps
-  // are spaced wider than the slowest build's dab and both paint the same set.
-  const y = box.y + box.height * 0.45;
-  const from = scriptedPositions[0];
-  await page.mouse.move(box.x + box.width * from, y);
-  await page.waitForTimeout(3000);
-  await page.mouse.down();
-  for (const position of scriptedPositions.slice(1, -1)) {
-    await page.mouse.move(box.x + box.width * position, y);
+    const origin = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentBounds());
+    if (origin.x === 0 && origin.y === 0)
+      throw new Error("the content window is at the screen origin; native and scripted input cannot be distinguished");
+    const monitor = await page.evaluateHandle(installInputMonitor);
+    await proveInputOrigin(page, monitor, box, origin);
+    process.stdout.write(`${label}: painting… `);
+    // A drag across most of the file, so the window has to slide several times.
+    // The frame loop paints the cursor's position once per frame, so the steps
+    // are spaced wider than the slowest build's dab and both paint the same set.
+    const y = box.y + box.height * 0.45;
+    const from = scriptedPositions[0];
+    await page.mouse.move(box.x + box.width * from, y);
+    await page.waitForTimeout(3000);
+    await monitor.evaluate((input) => input.begin());
+    await page.mouse.down();
+    for (const position of scriptedPositions.slice(1, -1)) {
+      await page.mouse.move(box.x + box.width * position, y);
+      await page.waitForTimeout(400);
+    }
+    // A last dab back at the start, on a block the window has long left behind.
+    // It has to wait for the read, so a window that drops a waiting dab commits
+    // a shorter stroke than the whole file does.
+    await page.mouse.move(box.x + box.width * scriptedPositions.at(-1), y);
     await page.waitForTimeout(400);
+    await page.mouse.up();
+    await monitor.evaluate((input) => input.end());
+    const input = await monitor.evaluate((input) => input.read());
+    await monitor.evaluate((input) => input.dispose());
+    await monitor.dispose();
+    const finalOrigin = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentBounds());
+    if (
+      (origin.x !== finalOrigin.x || origin.y !== finalOrigin.y) &&
+      !input.some((event) => event.duringStroke && event.origin === "native")
+    )
+      throw new Error("the content window moved during the stroke; the input discriminator could not be verified");
+    await page.waitForTimeout(20000);
+    // Off the spectrogram, so no brush overlay lands in the picture.
+    await page.mouse.move(box.x + box.width * 0.2, box.y - 40);
+    await page.waitForTimeout(3000);
+
+    const columns = await columnBrightness(app, page, strip);
+    const residentMB = await page.evaluate(async () =>
+      Math.round((await process.getProcessMemoryInfo()).private / 1024),
+    );
+    const footprints = committedFootprints(logs);
+
+    process.stdout.write(`${residentMB} MB\n`);
+    for (const footprint of footprints) {
+      console.log(`${label}: ${footprint.line}`);
+      console.log(
+        `${label}: committed time bounds ${JSON.stringify(footprint.bounds)}; expected span ${JSON.stringify(expectedStrokeSpan())}`,
+      );
+    }
+    return { columns, footprints, errors, residentMB, input };
+  } finally {
+    await app.close();
   }
-  // A last dab back at the start, on a block the window has long left behind.
-  // It has to wait for the read, so a window that drops a waiting dab commits
-  // a shorter stroke than the whole file does.
-  await page.mouse.move(box.x + box.width * scriptedPositions.at(-1), y);
-  await page.waitForTimeout(400);
-  await page.mouse.up();
-  await page.waitForTimeout(20000);
-  // Off the spectrogram, so no brush overlay lands in the picture.
-  await page.mouse.move(box.x + box.width * 0.2, box.y - 40);
-  await page.waitForTimeout(3000);
-
-  const columns = await columnBrightness(app, page, strip);
-  const residentMB = await page.evaluate(async () => Math.round((await process.getProcessMemoryInfo()).private / 1024));
-  const footprints = committedFootprints(logs);
-
-  await app.close();
-  process.stdout.write(`${residentMB} MB\n`);
-  return { columns, footprints, errors, residentMB };
 }
 
 const wav = join(mkdtempSync(join(tmpdir(), "nc-window-audio-")), "tone.wav");
 writeTone(wav);
 
-const whole = await run("whole file", null, wav);
-const windowed = await run(`${blocks} blocks`, blocks, wav);
-
-const failures = [];
-for (const [label, result] of [
-  ["whole file", whole],
-  ["windowed", windowed],
-]) {
-  if (result.footprints.length === 0) failures.push(`${label}: the stroke committed nothing`);
-  if (result.footprints.length > 1) {
-    failures.push(`${label}: the drag produced ${result.footprints.length} commits; expected one`);
-  }
-  for (const footprint of result.footprints) {
-    console.log(`${label}: ${footprint.line}`);
-    console.log(
-      `${label}: committed time bounds ${JSON.stringify(footprint.bounds)}; expected span ${JSON.stringify(expectedStrokeSpan())}`,
-    );
-    const spanFailure = strokeSpanFailure(footprint);
-    if (spanFailure) failures.push(`${label}: ${spanFailure}`);
-  }
-  for (const error of result.errors) failures.push(`${label} console: ${error}`);
+function fail(error) {
+  console.error(`\nFAILED\n${error.message}`);
+  process.exit(1);
 }
 
+const whole = await run("whole file", null, wav).catch(fail);
+const windowed = await run(`${blocks} blocks`, blocks, wav).catch(fail);
+
+const failures = [];
 if (whole.columns.length !== windowed.columns.length) {
   failures.push(`the two runs measured different widths (${whole.columns.length} vs ${windowed.columns.length})`);
 } else {
@@ -210,14 +318,10 @@ if (whole.columns.length !== windowed.columns.length) {
   if (holes > 0) failures.push(`${holes} columns of the picture went black under the window`);
 }
 
-const describe = (footprint) => (footprint ? `${footprint.ranges} ranges / ${footprint.pixels} pixels` : "—");
+const describe = (footprint) => (footprint ? `${footprint.ranges} ranges / ${footprint.pixels} pixels` : "none");
 
 const wholeFootprint = whole.footprints.length === 1 ? whole.footprints[0] : null;
 const windowedFootprint = windowed.footprints.length === 1 ? windowed.footprints[0] : null;
-
-if (wholeFootprint && wholeFootprint.pixels < REFERENCE_MIN_PIXELS) {
-  failures.push(`whole file: ${wholeFootprint.pixels} pixels is below the reference floor of ${REFERENCE_MIN_PIXELS}`);
-}
 
 if (wholeFootprint && windowedFootprint) {
   if (wholeFootprint.ranges !== windowedFootprint.ranges) {
@@ -242,4 +346,4 @@ if (failures.length > 0) {
   console.error(`\nFAILED\n${failures.map((line) => `  - ${line}`).join("\n")}`);
   process.exit(1);
 }
-console.log("\nOK — the window paints what the whole file paints.");
+console.log("\nOK. The window paints what the whole file paints.");
