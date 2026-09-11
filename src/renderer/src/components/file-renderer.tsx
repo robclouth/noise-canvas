@@ -1,6 +1,14 @@
+import {
+  createFileDisplayMaterial,
+  disposeFileDisplayMaterial,
+  bindFileSpectralInputs,
+  bindFileTopOverlays,
+} from "../lib/file-display-material";
 import type {
   BrushUnionUv,
   DabSpan,
+  FileDisplayData,
+  FileViewDescriptor,
   FileRendererHandle,
   FileRendererProps,
   RegionStroke,
@@ -22,7 +30,6 @@ import { strokeRefusal as refusalFor, overReachRefusal } from "@renderer/lib/who
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
-import { createDefaultUniforms } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, logFileFootprint, openFiles } from "@renderer/store/files";
 import type { BrushStep } from "@renderer/parameters";
 import { State, type OpenFile, type SpectrogramData } from "@renderer/store/types";
@@ -34,7 +41,6 @@ import {
   Color,
   DataTexture,
   FloatType,
-  GLSL3,
   Mesh,
   NearestFilter,
   NormalBlending,
@@ -50,8 +56,6 @@ import { LONE_LAYER_TINT } from "@renderer/lib/layer-tint";
 import { effects } from "../effects";
 import { deriveSideData, getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
-import displayFrag from "../glsl/display.frag";
-import passThroughVert from "../glsl/pass-through.vert";
 import { metadataTextureRows } from "../lib/band-layout";
 import { DEFAULT_ONSET_SENSITIVITY, packedFold, padToFold } from "../lib/constants";
 import { displayLevelChoice } from "../lib/display-pyramid";
@@ -60,8 +64,6 @@ import { getFileOnsets } from "../lib/file-onsets";
 import { impulseNeeds, type ImpulseNeed } from "../lib/impulse-need";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
-import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
-import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
 import { renderExportImage as renderExportImageToCanvas, type ImageExportOptions } from "../lib/image-export";
 import type { PosterInfo } from "../lib/image-export-poster";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
@@ -306,73 +308,10 @@ const FileRendererInner = memo(
     // Materials and scene objects for rendering
     const displayMaterial = useMemo(() => {
       const state = useStore.getState();
-      return new RawShaderMaterial({
-        uniforms: {
-          ...createDefaultUniforms(),
-          sourceBrushSizeUv: { value: new Vector2(0.1, 0.1) },
-          minDb: { value: state.displayMinDb },
-          maxDb: { value: state.displayMaxDb },
-          bpm: { value: 120.0 },
-          gridSize: { value: 0.25 },
-          gridWidthUv: { value: 0.0 },
-          gridHeightUv: { value: 0.0 },
-          barWidthUv: { value: 0.0 },
-          swingOffsetUv: { value: 0.0 },
-          octaveHeightUv: { value: 0.0 },
-          showHorizontalGrid: { value: true },
-          showVerticalGrid: { value: true },
-          scaleGridEnabled: { value: false },
-          scaleOffsets: { value: new Float32Array(12) },
-          pitchOffsetSemisFromC0: { value: 0.0 },
-          leftTint: { value: new Color(LONE_LAYER_TINT.left[0], LONE_LAYER_TINT.left[1], LONE_LAYER_TINT.left[2]) },
-          rightTint: {
-            value: new Color(LONE_LAYER_TINT.right[0], LONE_LAYER_TINT.right[1], LONE_LAYER_TINT.right[2]),
-          },
-          drawOverlays: { value: true },
-          showTargetRectangle: { value: false },
-          showSourceRectangle: { value: false },
-          targetRectPulse: { value: 1.0 },
-          // Mantine orange[6] #fd7e14 by default; swapped to blue[6] while picking a source.
-          targetRectColor: { value: new Color(0.992, 0.494, 0.078) },
-          sourceSamplingBottomLeftUv: { value: new Vector2(-1, -1) },
-          viewZoomPower: { value: 0.0 },
-          viewOffset: { value: 0.0 },
-          viewZoomPowerY: { value: 0.0 },
-          viewOffsetY: { value: 0.0 },
-          wrapMode: { value: 0 },
-          fullScaleDbOffset: { value: FULL_SCALE_DB_OFFSET },
-          previewTex: { value: null as Texture | null },
-          previewBinRangesTex: { value: null as Texture | null },
-          previewActive: { value: false },
-          canvasMetadataTex: { value: null as Texture | null },
-          canvasFrameCount: { value: 0 },
-          canvasStartFrame: { value: 0 },
-          displayFineTex: { value: null as Texture | null },
-          displayFineMetaTex: { value: null as Texture | null },
-          displayCoarseTex: { value: null as Texture | null },
-          displayCoarseMetaTex: { value: null as Texture | null },
-          displayLevelBlend: { value: 0.0 },
-          displayPyramidActive: { value: false },
-          displayCanvasFirst: { value: false },
-          displayFinerWanted: { value: false },
-          displayLoadingAll: { value: false },
-          displayLoading: { value: 0.0 },
-          displayTileTex: { value: null as Texture | null },
-          displayTileMetaTex: { value: null as Texture | null },
-          displayTileFirst: { value: 0.0 },
-          displayTileCount: { value: 0.0 },
-          displayTileSlots: { value: 1.0 },
-          displayTileTexels: { value: 0.0 },
-          displayTileBlend: { value: 0.0 },
-          displayTileLevel: { value: 0.0 },
-        },
-        vertexShader: passThroughVert,
-        fragmentShader: displayFrag,
-        glslVersion: GLSL3,
-      });
+      return createFileDisplayMaterial(state);
     }, []);
 
-    useEffect(() => () => displayMaterial.dispose(), [displayMaterial]);
+    useEffect(() => () => disposeFileDisplayMaterial(displayMaterial), [displayMaterial]);
 
     const mesh = useRef<Mesh>(null!);
 
@@ -795,73 +734,35 @@ const FileRendererInner = memo(
       const viewZoomPowerY = state.filesZoomY[viewFileId] ?? 0;
       const viewOffsetY = state.filesOffsetY[viewFileId] ?? 0;
 
-      const uniforms = displayMaterial.uniforms;
-      uniforms.sourceInverseMapTex.value = inverseMapTex;
-      uniforms.sourceMetadataTex.value = metadataTex;
-      const canvasView = strokeRendererRef.current?.committedSource().view;
-      uniforms.canvasMetadataTex.value = strokeRendererRef.current?.getTextures().metadata ?? metadataTex;
-      uniforms.canvasFrameCount.value = canvasView
-        ? canvasView.endFrame - canvasView.startFrame
-        : spectrogramData.numFrames;
-      uniforms.canvasStartFrame.value = canvasView?.startFrame ?? 0;
-      uniforms.sourceMinFreq.value = spectrogramData.minFreq;
-      uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
-      uniforms.sourceFrameCount.value = spectrogramData.numFrames;
-      uniforms.sourceBandCount.value = spectrogramData.numBands;
-      uniforms.sourceChannelCount.value = spectrogramData.numChannels;
-      uniforms.sourceSampleRate.value = spectrogramData.sampleRate;
-      uniforms.sourceSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
-      uniforms.gridSize.value = state.gridSizeBeats;
-      uniforms.bpm.value = bpm;
-      uniforms.minDb.value = state.displayMinDb;
-      uniforms.maxDb.value = state.displayMaxDb;
-      uniforms.viewZoomPower.value = viewZoomPower;
-      uniforms.viewOffset.value = viewOffset;
-      uniforms.viewZoomPowerY.value = viewZoomPowerY;
-      uniforms.viewOffsetY.value = viewOffsetY;
+      const data: FileDisplayData = {
+        spectrogramData,
+        inverseMapTex,
+        metadataTex,
+        canvasView: strokeRendererRef.current?.committedSource().view,
+        canvasMetadataTex: strokeRendererRef.current?.getTextures().metadata ?? metadataTex,
+      };
+      const view: FileViewDescriptor = {
+        displayMinDb: state.displayMinDb,
+        displayMaxDb: state.displayMaxDb,
+        gridSizeBeats: state.gridSizeBeats,
+        gridSizeSemis: state.gridSizeSemis,
+        gridSwing: state.gridSwing,
+        scaleTonic: state.scaleTonic,
+        scaleType: state.scaleType,
+        bpm,
+        totalDuration,
+        viewZoomPower,
+        viewOffset,
+        viewZoomPowerY,
+        viewOffsetY,
+        viewportWidth,
+        viewportHeight,
+      };
+      bindFileSpectralInputs(displayMaterial, data, view);
 
       applyDisplayPyramidUniforms(viewZoomPower, viewOffset, viewportWidth);
 
-      // Calculate and update grid values
-      const gridSizeBeats = state.gridSizeBeats;
-      const gridSizeSemis = state.gridSizeSemis;
-
-      // Horizontal grid (time/beats)
-      const beatDurationSeconds = 60.0 / bpm;
-      const gridIntervalSeconds = beatDurationSeconds * gridSizeBeats;
-      const gridWidthUv = gridSizeBeats > 0 ? gridIntervalSeconds / totalDuration : 0;
-      const barWidthUv = gridSizeBeats > 0 ? (beatDurationSeconds * 4.0) / totalDuration : 0;
-
-      // Vertical grid (frequency/semitones). When gridSizeSemis is 0, the pitch grid is in
-      // "Scale" mode and the chromatic grid is suppressed in favor of the scale grid.
-      const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
-      const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
-      const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
-      const octaveHeightUv = gridSizeSemis > 0 ? (12 * bandsPerSemitone) / spectrogramData.numBands : 0;
-
-      // Determine if grid lines should be shown based on spacing (min 10 pixels apart).
-      // Multiply by the view zoom factor so zooming in can reveal lines that were too
-      // dense at 1x.
-      const MIN_GRID_SPACING_PX = 10;
-      const zoomX = Math.pow(2, viewZoomPower);
-      const zoomY = Math.pow(2, viewZoomPowerY);
-      const gridWidthPx = gridWidthUv * viewportWidth * zoomX;
-      const gridHeightPx = gridHeightUv * viewportHeight * zoomY;
-
-      uniforms.gridWidthUv.value = gridWidthUv;
-      uniforms.gridHeightUv.value = gridHeightUv;
-      uniforms.barWidthUv.value = barWidthUv;
-      uniforms.swingOffsetUv.value = gridWidthUv * (state.gridSwing / 100) * 0.5;
-      uniforms.octaveHeightUv.value = octaveHeightUv;
-      uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
-      uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
-
-      // Scale grid: draw a line at every in-scale semitone when scale snap is on. Hide when too dense.
-      const semitoneHeightPx =
-        (spectrogramData.bandsPerOctave / 12 / spectrogramData.numBands) * viewportHeight * zoomY;
-      uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
-      uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
-      uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
+      bindFileTopOverlays(displayMaterial, data, view);
     };
 
     /**
