@@ -24,8 +24,6 @@ import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "..
 import FileHeader from "./file-header";
 import { FILE_VIEW_BODY_HEIGHT } from "@renderer/lib/file-view-metrics";
 import { ViewRenderer } from "./view-renderer";
-import { savedViewTransform } from "../lib/view-display";
-import { useShallow } from "zustand/react/shallow";
 import type { FileRendererHandle } from "../lib/file-renderer-types";
 import { LoopRegion } from "./loop-region";
 import { SelectionRegion } from "./selection-region";
@@ -157,11 +155,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   }, [pickingFileParam, isPanning, isZooming, editMode, shiftHeld]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
-  const transform = useStore(useShallow((state) => savedViewTransform(state, fileId)));
-  const descriptor = useMemo(
-    () => ({ topId: fileId, layerIds: stackLayerIds ?? [fileId], transform }),
-    [fileId, stackLayerIds, transform],
-  );
+  const descriptor = useMemo(() => ({ topId: fileId, layerIds: stackLayerIds ?? [fileId] }), [fileId, stackLayerIds]);
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);

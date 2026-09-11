@@ -21,6 +21,7 @@ import { strokeReach } from "../effect-reach";
 import { StrokeRenderer } from "../stroke-renderer";
 import { BRUSH_SIZE_TIME_FULL, BRUSH_SIZE_PITCH_FULL, snapToSwungGridCenter, uvToUnits } from "../utils";
 import { WindowedCanvas } from "../windowed-canvas";
+import { savedViewTransform, type ViewTransform } from "../view-display";
 
 vi.mock("../gpu-budget", async (original) => ({
   ...(await original<typeof import("../gpu-budget")>()),
@@ -79,7 +80,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function mount(state: State, blocks: number, durationSeconds = 300) {
+async function mount(state: State, blocks: number, durationSeconds = 300, requestFrame?: () => void) {
   windowBlocks = blocks;
   const w = window as unknown as Record<string, unknown>;
   const previous = { nodeOs: w.nodeOs, ipcRenderer: w.ipcRenderer, nodePath: w.nodePath };
@@ -99,8 +100,6 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
       import("../../store/transient"),
       import("../../components/file-engine-provider"),
     ]);
-  const { savedViewTransform } = await import("../view-display");
-  const { useShallow } = await import("zustand/react/shallow");
   const initialState = useStore.getState();
   useStore.setState({
     ...state,
@@ -152,14 +151,20 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   const element = document.createElement("canvas");
   const gl = new THREE.WebGLRenderer({ canvas: element });
   const root = createRoot(element);
-  await root.configure({ gl, frameloop: "never", size: { width: 100, height: 100, top: 0, left: 0 } });
+  await root.configure({
+    gl,
+    frameloop: "never",
+    size: { width: 100, height: 100, top: 0, left: 0 },
+    onCreated: (state) => {
+      if (requestFrame) state.set({ invalidate: requestFrame });
+    },
+  });
   const initializeSpy = vi.spyOn(WindowedCanvas.prototype, "initialize");
   const displaySpy = vi.spyOn(StrokeRenderer.prototype, "getDisplayPyramid");
   function TestView({ parked, selected }: { parked: boolean; selected: string }) {
-    const transform = useStore(useShallow((state) => savedViewTransform(state, selected)));
     const ids = useStore((state) => state.openFileIds);
     return createElement(ViewRenderer, {
-      descriptor: { topId: "residency", layerIds: ids, transform },
+      descriptor: { topId: selected, layerIds: ids },
       isLive: true,
       parked,
       snapshotCanvasRef: snapshot,
@@ -717,6 +722,12 @@ describe("session-owned file engine", () => {
 
   it("borrows the selected file's saved transform without changing either saved view", async () => {
     const rig = await mount(brush(0), Infinity, 8);
+    const { openFiles } = await import("../../store/files");
+    openFiles.selected = { ...rig.file, id: "selected", filePath: "/selected.wav", rendererRef: { current: null } };
+    disposers.push(() => {
+      delete openFiles.selected;
+    });
+    rig.useStore.setState({ openFileIds: ["residency", "selected"] });
     const saved = {
       filesZoom: { residency: 2, selected: 4 },
       filesOffset: { residency: 0.2, selected: 0.6 },
@@ -880,6 +891,53 @@ async function stackedView(count: number) {
 }
 
 describe("one direct display per view", () => {
+  it("draws each gesture revision once, with its current transform, including momentum", async () => {
+    let pending = false;
+    const rig = await mount(brush(0), Infinity, 8, () => {
+      pending = true;
+    });
+    const flush = () => {
+      if (!pending) return;
+      pending = false;
+      rig.frame();
+    };
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    flush();
+    const frames: ViewTransform[] = [];
+    const material = rig.getMaterial()!;
+    const render = rig.gl.render.bind(rig.gl);
+    vi.spyOn(rig.gl, "render").mockImplementation((scene, camera) => {
+      scene.traverse((object) => {
+        if (!(object instanceof THREE.Mesh) || object.material !== material) return;
+        frames.push({
+          viewZoomPower: material.uniforms.viewZoomPower.value,
+          viewOffset: material.uniforms.viewOffset.value,
+          viewZoomPowerY: material.uniforms.viewZoomPowerY.value,
+          viewOffsetY: material.uniforms.viewOffsetY.value,
+        });
+      });
+      render(scene, camera);
+    });
+    const state = rig.useStore.getState();
+    const inputs = [
+      () => state.setFileZoomAndOffset("residency", 2, 0.2),
+      () => state.setFileOffset("residency", 0.4),
+      () => state.setFileOffset("residency", 0.45),
+      () => state.setFileOffset("residency", 0.475),
+      () => state.setFileZoomAndOffsetY("residency", 1, 0.3),
+    ];
+    for (const input of inputs) {
+      frames.length = 0;
+      input();
+      const expected = savedViewTransform(rig.useStore.getState(), "residency");
+      flush();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      flush();
+      expect.soft(frames).toHaveLength(1);
+      for (const transform of frames) expect.soft(transform).toEqual(expected);
+    }
+  });
+
   it("draws a background whose history seed arrives after its record mounts", async () => {
     const rig = await stackedView(1);
     const { openFiles } = await import("../../store/files");

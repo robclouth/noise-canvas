@@ -171,6 +171,22 @@ export class ViewDisplay {
       if (this.top) this.mark(this.top);
     }
   }
+  updateTransform(transform: ViewTransform): void {
+    const previous = this.descriptor.transform;
+    if (
+      transform.viewZoomPower === previous.viewZoomPower &&
+      transform.viewOffset === previous.viewOffset &&
+      transform.viewZoomPowerY === previous.viewZoomPowerY &&
+      transform.viewOffsetY === previous.viewOffsetY
+    )
+      return;
+    this.descriptor = { ...this.descriptor, transform };
+    for (const layer of this.layers) {
+      layer.residency.transform = transform;
+      this.pending.add(layer);
+    }
+    this.changed();
+  }
   resize(width: number, height: number): void {
     if (this.width === width && this.height === height) return;
     this.width = width;

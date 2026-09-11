@@ -17,7 +17,7 @@ import { useStore } from "../store";
 import { useTransientStore } from "../store/transient";
 import { FileEngineRegistryContext } from "../lib/file-engine-registry";
 import type { FileRendererHandle } from "../lib/file-renderer-types";
-import { ViewDisplay, type ViewDescriptor } from "../lib/view-display";
+import { savedViewTransform, ViewDisplay, type ViewDescriptor } from "../lib/view-display";
 import { captureCompositionToCanvas } from "../lib/snapshot-capture";
 import { perfAdd, perfEnabled, perfSyncEnabled } from "../lib/perf-probe";
 import { prepareFileEditor } from "./file-renderer";
@@ -28,7 +28,7 @@ export interface ViewRendererHandle {
   refreshSnapshot: () => void;
 }
 export interface ViewRendererProps {
-  descriptor: ViewDescriptor;
+  descriptor: Pick<ViewDescriptor, "topId" | "layerIds">;
   isLive: boolean;
   parked: boolean;
   snapshotCanvasRef: RefObject<HTMLCanvasElement | null>;
@@ -49,19 +49,18 @@ export const ViewRenderer = memo(
     const scene = useThree((state) => state.scene);
     const dpr = useThree((state) => state.viewport.dpr);
     const invalidate = useThree((state) => state.invalidate);
-    const [initialDescriptor] = useState(props.descriptor);
+    const [initialDescriptor] = useState(() => ({
+      ...props.descriptor,
+      transform: savedViewTransform(useStore.getState(), topId),
+    }));
     const latest = useRef(props);
     latest.current = props;
     const dirty = useRef(true);
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const refresh = useRef<() => void>(() => {});
     const display = useMemo(
-      () =>
-        new ViewDisplay(registry, initialDescriptor, () => {
-          dirty.current = true;
-          invalidate();
-        }),
-      [registry, initialDescriptor, invalidate],
+      () => new ViewDisplay(registry, initialDescriptor, () => refresh.current()),
+      [registry, initialDescriptor],
     );
     const scheduleSnapshotRefresh = () => {
       dirty.current = true;
@@ -110,10 +109,11 @@ export const ViewRenderer = memo(
       [display],
     );
     useLayoutEffect(() => {
-      display.update(props.descriptor, useStore.getState());
+      const state = useStore.getState();
+      display.update({ ...props.descriptor, transform: savedViewTransform(state, topId) }, state);
       resize();
       refresh.current();
-    }, [display, props.descriptor, engineRevision, resize]);
+    }, [display, props.descriptor, topId, engineRevision, resize]);
     useLayoutEffect(() => {
       const id = topId;
       const engine = registry.get(id);
@@ -167,6 +167,7 @@ export const ViewRenderer = memo(
     }, [registry, topId, onFileHandle, engineRevision, invalidate]);
     useEffect(() => {
       const unsubscribe = useStore.subscribe((state) => {
+        display.updateTransform(savedViewTransform(state, display.descriptor.topId));
         display.updateState(state);
         invalidate();
       });
