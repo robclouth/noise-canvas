@@ -2,9 +2,11 @@ import {
   ClampToEdgeWrapping,
   DataTexture,
   FloatType,
+  GLSL3,
   NearestFilter,
   RGBAFormat,
   RGFormat,
+  RawShaderMaterial,
   Vector2,
   WebGLRenderer,
 } from "three";
@@ -23,6 +25,8 @@ import { displayPyramidLevels } from "../display-pyramid";
 import { packedFold, padToFold } from "../constants";
 import { metadataTextureRows } from "../band-layout";
 import type { SourceNeed } from "../source-window";
+import { createByteTarget, renderMaterialToBytes } from "../snapshot-capture";
+import passThroughVert from "../../glsl/pass-through.vert";
 
 const SAMPLE_RATE = 8000;
 // Long enough for the two-second block grid to cut the file into eight blocks.
@@ -838,6 +842,175 @@ describe("a canvas that holds a window of the file", () => {
     await until(() => fillSpy.mock.calls.length > 0, "a fill request after storeReady");
     expect(fillSpy).toHaveBeenCalled();
     expect(canvas.holdsFrames(view!.startFrame, view!.endFrame)).toBe(true);
+  });
+
+  async function delayedSeed() {
+    let renderer: StrokeRenderer | null = null;
+    let delay = false;
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const readBlock = vi.fn(async (index: number): Promise<Float32Array | null> => {
+      const list = blockPixelRanges(grid, index);
+      const values = gatherPixelRanges(data.packedData, list.ranges.subarray(0, list.count * 2));
+      if (delay) await gate;
+      return values;
+    });
+    const readRoot = vi.fn<(ranges: Uint32Array) => Promise<Float32Array | null>>().mockResolvedValue(null);
+    const canvas = new WindowedCanvas({
+      gl,
+      spectrogram: data,
+      windowBlocks: 2,
+      renderer: () => renderer,
+      readCurrent: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+      readRoot,
+      readCurrentBlock: readBlock,
+      onChanged: () => {},
+      sourceBlocks: () => null,
+    });
+    const view = canvas.firstView(0, grid.blockFrames);
+    const replace = (): StrokeRenderer => {
+      const next = new StrokeRenderer(gl, data, strokeTextures, "seed", effects, view);
+      next.initialize();
+      disposers.push(() => next.dispose());
+      renderer = next;
+      return next;
+    };
+    const initial = replace();
+    disposers.push(() => canvas.dispose());
+    canvas.initialize(data.packedData);
+    await until(() => canvas.holdsView(), "the initial canvas fill");
+    readBlock.mockClear();
+    delay = true;
+    return { canvas, initial, replace, release, readBlock, readRoot };
+  }
+
+  it.each([true, false])("keeps a pending seed out of a replacement renderer (disposed: %s)", async (dispose) => {
+    const rig = await delayedSeed();
+    const pending = rig.canvas.storeReady();
+    expect(rig.readBlock).toHaveBeenCalledTimes(4);
+    if (dispose) rig.canvas.dispose();
+    const replacement = rig.replace();
+    const begin = vi.spyOn(replacement, "beginDisplaySeedFromStore");
+    const patch = vi.spyOn(replacement, "patchDisplayFromCompact");
+    const finish = vi.spyOn(replacement, "finishDisplaySeed");
+    const source = vi.spyOn(replacement, "committedSource");
+    rig.release();
+    await pending;
+    expect(patch).not.toHaveBeenCalled();
+    expect(begin).not.toHaveBeenCalled();
+    expect(finish).not.toHaveBeenCalled();
+    expect(source).not.toHaveBeenCalled();
+    expect(rig.readBlock).toHaveBeenCalledTimes(4);
+  });
+
+  it("abandons a seed after reinitialising the same renderer", async () => {
+    const rig = await delayedSeed();
+    const pending = rig.canvas.storeReady();
+    rig.canvas.initialize(data.packedData);
+    const patch = vi.spyOn(rig.initial, "patchDisplayFromCompact");
+    const aim = vi.spyOn(rig.canvas, "aim");
+    rig.release();
+    await pending;
+    expect(patch).not.toHaveBeenCalled();
+    expect(aim).not.toHaveBeenCalled();
+  });
+
+  it("abandons a seed while its root fallback is pending", async () => {
+    const rig = await delayedSeed();
+    let releaseRoot = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseRoot = resolve;
+    });
+    rig.readBlock.mockResolvedValue(null);
+    rig.readRoot.mockImplementation(async (ranges) => {
+      await gate;
+      return gatherPixelRanges(data.packedData, ranges);
+    });
+    const pending = rig.canvas.storeReady();
+    await until(() => rig.readRoot.mock.calls.length === 4, "the seed's root reads");
+    rig.canvas.dispose();
+    const replacement = rig.replace();
+    const patch = vi.spyOn(replacement, "patchDisplayFromCompact");
+    releaseRoot();
+    await pending;
+    expect(patch).not.toHaveBeenCalled();
+    expect(rig.readRoot).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([true, false])("drains rejected seed read-ahead (rejected before the first read: %s)", async (early) => {
+    const rig = await delayedSeed();
+    let rejectRead: (error: Error) => void = () => {};
+    const abandoned = new Promise<Float32Array | null>((_resolve, reject) => {
+      rejectRead = reject;
+    });
+    rig.readBlock
+      .mockImplementationOnce(rig.readBlock.getMockImplementation()!)
+      .mockImplementationOnce(() => abandoned);
+    let settled = false;
+    const pending = rig.canvas.storeReady().then(() => {
+      settled = true;
+    });
+    rig.canvas.dispose();
+    if (early) rejectRead(new Error("abandoned read"));
+    else rig.release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    if (early) rig.release();
+    else rejectRead(new Error("abandoned read"));
+    await pending;
+    expect(settled).toBe(true);
+    expect(rig.readRoot).not.toHaveBeenCalled();
+  });
+
+  it("checks the seed owner again before storeReady aims the canvas", async () => {
+    const rig = await delayedSeed();
+    vi.spyOn(rig.initial, "finishDisplaySeed").mockImplementationOnce(() => {
+      rig.canvas.dispose();
+      rig.replace();
+    });
+    const pending = rig.canvas.storeReady();
+    const aim = vi.spyOn(rig.canvas, "aim");
+    rig.release();
+    await pending;
+    expect(aim).not.toHaveBeenCalled();
+  });
+
+  it("keeps a later compact edit when a still-current initial seed resolves", async () => {
+    const rig = await delayedSeed();
+    const pending = rig.canvas.storeReady();
+    const list = blockPixelRanges(grid, 0);
+    const ranges = Uint32Array.of(list.ranges[0], 8);
+    const values = new Float32Array(8 * 4).fill(0.001);
+    expect(rig.canvas.patchFBODataCompact(values, ranges)).toBe(true);
+    rig.release();
+    await pending;
+
+    const material = new RawShaderMaterial({
+      glslVersion: GLSL3,
+      vertexShader: passThroughVert,
+      fragmentShader: `precision highp float;
+        uniform sampler2D levelTex;
+        out vec4 outColor;
+        void main() {
+          outColor = vec4((texelFetch(levelTex, ivec2(gl_FragCoord.xy), 0).rg + 100.0) / 100.0, 0.0, 1.0);
+        }`,
+      uniforms: { levelTex: { value: rig.initial.getDisplayPyramid()!.texture(0) } },
+    });
+    const target = createByteTarget(32, 1);
+    try {
+      const actual = await renderMaterialToBytes(gl, material, target);
+      rig.initial.seedDisplayFromPacked(data.packedData);
+      rig.canvas.patchFBODataCompact(values, ranges);
+      const expected = await renderMaterialToBytes(gl, material, target);
+      expect(actual).toEqual(expected);
+      expect(actual[0]).toBeLessThan(actual[8 * 4]);
+      expect(rig.initial.getDisplayPyramid()!.readyLevel).toBe(0);
+    } finally {
+      material.dispose();
+      target.dispose();
+    }
   });
 
   it("shows a strip of the whole file at a coarser level until the store draw finishes", async () => {

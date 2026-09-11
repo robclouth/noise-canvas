@@ -31,6 +31,7 @@ import {
   intersectPixelRanges,
   mergePixelRanges,
   pixelRangeCount,
+  subtractPixelRanges,
   tapCount,
   tapSpanRanges,
 } from "./pixel-ranges";
@@ -137,6 +138,9 @@ export class WindowedCanvas {
   private request: WindowRequest | null = null;
   private fill: Promise<void> | null = null;
   private drawingStore: Promise<void> | null = null;
+  private displaySeed: { edited: Uint32Array } | null = null;
+  private generation = 0;
+  private disposed = false;
   private readonly held: HeldPaint[] = [];
   private carried = new CarriedPaint();
   private readonly pending: PendingPaint[] = [];
@@ -191,7 +195,10 @@ export class WindowedCanvas {
    */
   initialize(seed: Float32Array | null, strip: CoarseStrip | null = null): void {
     const renderer = this.deps.renderer();
-    if (!renderer) return;
+    if (this.disposed || !renderer) return;
+    this.generation++;
+    this.drawingStore = null;
+    this.displaySeed = null;
     const window = this.blocks;
     if (!window) {
       renderer.initialize();
@@ -223,9 +230,12 @@ export class WindowedCanvas {
    * stays blank until something else aims the canvas.
    */
   async storeReady(): Promise<void> {
-    await this.drawDisplayFromStore();
+    const generation = this.generation;
     const renderer = this.deps.renderer();
-    if (!renderer?.getIsInitialized()) return;
+    if (this.disposed || !renderer?.getIsInitialized()) return;
+    await this.drawDisplayFromStore();
+    if (this.disposed || generation !== this.generation || renderer !== this.deps.renderer()) return;
+    if (!renderer.getIsInitialized()) return;
     const view = renderer.committedSource().view;
     this.aim(view.startFrame, view.endFrame);
   }
@@ -236,39 +246,74 @@ export class WindowedCanvas {
    * blocks are read, a few reads in flight ahead of the block being drawn.
    */
   private drawDisplayFromStore(): Promise<void> {
+    if (this.disposed || !this.blocks) return Promise.resolve();
     if (this.drawingStore) return this.drawingStore;
-    if (!this.blocks) return Promise.resolve();
+    const renderer = this.deps.renderer();
+    if (!renderer?.getIsInitialized()) return Promise.resolve();
+    const generation = this.generation;
+    const current = (): boolean =>
+      !this.disposed &&
+      generation === this.generation &&
+      renderer === this.deps.renderer() &&
+      renderer.getIsInitialized();
+    const seed: { edited: Uint32Array } = { edited: new Uint32Array(0) };
+    for (const paint of this.pending) seed.edited = mergePixelRanges(seed.edited, paint.ranges);
+    if (this.stroking) seed.edited = mergePixelRanges(seed.edited, this.dirtyPixelRanges() ?? new Uint32Array(0));
+    this.displaySeed = seed;
     const { readCurrent, readCurrentBlock, readRoot, readRootBlock } = this.deps;
-    const read = async (index: number): Promise<{ ranges: Uint32Array; values: Float32Array | null }> => {
-      const list = blockPixelRanges(this.grid, index);
-      const ranges = list.ranges.slice(0, list.count * 2);
-      const values =
-        (await (readCurrentBlock ? readCurrentBlock(index) : readCurrent(ranges))) ??
-        (await (readRootBlock ? readRootBlock(index) : readRoot(ranges)));
-      return { ranges, values };
+    const read = async (index: number): Promise<{ ranges: Uint32Array; values: Float32Array } | null> => {
+      try {
+        const list = blockPixelRanges(this.grid, index);
+        const ranges = list.ranges.slice(0, list.count * 2);
+        let values = await (readCurrentBlock ? readCurrentBlock(index) : readCurrent(ranges));
+        if (!current()) return null;
+        if (!values) {
+          values = await (readRootBlock ? readRootBlock(index) : readRoot(ranges));
+          if (!current()) return null;
+        }
+        return values ? { ranges, values } : null;
+      } catch (error) {
+        if (current()) diag.warn("gl", "display seed read failed", { error: String(error) });
+        return null;
+      }
     };
     const draw = async (): Promise<void> => {
       const count = this.grid.blockCount;
       const pending: Array<ReturnType<typeof read>> = [];
-      for (let index = 0; index < Math.min(DISPLAY_DRAW_READ_AHEAD, count); index++) pending.push(read(index));
-      let seeded = false;
-      for (let index = 0; index < count; index++) {
-        const { ranges, values } = await pending.shift()!;
-        if (index + DISPLAY_DRAW_READ_AHEAD < count) pending.push(read(index + DISPLAY_DRAW_READ_AHEAD));
-        const renderer = this.deps.renderer();
-        if (!values || !renderer?.getIsInitialized()) return;
-        if (!seeded) {
-          renderer.beginDisplaySeedFromStore();
-          seeded = true;
+      try {
+        for (let index = 0; index < Math.min(DISPLAY_DRAW_READ_AHEAD, count); index++) pending.push(read(index));
+        let seeded = false;
+        for (let index = 0; index < count; index++) {
+          const block = await pending.shift()!;
+          if (!current() || !block) return;
+          if (index + DISPLAY_DRAW_READ_AHEAD < count) pending.push(read(index + DISPLAY_DRAW_READ_AHEAD));
+          if (!seeded) {
+            renderer.beginDisplaySeedFromStore();
+            seeded = true;
+          }
+          // Newer display pixels survive even while their store commit is still pending.
+          const ranges = seed.edited.length === 0 ? block.ranges : subtractPixelRanges(block.ranges, seed.edited);
+          if (ranges.length > 0) {
+            const values = seed.edited.length === 0 ? block.values : composePixelRangeValues(ranges, [block]);
+            renderer.patchDisplayFromCompact(values, ranges);
+          }
+          this.deps.onChanged();
         }
-        renderer.patchDisplayFromCompact(values, ranges);
-        this.deps.onChanged();
+        if (current()) renderer.finishDisplaySeed();
+      } finally {
+        await Promise.all(pending);
       }
-      this.deps.renderer()?.finishDisplaySeed();
     };
-    const tracked = draw().finally(() => {
-      if (this.drawingStore === tracked) this.drawingStore = null;
-    });
+    const tracked = draw()
+      .catch((error) => {
+        if (current()) diag.warn("gl", "display seed failed", { error: String(error) });
+      })
+      .finally(() => {
+        if (this.drawingStore === tracked) {
+          this.drawingStore = null;
+          this.displaySeed = null;
+        }
+      });
     this.drawingStore = tracked;
     return tracked;
   }
@@ -392,6 +437,7 @@ export class WindowedCanvas {
   holdPaint(ranges: Uint32Array, values: Promise<Float32Array>): () => void {
     // A display tile cut from the store while the stroke was painted lacks
     // its dabs; the canvas has them all now.
+    this.recordDisplayEdit(ranges);
     this.deps.renderer()?.refreshDisplayFromStroke();
     const paint: PendingPaint = {
       ranges,
@@ -492,7 +538,9 @@ export class WindowedCanvas {
    */
   paintWhenHeld(startFrame: number, endFrame: number, needs: DabNeeds, paint: () => boolean): boolean {
     if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame, needs.original) && this.othersHold(needs)) {
-      return paint();
+      const painted = paint();
+      if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
+      return painted;
     }
     this.held.push({ startFrame, endFrame, needs, paint });
     return true;
@@ -730,6 +778,7 @@ export class WindowedCanvas {
   setFBOData(data: Float32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
+    if (this.displaySeed) this.recordDisplayEdit(this.fullFilePixelRanges());
     if (this.coversFile()) {
       renderer.setFBOData(data);
       return true;
@@ -750,6 +799,7 @@ export class WindowedCanvas {
   patchFBOData(data: Float32Array, pixelRanges: Uint32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
+    this.recordDisplayEdit(pixelRanges);
     if (this.coversFile()) {
       renderer.patchFBOData(data, pixelRanges);
       return true;
@@ -764,6 +814,7 @@ export class WindowedCanvas {
   patchFBODataCompact(values: Float32Array, pixelRanges: Uint32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
+    this.recordDisplayEdit(pixelRanges);
     if (this.coversFile()) {
       renderer.patchFBODataCompact(values, pixelRanges);
       return true;
@@ -805,6 +856,9 @@ export class WindowedCanvas {
   }
 
   dispose(): void {
+    this.disposed = true;
+    this.generation++;
+    this.displaySeed = null;
     this.blocks?.dispose();
     this.original?.dispose();
     for (const slot of this.sources.values()) slot.dispose();
@@ -816,6 +870,10 @@ export class WindowedCanvas {
   }
 
   // ---------- inside ----------
+
+  private recordDisplayEdit(ranges: Uint32Array | null): void {
+    if (this.displaySeed && ranges) this.displaySeed.edited = mergePixelRanges(this.displaySeed.edited, ranges);
+  }
 
   private view(): CanvasView | null {
     return this.deps.renderer()?.committedSource().view ?? null;
@@ -857,6 +915,7 @@ export class WindowedCanvas {
       }
       this.held.shift();
       next.paint();
+      if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
     }
   }
 
