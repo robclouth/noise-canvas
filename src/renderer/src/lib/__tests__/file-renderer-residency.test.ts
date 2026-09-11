@@ -122,9 +122,10 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   const root = createRoot(element);
   await root.configure({ gl, frameloop: "never", size: { width: 100, height: 100, top: 0, left: 0 } });
   const initializeSpy = vi.spyOn(WindowedCanvas.prototype, "initialize");
-  const render = (parked: boolean) =>
+  const render = (parked: boolean, instance = 0) =>
     root.render(
       createElement(FileRenderer, {
+        key: instance,
         fileId: "residency",
         isLive: true,
         parked,
@@ -405,4 +406,22 @@ it("uses block capacity for the visible refusal and batch admission", async () =
   expect(rig.ref.current!.strokeRefusal(wide, aim)).not.toBeNull();
   rig.ref.current!.beginStroke();
   expect(rig.ref.current!.renderStrokeBatch([{ state: wide, aimX: aim.x, aimY: aim.y }])).toBe(0);
+});
+
+it("disposes each display material and releases its renderer properties across remounts", async () => {
+  const rig = await mount(brush(0), Infinity, 8);
+  for (let cycle = 0; cycle < 4; cycle++) {
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(rig.ref.current?.getTextures()).toBeTruthy();
+    });
+    const material = rig.ref.current!.getDisplayMaterial()!;
+    expect(rig.gl.properties.has(material)).toBe(true);
+    const disposed = vi.fn();
+    material.addEventListener("dispose", disposed);
+    if (cycle < 3) rig.render(false, cycle + 1);
+    else await rig.unmount();
+    await vi.waitFor(() => expect(disposed).toHaveBeenCalledTimes(1));
+    expect(rig.gl.properties.has(material)).toBe(false);
+  }
 });

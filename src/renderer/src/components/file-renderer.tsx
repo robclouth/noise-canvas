@@ -585,6 +585,8 @@ const FileRendererInner = memo(
       });
     }, []);
 
+    useEffect(() => () => displayMaterial.dispose(), [displayMaterial]);
+
     const mesh = useRef<Mesh>(null!);
 
     // A layer behind another adds into the picture already there and draws no
