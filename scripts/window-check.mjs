@@ -20,6 +20,7 @@ const { _electron } = createRequire(join(root, "package.json"))("playwright");
 const blocks = process.argv[2] ?? "8";
 const SECONDS = 60;
 const SAMPLE_RATE = 44100;
+const REFERENCE_MIN_PIXELS = 2_100_000;
 
 /** A tone long enough to need many blocks, written where the app can open it. */
 function writeTone(path) {
@@ -200,6 +201,10 @@ const describe = (footprint) => (footprint ? `${footprint.ranges} ranges / ${foo
 
 const wholeFootprint = whole.footprints.length === 1 ? whole.footprints[0] : null;
 const windowedFootprint = windowed.footprints.length === 1 ? windowed.footprints[0] : null;
+
+if (wholeFootprint && wholeFootprint.pixels < REFERENCE_MIN_PIXELS) {
+  failures.push(`whole file: ${wholeFootprint.pixels} pixels is below the reference floor of ${REFERENCE_MIN_PIXELS}`);
+}
 
 if (wholeFootprint && windowedFootprint) {
   if (wholeFootprint.ranges !== windowedFootprint.ranges) {
