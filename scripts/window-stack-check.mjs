@@ -64,7 +64,9 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.closeDevTools());
   await page.waitForFunction(() => Boolean(window.__store), null, { timeout: 120000 });
   const noThanks = page.getByText("No thanks", { exact: false });
-  if (await noThanks.count()) await noThanks.first().click();
+  await noThanks.first().waitFor({ state: "visible", timeout: 30000 });
+  await noThanks.first().click();
+  await noThanks.first().waitFor({ state: "hidden" });
   await page.evaluate(async () => {
     window.checkFiles = (await import("/src/store/files.ts")).openFiles;
   });
