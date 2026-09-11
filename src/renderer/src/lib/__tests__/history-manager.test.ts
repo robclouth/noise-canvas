@@ -445,6 +445,8 @@ function installPatchRenderer(
           return out;
         },
         expandDirtyRegion: vi.fn(),
+        settleStroke: vi.fn(async () => {}),
+        clearDirtyRegion: vi.fn(),
         reloadTextures: vi.fn(),
         releaseAnalysisData: vi.fn(),
       },
@@ -455,6 +457,63 @@ function installPatchRenderer(
 }
 
 describe("HistoryManager stroke chain", () => {
+  it("restores original blocks without moving history, then undoes to the selected parent", async () => {
+    installManagerEnv();
+    clearAllHistoryManagers();
+    budget.wholeFile = false;
+    const root = new Float32Array(600 * 4).fill(0.25);
+    const spec = { ...makeSpectrogram(root, 600, 1), sampleRate: 10 };
+    const renderer = installPatchRenderer(600, 1, spec);
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: spec });
+    const dimensions = mgr.getManifest()!.nodes[mgr.getCurrentId()!].dimensions;
+    const a = root.slice();
+    a[4 * 4] = 0.75;
+    const first = await mgr.addStroke({ data: a, label: "first", dimensions, dirtyRanges: Uint32Array.of(4, 1) });
+    const b = a.slice();
+    b[504 * 4] = 0.875;
+    const last = await mgr.addStroke({ data: b, label: "last", dimensions, dirtyRanges: Uint32Array.of(504, 1) });
+    const store = await getBlockStore("f1")!;
+    const whole = vi.spyOn(store, "readAll");
+    const rootWhole = vi.spyOn(store, "readAllRoot");
+    const reconstruct = vi.spyOn(mgr, "reconstruct");
+    synthesizeFile.mockImplementationOnce(async () => {
+      expect(await mgr.currentRanges(Uint32Array.of(4, 1, 504, 1))).toEqual(new Float32Array(8).fill(0.25));
+    });
+    await mgr.restoreOriginal();
+    expect(whole).not.toHaveBeenCalled();
+    expect(rootWhole).not.toHaveBeenCalled();
+    expect(reconstruct).not.toHaveBeenCalled();
+    expect(renderer.canvas).toEqual(root);
+    expect(await store.readRanges(Uint32Array.of(4, 1, 504, 1))).toEqual(new Float32Array(8).fill(0.25));
+    expect(mgr.getCurrentId()).toBe(last.id);
+    expect(Object.keys(mgr.getManifest()!.nodes)).toHaveLength(3);
+    expect((await mgr.reconstruct(last.id)).packedData).toEqual(b);
+    await mgr.navigateToParent();
+    expect(mgr.getCurrentId()).toBe(first.id);
+    expect(renderer.canvas).toEqual(a);
+    expect(await mgr.currentBlockState()).toEqual(a);
+    await mgr.restoreOriginal();
+    const next = await mgr.addStroke({
+      label: "after restore",
+      dimensions,
+      dirtyRanges: Uint32Array.of(4, 1),
+      baseFootprint: new Float32Array(4).fill(0.25),
+      afterFootprint: new Float32Array(4).fill(0.5),
+    });
+    const expected = root.slice();
+    expected.fill(0.5, 16, 20);
+    expect((await mgr.reconstruct(next.id)).packedData).toEqual(expected);
+    expect(await mgr.currentBlockState()).toEqual(expected);
+    await mgr.navigateToParent();
+    expect(mgr.getCurrentId()).toBe(first.id);
+    expect(renderer.canvas).toEqual(a);
+    await mgr.restoreOriginal();
+    await mgr.resetToCurrent();
+    expect(await mgr.currentBlockState()).toEqual(root);
+    await clearAllHistoryManagers();
+  });
+
   it("tells strokes committed after a node from any other move of the state", async () => {
     installManagerEnv();
     clearAllHistoryManagers();

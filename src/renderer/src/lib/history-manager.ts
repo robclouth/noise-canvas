@@ -24,7 +24,13 @@ import { clearFileTaskQueue, drainFileTaskQueues, serializeFileTask } from "./fi
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { ByteBudgetCache } from "./byte-budget-cache";
 import { host } from "./host";
-import { copyCompactOverlap, gatherPixelRanges, mergePixelRanges, pixelRangeCount } from "./pixel-ranges";
+import {
+  copyCompactOverlap,
+  gatherPixelRanges,
+  mergePixelRanges,
+  pixelRangeCount,
+  scatterCompactPixelRanges,
+} from "./pixel-ranges";
 
 const MANIFEST_FILENAME = "tree.json";
 const CHECKPOINT_INTERVAL = 20;
@@ -433,6 +439,7 @@ export class HistoryManager {
   // (e.g. restore-original bypasses history); forces the next navigation to
   // upload the full state rather than a patch.
   private fboOutOfSync = false;
+  private restoredOriginalId: string | null = null;
   // The onset restore still reading the packed state it was handed, if any.
   private onsetRestore: Promise<void> | null = null;
 
@@ -803,6 +810,7 @@ export class HistoryManager {
     this.manifest.currentId = id;
     this.lastLoadedAnchorId = id;
     this.fboOutOfSync = false;
+    this.restoredOriginalId = null;
     // The packed layout changes with the new dimensions, so a patch stashed
     // against the old one no longer addresses the pixels it was cut from.
     clearCanvasPatchStash(this.fileId);
@@ -875,6 +883,33 @@ export class HistoryManager {
     const parentId = this.manifest.currentId;
     const parent = this.manifest.nodes[parentId];
     const sameDims = parent.dimensions.texels === opts.dimensions.texels;
+    if (this.restoredOriginalId) {
+      let restoredRanges = this.pathDirtyRanges(this.restoredOriginalId, parentId);
+      const restoredTurns = await this.pathTurns(this.restoredOriginalId, parentId);
+      if (!restoredTurns) restoredRanges = null;
+      if (restoredRanges) {
+        for (const turn of restoredTurns ?? [])
+          restoredRanges = mergePixelRanges(restoredRanges, phaseTurnRanges(turn.turns));
+      }
+      const ranges =
+        restoredRanges && opts.dirtyRanges
+          ? mergePixelRanges(restoredRanges, opts.dirtyRanges)
+          : Uint32Array.of(0, opts.dimensions.texels);
+      const base =
+        (await this.walkTierValues(this.restoredOriginalId, parentId, ranges)) ??
+        gatherPixelRanges((await this.reconstruct(parentId)).packedData, ranges);
+      const after = opts.data ? gatherPixelRanges(opts.data, ranges) : await this.currentRangesNow(ranges);
+      if (!after) throw new Error("HistoryManager: the restored state is unavailable");
+      if (opts.afterFootprint && opts.dirtyRanges)
+        copyCompactOverlap(after, ranges, opts.afterFootprint, opts.dirtyRanges);
+      opts = { ...opts, dirtyRanges: ranges, baseFootprint: base, afterFootprint: after, audioRegion: null };
+      if (pixelRangeCount(ranges) >= opts.dimensions.texels * 0.5 && !opts.data) {
+        const whole = await this.tierWholeState();
+        if (!whole) throw new Error("HistoryManager: the restored checkpoint is unavailable");
+        scatterCompactPixelRanges(whole, after, ranges);
+        opts = { ...opts, data: whole };
+      }
+    }
 
     const ranges = opts.dirtyRanges;
     let footprintPixels = 0;
@@ -994,6 +1029,7 @@ export class HistoryManager {
     if (!this.manifest) return { id, isNew: true };
     // The stroke was read back from the FBO, so the two are in step again.
     this.fboOutOfSync = false;
+    this.restoredOriginalId = null;
     await this.writeManifest();
     this.notifyStateChange();
     return { id, isNew: true };
@@ -1147,7 +1183,7 @@ export class HistoryManager {
     const holder = this.seedHolder();
     const current = manifest.nodes[manifest.currentId];
     if (!holder || !current || !sameStoreDimensions(holder.dimensions, current.dimensions)) return;
-    const patchable = manifest.overlayNodeId === baseId && ranges != null;
+    const patchable = manifest.overlayNodeId === (this.restoredOriginalId ?? baseId) && ranges != null;
     const compact = patchable && ranges ? (values ?? (whole ? gatherPixelRanges(whole, ranges) : null)) : null;
     if (patchable ? compact == null : whole == null) return;
     try {
@@ -1192,7 +1228,7 @@ export class HistoryManager {
     data: Float32Array | undefined,
   ): Promise<Uint32Array | null> {
     const manifest = this.manifest;
-    if (!manifest || manifest.overlayNodeId !== parentId) return null;
+    if (!manifest || manifest.overlayNodeId !== (this.restoredOriginalId ?? parentId)) return null;
     const holder = this.seedHolder();
     const parent = manifest.nodes[parentId];
     if (!holder || !parent || !sameStoreDimensions(holder.dimensions, parent.dimensions)) return null;
@@ -1408,7 +1444,7 @@ export class HistoryManager {
   async restoreCurrentAudio(): Promise<void> {
     await this.initialize();
     if (!this.manifest) return;
-    const targetId = this.manifest.currentId;
+    const targetId = this.restoredOriginalId ?? this.manifest.currentId;
     const target = this.manifest.nodes[targetId];
     if (!target) return;
     const reopened = openFiles[this.fileId];
@@ -1443,6 +1479,42 @@ export class HistoryManager {
     return serializeFileTask(this.fileId, () => this.navigateToNow(targetId));
   }
 
+  /** Installs the pristine state without changing the selected history node. */
+  async restoreOriginal(): Promise<void> {
+    return serializeFileTask(this.fileId, async () => {
+      await this.initialize();
+      await this.awaitPackedReaders();
+      const manifest = this.manifest;
+      const holder = this.seedHolder();
+      const file = openFiles[this.fileId];
+      const renderer = file?.rendererRef?.current;
+      if (!manifest || !holder || !renderer) return;
+      await renderer.settleStroke();
+      await this.awaitTierFlush();
+      const store = await this.seedBlockStore(holder);
+      const current = () => this.manifest === manifest && openFiles[this.fileId]?.rendererRef?.current === renderer;
+      if (!current()) return;
+      manifest.overlayNodeId = undefined;
+      await this.writeManifest();
+      this.markFboOutOfSync();
+      for (let block = 0; block < store.grid.blockCount; block++) {
+        const ranges = store.blockRanges(block);
+        const original = await store.readRootBlock(block);
+        if (!current()) return;
+        await store.patch(ranges, original);
+        if (!current()) return;
+        renderer.patchFBODataCompact(original, ranges);
+      }
+      this.restoredOriginalId = holder.id === manifest.currentId ? null : holder.id;
+      manifest.overlayNodeId = holder.id;
+      this.scheduleTierFlush(store);
+      file.unprojectedPaint = false;
+      this.notifyStateChange();
+      renderer.clearDirtyRegion();
+      await useStore.getState().synthesizeFile(this.fileId);
+    });
+  }
+
   private async navigateToNow(targetId: string): Promise<void> {
     await this.initialize();
     if (!this.manifest) return;
@@ -1469,7 +1541,7 @@ export class HistoryManager {
     // it — a synthesis it was handed, an onset pass — has to land first.
     await this.awaitPackedReaders();
     if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
-    const fromId = this.manifest.currentId;
+    const fromId = this.restoredOriginalId ?? this.manifest.currentId;
 
     // Only rebuild textures and swap spectrogramData when the full-snapshot
     // anchor has actually changed (i.e. we crossed a resize/reanalyze boundary).
@@ -1557,6 +1629,7 @@ export class HistoryManager {
       }
     }
     this.fboOutOfSync = false;
+    this.restoredOriginalId = null;
     // The FBO now holds the target state; a patch stashed against the old
     // state would write stale pixels onto it.
     clearCanvasPatchStash(this.fileId);
@@ -1630,7 +1703,7 @@ export class HistoryManager {
   async currentBlockState(): Promise<Float32Array | null> {
     await this.initialize();
     const manifest = this.manifest;
-    if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
+    if (!manifest || manifest.overlayNodeId !== (this.restoredOriginalId ?? manifest.currentId)) return null;
     return await this.tierWholeState();
   }
 
@@ -1657,7 +1730,11 @@ export class HistoryManager {
     await this.initialize();
     // A stroke moving the tier leaves the store off the current node until
     // it is done; the read waits for it rather than fail.
-    while (this.storeHolds > 0 && this.manifest && this.manifest.overlayNodeId !== this.manifest.currentId) {
+    while (
+      this.storeHolds > 0 &&
+      this.manifest &&
+      this.manifest.overlayNodeId !== (this.restoredOriginalId ?? this.manifest.currentId)
+    ) {
       await this.storeReleased;
     }
     return await this.currentRangesNow(ranges);
@@ -1666,7 +1743,7 @@ export class HistoryManager {
   /** The named pixels as the store stands now, or null while it is off the current node. */
   private async currentRangesNow(ranges: Uint32Array): Promise<Float32Array | null> {
     const manifest = this.manifest;
-    if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
+    if (!manifest || manifest.overlayNodeId !== (this.restoredOriginalId ?? manifest.currentId)) return null;
     const holder = this.seedHolder();
     if (!holder) return null;
     try {
@@ -1684,11 +1761,15 @@ export class HistoryManager {
    */
   async currentTaps(runs: Uint32Array): Promise<Float32Array | null> {
     await this.initialize();
-    while (this.storeHolds > 0 && this.manifest && this.manifest.overlayNodeId !== this.manifest.currentId) {
+    while (
+      this.storeHolds > 0 &&
+      this.manifest &&
+      this.manifest.overlayNodeId !== (this.restoredOriginalId ?? this.manifest.currentId)
+    ) {
       await this.storeReleased;
     }
     const manifest = this.manifest;
-    if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
+    if (!manifest || manifest.overlayNodeId !== (this.restoredOriginalId ?? manifest.currentId)) return null;
     const holder = this.seedHolder();
     if (!holder) return null;
     try {
@@ -1705,11 +1786,15 @@ export class HistoryManager {
    */
   async currentBlock(index: number): Promise<Float32Array | null> {
     await this.initialize();
-    while (this.storeHolds > 0 && this.manifest && this.manifest.overlayNodeId !== this.manifest.currentId) {
+    while (
+      this.storeHolds > 0 &&
+      this.manifest &&
+      this.manifest.overlayNodeId !== (this.restoredOriginalId ?? this.manifest.currentId)
+    ) {
       await this.storeReleased;
     }
     const manifest = this.manifest;
-    if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
+    if (!manifest || manifest.overlayNodeId !== (this.restoredOriginalId ?? manifest.currentId)) return null;
     const holder = this.seedHolder();
     if (!holder) return null;
     try {
@@ -2355,6 +2440,8 @@ export class HistoryManager {
     this.nodeTurns.clear();
     this.audioLru = current.audioCached ? [currentId] : [];
     this.lastLoadedAnchorId = currentId;
+    this.restoredOriginalId = null;
+    this.fboOutOfSync = false;
 
     await this.writeManifest();
     this.notifyStateChange();
@@ -2373,6 +2460,7 @@ export class HistoryManager {
     // Queued manifest writes land before the wipe and none start after it,
     // so a late write cannot resurrect the tree file in a deleted directory.
     this.manifest = null;
+    this.restoredOriginalId = null;
     await this.tierFlushing;
     await this.manifestWriting;
     const dir = await this.dir;
@@ -2404,6 +2492,7 @@ export class HistoryManager {
     await this.flushManifestWrite();
     await this.tierFlushing;
     this.manifest = null;
+    this.restoredOriginalId = null;
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();

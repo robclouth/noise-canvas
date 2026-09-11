@@ -247,7 +247,7 @@ export interface FileRendererHandle {
    */
   strokeRefusal: (state: State) => string | null;
   /** Restores the spectrogram to its original state. */
-  restoreOriginal: () => void;
+  restoreOriginal: () => Promise<void>;
   /** Clears the stroke preview. */
   clearPreview: () => void;
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
@@ -2199,18 +2199,7 @@ const FileRendererInner = memo(
     /** The span those textures lay out. */
     const getCanvasView = (): CanvasView | null => strokeRendererRef.current?.committedSource().view ?? null;
 
-    /**
-     * Restores the spectrogram to its original, unmodified state.
-     */
-    const restoreOriginal = () => {
-      if (strokeRendererRef.current) {
-        strokeRendererRef.current.restoreOriginal();
-      }
-      invalidateRef.current();
-      snapshotStaleRef.current = true;
-      scheduleSnapshotRefresh();
-      useStore.getState().synthesizeFile(fileId);
-    };
+    const restoreOriginal = (): Promise<void> => getHistoryManager(fileId).restoreOriginal();
 
     /**
      * Reloads all textures from the current spectrogramData.

@@ -392,19 +392,14 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubRedo);
 
-    const unsubRestoreOriginal = ipcOn("restore-original", () => {
+    const unsubRestoreOriginal = ipcOn("restore-original", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
       const file = openFiles[activeFileId];
 
       if (!file?.rendererRef?.current) return;
 
-      file.rendererRef.current.restoreOriginal();
-      // The canvas is the analysis again, so it holds no unprojected paint.
-      file.unprojectedPaint = false;
-      // restore-original bypasses history, so the FBO no longer matches the
-      // history's current node; navigation must not patch on top of it.
-      getHistoryManager(activeFileId).markFboOutOfSync();
+      await file.rendererRef.current.restoreOriginal();
     });
     unsubscribers.push(unsubRestoreOriginal);
 
