@@ -42,6 +42,14 @@ Everything else — a pointer only hovering, a pan under way — moves it once t
 aim comes to rest, because paging in every block a pointer crosses serves no
 dab.
 
+The screen's visible range is distinct from the packed view. `isPopulated`
+says every block of the canvas's current view has content. `holdsFrames` checks
+that the entire requested file-frame range is present; `isFillingFrames` checks
+that an outstanding fill's layout can cover it. `fitsWindow` measures capacity
+in blocks, and both dab refusal and admission use that decision. A screen range
+may be wider than the canvas and use the pyramid and tile ring; an impossible
+dab is refused.
+
 ## Who owns what
 
 | File                       | Holds                                                                      |
