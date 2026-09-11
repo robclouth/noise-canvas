@@ -152,31 +152,18 @@ try {
   assert.equal(changed.mismatches, 0, "the static still must match the current layer count and tints");
   console.log("PASS retained static removal", changed);
   await page.evaluate((top) => {
-    const ref = window.checkFiles[top].rendererRef;
-    let current = ref.current;
+    const current = window.checkFiles[top].rendererRef.current;
+    const captureSnapshot = current.captureSnapshot;
     window.checkCaptures = 0;
     window.checkGate = new Promise((resolve) => {
       window.releaseCheckCapture = resolve;
     });
-    Object.defineProperty(ref, "current", {
-      configurable: true,
-      get: () =>
-        current &&
-        new Proxy(current, {
-          get(target, key) {
-            if (key !== "captureSnapshot") return target[key];
-            return async (...args) => {
-              window.checkCaptures++;
-              const ok = await target.captureSnapshot(...args);
-              await window.checkGate;
-              return ok;
-            };
-          },
-        }),
-      set: (value) => {
-        current = value;
-      },
-    });
+    current.captureSnapshot = async (...args) => {
+      window.checkCaptures++;
+      const ok = await captureSnapshot(...args);
+      await window.checkGate;
+      return ok;
+    };
     current.refreshSnapshot();
   }, ids[2]);
   await page.waitForFunction(() => window.checkCaptures > 0);

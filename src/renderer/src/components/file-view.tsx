@@ -438,30 +438,15 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   behindOrderRef.current = behindIds;
   const behindRefCallback = useCallback(
     (id: string) => (handle: FileRendererHandle | null) => {
-      const file = openFiles[id];
-      const previous = behindRefs.current.get(id);
-      if (handle) {
-        behindRefs.current.set(id, handle);
-        if (file) file.rendererRef = { current: handle };
-      } else {
-        behindRefs.current.delete(id);
-        const registered = file?.rendererRef;
-        if (registered && registered.current === previous) registered.current = null;
-      }
+      if (handle) behindRefs.current.set(id, handle);
+      else behindRefs.current.delete(id);
     },
     [],
   );
 
-  const refCallback = useCallback(
-    (handle: FileRendererHandle | null) => {
-      rendererRef.current = handle;
-      const file = openFiles[fileId];
-      if (handle && file) {
-        file.rendererRef = rendererRef;
-      }
-    },
-    [fileId],
-  );
+  const refCallback = useCallback((handle: FileRendererHandle | null) => {
+    rendererRef.current = handle;
+  }, []);
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 

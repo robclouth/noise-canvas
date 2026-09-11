@@ -1,20 +1,29 @@
 import { createStepStateView, useStore } from "@/store";
 import { useFrame, useThree } from "@react-three/fiber";
 import { AimRest } from "@renderer/lib/canvas-window";
-import { serializeFileTask } from "@renderer/lib/file-task-queue";
-import { deriveSideData, getHistoryManager } from "@renderer/lib/history-manager";
+import { getHistoryManager } from "@renderer/lib/history-manager";
 import { LONE_LAYER_TINT } from "@renderer/lib/layer-tint";
 import { perfAdd, perfEnabled, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import type { BrushStep } from "@renderer/parameters";
-import { getOpenFileByPath, logFileFootprint, openFiles } from "@renderer/store/files";
+import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import { useTransientStore } from "@renderer/store/transient";
 import { State, type OpenFile } from "@renderer/store/types";
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useContext,
+  useSyncExternalStore,
+  useLayoutEffect,
+} from "react";
 import {
   AdditiveBlending,
   Camera,
   Color,
-  DataTexture,
   Mesh,
   NormalBlending,
   RawShaderMaterial,
@@ -36,7 +45,8 @@ import {
   visibleFrameRange,
   type FileDisplayResidencyContext,
 } from "../lib/file-display-residency";
-import { FileEngine } from "../lib/file-engine";
+import { FileEngineRegistryContext } from "../lib/file-engine-registry";
+import type { FileEngine } from "../lib/file-engine";
 import { getFileOnsets } from "../lib/file-onsets";
 import type {
   BrushUnionUv,
@@ -45,9 +55,7 @@ import type {
   FileViewDescriptor,
 } from "../lib/file-renderer-types";
 import { brushUnionAt as resolveBrushUnionAt, type FileStrokeContext } from "../lib/file-stroke-dispatch";
-import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
-import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import {
   destToSourceBandUv,
   resolveBrushAnchor,
@@ -72,14 +80,19 @@ function resolveStepSourceFile(state: State, step: BrushStep | undefined): OpenF
  */
 export const FileRenderer = memo(
   forwardRef<FileRendererHandle, FileRendererProps>((props, ref) => {
-    const { spectrogramData } = openFiles[props.fileId];
-    if (!spectrogramData) return null;
-    return <FileRendererInner key={props.fileId} {...props} ref={ref} />;
+    const registry = useContext(FileEngineRegistryContext);
+    if (!registry) throw new Error("FileRenderer requires the shared engine provider");
+    const engineRevision = useSyncExternalStore(registry.subscribe, registry.snapshot);
+    const engine = registry.get(props.fileId);
+    if (!engine || !registry.handle(props.fileId)) return null;
+    return (
+      <FileRendererInner key={props.fileId} {...props} engine={engine} engineRevision={engineRevision} ref={ref} />
+    );
   }),
 );
 
 const FileRendererInner = memo(
-  forwardRef<FileRendererHandle, FileRendererProps>((props, ref) => {
+  forwardRef<FileRendererHandle, FileRendererProps & { engine: FileEngine; engineRevision: number }>((props, ref) => {
     const {
       fileId,
       viewFileId = fileId,
@@ -97,22 +110,8 @@ const FileRendererInner = memo(
     const glRef = useRef<WebGLRenderer>(null!);
     const cameraRef = useRef<Camera>(null!);
     const invalidateRef = useRef<() => void>(null!);
-    const engineRef = useRef<FileEngine | null>(null);
-    if (!engineRef.current)
-      engineRef.current = new FileEngine(
-        fileId,
-        {
-          getHistoryManager,
-          deriveSideData,
-          serializeFileTask,
-          openFiles,
-          logFileFootprint,
-          getState: useStore.getState,
-          getTransientState: useTransientStore.getState,
-        },
-        parked,
-      );
-    const engine = engineRef.current;
+    const engine = props.engine;
+    const registry = useContext(FileEngineRegistryContext)!;
     const { strokeRendererRef, canvasRef, displayMode, applyStroke, strokePreview } = engine;
 
     // Populate invalidateRef from the R3F store, which is available on mount
@@ -162,27 +161,10 @@ const FileRendererInner = memo(
       };
     }, []);
 
-    const modulatorScaleLut = useModulatorScaleLut(fileId);
-
-    // Load image textures for all modulators
-    const modulator1Texture = useModulatorTexture(0);
-    const modulator2Texture = useModulatorTexture(1);
-    const modulator3Texture = useModulatorTexture(2);
-
-    // Modulator textures load asynchronously and change when the user picks a
-    // different image, so the values captured at StrokeRenderer construction go
-    // stale. Re-sync them onto the live renderer whenever they change.
-    useEffect(() => {
-      strokeRendererRef.current?.updateModulatorTextures(modulator1Texture, modulator2Texture, modulator3Texture);
-      invalidateRef.current?.();
-    }, [strokeRendererRef, modulator1Texture, modulator2Texture, modulator3Texture]);
-
-    // Textures for spectrogram data. The pristine packed texture is both the
-    // FBO seed and the shaders' originalSpectrogramTex; the current state lives
-    // in the StrokeRenderer's FBOs.
-    const [originalPackedDataTex, setOriginalPackedDataTex] = useState<DataTexture | null>(null);
-    const [inverseMapTex, setInverseMapTex] = useState<DataTexture | null>(null);
-    const [metadataTex, setMetadataTex] = useState<DataTexture | null>(null);
+    const live = engine.liveTexturesRef.current;
+    const originalPackedDataTex = live?.packed ?? null;
+    const inverseMapTex = live?.inverse ?? null;
+    const metadataTex = live?.meta ?? null;
 
     // Interaction state
     const clearingPreview = useRef(false);
@@ -335,14 +317,6 @@ const FileRendererInner = memo(
       currentTaps: (runs) => getHistoryManager(fileId).currentTaps(runs),
     };
 
-    useEffect(() => () => engine.dispose(), [engine, spectrogramData.texels]);
-
-    useEffect(
-      () => engine.prepare(parked),
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      [engine, spectrogramData, spectrogramData.texels, spectrogramData.numBands, fileId],
-    );
-
     // Request a frame once the textures are actually ready. With frameloop="demand"
     // the initial mount frame runs before setState has populated the textures, so
     // without this the view stays black until the user interacts.
@@ -386,8 +360,6 @@ const FileRendererInner = memo(
       },
       [],
     );
-
-    const placeholderTexture = usePlaceholderTexture();
 
     const applyStaticDisplayUniforms = (state: State, viewportWidth: number, viewportHeight: number): void => {
       const file = openFiles[fileId];
@@ -461,19 +433,6 @@ const FileRendererInner = memo(
     captureSnapshotRef.current = captureSnapshot;
 
     const { canvasFor } = engine;
-    useEffect(
-      () => (parked ? engine.park() : engine.resume()),
-      [
-        engine,
-        parked,
-        fileId,
-        spectrogramData,
-        spectrogramData.texels,
-        spectrogramData.numBands,
-        scheduleSnapshotRefresh,
-      ],
-    );
-
     const strokeContext: FileStrokeContext = {
       fileId,
       viewFileId,
@@ -492,25 +451,10 @@ const FileRendererInner = memo(
       resolveBrushUnionAt(strokeContext, state, cursorPos, bpm, totalDuration);
 
     const { paint: dispatchStroke, span: dabSpan } = engine.strokeDispatch(strokeContext);
-    engine.updateContext({
-      spectrogramData,
-      glRef,
-      invalidateRef,
-      hasDrawnDisplayRef,
-      modulatorScaleLut,
-      modulator1Texture,
-      modulator2Texture,
-      modulator3Texture,
-      placeholderTexture,
-      setOriginalPackedDataTex,
-      setInverseMapTex,
-      setMetadataTex,
-      scheduleSnapshotRefresh,
-      strokeContext,
-    });
     useEffect(
       () =>
         engine.subscribeVisualChange(() => {
+          hasDrawnDisplayRef.current = false;
           snapshotStaleRef.current = true;
           scheduleSnapshotRefresh();
         }),
@@ -834,7 +778,7 @@ const FileRendererInner = memo(
     /**
      * Exposes component methods to the parent through a ref.
      */
-    useImperativeHandle(ref, () => ({
+    const viewOperations = {
       renderStroke: (preview: boolean) => {
         // While picking a source file, don't render the brush preview — just the rectangle.
         if (preview && useStore.getState().pickingFileParam !== null) {
@@ -849,7 +793,6 @@ const FileRendererInner = memo(
         applyStroke.current = true;
         invalidateRef.current?.();
       },
-      ...engine.fileOperations(),
       clearPreview,
       applyStroke: () => {
         applyStroke.current = true;
@@ -868,7 +811,9 @@ const FileRendererInner = memo(
         return displayMaterial;
       },
       refreshSnapshot: scheduleSnapshotRefresh,
-    }));
+    };
+    useLayoutEffect(() => registry.bindView(fileId, viewFileId, viewOperations));
+    useImperativeHandle(ref, () => registry.handle(fileId)!, [registry, fileId]);
 
     // The component renders a mesh with a plane geometry and the custom `displayMaterial`.
     return (

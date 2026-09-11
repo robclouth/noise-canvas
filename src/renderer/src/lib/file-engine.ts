@@ -40,7 +40,7 @@ type FileEngineOperations = Omit<
   FileRendererHandle,
   "renderStroke" | "clearPreview" | "applyStroke" | "captureSnapshot" | "getDisplayMaterial" | "refreshSnapshot"
 >;
-interface FileEngineServices {
+export interface FileEngineServices {
   getHistoryManager: typeof getHistoryManager;
   deriveSideData: typeof deriveSideData;
   serializeFileTask: typeof serializeFileTask;
@@ -49,7 +49,7 @@ interface FileEngineServices {
   getState: () => State;
   getTransientState: typeof useTransientStore.getState;
 }
-interface FileEngineContext {
+export interface FileEngineContext {
   spectrogramData: SpectrogramData;
   glRef: { current: WebGLRenderer };
   invalidateRef: { current: () => void };
@@ -59,14 +59,12 @@ interface FileEngineContext {
   modulator2Texture: StrokeTextures["modulator2Texture"];
   modulator3Texture: StrokeTextures["modulator3Texture"];
   placeholderTexture: StrokeTextures["placeholderTexture"];
-  setOriginalPackedDataTex: (texture: DataTexture | null) => void;
-  setInverseMapTex: (texture: DataTexture | null) => void;
-  setMetadataTex: (texture: DataTexture | null) => void;
+  resourcesChanged: () => void;
   scheduleSnapshotRefresh: () => void;
   strokeContext: FileStrokeContext;
 }
 
-/** Owns one component's editable file resources and operations. */
+/** Owns an open file's editable resources and operations. */
 export class FileEngine {
   readonly strokeRendererRef: { current: StrokeRenderer | null } = { current: null };
   readonly canvasRef: { current: WindowedCanvas | null } = { current: null };
@@ -80,6 +78,8 @@ export class FileEngine {
   readonly applyStroke = { current: false };
   readonly strokePreview = { current: false };
   private context!: FileEngineContext;
+  private disposed = false;
+  private epoch = 0;
   private readonly listeners = new Set<() => void>();
   constructor(
     private readonly fileId: string,
@@ -166,11 +166,8 @@ export class FileEngine {
   };
   installTextures = (next: EngineTextures) => {
     const { liveTexturesRef } = this;
-    const { setOriginalPackedDataTex, setInverseMapTex, setMetadataTex } = this.context;
     liveTexturesRef.current = next;
-    setOriginalPackedDataTex(next.packed);
-    setInverseMapTex(next.inverse);
-    setMetadataTex(next.meta);
+    this.context.resourcesChanged();
   };
   prepareHistorySeeds = async (
     cancelled: () => boolean,
@@ -203,7 +200,7 @@ export class FileEngine {
       disposeCanvas,
       fileId,
     } = this;
-    const { spectrogramData, setOriginalPackedDataTex, setInverseMapTex, setMetadataTex } = this.context;
+    const { spectrogramData } = this.context;
     const { serializeFileTask } = this.services;
     if (parked) return;
     let cancelled = false;
@@ -216,21 +213,18 @@ export class FileEngine {
       }
       if (!cancelled) installTextures(createTextures(spectrogramData));
     };
-    void prepare().catch((error: unknown) => console.error("Preparing renderer textures failed:", error));
-
     if (strokeRendererRef.current) {
       strokeRendererRef.current.dispose();
       strokeRendererRef.current = null;
     }
     disposeCanvas();
+    void prepare().catch((error: unknown) => console.error("Preparing renderer textures failed:", error));
 
     return () => {
       cancelled = true;
 
       disposeLiveTextures();
-      setOriginalPackedDataTex(null);
-      setInverseMapTex(null);
-      setMetadataTex(null);
+      this.context.resourcesChanged();
     };
   };
   canvasFor = (gl: WebGLRenderer): WindowedCanvas => {
@@ -274,6 +268,14 @@ export class FileEngine {
     canvasRef.current = null;
   };
   dispose = (): void => {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.epoch++;
+    this.listeners.clear();
+    this.disposeLiveTextures();
+    this.currentSeedRef.current = null;
+    this.packedSeedRef.current = null;
+    this.inverseSeedRef.current = null;
     const { strokeRendererRef, disposeCanvas } = this;
     if (strokeRendererRef.current) {
       strokeRendererRef.current.dispose();
@@ -283,7 +285,7 @@ export class FileEngine {
   };
   park = (): (() => void) => {
     const { strokeRendererRef, isParkedRef, disposeLiveTextures, disposeCanvas, fileId } = this;
-    const { setOriginalPackedDataTex, setInverseMapTex, setMetadataTex } = this.context;
+    const { resourcesChanged } = this.context;
     const { getHistoryManager, serializeFileTask, openFiles } = this.services;
 
     isParkedRef.current = true;
@@ -301,9 +303,7 @@ export class FileEngine {
         strokeRendererRef.current = null;
       }
       disposeCanvas();
-      setOriginalPackedDataTex(null);
-      setInverseMapTex(null);
-      setMetadataTex(null);
+      resourcesChanged();
       if (openFiles[fileId]) {
         openFiles[fileId].parked = true;
       }
@@ -361,11 +361,14 @@ export class FileEngine {
       cancelled = true;
     };
   };
-  initialise = (visibleFrames: () => { start: number; end: number }): StrokeRenderer | undefined => {
+  initialise = (
+    visibleFrames: () => { start: number; end: number },
+    releaseSeeds = true,
+  ): StrokeRenderer | undefined => {
     const originalPackedDataTex = this.liveTexturesRef.current?.packed ?? null;
     const inverseMapTex = this.liveTexturesRef.current?.inverse ?? null;
     const metadataTex = this.liveTexturesRef.current?.meta ?? null;
-    if (!originalPackedDataTex || !inverseMapTex || !metadataTex) return;
+    if (this.disposed || this.isParkedRef.current || !originalPackedDataTex || !inverseMapTex || !metadataTex) return;
     const {
       strokeRendererRef,
       canvasRef,
@@ -428,7 +431,7 @@ export class FileEngine {
         strokeRenderer.setFBOData(currentSeedRef.current);
         currentSeedRef.current = null;
       }
-      if (historyHookedRef.current) {
+      if (historyHookedRef.current && releaseSeeds) {
         releaseAnalysisData(spectrogramData);
       }
     }
@@ -436,13 +439,15 @@ export class FileEngine {
     if (!historyHookedRef.current) {
       historyHookedRef.current = true;
 
+      const epoch = this.epoch;
+      const current = () => !this.disposed && this.epoch === epoch;
       (async () => {
         const historyManager = getHistoryManager(fileId);
         const packed = spectrogramData.packedData;
 
         const nodeId = await serializeFileTask(fileId, async () => {
           const hadExisting = await historyManager.initialize();
-          if (hadExisting) return null;
+          if (!current() || hadExisting) return null;
 
           const id = await historyManager.addRootSnapshot({
             data: packed ?? null,
@@ -451,6 +456,7 @@ export class FileEngine {
             spectrogram: spectrogramData,
           });
 
+          if (!current()) return null;
           const opened = openFiles[fileId];
           if (id && opened?.onsets && (opened.onsetReference?.odfMax ?? 0) > 0) {
             void historyManager
@@ -460,6 +466,7 @@ export class FileEngine {
           return id;
         });
 
+        if (!current()) return;
         if (!packed) void canvasRef.current?.storeReady();
 
         releaseAnalysisData(spectrogramData);
@@ -469,6 +476,7 @@ export class FileEngine {
         }
         const gateBefore = openFiles[fileId]?.onsetReference?.odfMax ?? 0;
         await state.synthesizeFile(fileId, undefined, packed);
+        if (!current()) return;
         const updated = openFiles[fileId];
         if (nodeId && updated?.audioBuffer) {
           historyManager.setStateAudio(nodeId, updated.audioBuffer, updated.audioPeak ?? 1);
@@ -478,7 +486,7 @@ export class FileEngine {
             .setNodeOnsets(nodeId, packOnsetState({ onsets: updated.onsets, reference: updated.onsetReference }))
             .catch((error) => console.error("Storing onsets for history node failed:", error));
         }
-      })();
+      })().catch((error: unknown) => console.error("Attaching file history failed:", error));
     }
 
     return strokeRenderer;
@@ -600,6 +608,14 @@ export class FileEngine {
     return getHistoryManager(fileId).restoreOriginal();
   };
   reloadTextures = () => {
+    this.epoch++;
+    const spectrogram = this.services.openFiles[this.fileId]?.spectrogramData;
+    if (spectrogram) {
+      this.context.spectrogramData = spectrogram;
+      this.context.strokeContext.spectrogramData = spectrogram;
+      this.packedSeedRef.current = spectrogram.packedData ?? null;
+      this.inverseSeedRef.current = spectrogram.inverseMap ?? null;
+    }
     const { strokeRendererRef, createTextures, disposeLiveTextures, installTextures, disposeCanvas, visualChanged } =
       this;
     const { invalidateRef, spectrogramData } = this.context;
@@ -611,6 +627,7 @@ export class FileEngine {
       strokeRendererRef.current = null;
     }
     disposeCanvas();
+    if (this.isParkedRef.current) return;
 
     installTextures(createTextures(spectrogramData));
 

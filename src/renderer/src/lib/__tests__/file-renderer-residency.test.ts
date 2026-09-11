@@ -85,21 +85,25 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   Object.assign(w, {
     nodeOs: { homedir: () => "/home", totalmem: () => 16 * 1024 ** 3 },
     ipcRenderer: { invoke: vi.fn(async () => undefined) },
-    nodePath: { join: (...parts: string[]) => parts.join("/") },
+    nodePath: { join: (...parts: string[]) => parts.join("/"), basename: (path: string) => path.split("/").at(-1) },
   });
   disposers.push(() => {
     Object.assign(w, previous);
   });
-  const [{ FileRenderer }, { useStore }, { openFiles }, { useTransientStore }] = await Promise.all([
-    import("../../components/file-renderer"),
-    import("../../store"),
-    import("../../store/files"),
-    import("../../store/transient"),
-  ]);
+  const [{ FileRenderer }, { useStore }, { openFiles }, { useTransientStore }, { FileEngineProvider }] =
+    await Promise.all([
+      import("../../components/file-renderer"),
+      import("../../store"),
+      import("../../store/files"),
+      import("../../store/transient"),
+      import("../../components/file-engine-provider"),
+    ]);
   const initialState = useStore.getState();
   useStore.setState({
     ...state,
     activeFileId: "residency",
+    openFileIds: ["residency"],
+    minimizedFileIds: [],
     pickingFileParam: null,
     filesZoom: { residency: 0 },
     filesOffset: { residency: 0 },
@@ -127,7 +131,7 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
     filePath: "/residency.wav",
     displayName: "residency.wav",
     spectrogramData: data,
-    rendererRef: ref,
+    rendererRef: { current: null },
   };
   disposers.push(() => {
     delete openFiles.residency;
@@ -138,17 +142,26 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   await root.configure({ gl, frameloop: "never", size: { width: 100, height: 100, top: 0, left: 0 } });
   const initializeSpy = vi.spyOn(WindowedCanvas.prototype, "initialize");
   const displaySpy = vi.spyOn(StrokeRenderer.prototype, "getDisplayPyramid");
-  const render = (parked: boolean, instance = 0) =>
-    root.render(
-      createElement(FileRenderer, {
-        key: instance,
-        fileId: "residency",
-        isLive: true,
-        parked,
-        snapshotCanvasRef: createRef<HTMLCanvasElement>(),
-        ref,
-      }),
+  const render = (parked: boolean, instance = 0, session = 0, visible = true, viewFileId = "residency") => {
+    useStore.setState({ minimizedFileIds: parked ? ["residency"] : [] });
+    return root.render(
+      createElement(
+        FileEngineProvider,
+        { key: session },
+        visible
+          ? createElement(FileRenderer, {
+              key: instance,
+              fileId: "residency",
+              viewFileId,
+              isLive: true,
+              parked,
+              snapshotCanvasRef: createRef<HTMLCanvasElement>(),
+              ref,
+            })
+          : null,
+      ),
     );
+  };
   const store = render(false);
   const unmount = async () => {
     root.unmount();
@@ -600,8 +613,8 @@ describe("display residency completion", () => {
   });
 });
 
-describe("component-owned file engine", () => {
-  it("retains one engine through reload and parking and replaces it on remount", async () => {
+describe("session-owned file engine", () => {
+  it("retains one engine through reload, parking and display remounts", async () => {
     const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
     const rig = await mount(brush(0), Infinity, 8);
     const engine = contexts.mock.contexts.at(-1);
@@ -609,7 +622,9 @@ describe("component-owned file engine", () => {
     const originalRenderer = engine.strokeRendererRef.current!;
     const disposed = vi.spyOn(originalRenderer, "dispose");
     const historyCalls = historyInitialize.mock.calls.length;
+    rig.file.spectrogramData = { ...rig.data, packedData: seed, inverseMap: inverseSeed };
     rig.ref.current!.reloadTextures();
+    expect(rig.file.spectrogramData.packedData).toBe(seed);
     expect(disposed).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
       rig.frame();
@@ -623,6 +638,10 @@ describe("component-owned file engine", () => {
     expect(engine.strokeRendererRef.current).toBeNull();
     expect(engine.canvasRef.current).toBeNull();
     expect(engine.borrowDisplaySource()).toBeNull();
+    rig.file.spectrogramData = { ...rig.data, packedData: seed, inverseMap: inverseSeed };
+    rig.file.rendererRef!.current!.reloadTextures();
+    expect(engine.liveTexturesRef.current).toBeNull();
+    expect(engine.strokeRendererRef.current).toBeNull();
     rig.render(false);
     await vi.waitFor(() => {
       rig.frame();
@@ -632,12 +651,115 @@ describe("component-owned file engine", () => {
     rig.render(false, 1);
     await vi.waitFor(() => {
       rig.frame();
-      expect(contexts.mock.contexts.at(-1)).not.toBe(engine);
+      expect(contexts.mock.contexts.at(-1)).toBe(engine);
       expect(rig.ref.current!.getTextures()).toBeTruthy();
     });
-    expect(engine.strokeRendererRef.current).toBeNull();
-    expect(engine.canvasRef.current).toBeNull();
+    expect(engine.strokeRendererRef.current).not.toBeNull();
+    expect(engine.canvasRef.current).not.toBeNull();
+    expect(engine.borrowDisplaySource()).not.toBeNull();
+  });
+
+  it("keeps editable state and the registered adapter while every display is detached", async () => {
+    const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
+    const rig = await mount(brush(0), Infinity, 8);
+    const engine = contexts.mock.contexts.at(-1);
+    if (!(engine instanceof FileEngine)) throw new Error("no file engine");
+    const adapter = rig.file.rendererRef!.current!;
+    const renderer = engine.strokeRendererRef.current;
+    const historyCalls = historyInitialize.mock.calls.length;
+    const dispose = vi.spyOn(engine, "dispose");
+    const current = await adapter.getFBOData();
+    rig.render(false, 0, 0, false);
+    await vi.waitFor(() => expect(rig.ref.current).toBeNull());
+    expect(rig.file.rendererRef!.current).toBe(adapter);
+    expect(await adapter.getFBOData()).toEqual(current);
+    expect(adapter.getDisplayMaterial()).toBeNull();
+    for (let instance = 1; instance <= 8; instance++) {
+      rig.render(false, instance);
+      await vi.waitFor(() => {
+        rig.frame();
+        expect(rig.ref.current).toBe(adapter);
+      });
+      expect(engine.strokeRendererRef.current).toBe(renderer);
+    }
+    expect(historyInitialize).toHaveBeenCalledTimes(historyCalls);
+    expect(dispose).not.toHaveBeenCalled();
+    await rig.unmount();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(rig.file.rendererRef!.current).toBeNull();
+  });
+
+  it("borrows the selected file's saved transform without changing either saved view", async () => {
+    const rig = await mount(brush(0), Infinity, 8);
+    const saved = {
+      filesZoom: { residency: 2, selected: 4 },
+      filesOffset: { residency: 0.2, selected: 0.6 },
+      filesZoomY: { residency: 1, selected: 3 },
+      filesOffsetY: { residency: 0.1, selected: 0.4 },
+    };
+    rig.useStore.setState(saved);
+    for (const [instance, id] of ["selected", "residency", "selected", "residency"].entries()) {
+      const previous = rig.ref.current!.getDisplayMaterial();
+      rig.render(false, instance + 1, 0, true, id);
+      await vi.waitFor(() => {
+        rig.frame();
+        expect(rig.ref.current!.getDisplayMaterial()).not.toBe(previous);
+      });
+      const material = rig.ref.current!.getDisplayMaterial()!;
+      const key = id === "selected" ? "selected" : "residency";
+      expect(material.uniforms.viewZoomPower.value).toBe(saved.filesZoom[key]);
+      expect(material.uniforms.viewOffset.value).toBe(saved.filesOffset[key]);
+      expect(material.uniforms.viewZoomPowerY.value).toBe(saved.filesZoomY[key]);
+      expect(material.uniforms.viewOffsetY.value).toBe(saved.filesOffsetY[key]);
+      for (const field of ["filesZoom", "filesOffset", "filesZoomY", "filesOffsetY"] as const)
+        expect(rig.useStore.getState()[field]).toEqual(saved[field]);
+    }
+  });
+
+  it("reconstructs a new engine after graphics context restoration", async () => {
+    const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
+    const rig = await mount(brush(0), Infinity, 8);
+    const engine = contexts.mock.contexts.at(-1);
+    if (!(engine instanceof FileEngine)) throw new Error("no file engine");
+    const expected = await rig.file.rendererRef!.current!.getFBOData();
+    rig.gl.domElement.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+    expect(rig.file.rendererRef!.current).toBeNull();
     expect(engine.borrowDisplaySource()).toBeNull();
+    rig.gl.domElement.dispatchEvent(new Event("webglcontextrestored"));
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(rig.file.rendererRef!.current?.getTextures()).toBeTruthy();
+    });
+    expect(contexts.mock.contexts.at(-1)).not.toBe(engine);
+    expect(await rig.file.rendererRef!.current!.getFBOData()).toEqual(expected);
+  });
+
+  it("paints with the bridge's current scale texture while retaining its engine", async () => {
+    const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
+    const rig = await mount(brush(0), Infinity, 8);
+    const engine = contexts.mock.contexts.at(-1);
+    const original = contexts.mock.calls.at(-1)![0].modulatorScaleLut;
+    rig.useStore.setState({ scaleTonic: "D" });
+    await vi.waitFor(() => expect(contexts.mock.calls.at(-1)![0].modulatorScaleLut).not.toBe(original));
+    const current = contexts.mock.calls.at(-1)![0].modulatorScaleLut;
+    expect(current).not.toBeNull();
+    expect(contexts.mock.contexts.at(-1)).toBe(engine);
+    const luts: unknown[] = [];
+    const render = rig.gl.render.bind(rig.gl);
+    vi.spyOn(rig.gl, "render").mockImplementation((scene, camera) => {
+      scene.traverse((object) => {
+        if (
+          object instanceof THREE.Mesh &&
+          object.material instanceof THREE.RawShaderMaterial &&
+          object.material.uniforms.gainLut
+        )
+          luts.push(object.material.uniforms.gainLut.value);
+      });
+      render(scene, camera);
+    });
+    rig.ref.current!.renderRegionStroke({ aimX: 0.5, aimY: 0.5, state: rig.useStore.getState() }, false);
+    expect(luts).toContain(current);
+    expect(luts).not.toContain(original);
   });
 
   it("keeps the initial seeds until the queued root has taken them and attaches once", async () => {
@@ -667,34 +789,37 @@ describe("component-owned file engine", () => {
     expect(addRootSnapshot).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["remount", "resume"])("cancels %s installation after a close during side-data recovery", async (path) => {
-    const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
-    const rig = await mount(brush(0), Infinity, 8);
-    rig.ref.current!.releaseAnalysisData();
-    const { deriveSideData } = await import("../history-manager");
-    let finishSide!: () => void;
-    vi.mocked(deriveSideData).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishSide = () => resolve({ inverseMap: inverseSeed!, metadata: rig.data.metadata });
-        }),
-    );
-    if (path === "resume") {
-      rig.render(true);
-      await vi.waitFor(() => expect(rig.file.parked).toBe(true));
-      rig.render(false);
-    } else rig.render(false, 1);
-    await vi.waitFor(() => expect(finishSide).toBeTypeOf("function"));
-    const engine = contexts.mock.contexts.at(-1);
-    if (!(engine instanceof FileEngine)) throw new Error("no file engine");
-    const install = vi.spyOn(engine, "installTextures");
-    await rig.unmount();
-    finishSide();
-    const { serializeFileTask } = await import("../file-task-queue");
-    await serializeFileTask("residency", async () => {});
-    expect(install).not.toHaveBeenCalled();
-    expect(engine.currentSeedRef.current).toBeNull();
-    expect(engine.packedSeedRef.current).toBeNull();
-    expect(engine.borrowDisplaySource()).toBeNull();
-  });
+  it.each(["context replacement", "resume"])(
+    "cancels %s installation after a close during side-data recovery",
+    async (path) => {
+      const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
+      const rig = await mount(brush(0), Infinity, 8);
+      rig.ref.current!.releaseAnalysisData();
+      const { deriveSideData } = await import("../history-manager");
+      let finishSide!: () => void;
+      vi.mocked(deriveSideData).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishSide = () => resolve({ inverseMap: inverseSeed!, metadata: rig.data.metadata });
+          }),
+      );
+      if (path === "resume") {
+        rig.render(true);
+        await vi.waitFor(() => expect(rig.file.parked).toBe(true));
+        rig.render(false);
+      } else rig.render(false, 1, 1);
+      await vi.waitFor(() => expect(finishSide).toBeTypeOf("function"));
+      const engine = contexts.mock.contexts.at(-1);
+      if (!(engine instanceof FileEngine)) throw new Error("no file engine");
+      const install = vi.spyOn(engine, "installTextures");
+      await rig.unmount();
+      finishSide();
+      const { serializeFileTask } = await import("../file-task-queue");
+      await serializeFileTask("residency", async () => {});
+      expect(install).not.toHaveBeenCalled();
+      expect(engine.currentSeedRef.current).toBeNull();
+      expect(engine.packedSeedRef.current).toBeNull();
+      expect(engine.borrowDisplaySource()).toBeNull();
+    },
+  );
 });

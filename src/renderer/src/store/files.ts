@@ -1,3 +1,5 @@
+import type { FileEngineRegistry } from "../lib/file-engine-registry";
+import type { FileRendererHandle } from "../lib/file-renderer-types";
 import { CoarseStripBuilder, coarseStripLevel } from "../lib/coarse-strip";
 import {
   openConfirm,
@@ -276,6 +278,29 @@ export interface FilesState {
 
 // Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
+let fileEngineRegistry: FileEngineRegistry | null = null;
+
+/** Registers the session owner for close and context teardown. */
+export function attachFileEngineRegistry(registry: FileEngineRegistry): () => void {
+  fileEngineRegistry = registry;
+  return () => {
+    if (fileEngineRegistry === registry) fileEngineRegistry = null;
+    registry.dispose();
+  };
+}
+
+/** Installs or clears the session-owned compatibility handle. */
+export function registerFileEngineHandle(id: string, handle: FileRendererHandle | null): void {
+  const file = openFiles[id];
+  if (!file) return;
+  file.rendererRef ??= { current: null };
+  file.rendererRef.current = handle;
+}
+
+function reloadFileEngine(fileId: string): void {
+  if (fileEngineRegistry?.get(fileId)) fileEngineRegistry.reload(fileId);
+  else openFiles[fileId]?.rendererRef?.current?.reloadTextures();
+}
 
 // Counts synthesis requests per file, so a result that resolves after a later
 // request started can tell that it has been superseded.
@@ -1303,7 +1328,7 @@ async function rebuildFileWithChannels(
   }
   file.audioPeak = newPeak > 0 ? newPeak : 1;
 
-  file.rendererRef?.current?.reloadTextures();
+  reloadFileEngine(fileId);
 
   const reshaped = file.spectrogramData.packedData;
   if (!reshaped) throw new Error("the snapshot result carries no packed state");
@@ -2480,6 +2505,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       state.stopAudio();
     }
     logFileFootprint(fileId, "closed");
+    fileEngineRegistry?.close(fileId);
 
     // Fire-and-forget: drops on-disk history directory and in-memory state.
     destroyHistoryManager(fileId).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
@@ -3362,7 +3388,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         file.unprojectedPaint = false;
         diag.timing("file", "re-analysis", analysisMs, { name: host.path.basename(file.filePath), bandsPerOctave });
 
-        file.rendererRef?.current?.reloadTextures();
+        reloadFileEngine(fileId);
 
         await getHistoryManager(fileId).addSnapshot({
           data: reshaped,

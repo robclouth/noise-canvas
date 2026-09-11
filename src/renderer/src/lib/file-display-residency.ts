@@ -174,7 +174,10 @@ export function applyDisplayPyramidUniforms(
   if (fade < 1) invalidateRef.current?.();
 }
 
-export function visibleFrameRange(context: FileDisplayResidencyContext, state: State): { start: number; end: number } {
+export function visibleFrameRange(
+  context: Pick<FileDisplayResidencyContext, "spectrogramData" | "viewFileId">,
+  state: State,
+): { start: number; end: number } {
   const { spectrogramData, viewFileId } = context;
   const { numFrames } = spectrogramData;
   const zoom = Math.pow(2, state.filesZoom[viewFileId] ?? 0);

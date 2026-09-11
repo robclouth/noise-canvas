@@ -675,10 +675,12 @@ export class StrokeRenderer {
     modulator1Texture: Texture | null,
     modulator2Texture: Texture | null,
     modulator3Texture: Texture | null,
+    modulatorScaleLut?: Texture | null,
   ): void {
     this.textures.modulator1Texture = modulator1Texture;
     this.textures.modulator2Texture = modulator2Texture;
     this.textures.modulator3Texture = modulator3Texture;
+    if (modulatorScaleLut !== undefined) this.textures.modulatorScaleLut = modulatorScaleLut;
   }
 
   /**

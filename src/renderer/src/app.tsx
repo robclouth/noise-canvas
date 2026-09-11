@@ -1,3 +1,4 @@
+import { FileEngineProvider } from "./components/file-engine-provider";
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { SidebarPanel } from "@/components/layout/sidebar-panel";
 import { useStore } from "@/store";
@@ -518,7 +519,9 @@ function App(): React.JSX.Element {
             powerPreference: "high-performance",
           }}
         >
-          <View.Port />
+          <FileEngineProvider>
+            <View.Port />
+          </FileEngineProvider>
           <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
           <DiagProbe />
 
