@@ -10,7 +10,7 @@ import { blockGrid, blockPixelRanges } from "../block-grid";
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 import { strokeReach } from "../effect-reach";
 import { StrokeRenderer } from "../stroke-renderer";
-import { snapToSwungGridCenter, uvToUnits } from "../utils";
+import { BRUSH_SIZE_TIME_FULL, BRUSH_SIZE_PITCH_FULL, snapToSwungGridCenter, uvToUnits } from "../utils";
 import { WindowedCanvas } from "../windowed-canvas";
 
 vi.mock("../gpu-budget", async (original) => ({
@@ -19,10 +19,14 @@ vi.mock("../gpu-budget", async (original) => ({
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(),
-  deriveSideData: vi.fn(),
+  deriveSideData: vi.fn(async () => ({ inverseMap: inverseSeed })),
   historyMemoryCacheBytes: () => ({ deltas: 0, audioHops: 0 }),
   getHistoryManager: () => ({
     initialize: async () => true,
+    currentBlockState: async () => currentSeed ?? seed,
+    getManifest: () => ({ currentId: "edited" }),
+    nearestFullAnchor: () => ({ id: "root" }),
+    isCurrentAudioCached: () => true,
     currentRanges: async (ranges: Uint32Array) => gatherPixelRanges(seed, ranges),
     rootRanges: async (ranges: Uint32Array) => gatherPixelRanges(seed, ranges),
     currentBlock: async (index: number) => {
@@ -35,16 +39,19 @@ vi.mock("../history-manager", () => ({
 
 let windowBlocks = 2;
 let seed: Float32Array;
+let currentSeed: Float32Array | null = null;
+let inverseSeed: Float32Array | undefined;
 let grid: ReturnType<typeof blockGrid>;
 const disposers: Array<() => void | Promise<void>> = [];
 extend({ Mesh: THREE.Mesh, PlaneGeometry: THREE.PlaneGeometry });
 
 afterEach(async () => {
   while (disposers.length) await disposers.pop()!();
+  currentSeed = null;
   vi.restoreAllMocks();
 });
 
-async function mount(state: State, blocks: number) {
+async function mount(state: State, blocks: number, durationSeconds = 300) {
   windowBlocks = blocks;
   const w = window as unknown as Record<string, unknown>;
   const previous = { nodeOs: w.nodeOs, ipcRenderer: w.ipcRenderer, nodePath: w.nodePath };
@@ -79,8 +86,9 @@ async function mount(state: State, blocks: number) {
   const previousTransient = useTransientStore.getState();
   disposers.push(() => useTransientStore.setState(previousTransient, true));
   useTransientStore.setState({ cursorPosition: null, hoveredFile: null, cursorVisible: false });
-  const data = createConstantQMockSpectrogramData({ durationSeconds: 300, sampleRate: 800, bandsPerOctave: 1 });
+  const data = createConstantQMockSpectrogramData({ durationSeconds, sampleRate: 800, bandsPerOctave: 1 });
   seed = data.packedData;
+  inverseSeed = data.inverseMap;
   for (let i = 0; i < seed.length; i += 4) {
     seed[i] = 0.2;
     seed[i + 2] = 0.3;
@@ -102,15 +110,17 @@ async function mount(state: State, blocks: number) {
   const root = createRoot(element);
   await root.configure({ gl, frameloop: "never", size: { width: 100, height: 100, top: 0, left: 0 } });
   const initializeSpy = vi.spyOn(WindowedCanvas.prototype, "initialize");
-  const store = root.render(
-    createElement(FileRenderer, {
-      fileId: "residency",
-      isLive: true,
-      parked: false,
-      snapshotCanvasRef: createRef<HTMLCanvasElement>(),
-      ref,
-    }),
-  );
+  const render = (parked: boolean) =>
+    root.render(
+      createElement(FileRenderer, {
+        fileId: "residency",
+        isLive: true,
+        parked,
+        snapshotCanvasRef: createRef<HTMLCanvasElement>(),
+        ref,
+      }),
+    );
+  const store = render(false);
   const unmount = async () => {
     root.unmount();
     await vi.waitFor(() => expect(ref.current).toBeNull());
@@ -124,7 +134,17 @@ async function mount(state: State, blocks: number) {
   const canvas = initializeSpy.mock.contexts.at(-1);
   if (!(canvas instanceof WindowedCanvas)) throw new Error("no initialised canvas");
   await vi.waitFor(() => expect(canvas.holdsView()).toBe(true));
-  return { ref, data, frame, canvas, state: useStore.getState(), useTransientStore, unmount };
+  return {
+    ref,
+    data,
+    frame,
+    canvas,
+    state: useStore.getState(),
+    useTransientStore,
+    unmount,
+    render,
+    file: openFiles.residency,
+  };
 }
 
 function brush(anchor: number, gridSize = false, withReach = false, multiple = false): State {
@@ -261,6 +281,56 @@ describe("anchored dab residency", () => {
     }
     expect(changed).toBeGreaterThan(0);
     expect(different, `maximum coefficient error: ${maxError}`).toBe(0);
+    expect(maxError).toBeLessThanOrEqual(1e-6);
+  });
+});
+
+describe("pristine sampling after resume", () => {
+  it("paints original coefficients after parking an edited whole-file canvas", async () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Original",
+        overrides: {
+          sourceDataMode: "original",
+          sourcePositionMode: "follow",
+          brushSizeTime: BRUSH_SIZE_TIME_FULL,
+          brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+          effects: [{ id: "pass", effect: "passthrough", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    const rig = await mount(state, Infinity, 8);
+    expect(rig.canvas.wholeFile).toBe(true);
+    const original = seed.slice();
+    currentSeed = seed.slice();
+    for (let i = 0; i < currentSeed.length; i += 4) {
+      currentSeed[i] = 0.8;
+      currentSeed[i + 2] = 0.9;
+    }
+    rig.ref.current!.setFBOData(currentSeed);
+    rig.ref.current!.releaseAnalysisData();
+    rig.render(true);
+    await vi.waitFor(() => expect(rig.file.parked).toBe(true));
+    expect(rig.ref.current!.getTextures()).toBeNull();
+    rig.render(false);
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(rig.ref.current!.getTextures()).not.toBeNull();
+    });
+    const resumed = (await rig.ref.current!.getFBOData())!;
+    expect(resumed[0]).toBeCloseTo(0.8, 6);
+    rig.ref.current!.beginStroke();
+    expect(rig.ref.current!.renderStrokeBatch([{ state: rig.state, aimX: 0, aimY: 0 }])).toBe(1);
+    await rig.ref.current!.settleStroke();
+    const painted = (await rig.ref.current!.getFBOData())!;
+    let mismatches = 0;
+    let maxError = 0;
+    for (let i = 0; i < original.length; i += 2) {
+      const error = Math.abs(painted[i] - original[i]);
+      if (error > 1e-6) mismatches++;
+      maxError = Math.max(maxError, error);
+    }
+    expect(mismatches, `maximum Original sampling error: ${maxError}; first magnitude: ${painted[0]}`).toBe(0);
     expect(maxError).toBeLessThanOrEqual(1e-6);
   });
 });

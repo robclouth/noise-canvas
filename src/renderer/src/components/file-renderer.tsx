@@ -730,29 +730,36 @@ const FileRendererInner = memo(
       setMetadataTex(next.meta);
     }, []);
 
+    const prepareHistorySeeds = useCallback(
+      async (cancelled: () => boolean): Promise<boolean> => {
+        const history = getHistoryManager(fileId);
+        await history.initialize();
+        const manifest = history.getManifest();
+        if (!manifest || cancelled()) return false;
+        const current =
+          (await history.currentBlockState()) ?? (await history.reconstruct(manifest.currentId)).packedData;
+        const original = await history.rootRanges(new Uint32Array([0, spectrogramData.texels]));
+        const anchor = history.nearestFullAnchor(manifest.currentId);
+        const side = anchor ? await deriveSideData(anchor) : null;
+        if (cancelled()) return false;
+        currentSeedRef.current = current;
+        packedSeedRef.current = original ?? current;
+        inverseSeedRef.current = side?.inverseMap ?? null;
+        return true;
+      },
+      [fileId, spectrogramData.texels],
+    );
+
     // Effect to create and manage spectrogram textures
     useEffect(() => {
       if (parked) return;
       let cancelled = false;
       const prepare = async () => {
-        const { numBands, metadata, numFrames, sampleRate, texels } = spectrogramData;
+        const { numBands, metadata, numFrames, sampleRate } = spectrogramData;
         const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
         if (!packedSeedRef.current && !needsCanvasWindow(grid, canvasWindowBlocks(grid))) {
-          await serializeFileTask(fileId, async () => {
-            const history = getHistoryManager(fileId);
-            await history.initialize();
-            const manifest = history.getManifest();
-            if (!manifest || cancelled) return;
-            const current =
-              (await history.currentBlockState()) ?? (await history.reconstruct(manifest.currentId)).packedData;
-            const original = await history.rootRanges(new Uint32Array([0, texels]));
-            const anchor = history.nearestFullAnchor(manifest.currentId);
-            const side = anchor ? await deriveSideData(anchor) : null;
-            if (cancelled) return;
-            currentSeedRef.current = current;
-            packedSeedRef.current = original ?? current;
-            inverseSeedRef.current = side?.inverseMap ?? null;
-          });
+          const prepared = await serializeFileTask(fileId, () => prepareHistorySeeds(() => cancelled));
+          if (!prepared) return;
         }
         if (!cancelled) installTextures(createTextures());
       };
@@ -775,7 +782,7 @@ const FileRendererInner = memo(
         setMetadataTex(null);
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [createTextures, installTextures, disposeLiveTextures]);
+    }, [createTextures, installTextures, disposeLiveTextures, prepareHistorySeeds]);
 
     // Request a frame once the textures are actually ready. With frameloop="demand"
     // the initial mount frame runs before setState has populated the textures, so
@@ -1239,15 +1246,7 @@ const FileRendererInner = memo(
             packedSeedRef.current = null;
             inverseSeedRef.current = null;
           } else {
-            const seed = await historyManager.currentBlockState();
-            if (cancelled) return;
-            packedSeedRef.current = seed;
-            const manifest = historyManager.getManifest();
-            const anchor = manifest ? historyManager.nearestFullAnchor(manifest.currentId) : null;
-            if (anchor) {
-              const { inverseMap } = await deriveSideData(anchor);
-              inverseSeedRef.current = inverseMap ?? null;
-            }
+            if (!(await prepareHistorySeeds(() => cancelled))) return;
           }
 
           installTextures(createTextures());
@@ -1270,6 +1269,7 @@ const FileRendererInner = memo(
       createTextures,
       installTextures,
       disposeLiveTextures,
+      prepareHistorySeeds,
       scheduleSnapshotRefresh,
     ]);
 
