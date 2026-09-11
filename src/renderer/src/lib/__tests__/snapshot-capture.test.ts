@@ -34,8 +34,54 @@ describe("captureMaterialToCanvas", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     material.dispose();
     gl.dispose();
+  });
+
+  it("preserves real bindings through two captures and the caller's next draw", async () => {
+    const target = createByteTarget(8, 8);
+    const previous = createByteTarget(4, 4);
+    const context = gl.getContext();
+    if (!(context instanceof WebGL2RenderingContext)) throw new Error("WebGL2 required");
+    const read = context.createFramebuffer();
+    const pack = context.createBuffer();
+    gl.setRenderTarget(previous);
+    const draw: WebGLFramebuffer | null = context.getParameter(context.DRAW_FRAMEBUFFER_BINDING);
+    context.bindFramebuffer(context.READ_FRAMEBUFFER, read);
+    context.bindBuffer(context.PIXEL_PACK_BUFFER, pack);
+    const assertBindings = (): void => {
+      expect(gl.getRenderTarget()).toBe(previous);
+      expect(context.getParameter(context.DRAW_FRAMEBUFFER_BINDING)).toBe(draw);
+      expect(context.getParameter(context.READ_FRAMEBUFFER_BINDING)).toBe(read);
+      expect(context.getParameter(context.PIXEL_PACK_BUFFER_BINDING)).toBe(pack);
+    };
+    try {
+      material.blending = AdditiveBlending;
+      const first = renderMaterialToBytes(gl, material, target);
+      const second = renderMaterialToBytes(gl, [material, material], target);
+      const bindingsRestored = context.getParameter(context.DRAW_FRAMEBUFFER_BINDING) === draw;
+      gl.setClearColor(0xff0000, 1);
+      gl.clear();
+      const pixels = await Promise.all([first, second]);
+      expect(bindingsRestored).toBe(true);
+      assertBindings();
+      expect(Array.from(pixels[0].slice(0, 4))).toEqual([16, 16, 64, 255]);
+      expect(Array.from(pixels[1].slice(0, 4))).toEqual([32, 32, 128, 255]);
+      context.bindBuffer(context.PIXEL_PACK_BUFFER, null);
+      const callerPixels = new Uint8Array(4 * 4 * 4);
+      context.bindFramebuffer(context.READ_FRAMEBUFFER, draw);
+      context.readPixels(0, 0, 4, 4, context.RGBA, context.UNSIGNED_BYTE, callerPixels);
+      expect(Array.from(callerPixels.slice(0, 4))).toEqual([255, 0, 0, 255]);
+    } finally {
+      context.bindBuffer(context.PIXEL_PACK_BUFFER, null);
+      gl.setRenderTarget(null);
+      context.bindFramebuffer(context.READ_FRAMEBUFFER, null);
+      context.deleteBuffer(pack);
+      context.deleteFramebuffer(read);
+      target.dispose();
+      previous.dispose();
+    }
   });
 
   function pixelAt(canvas: HTMLCanvasElement, x: number, y: number): Uint8ClampedArray {
@@ -109,15 +155,28 @@ describe("captureMaterialToCanvas", () => {
 
   it("restores the render state if drawing throws", async () => {
     const target = createByteTarget(8, 8);
+    const previous = createByteTarget(4, 4);
+    const context = gl.getContext();
+    if (!(context instanceof WebGL2RenderingContext)) throw new Error("WebGL2 required");
+    gl.setRenderTarget(previous);
+    const draw: WebGLFramebuffer | null = context.getParameter(context.DRAW_FRAMEBUFFER_BINDING);
+    const read = context.createFramebuffer();
+    context.bindFramebuffer(context.READ_FRAMEBUFFER, read);
     const render = vi.spyOn(gl, "render").mockImplementationOnce(() => {
       throw new Error("draw failed");
     });
     try {
       await expect(renderMaterialToBytes(gl, material, target)).rejects.toThrow("draw failed");
       expect(gl.autoClear).toBe(true);
-      expect(gl.getRenderTarget()).toBeNull();
+      expect(gl.getRenderTarget()).toBe(previous);
+      expect(context.getParameter(context.DRAW_FRAMEBUFFER_BINDING)).toBe(draw);
+      expect(context.getParameter(context.READ_FRAMEBUFFER_BINDING)).toBe(read);
     } finally {
       render.mockRestore();
+      gl.setRenderTarget(null);
+      context.bindFramebuffer(context.READ_FRAMEBUFFER, null);
+      context.deleteFramebuffer(read);
+      previous.dispose();
       target.dispose();
     }
   });

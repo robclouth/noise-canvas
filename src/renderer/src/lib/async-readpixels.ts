@@ -17,10 +17,10 @@ async function readPixelsViaPbo(
   height: number,
   buffer: PixelBuffer,
 ): Promise<PixelBuffer> {
-  const glContext = gl.getContext() as WebGL2RenderingContext;
+  const glContext = gl.getContext();
 
   // Check if WebGL2 is available
-  if (!glContext.createBuffer || !glContext.fenceSync) {
+  if (!("fenceSync" in glContext)) {
     // Fallback to synchronous readback for WebGL1
     gl.readRenderTargetPixels(renderTarget, x, y, width, height, buffer);
     return buffer;
@@ -34,63 +34,59 @@ async function readPixelsViaPbo(
     throw new Error("Failed to create PBO");
   }
 
-  const byteSize = buffer.byteLength;
+  let sync: WebGLSync | null = null;
+  try {
+    const readFramebuffer: WebGLFramebuffer | null = glContext.getParameter(glContext.READ_FRAMEBUFFER_BINDING);
+    const drawFramebuffer: WebGLFramebuffer | null = glContext.getParameter(glContext.DRAW_FRAMEBUFFER_BINDING);
+    const packBuffer: WebGLBuffer | null = glContext.getParameter(glContext.PIXEL_PACK_BUFFER_BINDING);
+    try {
+      const framebuffer = (gl.properties.get(renderTarget) as { __webglFramebuffer: WebGLFramebuffer })
+        .__webglFramebuffer;
+      glContext.bindFramebuffer(glContext.READ_FRAMEBUFFER, framebuffer);
+      glContext.bindBuffer(glContext.PIXEL_PACK_BUFFER, pbo);
+      glContext.bufferData(glContext.PIXEL_PACK_BUFFER, buffer.byteLength, glContext.STREAM_READ);
+      // Issue the read before yielding, so another capture can reuse the target.
+      glContext.readPixels(x, y, width, height, glContext.RGBA, glType, 0);
+      sync = glContext.fenceSync(glContext.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      if (!sync) throw new Error("Failed to create fence sync");
+      glContext.flush();
+    } finally {
+      glContext.bindFramebuffer(glContext.READ_FRAMEBUFFER, readFramebuffer);
+      glContext.bindFramebuffer(glContext.DRAW_FRAMEBUFFER, drawFramebuffer);
+      glContext.bindBuffer(glContext.PIXEL_PACK_BUFFER, packBuffer);
+    }
 
-  // Bind the FBO for reading
-  const framebuffer = (gl.properties.get(renderTarget) as { __webglFramebuffer: WebGLFramebuffer }).__webglFramebuffer;
-  glContext.bindFramebuffer(glContext.FRAMEBUFFER, framebuffer);
+    const fence = sync;
+    await new Promise<void>((resolve, reject) => {
+      const checkSync = (): void => {
+        try {
+          if (glContext.isContextLost()) throw new Error("WebGL context lost during readback");
+          const status = glContext.clientWaitSync(fence, 0, 0);
+          if (status === glContext.WAIT_FAILED) throw new Error("Failed to wait for readback fence");
+          if (status === glContext.ALREADY_SIGNALED || status === glContext.CONDITION_SATISFIED) {
+            resolve();
+          } else {
+            requestAnimationFrame(checkSync);
+          }
+        } catch (error) {
+          reject(error);
+        }
+      };
+      checkSync();
+    });
 
-  // Bind PBO and allocate storage
-  glContext.bindBuffer(glContext.PIXEL_PACK_BUFFER, pbo);
-  glContext.bufferData(glContext.PIXEL_PACK_BUFFER, byteSize, glContext.STREAM_READ);
-
-  // Initiate async readPixels into the PBO
-  glContext.readPixels(
-    x,
-    y,
-    width,
-    height,
-    glContext.RGBA,
-    glType,
-    0, // offset into PBO
-  );
-
-  // Create a fence sync object to check when GPU is done
-  const sync = glContext.fenceSync(glContext.SYNC_GPU_COMMANDS_COMPLETE, 0);
-  if (!sync) {
+    if (glContext.isContextLost()) throw new Error("WebGL context lost during readback");
+    const currentPackBuffer: WebGLBuffer | null = glContext.getParameter(glContext.PIXEL_PACK_BUFFER_BINDING);
+    try {
+      glContext.bindBuffer(glContext.PIXEL_PACK_BUFFER, pbo);
+      glContext.getBufferSubData(glContext.PIXEL_PACK_BUFFER, 0, buffer);
+    } finally {
+      glContext.bindBuffer(glContext.PIXEL_PACK_BUFFER, currentPackBuffer);
+    }
+  } finally {
+    if (sync) glContext.deleteSync(sync);
     glContext.deleteBuffer(pbo);
-    throw new Error("Failed to create fence sync");
   }
-
-  // Flush to ensure the commands are submitted
-  glContext.flush();
-
-  // Unbind the PBO
-  glContext.bindBuffer(glContext.PIXEL_PACK_BUFFER, null);
-  glContext.bindFramebuffer(glContext.FRAMEBUFFER, null);
-
-  // Wait for the GPU to finish (non-blocking poll)
-  await new Promise<void>((resolve) => {
-    const checkSync = () => {
-      const status = glContext.getSyncParameter(sync, glContext.SYNC_STATUS);
-      if (status === glContext.SIGNALED) {
-        resolve();
-      } else {
-        // Check again on next frame
-        requestAnimationFrame(checkSync);
-      }
-    };
-    checkSync();
-  });
-
-  // Read data from PBO into our buffer
-  glContext.bindBuffer(glContext.PIXEL_PACK_BUFFER, pbo);
-  glContext.getBufferSubData(glContext.PIXEL_PACK_BUFFER, 0, buffer);
-  glContext.bindBuffer(glContext.PIXEL_PACK_BUFFER, null);
-
-  // Cleanup
-  glContext.deleteSync(sync);
-  glContext.deleteBuffer(pbo);
 
   return buffer;
 }

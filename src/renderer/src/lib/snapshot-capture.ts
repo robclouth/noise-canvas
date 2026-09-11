@@ -70,6 +70,13 @@ export async function renderMaterialToBytes(
   const { scene, mesh, camera } = ensureQuad();
   const list = Array.isArray(materials) ? materials : [materials];
 
+  const context = gl.getContext();
+  const readTarget = "READ_FRAMEBUFFER" in context ? context.READ_FRAMEBUFFER : context.FRAMEBUFFER;
+  const drawTarget = "DRAW_FRAMEBUFFER" in context ? context.DRAW_FRAMEBUFFER : context.FRAMEBUFFER;
+  const prevReadFramebuffer: WebGLFramebuffer | null = context.getParameter(
+    "READ_FRAMEBUFFER_BINDING" in context ? context.READ_FRAMEBUFFER_BINDING : context.FRAMEBUFFER_BINDING,
+  );
+  const prevDrawFramebuffer: WebGLFramebuffer | null = context.getParameter(context.FRAMEBUFFER_BINDING);
   const prevTarget = gl.getRenderTarget();
   const prevAutoClear = gl.autoClear;
   try {
@@ -84,6 +91,8 @@ export async function renderMaterialToBytes(
   } finally {
     gl.autoClear = prevAutoClear;
     gl.setRenderTarget(prevTarget);
+    context.bindFramebuffer(readTarget, prevReadFramebuffer);
+    context.bindFramebuffer(drawTarget, prevDrawFramebuffer);
   }
 
   return readRenderTargetBytesAsync(gl, target, 0, 0, target.width, target.height);
