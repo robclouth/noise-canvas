@@ -600,7 +600,9 @@ const FileRendererInner = memo(
       displayMaterial.depthWrite = !overlaid;
       displayMaterial.needsUpdate = true;
       invalidateRef.current?.();
-    }, [displayMaterial, tint, overlaid, behind]);
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
+    }, [displayMaterial, tint, overlaid, behind, scheduleSnapshotRefresh]);
 
     // Stroke params for render loop
     const strokePreview = useRef(false);

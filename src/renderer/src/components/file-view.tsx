@@ -200,9 +200,11 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   const wantsLiveRef = useRef(wantsLive);
   wantsLiveRef.current = wantsLive;
   const captureInFlightRef = useRef(false);
+  const snapshotRevisionRef = useRef(0);
 
-  const trySnapshot = useCallback(() => {
+  const trySnapshot = useCallback(function captureLatest() {
     if (captureInFlightRef.current) return;
+    const revision = snapshotRevisionRef.current;
     // In stack order, so the still sums the layers the way the live view does.
     const behindMaterials = behindOrderRef.current.map((id) => behindRefs.current.get(id)?.getDisplayMaterial());
     if (behindMaterials.some((material) => !material)) return;
@@ -216,8 +218,14 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
       })
       .finally(() => {
         captureInFlightRef.current = false;
+        if (revision !== snapshotRevisionRef.current) captureLatest();
       });
   }, []);
+
+  const refreshSnapshot = useCallback(() => {
+    snapshotRevisionRef.current++;
+    trySnapshot();
+  }, [trySnapshot]);
 
   useEffect(() => {
     if (!wantsLive && phase === "live") {
@@ -418,6 +426,10 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
     return byLayer;
   }, [stackLayerIds]);
   const tintOf = useCallback((id: string) => tints.get(id), [tints]);
+  const snapshotDescriptor = JSON.stringify([fileId, (stackLayerIds ?? [fileId]).map((id) => [id, tintOf(id)])]);
+  useEffect(() => {
+    refreshSnapshot();
+  }, [snapshotDescriptor, refreshSnapshot]);
 
   // The handles of the layers drawn behind this one, so a still can paint them.
   const behindRefs = useRef(new Map<string, FileRendererHandle>());
@@ -1167,7 +1179,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
                       isLive={phase !== "static"}
                       parked={isMinimized}
                       snapshotCanvasRef={snapshotCanvasRef}
-                      onSnapshotRefresh={trySnapshot}
+                      onSnapshotRefresh={refreshSnapshot}
                       tint={tintOf(behindId)}
                       overlaid
                       behind
@@ -1179,7 +1191,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
                     isLive={phase !== "static"}
                     parked={isMinimized}
                     snapshotCanvasRef={snapshotCanvasRef}
-                    onSnapshotRefresh={trySnapshot}
+                    onSnapshotRefresh={refreshSnapshot}
                     onLiveFrame={handleLiveFrame}
                     tint={tintOf(fileId)}
                     overlaid={behindIds.length > 0}
