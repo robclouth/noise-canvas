@@ -13,13 +13,24 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildSync } from "esbuild";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const { _electron } = createRequire(join(root, "package.json"))("playwright");
+const footprintModule = buildSync({
+  entryPoints: [join(root, "scripts/window-check-footprint.ts")],
+  bundle: true,
+  write: false,
+  format: "esm",
+  platform: "node",
+}).outputFiles[0].text;
+const { fixture, scriptedPositions, committedFootprints, expectedStrokeSpan, strokeSpanFailure } = await import(
+  `data:text/javascript;base64,${Buffer.from(footprintModule).toString("base64")}`
+);
 
 const blocks = process.argv[2] ?? "8";
-const SECONDS = 60;
-const SAMPLE_RATE = 44100;
+const SECONDS = fixture.seconds;
+const SAMPLE_RATE = fixture.sampleRate;
 const REFERENCE_MIN_PIXELS = 2_100_000;
 
 /** A tone long enough to need many blocks, written where the app can open it. */
@@ -137,20 +148,18 @@ async function run(label, windowBlocks, wav) {
   // The frame loop paints the cursor's position once per frame, so the steps
   // are spaced wider than the slowest build's dab and both paint the same set.
   const y = box.y + box.height * 0.45;
-  const from = 0.08;
-  const to = 0.92;
-  const steps = 24;
+  const from = scriptedPositions[0];
   await page.mouse.move(box.x + box.width * from, y);
   await page.waitForTimeout(3000);
   await page.mouse.down();
-  for (let step = 1; step <= steps; step++) {
-    await page.mouse.move(box.x + box.width * (from + ((to - from) * step) / steps), y);
+  for (const position of scriptedPositions.slice(1, -1)) {
+    await page.mouse.move(box.x + box.width * position, y);
     await page.waitForTimeout(400);
   }
   // A last dab back at the start, on a block the window has long left behind.
   // It has to wait for the read, so a window that drops a waiting dab commits
   // a shorter stroke than the whole file does.
-  await page.mouse.move(box.x + box.width * 0.03, y);
+  await page.mouse.move(box.x + box.width * scriptedPositions.at(-1), y);
   await page.waitForTimeout(400);
   await page.mouse.up();
   await page.waitForTimeout(20000);
@@ -160,10 +169,7 @@ async function run(label, windowBlocks, wav) {
 
   const columns = await columnBrightness(app, page, strip);
   const residentMB = await page.evaluate(async () => Math.round((await process.getProcessMemoryInfo()).private / 1024));
-  const footprints = logs
-    .map((line) => /addStroke footprint delta.*?ranges: (\d+), footprintPixels: (\d+)/.exec(line))
-    .filter(Boolean)
-    .map((match) => ({ ranges: Number(match[1]), pixels: Number(match[2]), line: match.input }));
+  const footprints = committedFootprints(logs);
 
   await app.close();
   process.stdout.write(`${residentMB} MB\n`);
@@ -185,7 +191,14 @@ for (const [label, result] of [
   if (result.footprints.length > 1) {
     failures.push(`${label}: the drag produced ${result.footprints.length} commits; expected one`);
   }
-  for (const footprint of result.footprints) console.log(`${label}: ${footprint.line}`);
+  for (const footprint of result.footprints) {
+    console.log(`${label}: ${footprint.line}`);
+    console.log(
+      `${label}: committed time bounds ${JSON.stringify(footprint.bounds)}; expected span ${JSON.stringify(expectedStrokeSpan())}`,
+    );
+    const spanFailure = strokeSpanFailure(footprint);
+    if (spanFailure) failures.push(`${label}: ${spanFailure}`);
+  }
   for (const error of result.errors) failures.push(`${label} console: ${error}`);
 }
 

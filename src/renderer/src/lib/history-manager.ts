@@ -971,6 +971,15 @@ export class HistoryManager {
         // the hops to and from it in memory.
         deltaBytes = await host.analysis.encodeHistoryDelta(deltaBase, after, ranges, true, true, turnsIn ?? undefined);
         storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";
+        const spec = openFiles[this.fileId]?.spectrogramData;
+        const footprint = spec?.synthesisMetadata
+          ? packedRangesToUvRegion(ranges, spec.synthesisMetadata, spec.numFrames, spec.numBands)
+          : null;
+        diag.info("timing", "addStroke footprint time bounds", {
+          fileId: this.fileId,
+          timeMin: footprint?.startX ?? null,
+          timeMax: footprint?.endX ?? null,
+        });
         diag.timing("timing", "addStroke footprint delta", performance.now() - deltaStart, {
           ranges: ranges.length / 2,
           footprintPixels,

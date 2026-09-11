@@ -57,7 +57,13 @@ vi.mock("../gpu-budget", async (importOriginal) => {
   };
 });
 
-import { clearAllHistoryManagers, destroyHistoryManager, getHistoryManager } from "../history-manager";
+import {
+  clearAllHistoryManagers,
+  destroyHistoryManager,
+  getHistoryManager,
+  packedRangesToUvRegion,
+} from "../history-manager";
+import { diag } from "../diag-log";
 import { getBlockStore, openBlockStore } from "../block-stores";
 import type { BlockGrid } from "../block-grid";
 import { historyCacheBudgets } from "../history-cache-budgets";
@@ -605,6 +611,35 @@ describe("HistoryManager undo/redo round-trip", () => {
 
     mgr.dispose();
     delete fakeOpenFiles["f1"];
+  });
+
+  it("reports the committed footprint's bounds in file time", async () => {
+    installManagerEnv();
+    clearAllHistoryManagers();
+    const root = lossyFill(8, 4, 0);
+    const spec = makeSpectrogram(root, 8, 4);
+    fakeOpenFiles.f2 = { spectrogramData: spec };
+    const mgr = getHistoryManager("f2");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: spec });
+    const ranges = Uint32Array.of(10, 3);
+    const after = root.slice();
+    after[10 * 4] += 0.25;
+    const log = vi.spyOn(diag, "info");
+    try {
+      const dimensions = mgr.getManifest()!.nodes[mgr.getManifest()!.currentId].dimensions;
+      await mgr.addStroke({ data: after, label: "Paint", dimensions, dirtyRanges: ranges });
+      const expected = packedRangesToUvRegion(ranges, spec.synthesisMetadata, spec.numFrames, spec.numBands)!;
+      expect(log).toHaveBeenCalledWith("timing", "addStroke footprint time bounds", {
+        fileId: "f2",
+        timeMin: expected.startX,
+        timeMax: expected.endX,
+      });
+    } finally {
+      log.mockRestore();
+      clearAllHistoryManagers();
+      delete fakeOpenFiles.f2;
+      delete fakeOpenFiles.f1;
+    }
   });
 
   it("reconstructs a footprint-delta node from disk losslessly", async () => {
