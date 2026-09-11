@@ -2388,7 +2388,32 @@ const FileRendererInner = memo(
       holdPaint: (ranges, values) => canvasRef.current?.holdPaint(ranges, values) ?? (() => {}),
       forgetBlocks: (ranges) => canvasRef.current?.forgetBlocks(ranges),
       settleStroke: async () => {
-        await canvasRef.current?.settle();
+        const canvas = canvasRef.current;
+        if (applyStroke.current && !strokePreview.current && canvas && strokeRendererRef.current?.getIsInitialized()) {
+          applyStroke.current = false;
+          const state = useStore.getState();
+          const { cursorPosition, hoveredFile } = useTransientStore.getState();
+          const file = openFiles[fileId];
+          const spec = file?.spectrogramData;
+          if (spec && cursorPosition && (state.activeFileId === fileId || hoveredFile === fileId)) {
+            const aim = unitsToUv(
+              cursorPosition.beats,
+              cursorPosition.pitch,
+              state.filepathsBpm[file.filePath] || 120,
+              spec.numFrames / spec.sampleRate,
+              spec.bandsPerOctave,
+              spec.numBands,
+            );
+            if (aim.x >= 0) {
+              const span = dabSpan(state, aim, canvas);
+              canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () =>
+                dispatchStroke(state, aim, false, undefined, span),
+              );
+              displayMode.current = "committed";
+            }
+          }
+        }
+        await canvas?.settle();
       },
       applyStroke: () => {
         // The frame loop resolves the position from the cursor.

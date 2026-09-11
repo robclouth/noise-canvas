@@ -425,3 +425,51 @@ it("disposes each display material and releases its renderer properties across r
     expect(rig.gl.properties.has(material)).toBe(false);
   }
 });
+
+describe("pending frame dab settlement", () => {
+  it.each([
+    { blocks: Infinity, duration: 8 },
+    { blocks: 2, duration: 300 },
+  ])("paints the pending dab before the commit read ($blocks blocks)", async ({ blocks, duration }) => {
+    const rig = await mount(brush(0), blocks, duration);
+    const handle = rig.ref.current!;
+    const aim = 0.7;
+    const [beats, pitch] = uvToUnits(aim, 0.5, 120, duration, rig.data.bandsPerOctave, rig.data.numBands);
+    rig.useTransientStore.setState({ cursorPosition: { beats, pitch }, cursorVisible: true });
+    const painted = vi.spyOn(StrokeRenderer.prototype, "renderStroke");
+    handle.beginStroke();
+    handle.renderStroke(false);
+    expect(painted).not.toHaveBeenCalled();
+
+    await handle.settleStroke();
+    expect(painted).toHaveBeenCalledTimes(1);
+    const footprint = handle.getCommittedFootprintUv();
+    expect(footprint).not.toBeNull();
+    const ranges = handle.getDirtyPixelRanges()!;
+    const committed = (await handle.readPixelRanges(ranges))!;
+    const original = gatherPixelRanges(seed, ranges);
+    expect(committed.some((value, i) => Math.abs(value - original[i]) > 1e-6)).toBe(true);
+    handle.endStroke();
+    rig.frame();
+    expect(painted).toHaveBeenCalledTimes(1);
+    expect(await handle.readPixelRanges(ranges)).toEqual(committed);
+
+    handle.beginStroke();
+    handle.renderStrokeBatch([{ state: rig.state, aimX: aim, aimY: 0.5 }]);
+    await handle.settleStroke();
+    expect(painted).toHaveBeenCalledTimes(2);
+    expect(handle.getCommittedFootprintUv()).toEqual(footprint);
+    handle.endStroke();
+  });
+
+  it("leaves a pending preview out of the commit", async () => {
+    const rig = await mount(brush(0), Infinity, 8);
+    const [beats, pitch] = uvToUnits(0.5, 0.5, 120, 8, rig.data.bandsPerOctave, rig.data.numBands);
+    rig.useTransientStore.setState({ cursorPosition: { beats, pitch }, cursorVisible: true });
+    const painted = vi.spyOn(StrokeRenderer.prototype, "renderStroke");
+    rig.ref.current!.renderStroke(true);
+    await rig.ref.current!.settleStroke();
+    expect(painted).not.toHaveBeenCalled();
+    expect(rig.ref.current!.getCommittedFootprintUv()).toBeNull();
+  });
+});
