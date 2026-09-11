@@ -1,4 +1,11 @@
 import {
+  applyDisplayPyramidUniforms,
+  prepareVisibleRegion,
+  visibleFrameRange,
+  disposeDisplayResidency,
+  type FileDisplayResidencyContext,
+} from "../lib/file-display-residency";
+import {
   brushUnionAt as resolveBrushUnionAt,
   dispatchStroke as dispatchFileStroke,
   strokeRefusal as fileStrokeRefusal,
@@ -61,8 +68,6 @@ import { deriveSideData, getHistoryManager } from "@renderer/lib/history-manager
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import { metadataTextureRows } from "../lib/band-layout";
 import { DEFAULT_ONSET_SENSITIVITY, packedFold, padToFold } from "../lib/constants";
-import { displayLevelChoice } from "../lib/display-pyramid";
-import type { DisplayTileRing } from "../lib/display-tiles-textures";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
@@ -88,11 +93,6 @@ function resolveStepSourceFile(state: State, step: BrushStep | undefined): OpenF
   if (named) return getOpenFileByPath(named.path);
   return state.activeFileId ? openFiles[state.activeFileId] : undefined;
 }
-
-// A region the display cannot serve finely yet is greyed only once it has been
-// missing this long, then fades in over the second span.
-const DISPLAY_LOADING_GRACE_MS = 120;
-const DISPLAY_LOADING_FADE_MS = 160;
 
 /**
  * The `FileRenderer` component is responsible for rendering the spectrogram of an audio file
@@ -296,7 +296,7 @@ const FileRendererInner = memo(
         unsubDisplay();
         unsubTransient();
         unsubActiveFileId();
-        if (aimRestTimer.current !== null) clearTimeout(aimRestTimer.current);
+        disposeDisplayResidency(aimRestTimer);
       };
     }, [fileId, viewFileId, scheduleSnapshotRefresh]);
 
@@ -343,6 +343,22 @@ const FileRendererInner = memo(
     const loadingSinceRef = useRef<number | null>(null);
     // The zoom and offset the loading grace was last measured against.
     const loadingViewRef = useRef({ zoom: 0, offset: 0 });
+    const residencyContext: FileDisplayResidencyContext = {
+      viewFileId,
+      spectrogramData,
+      displayMaterial,
+      glRef,
+      strokeRendererRef,
+      canvasRef,
+      invalidateRef,
+      ringRequestsRef,
+      loadingSinceRef,
+      loadingViewRef,
+      aimRest,
+      aimRestTimer,
+      getState: useStore.getState,
+      currentTaps: (runs) => getHistoryManager(fileId).currentTaps(runs),
+    };
 
     // Cleanup StrokeRenderer on unmount or when textures change
     useEffect(() => {
@@ -553,171 +569,6 @@ const FileRendererInner = memo(
 
     const placeholderTexture = usePlaceholderTexture();
 
-    /**
-     * Updates every display uniform that doesn't depend on the cursor,
-     * preview, or picking state: texture metadata, dB range, view zoom/offset,
-     * and the grid overlay. Shared by the live frame loop and snapshot capture
-     * so a captured snapshot matches what the live view would draw.
-     */
-    /**
-     * Holds the tiles the view needs and binds them. The ring stays empty
-     * wherever the pyramid already has bins as fine as the screen asks for.
-     * Returns true while a tile the view needs is still being read.
-     */
-    const applyDisplayTileUniforms = (
-      pyramidStepLog2: number,
-      framesPerPixel: number,
-      viewZoomPower: number,
-      viewOffset: number,
-      viewportWidth: number,
-    ): boolean => {
-      const uniforms = displayMaterial.uniforms;
-      const gl = glRef.current;
-      const strokeRenderer = strokeRendererRef.current;
-      const tiles = strokeRenderer?.getDisplayTiles();
-      if (!gl || !strokeRenderer || !tiles) {
-        uniforms.displayTileCount.value = 0;
-        return false;
-      }
-      const zoom = Math.pow(2, viewZoomPower);
-      const span = spectrogramData.numFrames / zoom;
-      const startFrame = zoom > 1 ? viewOffset * (spectrogramData.numFrames - span) : 0;
-      const ringView = {
-        framesPerPixel,
-        startFrame,
-        endFrame: startFrame + span,
-        viewportPixels: Math.max(1, viewportWidth),
-      };
-      let lacking = false;
-      if (canvasCoversFile()) {
-        tiles.update(gl, strokeRenderer.committedSource(), ringView, pyramidStepLog2);
-      } else if (
-        canvasRef.current?.holdsFrames(ringView.startFrame, ringView.endFrame) ||
-        canvasRef.current?.isFillingFrames(ringView.startFrame, ringView.endFrame)
-      ) {
-        tiles.release();
-        lacking = true;
-      } else {
-        const missing = tiles.aim(ringView, pyramidStepLog2);
-        requestRingTiles(tiles, missing);
-        lacking = missing.length > 0;
-      }
-
-      const ring = tiles.uniforms();
-      uniforms.displayTileTex.value = tiles.texture();
-      uniforms.displayTileMetaTex.value = tiles.metadataTexture();
-      uniforms.displayTileFirst.value = ring.firstTile;
-      uniforms.displayTileCount.value = ring.tileCount;
-      uniforms.displayTileSlots.value = Math.max(1, ring.slotCount);
-      uniforms.displayTileTexels.value = ring.tileTexels;
-      uniforms.displayTileBlend.value = ring.blend;
-      uniforms.displayTileLevel.value = ring.level;
-      return lacking;
-    };
-
-    /**
-     * Reads the taps of the tiles the ring is missing out of the committed
-     * state and cuts them in as they land. The read goes through the canvas,
-     * which lays the paint of a stroke still committing over the store's
-     * values. A tile
-     * whose level has moved on, or whose slot the bound window took back, is
-     * dropped: the next aim asks again.
-     */
-    const requestRingTiles = (tiles: DisplayTileRing, missing: number[]): void => {
-      if (missing.length === 0) return;
-      const level = tiles.gridLevel();
-      for (const tile of missing) {
-        const key = `${level}:${tile}`;
-        if (ringRequestsRef.current.has(key)) continue;
-        ringRequestsRef.current.add(key);
-        const runs = tiles.tileTapRuns(tile);
-        const read = canvasRef.current
-          ? canvasRef.current.readCommittedTaps(runs)
-          : getHistoryManager(fileId).currentTaps(runs);
-        void read
-          .then((values) => {
-            ringRequestsRef.current.delete(key);
-            const gl = glRef.current;
-            const live = strokeRendererRef.current?.getDisplayTiles();
-            if (!values || !gl || live !== tiles) return;
-            if (tiles.gridLevel() !== level || !tiles.canCutTile(tile)) return;
-            tiles.cutTileFromTaps(gl, tile, values);
-            // A tile cut mid-stroke came from a store without the dabs so far.
-            if (canvasRef.current?.isStroking && tiles.uniforms().tileCount > 0) {
-              strokeRendererRef.current?.refreshDisplayFromStroke();
-            }
-            invalidateRef.current();
-          })
-          .catch(() => ringRequestsRef.current.delete(key));
-      }
-    };
-
-    /**
-     * Binds the two pyramid levels whose bins best match the screen, with the
-     * weight of the coarser one, and the tile ring that covers what the
-     * pyramid is too coarse for. The canvas takes over when neither has bins.
-     */
-    const applyDisplayPyramidUniforms = (viewZoomPower: number, viewOffset: number, viewportWidth: number): void => {
-      const uniforms = displayMaterial.uniforms;
-      const pyramid = strokeRendererRef.current?.getDisplayPyramid();
-      if (!pyramid || !pyramid.texture(0)) {
-        uniforms.displayPyramidActive.value = false;
-        uniforms.displayCanvasFirst.value = false;
-        uniforms.displayTileCount.value = 0;
-        uniforms.displayLoading.value = 0;
-        loadingSinceRef.current = null;
-        return;
-      }
-      const framesPerPixel = spectrogramData.numFrames / (Math.pow(2, viewZoomPower) * Math.max(1, viewportWidth));
-      const finestStepLog2 = pyramid.levels[0].stepLog2;
-      const ringLacks = applyDisplayTileUniforms(
-        finestStepLog2,
-        framesPerPixel,
-        viewZoomPower,
-        viewOffset,
-        viewportWidth,
-      );
-
-      // Past the pyramid's finest level the canvas is the sharp picture, and
-      // the finest level stands in wherever the canvas does not reach yet.
-      const finerThanPyramid = 2 ** finestStepLog2 > Math.max(framesPerPixel, 1);
-      const canvas = canvasRef.current;
-      const visible = visibleFrameRange(useStore.getState());
-      const visibleRangeCovered = canvas?.holdsFrames(visible.start, visible.end) ?? true;
-      uniforms.displayCanvasFirst.value = finerThanPyramid && (canvas?.isPopulated() ?? true);
-      const ready = pyramid.readyLevel;
-      const choice = finerThanPyramid
-        ? { fine: ready, coarse: ready, blend: 0 }
-        : displayLevelChoice(pyramid.levels, framesPerPixel, ready);
-      uniforms.displayFineTex.value = pyramid.texture(choice.fine);
-      uniforms.displayFineMetaTex.value = pyramid.metadataTexture(choice.fine);
-      uniforms.displayCoarseTex.value = pyramid.texture(choice.coarse);
-      uniforms.displayCoarseMetaTex.value = pyramid.metadataTexture(choice.coarse);
-      uniforms.displayLevelBlend.value = choice.blend;
-      uniforms.displayPyramidActive.value = true;
-
-      // A region the pyramid serves in place of something finer is greyed as
-      // loading, after a grace so a zoom whose tiles land at once never flashes.
-      const levelsLoading = !finerThanPyramid && displayLevelChoice(pyramid.levels, framesPerPixel).fine < ready;
-      uniforms.displayFinerWanted.value = finerThanPyramid;
-      uniforms.displayLoadingAll.value = levelsLoading;
-      const lacking = levelsLoading || (finerThanPyramid && !visibleRangeCovered && ringLacks);
-      if (!lacking) {
-        loadingSinceRef.current = null;
-        uniforms.displayLoading.value = 0;
-        return;
-      }
-      const now = performance.now();
-      // The grace runs from the last move of the view, so a zoom or pan under
-      // way is never greyed while it still moves.
-      const viewMoved = loadingViewRef.current.zoom !== viewZoomPower || loadingViewRef.current.offset !== viewOffset;
-      if (viewMoved) loadingViewRef.current = { zoom: viewZoomPower, offset: viewOffset };
-      if (loadingSinceRef.current === null || viewMoved) loadingSinceRef.current = now;
-      const fade = (now - loadingSinceRef.current - DISPLAY_LOADING_GRACE_MS) / DISPLAY_LOADING_FADE_MS;
-      uniforms.displayLoading.value = Math.min(1, Math.max(0, fade));
-      if (fade < 1) invalidateRef.current?.();
-    };
-
     const applyStaticDisplayUniforms = (state: State, viewportWidth: number, viewportHeight: number): void => {
       const file = openFiles[fileId];
       if (!file?.spectrogramData || !inverseMapTex || !metadataTex) return;
@@ -755,7 +606,7 @@ const FileRendererInner = memo(
       };
       bindFileSpectralInputs(displayMaterial, data, view);
 
-      applyDisplayPyramidUniforms(viewZoomPower, viewOffset, viewportWidth);
+      applyDisplayPyramidUniforms(residencyContext, viewZoomPower, viewOffset, viewportWidth);
 
       bindFileTopOverlays(displayMaterial, data, view);
     };
@@ -833,15 +684,6 @@ const FileRendererInner = memo(
       } finally {
         window?.dispose();
       }
-    };
-
-    /** The frames the file's view shows at its current zoom and offset. */
-    const visibleFrameRange = (state: State): { start: number; end: number } => {
-      const { numFrames } = spectrogramData;
-      const zoom = Math.pow(2, state.filesZoom[viewFileId] ?? 0);
-      const span = numFrames / zoom;
-      const start = zoom > 1 ? (state.filesOffset[viewFileId] ?? 0) * (numFrames - span) : 0;
-      return { start, end: start + span };
     };
 
     /** The canvas, built on first use once there is a graphics device. */
@@ -1056,7 +898,7 @@ const FileRendererInner = memo(
         // The GPU can refuse the allocations even after analysis fit the
         // budget; closing the file keeps the context alive.
         try {
-          const visible = visibleFrameRange(state);
+          const visible = visibleFrameRange(residencyContext, state);
           const view = canvasFor(gl).firstView(visible.start, visible.end);
           strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects, view);
         } catch (error) {
@@ -1255,31 +1097,7 @@ const FileRendererInner = memo(
       const span = dabSpan(state, cursorPos, canvas, union);
       const { startFrame: dabStart, endFrame: dabEnd, needs } = span;
       const original = needs.original;
-      if (!canvas.wholeFile) {
-        const visible = visibleFrameRange(state);
-        // The window holds the view and the dab under the pointer when it can,
-        // so the picture is sharp across the view and a dab lands anywhere in
-        // it; a view wider than the window centres on the dab instead.
-        let start = visible.start;
-        let end = visible.end;
-        if (cursorPos.x >= 0) {
-          const bothStart = Math.min(visible.start, dabStart);
-          const bothEnd = Math.max(visible.end, dabEnd);
-          if (canvas.fitsWindow(bothStart, bothEnd)) {
-            start = bothStart;
-            end = bothEnd;
-          } else {
-            start = dabStart;
-            end = dabEnd;
-          }
-        }
-        // A stroke pages ahead of the brush every frame. Everything else — a
-        // pointer crossing the file, a pan under way — waits until the aim
-        // stops, and takes a frame at the moment it does.
-        const wait = canvas.isStroking ? 0 : aimRest.current.wait(start, end, performance.now());
-        if (wait === 0) canvas.aim(start, end, original);
-        else scheduleAimRest(wait);
-      }
+      prepareVisibleRegion(residencyContext, canvas, state, cursorPos, dabStart, dabEnd, original);
 
       // Render brush stroke if requested
       if (applyStroke.current && cursorPos.x >= 0) {
@@ -1439,18 +1257,6 @@ const FileRendererInner = memo(
         perfAdd("fileFrame(active)", performance.now() - frameT0);
       }
     });
-
-    /** True while the canvas holds every frame of the file. */
-    const canvasCoversFile = (): boolean => canvasRef.current?.coversFile() ?? true;
-
-    /** Takes a frame when the aim comes to rest, since a still pointer sends no events. */
-    const scheduleAimRest = (wait: number): void => {
-      if (aimRestTimer.current !== null) clearTimeout(aimRestTimer.current);
-      aimRestTimer.current = setTimeout(() => {
-        aimRestTimer.current = null;
-        invalidateRef.current?.();
-      }, wait);
-    };
 
     const regionToFileUv = (region: UvRegion | null): UvRegion | null =>
       canvasRef.current ? canvasRef.current.regionToFileUv(region) : region;

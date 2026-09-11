@@ -1,3 +1,10 @@
+import { AimRest } from "../canvas-window";
+import {
+  applyDisplayPyramidUniforms,
+  prepareVisibleRegion,
+  disposeDisplayResidency,
+  type FileDisplayResidencyContext,
+} from "../file-display-residency";
 import { createElement, createRef } from "react";
 import { createRoot, extend } from "@react-three/fiber";
 import * as THREE from "three";
@@ -122,6 +129,7 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   const root = createRoot(element);
   await root.configure({ gl, frameloop: "never", size: { width: 100, height: 100, top: 0, left: 0 } });
   const initializeSpy = vi.spyOn(WindowedCanvas.prototype, "initialize");
+  const displaySpy = vi.spyOn(StrokeRenderer.prototype, "getDisplayPyramid");
   const render = (parked: boolean, instance = 0) =>
     root.render(
       createElement(FileRenderer, {
@@ -147,6 +155,8 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   const canvas = initializeSpy.mock.contexts.at(-1);
   if (!(canvas instanceof WindowedCanvas)) throw new Error("no initialised canvas");
   await vi.waitFor(() => expect(canvas.isPopulated()).toBe(true));
+  const strokeRenderer = displaySpy.mock.contexts.at(-1);
+  if (!(strokeRenderer instanceof StrokeRenderer)) throw new Error("no display renderer");
   return {
     ref,
     data,
@@ -159,6 +169,7 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
     file: openFiles.residency,
     useStore,
     gl,
+    strokeRenderer,
   };
 }
 
@@ -471,5 +482,112 @@ describe("pending frame dab settlement", () => {
     await rig.ref.current!.settleStroke();
     expect(painted).not.toHaveBeenCalled();
     expect(rig.ref.current!.getCommittedFootprintUv()).toBeNull();
+  });
+});
+
+function displayContext(rig: Awaited<ReturnType<typeof mount>>): FileDisplayResidencyContext {
+  return {
+    viewFileId: "residency",
+    spectrogramData: rig.data,
+    displayMaterial: rig.ref.current!.getDisplayMaterial()!,
+    glRef: { current: rig.gl },
+    strokeRendererRef: { current: rig.strokeRenderer },
+    canvasRef: { current: rig.canvas },
+    invalidateRef: { current: vi.fn() },
+    ringRequestsRef: { current: new Set() },
+    loadingSinceRef: { current: null },
+    loadingViewRef: { current: { zoom: 0, offset: 0 } },
+    aimRest: { current: new AimRest() },
+    aimRestTimer: { current: null },
+    getState: rig.useStore.getState,
+    currentTaps: async (runs) => gatherTaps(seed, runs),
+  };
+}
+
+describe("display residency completion", () => {
+  it.each(["current", "renderer replaced", "level changed", "slot reclaimed"])(
+    "checks a delayed tile before publishing: %s",
+    async (completion) => {
+      pyramidBudget = 1000;
+      const rig = await mount(brush(0), 2);
+      const context = displayContext(rig);
+      const tiles = rig.strokeRenderer.getDisplayTiles()!;
+      const cut = vi.spyOn(tiles, "cutTileFromTaps");
+      const pending: Array<() => void> = [];
+      vi.spyOn(rig.canvas, "readCommittedTaps").mockImplementation(
+        (runs) => new Promise((resolve) => pending.push(() => resolve(gatherTaps(seed, runs)))),
+      );
+      rig.useStore.setState({ filesZoom: { residency: 8 }, filesOffset: { residency: 0.75 } });
+      applyDisplayPyramidUniforms(context, 8, 0.75, 100);
+      expect(pending.length).toBeGreaterThan(0);
+      const requests = pending.length;
+      applyDisplayPyramidUniforms(context, 8, 0.75, 100);
+      expect(pending).toHaveLength(requests);
+      if (completion === "renderer replaced") context.strokeRendererRef.current = null;
+      if (completion === "level changed") vi.spyOn(tiles, "gridLevel").mockReturnValue(tiles.gridLevel() + 1);
+      if (completion === "slot reclaimed") vi.spyOn(tiles, "canCutTile").mockReturnValue(false);
+      vi.mocked(context.invalidateRef.current).mockClear();
+      for (const resolve of pending) resolve();
+      await vi.waitFor(() => expect(context.ringRequestsRef.current.size).toBe(0));
+      expect(cut).toHaveBeenCalledTimes(completion === "current" ? requests : 0);
+      expect(context.invalidateRef.current).toHaveBeenCalledTimes(completion === "current" ? requests : 0);
+    },
+  );
+
+  it("advances loading grace and fade without pointer input and stops requesting frames once ready", async () => {
+    pyramidBudget = 1000;
+    const rig = await mount(brush(0), 2);
+    const context = displayContext(rig);
+    const pending: Array<() => void> = [];
+    vi.spyOn(rig.canvas, "readCommittedTaps").mockImplementation(
+      (runs) => new Promise((resolve) => pending.push(() => resolve(gatherTaps(seed, runs)))),
+    );
+    rig.useStore.setState({ filesZoom: { residency: 5 }, filesOffset: { residency: 0.75 } });
+    const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+    const loading = context.displayMaterial.uniforms.displayLoading;
+    applyDisplayPyramidUniforms(context, 5, 0.75, 100);
+    expect(loading.value).toBe(0);
+    expect(context.invalidateRef.current).toHaveBeenCalled();
+    now.mockReturnValue(1200);
+    applyDisplayPyramidUniforms(context, 5, 0.75, 100);
+    expect(loading.value).toBeGreaterThan(0);
+    expect(loading.value).toBeLessThan(1);
+    now.mockReturnValue(2000);
+    vi.mocked(context.invalidateRef.current).mockClear();
+    applyDisplayPyramidUniforms(context, 5, 0.75, 100);
+    expect(loading.value).toBe(1);
+    expect(context.invalidateRef.current).not.toHaveBeenCalled();
+    for (const resolve of pending) resolve();
+    await vi.waitFor(() => expect(context.ringRequestsRef.current.size).toBe(0));
+    vi.mocked(context.invalidateRef.current).mockClear();
+    applyDisplayPyramidUniforms(context, 5, 0.75, 100);
+    expect(loading.value).toBe(0);
+    expect(context.loadingSinceRef.current).toBeNull();
+    expect(context.invalidateRef.current).not.toHaveBeenCalled();
+  });
+
+  it("owns the frame at aim rest and cancels it at disposal", async () => {
+    const rig = await mount(brush(0), 2);
+    const context = displayContext(rig);
+    const aim = vi.spyOn(rig.canvas, "aim");
+    rig.useStore.setState({ filesZoom: { residency: 8 }, filesOffset: { residency: 0.75 } });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      prepareVisibleRegion(context, rig.canvas, context.getState(), { x: -1 }, 0, 0, false);
+      expect(aim).not.toHaveBeenCalled();
+      expect(context.aimRestTimer.current).not.toBeNull();
+      vi.advanceTimersByTime(1000);
+      expect(context.invalidateRef.current).toHaveBeenCalledTimes(1);
+      expect(context.aimRestTimer.current).toBeNull();
+      rig.useStore.setState({ filesOffset: { residency: 0.25 } });
+      prepareVisibleRegion(context, rig.canvas, context.getState(), { x: -1 }, 0, 0, false);
+      expect(context.aimRestTimer.current).not.toBeNull();
+      disposeDisplayResidency(context.aimRestTimer);
+      vi.advanceTimersByTime(1000);
+      expect(context.invalidateRef.current).toHaveBeenCalledTimes(1);
+    } finally {
+      disposeDisplayResidency(context.aimRestTimer);
+      vi.useRealTimers();
+    }
   });
 });
