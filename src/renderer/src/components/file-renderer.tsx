@@ -1,3 +1,11 @@
+import type {
+  BrushUnionUv,
+  DabSpan,
+  FileRendererHandle,
+  FileRendererProps,
+  RegionStroke,
+  StrokeDispatch,
+} from "../lib/file-renderer-types";
 import { createStepStateView, useStore } from "@/store";
 import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
@@ -8,7 +16,7 @@ import { AimRest, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { canvasWindowBlocks } from "@renderer/lib/gpu-budget";
 import { ExportSourceWindow, exportBlockGrid } from "@renderer/lib/export-window";
 import { sourceReadSpan, type SourceWindowTextures } from "@renderer/lib/source-window";
-import { WindowedCanvas, type DabNeeds, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
+import { WindowedCanvas, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
 import { strokeReach, type ReachContext } from "@renderer/lib/effect-reach";
 import { strokeRefusal as refusalFor, overReachRefusal } from "@renderer/lib/whole-file-gate";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
@@ -18,17 +26,7 @@ import { createDefaultUniforms } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, logFileFootprint, openFiles } from "@renderer/store/files";
 import type { BrushStep } from "@renderer/parameters";
 import { State, type OpenFile, type SpectrogramData } from "@renderer/store/types";
-import {
-  forwardRef,
-  memo,
-  RefObject,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   AdditiveBlending,
   Camera,
@@ -48,7 +46,7 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
-import { LONE_LAYER_TINT, type LayerTint } from "@renderer/lib/layer-tint";
+import { LONE_LAYER_TINT } from "@renderer/lib/layer-tint";
 import { effects } from "../effects";
 import { deriveSideData, getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
@@ -87,222 +85,11 @@ import {
   unitsToUv,
 } from "../lib/utils";
 
-/**
- * Props for the FileRenderer component.
- * @param fileId - The open file to render.
- * @param isLive - Whether this file's view is live-rendered. When false the
- *   frame loop skips the file entirely (its DOM snapshot covers the view) and
- *   display-state changes refresh the snapshot instead.
- * @param snapshotCanvasRef - The 2D canvas that snapshot captures paint into.
- * @param onLiveFrame - Called after each fully drawn live frame.
- */
-interface FileRendererProps {
-  fileId: string;
-  /** The layer whose zoom and scroll place this display in an overlaid view. */
-  viewFileId?: string;
-  isLive: boolean;
-  parked: boolean;
-  snapshotCanvasRef: RefObject<HTMLCanvasElement | null>;
-  onLiveFrame?: () => void;
-  /** Requests a capture of every layer sharing the snapshot canvas. */
-  onSnapshotRefresh?: () => void;
-  /**
-   * The hue pair this layer paints its left and right channels in. Defaults to
-   * the orange and blue a layer on its own has always used.
-   */
-  tint?: LayerTint;
-  /**
-   * One layer of an overlaid stack. Every layer of one adds into the picture,
-   * including the layer on top, or the top layer's opaque output would wipe the
-   * layers already drawn.
-   */
-  overlaid?: boolean;
-  /**
-   * Drawn behind the layer on top: spectrogram only. The layer on top keeps the
-   * grid, the brush preview and the rectangles, so a stack carries one of each.
-   */
-  behind?: boolean;
-}
-
-/** One stroke of a batch: where it is aimed, and the state to paint it with. */
-/** A stroke over one region, painted from a state built for it. */
-export interface RegionStroke {
-  aimX: number;
-  aimY: number;
-  state: State;
-  /** The spectrogram the stroke samples, when it is not an open file. */
-  source?: SourceFileInfo;
-}
-
-export interface StrokeDispatch {
-  /** Aim point in pitch UV — y up from the file's lowest band, as unitsToUv gives it. */
-  aimX: number;
-  aimY: number;
-  state: State;
-}
-
 /** The file a step samples from: the one it names, or the file being painted. */
 function resolveStepSourceFile(state: State, step: BrushStep | undefined): OpenFile | undefined {
   const named = step?.sourceFile ?? null;
   if (named) return getOpenFileByPath(named.path);
   return state.activeFileId ? openFiles[state.activeFileId] : undefined;
-}
-
-/**
- * Handle for the FileRenderer component, exposing methods to parent components.
- */
-/** The union of the steps' brush rectangles for one aim, in file UV. */
-interface BrushUnionUv {
-  min: Vector2;
-  max: Vector2;
-  sizeUv: Vector2;
-  fullTime: boolean;
-  fullPitch: boolean;
-  wrapsTime: boolean;
-  wrapsPitch: boolean;
-  hasSteps: boolean;
-}
-
-/** The frames a dab reads and writes, with what it reads of other files. */
-interface DabSpan {
-  startFrame: number;
-  endFrame: number;
-  needs: DabNeeds;
-}
-
-export interface FileRendererHandle {
-  /** Renders a brush stroke at the current cursor position. */
-  renderStroke: (preview: boolean) => void;
-  /**
-   * Paints a batch of strokes into the FBO, each from its own state snapshot,
-   * as part of the stroke already opened with beginStrokePreview(). A stroke
-   * on frames the canvas does not hold waits for its window; `settleStroke`
-   * lands what is waiting. The blocks under `ahead`, the strokes that follow
-   * this batch, are read towards while it lands. Returns how many were taken.
-   */
-  renderStrokeBatch: (strokes: StrokeDispatch[], ahead?: StrokeDispatch[]) => number;
-  /**
-   * Paints one stroke from an explicit state, optionally sampling a spectrogram
-   * that is not an open file. A preview goes to the partner buffer and can be
-   * redrawn as the pointer moves; a commit is the caller's to make.
-   */
-  renderRegionStroke: (stroke: RegionStroke, preview: boolean) => boolean;
-  /** GPU textures for a detached spectrogram, for `renderRegionStroke` to sample. */
-  createRegionSource: (
-    id: string,
-    spec: SpectrogramData,
-    onsets?: Float32Array,
-    onsetSensitivity?: number,
-  ) => SourceFileInfo | null;
-  disposeRegionSource: (source: SourceFileInfo) => void;
-  /**
-   * Opens a stroke and saves the spectrogram (or restores an already-saved
-   * one), so the strokes painted next can be taken back without touching
-   * history.
-   */
-  beginStrokePreview: () => void;
-  /** Puts back the pixels from before the preview. Resolves false if none were saved. */
-  discardStrokePreview: () => Promise<boolean>;
-  /**
-   * The longest stroke the canvas takes at once, in seconds, while it holds a
-   * window of the file; null while it holds all of it.
-   */
-  maxStrokeSeconds: () => number | null;
-  /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
-  keepStrokePreview: () => void;
-  /** The whole packed state from the frame buffer, or null when the canvas view does not hold the whole file. */
-  getFBOData: () => Promise<Float32Array | null>;
-  /**
-   * Reads only the pixels of the flat [pixelStart, pixelCount, ...] ranges from
-   * the committed frame buffer, as one block in range order.
-   */
-  readPixelRanges: (pixelRanges: Uint32Array) => Promise<Float32Array>;
-  /**
-   * Adds per-range phase offsets to the committed frame buffer in place:
-   * [pixelStart, pixelCount, offsetLeft, offsetRight, ...].
-   */
-  applyPhaseTurns: (turns: ArrayLike<number>) => void;
-  /** Sets the data of the frame buffer object. */
-  setFBOData: (data: Float32Array) => void;
-  /**
-   * Uploads only the texture rows covered by the flat [pixelStart, pixelCount, ...]
-   * ranges from `data` (the full packed state). Equivalent to setFBOData when
-   * everything outside the ranges already matches the FBO, but far cheaper.
-   */
-  patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
-  /** As patchFBOData, from values holding exactly the ranges' pixels in range order. */
-  patchFBODataCompact: (values: Float32Array, pixelRanges: Uint32Array) => void;
-  /** Returns the textures used for rendering. */
-  getTextures: () => {
-    packed: WebGLRenderTarget;
-    inverse: DataTexture;
-    metadata: DataTexture;
-    original: Texture;
-  } | null;
-  /** The span the canvas textures lay out, or null before the renderer exists. */
-  getCanvasView: () => CanvasView | null;
-  /**
-   * Why the brush cannot paint on a canvas holding a window of the file, in the
-   * words the user reads. Null when the stroke can paint.
-   */
-  strokeRefusal: (state: State, aim?: { x: number; y: number }) => string | null;
-  /** Restores the spectrogram to its original state. */
-  restoreOriginal: () => Promise<void>;
-  /** Clears the stroke preview. */
-  clearPreview: () => void;
-  /** Reloads all textures from the current spectrogramData (used after re-analysis). */
-  reloadTextures: () => void;
-  releaseAnalysisData: () => void;
-  applyStroke: () => void;
-  beginStroke: () => void;
-  endStroke: () => void;
-  /** Resolves once every dab of the stroke has landed. Call it before committing. */
-  settleStroke: () => Promise<void>;
-  /**
-   * Keeps a stroke's paint, `values` over the file pixels of `ranges`, on the
-   * canvas until the function returned is called, however the window moves.
-   */
-  holdPaint: (ranges: Uint32Array, values: Promise<Float32Array>) => () => void;
-  /** Drops the canvas's cached copies of the blocks over the named file pixels. */
-  forgetBlocks: (ranges: Uint32Array) => void;
-  /** Gets the dirty region (UV range modified since last clear). Returns null if no modifications. */
-  getDirtyRegion: () => { startX: number; endX: number; startY: number; endY: number } | null;
-  /** Clears the dirty region tracking (call after synthesis). */
-  clearDirtyRegion: () => void;
-  /** Takes the dirty region and clears it, so only this commit synthesizes it. */
-  consumeDirtyRegion: () => { startX: number; endX: number; startY: number; endY: number } | null;
-  /** Packed-pixel ranges the current stroke's committed footprint covers, for the history delta. Null = full snapshot. */
-  getDirtyPixelRanges: () => Uint32Array | null;
-  /** The stroke's committed footprint in unpacked UV, or null when nothing was committed. */
-  getCommittedFootprintUv: () => { timeMin: number; timeMax: number; pitchMin: number; pitchMax: number } | null;
-  /** Monotonic count of stroke starts, for dropping stale async commit work. */
-  getStrokeGeneration: () => number;
-  /** Widens the dirty region to cover pixels changed outside the painted rect. */
-  expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) => void;
-  /**
-   * Renders the committed spectrogram (no cursor/preview overlays) into the
-   * snapshot canvas at its current on-screen size. Resolves false when the
-   * renderer isn't ready yet or the view has no usable size.
-   */
-  /**
-   * Paints the view into the snapshot canvas. An overlaid stack passes the
-   * materials of the layers behind this one, drawn first, or the still would
-   * show the top layer alone.
-   */
-  captureSnapshot: (behindMaterials?: RawShaderMaterial[]) => Promise<boolean>;
-  /** This layer's display material, so a stack can capture every layer at once. */
-  getDisplayMaterial: () => RawShaderMaterial | null;
-  /** Schedules a throttled snapshot re-capture (no-op while the view is live). */
-  refreshSnapshot: () => void;
-  /**
-   * Renders a standalone still image of the committed spectrogram at export
-   * resolution. Resolves null when the renderer isn't ready yet.
-   */
-  renderExportImage: (
-    options: ImageExportOptions,
-    posterInfo: PosterInfo,
-    onProgress?: (fraction: number) => void,
-  ) => Promise<HTMLCanvasElement | null>;
 }
 
 // A region the display cannot serve finely yet is greyed only once it has been

@@ -1,6 +1,6 @@
 import { notifications } from "@mantine/notifications";
 import { diag } from "@renderer/lib/diag-log";
-import type { FileRendererHandle, StrokeDispatch } from "@renderer/components/file-renderer";
+import type { FileRendererHandle, StrokeDispatch } from "@renderer/lib/file-renderer-types";
 import { resolveGridFill, type GridFillTarget } from "@renderer/lib/grid/grid-fill";
 import { activeLoopRegion, openFiles } from "./files";
 import type { State, ZustandGet, ZustandSet } from "./types";

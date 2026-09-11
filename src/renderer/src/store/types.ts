@@ -1,5 +1,5 @@
 import type { CoarseStrip } from "../lib/coarse-strip";
-import type { FileRendererHandle } from "@renderer/components/file-renderer";
+import type { FileRendererHandle } from "@renderer/lib/file-renderer-types";
 import type { BrushStep } from "@renderer/parameters";
 import type { OutputLevels } from "@renderer/lib/output-levels";
 import type { Vector2 } from "three";

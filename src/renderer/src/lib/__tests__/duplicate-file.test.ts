@@ -146,7 +146,7 @@ import { destroyBlockStore, getBlockStore } from "../block-stores";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { blockGrid } from "../block-grid";
 import { canvasViewOf } from "../canvas-view";
-import type { FileRendererHandle } from "../../components/file-renderer";
+import type { FileRendererHandle } from "../file-renderer-types";
 import type { State, ZustandGet, ZustandSet } from "../../store/types";
 import type { PackedLayout } from "../../../../main/lib/types";
 

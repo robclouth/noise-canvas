@@ -2,7 +2,7 @@ import { createElement, createRef } from "react";
 import { createRoot, extend } from "@react-three/fiber";
 import * as THREE from "three";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FileRendererHandle } from "../../components/file-renderer";
+import type { FileRendererHandle } from "../file-renderer-types";
 import type { State } from "../../store/types";
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
