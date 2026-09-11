@@ -92,6 +92,9 @@ export class FileEngine {
     if (context.spectrogramData.packedData) this.packedSeedRef.current = context.spectrogramData.packedData;
     if (context.spectrogramData.inverseMap) this.inverseSeedRef.current = context.spectrogramData.inverseMap;
   }
+  get reachByState(): FileStrokeContext["reachByState"] {
+    return this.context.strokeContext.reachByState;
+  }
   subscribeVisualChange = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => {

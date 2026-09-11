@@ -78,7 +78,7 @@ export function prepareFileEditor(
     createStepStateView,
     getFileOnsets,
     closeFile: (id) => state.closeFile(id),
-    reachByState: new WeakMap(),
+    reachByState: engine.reachByState,
   };
   const { paint: dispatchStroke, span: dabSpan } = engine.strokeDispatch(strokeContext);
   const { cursorPosition, cursorVisible, hoveredFile: hoveredFileId } = transient;

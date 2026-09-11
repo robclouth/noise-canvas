@@ -23,6 +23,8 @@ import { BRUSH_SIZE_TIME_FULL, BRUSH_SIZE_PITCH_FULL, snapToSwungGridCenter, uvT
 import { WindowedCanvas } from "../windowed-canvas";
 import { savedViewTransform, type ViewTransform } from "../view-display";
 
+vi.mock("../effect-reach", { spy: true });
+
 vi.mock("../gpu-budget", async (original) => ({
   ...(await original<typeof import("../gpu-budget")>()),
   canvasWindowBlocks: () => windowBlocks,
@@ -891,6 +893,27 @@ async function stackedView(count: number) {
 }
 
 describe("one direct display per view", () => {
+  it("reuses reach computations across frames until the state changes", async () => {
+    const rig = await mount(brush(0, false, true), 2);
+    rig.useTransientStore.setState({ cursorPosition: { beats: 1, pitch: 0 }, cursorVisible: true });
+    rig.useStore.setState({ filepathsBpm: { "/residency.wav": 120 } });
+    vi.mocked(strokeReach).mockClear();
+    const state = rig.useStore.getState();
+    for (let frame = 0; frame < 4; frame++) {
+      rig.frame();
+      expect(rig.useStore.getState()).toBe(state);
+      expect.soft(strokeReach).toHaveBeenCalledTimes(1);
+    }
+    rig.useStore.setState({ filepathsBpm: { "/residency.wav": 140 } });
+    const nextState = rig.useStore.getState();
+    expect(nextState).not.toBe(state);
+    for (let frame = 0; frame < 4; frame++) {
+      rig.frame();
+      expect(rig.useStore.getState()).toBe(nextState);
+      expect.soft(strokeReach).toHaveBeenCalledTimes(2);
+    }
+  });
+
   it("draws each gesture revision once, with its current transform, including momentum", async () => {
     let pending = false;
     const rig = await mount(brush(0), Infinity, 8, () => {
