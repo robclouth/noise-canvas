@@ -159,15 +159,14 @@ async function run(label, windowBlocks, wav) {
 
   const columns = await columnBrightness(app, page, strip);
   const residentMB = await page.evaluate(async () => Math.round((await process.getProcessMemoryInfo()).private / 1024));
-  const footprint = logs
+  const footprints = logs
     .map((line) => /addStroke footprint delta.*?ranges: (\d+), footprintPixels: (\d+)/.exec(line))
     .filter(Boolean)
-    .map((match) => ({ ranges: Number(match[1]), pixels: Number(match[2]) }))
-    .pop();
+    .map((match) => ({ ranges: Number(match[1]), pixels: Number(match[2]), line: match.input }));
 
   await app.close();
   process.stdout.write(`${residentMB} MB\n`);
-  return { columns, footprint, errors, residentMB };
+  return { columns, footprints, errors, residentMB };
 }
 
 const wav = join(mkdtempSync(join(tmpdir(), "nc-window-audio-")), "tone.wav");
@@ -181,7 +180,11 @@ for (const [label, result] of [
   ["whole file", whole],
   ["windowed", windowed],
 ]) {
-  if (!result.footprint) failures.push(`${label}: the stroke committed nothing`);
+  if (result.footprints.length === 0) failures.push(`${label}: the stroke committed nothing`);
+  if (result.footprints.length > 1) {
+    failures.push(`${label}: the drag produced ${result.footprints.length} commits; expected one`);
+  }
+  for (const footprint of result.footprints) console.log(`${label}: ${footprint.line}`);
   for (const error of result.errors) failures.push(`${label} console: ${error}`);
 }
 
@@ -195,25 +198,26 @@ if (whole.columns.length !== windowed.columns.length) {
 
 const describe = (footprint) => (footprint ? `${footprint.ranges} ranges / ${footprint.pixels} pixels` : "—");
 
-if (whole.footprint && windowed.footprint) {
-  if (whole.footprint.ranges !== windowed.footprint.ranges) {
-    failures.push(`the commit covers different bands: ${describe(whole.footprint)} vs ${describe(windowed.footprint)}`);
+const wholeFootprint = whole.footprints.length === 1 ? whole.footprints[0] : null;
+const windowedFootprint = windowed.footprints.length === 1 ? windowed.footprints[0] : null;
+
+if (wholeFootprint && windowedFootprint) {
+  if (wholeFootprint.ranges !== windowedFootprint.ranges) {
+    failures.push(`the commit covers different bands: ${describe(wholeFootprint)} vs ${describe(windowedFootprint)}`);
   }
   // The footprint's time edge rounds up to a whole bin against the band's own
   // bin count, and a band's count over the file is itself rounded up, so the
   // two runs can land a bin apart at an edge. The four-bin margin either side
   // covers it; a wider gap is real paint the commit missed.
-  const slack = whole.footprint.ranges;
-  const gap = Math.abs(whole.footprint.pixels - windowed.footprint.pixels);
+  const slack = wholeFootprint.ranges;
+  const gap = Math.abs(wholeFootprint.pixels - windowedFootprint.pixels);
   if (gap > slack) {
-    failures.push(
-      `the commit differs by ${gap} pixels: ${describe(whole.footprint)} vs ${describe(windowed.footprint)}`,
-    );
+    failures.push(`the commit differs by ${gap} pixels: ${describe(wholeFootprint)} vs ${describe(windowedFootprint)}`);
   }
 }
 
-console.log(`\ncommitted   whole file: ${describe(whole.footprint)}`);
-console.log(`            windowed:   ${describe(windowed.footprint)}`);
+console.log(`\ncommitted   whole file: ${describe(wholeFootprint)}`);
+console.log(`            windowed:   ${describe(windowedFootprint)}`);
 console.log(`resident    whole file: ${whole.residentMB} MB, windowed: ${windowed.residentMB} MB`);
 
 if (failures.length > 0) {
