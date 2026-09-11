@@ -1432,6 +1432,7 @@ const FileRendererInner = memo(
       cursorPos: Vector2,
       preview: boolean,
       sourceOverride?: SourceFileInfo,
+      preparedSpan?: DabSpan,
     ): boolean => {
       const strokeRenderer = strokeRendererRef.current;
       const file = openFiles[fileId];
@@ -1443,6 +1444,10 @@ const FileRendererInner = memo(
       // The renderer paints over the span the canvas holds, so the cursor and
       // the duration it reads them against are the window's, not the file's.
       const canvas = canvasRef.current;
+      if (canvas) {
+        const span = preparedSpan ?? dabSpan(state, cursorPos, canvas);
+        if (!canvas.holdsFrames(span.startFrame, span.endFrame, span.needs.original)) return false;
+      }
       const dabCursor = canvas ? canvas.dabCursor(cursorPos) : cursorPos;
       const dabDuration = canvas ? canvas.dabDuration(totalDuration) : totalDuration;
 
@@ -1853,12 +1858,10 @@ const FileRendererInner = memo(
       }
 
       const canvas = canvasFor(gl);
-      // An effect reads around the dab, so the canvas has to hold that reach as
-      // well as the dab itself.
-      const reach = canvas.wholeFile ? { before: 0, after: 0 } : reachFrames(state);
-      const original = !canvas.wholeFile && wantsOriginal(state);
+      const span = dabSpan(state, cursorPos, canvas, union);
+      const { startFrame: dabStart, endFrame: dabEnd, needs } = span;
+      const original = needs.original;
       if (!canvas.wholeFile) {
-        const { numFrames } = spectrogramData;
         const visible = visibleFrameRange(state);
         // The window holds the view and the dab under the pointer when it can,
         // so the picture is sharp across the view and a dab lands anywhere in
@@ -1866,8 +1869,6 @@ const FileRendererInner = memo(
         let start = visible.start;
         let end = visible.end;
         if (cursorPos.x >= 0) {
-          const dabStart = cursorPos.x * numFrames - reach.before;
-          const dabEnd = (cursorPos.x + brushSizeUv.x) * numFrames + reach.after;
           const bothStart = Math.min(visible.start, dabStart);
           const bothEnd = Math.max(visible.end, dabEnd);
           if (canvas.fitsWindow(bothStart, bothEnd)) {
@@ -1890,7 +1891,6 @@ const FileRendererInner = memo(
       // Render brush stroke if requested
       if (applyStroke.current && cursorPos.x >= 0) {
         const preview = strokePreview.current;
-        const { startFrame: dabStart, endFrame: dabEnd, needs } = dabSpan(state, cursorPos, canvas);
         for (const need of needs.sources) canvas.aimSource(need);
         for (const need of needs.impulses) canvas.aimImpulse(need);
         canvas.dropSourcesExcept(needs.sources);
@@ -1903,7 +1903,10 @@ const FileRendererInner = memo(
           // A preview the renderer refuses, for a brush the window cannot
           // serve or a source window still on its way, shows the committed
           // picture and stays asked for as well.
-          if (!canvas.holdsFrames(dabStart, dabEnd, original) || !dispatchStroke(state, cursorPos, true)) {
+          if (
+            !canvas.holdsFrames(dabStart, dabEnd, original) ||
+            !dispatchStroke(state, cursorPos, true, undefined, span)
+          ) {
             displayMode.current = "committed";
           } else {
             displayMode.current = "preview";
@@ -1918,7 +1921,7 @@ const FileRendererInner = memo(
           // committed picture where the view is now.
           const dabState = state;
           const dabPos = cursorPos.clone();
-          canvas.paintWhenHeld(dabStart, dabEnd, needs, () => dispatchStroke(dabState, dabPos, false));
+          canvas.paintWhenHeld(dabStart, dabEnd, needs, () => dispatchStroke(dabState, dabPos, false, undefined, span));
           displayMode.current = "committed";
           applyStroke.current = false;
         }
@@ -2103,21 +2106,21 @@ const FileRendererInner = memo(
      */
     const reachFrames = (state: State): { before: number; after: number } => reachOf(state).frames;
 
-    /**
-     * The frames a dab at `cursorPos` covers, widened by what its effects read
-     * past the brush, and what it reads of other files. A canvas holding the
-     * whole file reaches nothing.
-     */
-    const dabSpan = (state: State, cursorPos: Vector2, canvas: WindowedCanvas): DabSpan => {
+    const dabSpan = (
+      state: State,
+      cursorPos: Vector2,
+      canvas: WindowedCanvas,
+      resolvedUnion?: BrushUnionUv,
+    ): DabSpan => {
       const file = openFiles[fileId];
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const { numFrames, sampleRate } = spectrogramData;
       const totalDuration = numFrames / sampleRate;
       const reach = canvas.wholeFile ? { before: 0, after: 0 } : reachFrames(state);
-      const union = brushUnionAt(state, cursorPos, bpm, totalDuration);
+      const union = resolvedUnion ?? brushUnionAt(state, cursorPos, bpm, totalDuration);
       return {
-        startFrame: cursorPos.x * numFrames - reach.before,
-        endFrame: (cursorPos.x + union.sizeUv.x) * numFrames + reach.after,
+        startFrame: (union.hasSteps ? union.min.x : cursorPos.x) * numFrames - reach.before,
+        endFrame: (union.hasSteps ? union.max.x : cursorPos.x) * numFrames + reach.after,
         needs: {
           sources: sourceNeedsFor(state, cursorPos),
           impulses: windowedImpulseNeeds(state),
@@ -2342,7 +2345,9 @@ const FileRendererInner = memo(
           const span = dabSpan(stroke.state, aim, canvas);
           const dabState = stroke.state;
           if (
-            canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () => dispatchStroke(dabState, aim, false))
+            canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () =>
+              dispatchStroke(dabState, aim, false, undefined, span),
+            )
           ) {
             painted++;
           }
