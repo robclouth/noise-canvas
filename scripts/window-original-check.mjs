@@ -86,7 +86,7 @@ try {
   await page.waitForFunction(
     (path) => {
       const file = window.checkFiles[window.__store.getState().activeFileId];
-      return file?.filePath === path && file?.rendererRef?.current?.getTextures() && window.checkCanvas?.holdsView();
+      return file?.filePath === path && file?.rendererRef?.current?.getTextures() && window.checkCanvas?.isPopulated();
     },
     input,
     { timeout: 300000 },

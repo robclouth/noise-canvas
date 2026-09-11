@@ -7,7 +7,7 @@ import type { State } from "../../store/types";
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { blockGrid, blockPixelRanges } from "../block-grid";
-import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
+import { gatherPixelRanges, gatherTaps, scatterCompactPixelRanges } from "../pixel-ranges";
 import { strokeReach } from "../effect-reach";
 import { StrokeRenderer } from "../stroke-renderer";
 import { BRUSH_SIZE_TIME_FULL, BRUSH_SIZE_PITCH_FULL, snapToSwungGridCenter, uvToUnits } from "../utils";
@@ -27,6 +27,7 @@ vi.mock("../history-manager", () => ({
     getManifest: () => ({ currentId: "edited" }),
     nearestFullAnchor: () => ({ id: "root" }),
     isCurrentAudioCached: () => true,
+    currentTaps: async (runs: Uint32Array) => gatherTaps(seed, runs),
     currentRanges: async (ranges: Uint32Array) => gatherPixelRanges(seed, ranges),
     rootRanges: async (ranges: Uint32Array) => gatherPixelRanges(seed, ranges),
     currentBlock: async (index: number) => {
@@ -37,6 +38,16 @@ vi.mock("../history-manager", () => ({
   }),
 }));
 
+vi.mock("../display-pyramid", async (original) => {
+  const module = await original<typeof import("../display-pyramid")>();
+  return {
+    ...module,
+    displayPyramidLevels: (layout: Parameters<typeof module.displayPyramidLevels>[0]) =>
+      module.displayPyramidLevels(layout, pyramidBudget),
+  };
+});
+
+let pyramidBudget: number | undefined;
 let windowBlocks = 2;
 let seed: Float32Array;
 let currentSeed: Float32Array | null = null;
@@ -48,6 +59,7 @@ extend({ Mesh: THREE.Mesh, PlaneGeometry: THREE.PlaneGeometry });
 afterEach(async () => {
   while (disposers.length) await disposers.pop()!();
   currentSeed = null;
+  pyramidBudget = undefined;
   vi.restoreAllMocks();
 });
 
@@ -133,7 +145,7 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
   });
   const canvas = initializeSpy.mock.contexts.at(-1);
   if (!(canvas instanceof WindowedCanvas)) throw new Error("no initialised canvas");
-  await vi.waitFor(() => expect(canvas.holdsView()).toBe(true));
+  await vi.waitFor(() => expect(canvas.isPopulated()).toBe(true));
   return {
     ref,
     data,
@@ -144,6 +156,8 @@ async function mount(state: State, blocks: number, durationSeconds = 300) {
     unmount,
     render,
     file: openFiles.residency,
+    useStore,
+    gl,
   };
 }
 
@@ -333,4 +347,62 @@ describe("pristine sampling after resume", () => {
     expect(mismatches, `maximum Original sampling error: ${maxError}; first magnitude: ${painted[0]}`).toBe(0);
     expect(maxError).toBeLessThanOrEqual(1e-6);
   });
+});
+
+describe("visible screen residency", () => {
+  it.each([8, 5])("keeps fine tiles for a disjoint screen at zoom %s through the rest delay", async (zoom) => {
+    pyramidBudget = 1000;
+    const rig = await mount(brush(0), 2);
+    const read = vi.spyOn(rig.canvas, "readCommittedTaps");
+    const aim = vi.spyOn(rig.canvas, "aim");
+    rig.useStore.setState({ filesZoom: { residency: zoom }, filesOffset: { residency: 0.75 } });
+    rig.frame();
+    expect(aim).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalled();
+    const material = rig.ref.current!.getDisplayMaterial()!;
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(material.uniforms.displayTileCount.value).toBeGreaterThan(0);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    rig.frame();
+    expect(aim).toHaveBeenCalled();
+    const visible = { start: aim.mock.calls[0][0], end: aim.mock.calls[0][1] };
+    if (rig.canvas.fitsWindow(visible.start, visible.end)) {
+      await vi.waitFor(() => expect(rig.canvas.holdsFrames(visible.start, visible.end)).toBe(true));
+      rig.frame();
+      expect(material.uniforms.displayTileCount.value).toBe(0);
+    } else {
+      expect(material.uniforms.displayTileCount.value).toBeGreaterThan(0);
+    }
+    const { createByteTarget, renderMaterialToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(100, 100);
+    disposers.push(() => target.dispose());
+    material.uniforms.drawOverlays.value = false;
+    const pixels = await renderMaterialToBytes(rig.gl, material, target);
+    expect(pixels).not.toBeNull();
+    expect(pixels!.some((value, index) => index % 4 !== 3 && value > 20)).toBe(true);
+    expect(material.uniforms.displayLoading.value).toBe(0);
+  });
+});
+
+it("uses block capacity for the visible refusal and batch admission", async () => {
+  const state = brush(0);
+  const rig = await mount(state, 2);
+  const wideBrush = createMockStateWithSteps([
+    {
+      name: "Wide",
+      overrides: {
+        brushSizeTime: rig.canvas.windowSeconds() * 2 - 0.01,
+        brushAnchorMode: 0,
+        sourcePositionMode: "follow",
+        effects: [],
+      },
+    },
+  ]);
+  const wide = { ...rig.state, brushes: wideBrush.brushes };
+  const aim = { x: (grid.blockFrames - 1) / rig.data.numFrames, y: 0.5 };
+  expect(rig.ref.current!.strokeRefusal(wide, aim)).not.toBeNull();
+  rig.ref.current!.beginStroke();
+  expect(rig.ref.current!.renderStrokeBatch([{ state: wide, aimX: aim.x, aimY: aim.y }])).toBe(0);
 });

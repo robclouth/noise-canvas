@@ -258,6 +258,37 @@ describe("a canvas that holds a window of the file", () => {
     expect(canvas.holdsFrames(last.start, last.end)).toBe(false);
   });
 
+  it("distinguishes populated blocks from covered and pending screen ranges", async () => {
+    const rig = harness(2);
+    await until(() => rig.canvas.isPopulated(), "the initial canvas fill");
+    const start = grid.blockFrames * 4;
+    const end = grid.blockFrames * 5;
+    expect(rig.canvas.holdsFrames(start, end)).toBe(false);
+    expect(rig.canvas.isFillingFrames(start, end)).toBe(false);
+    rig.close();
+    rig.canvas.aim(start, end);
+    expect(rig.canvas.isPopulated()).toBe(true);
+    expect(rig.canvas.holdsFrames(start, end)).toBe(false);
+    expect(rig.canvas.isFillingFrames(start, end)).toBe(true);
+    expect(rig.canvas.isFillingFrames(0, data.numFrames)).toBe(false);
+    rig.open();
+    await until(() => rig.canvas.holdsFrames(start, end), "the disjoint screen fill");
+    expect(rig.canvas.isFillingFrames(start, end)).toBe(false);
+  });
+
+  it("refuses a sub-capacity duration that crosses too many block boundaries", async () => {
+    const { canvas } = harness(2);
+    await until(() => canvas.holdsFrames(0, 1), "the first window");
+    const start = grid.blockFrames - 1;
+    const end = grid.blockFrames * 2 + 1;
+    expect(end - start).toBeLessThan(grid.blockFrames * 2);
+    expect(canvas.fitsWindow(start, end)).toBe(false);
+    expect(canvas.holdsFrames(start, end)).toBe(false);
+    const paint = vi.fn(() => true);
+    expect(canvas.paintWhenHeld(start, end, NO_OTHER_FILES, paint)).toBe(false);
+    expect(paint).not.toHaveBeenCalled();
+  });
+
   it("holds a dab back while the canvas has no content for its block", async () => {
     const rig = harness(2, true);
     rig.open();
@@ -880,7 +911,7 @@ describe("a canvas that holds a window of the file", () => {
     const initial = replace();
     disposers.push(() => canvas.dispose());
     canvas.initialize(data.packedData);
-    await until(() => canvas.holdsView(), "the initial canvas fill");
+    await until(() => canvas.isPopulated(), "the initial canvas fill");
     readBlock.mockClear();
     delay = true;
     return { canvas, initial, replace, release, readBlock, readRoot };

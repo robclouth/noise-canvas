@@ -780,7 +780,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
       if (rendererRef?.current) {
         const { spectrogramData } = file;
         if (!spectrogramData) return;
-        const refusal = rendererRef.current.strokeRefusal(state);
+        const refusal = rendererRef.current.strokeRefusal(state, aim);
         if (refusal !== null) {
           notifications.show({ id: "whole-file-brush", color: "yellow", title: "Nothing painted", message: refusal });
           return;

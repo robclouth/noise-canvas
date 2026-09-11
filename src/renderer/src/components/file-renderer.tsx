@@ -10,7 +10,7 @@ import { ExportSourceWindow, exportBlockGrid } from "@renderer/lib/export-window
 import { sourceReadSpan, type SourceWindowTextures } from "@renderer/lib/source-window";
 import { WindowedCanvas, type DabNeeds, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
 import { strokeReach, type ReachContext } from "@renderer/lib/effect-reach";
-import { strokeRefusal as refusalFor } from "@renderer/lib/whole-file-gate";
+import { strokeRefusal as refusalFor, overReachRefusal } from "@renderer/lib/whole-file-gate";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -245,7 +245,7 @@ export interface FileRendererHandle {
    * Why the brush cannot paint on a canvas holding a window of the file, in the
    * words the user reads. Null when the stroke can paint.
    */
-  strokeRefusal: (state: State) => string | null;
+  strokeRefusal: (state: State, aim?: { x: number; y: number }) => string | null;
   /** Restores the spectrogram to its original state. */
   restoreOriginal: () => Promise<void>;
   /** Clears the stroke preview. */
@@ -618,8 +618,6 @@ const FileRendererInner = memo(
     const loadingSinceRef = useRef<number | null>(null);
     // The zoom and offset the loading grace was last measured against.
     const loadingViewRef = useRef({ zoom: 0, offset: 0 });
-    // True while the canvas window is aimed to hold the whole visible span.
-    const viewAimedRef = useRef(false);
 
     // Cleanup StrokeRenderer on unmount or when textures change
     useEffect(() => {
@@ -868,9 +866,10 @@ const FileRendererInner = memo(
       let lacking = false;
       if (canvasCoversFile()) {
         tiles.update(gl, strokeRenderer.committedSource(), ringView, pyramidStepLog2);
-      } else if ((canvasRef.current?.holdsView() ?? false) || viewAimedRef.current) {
-        // The canvas is the sharp picture over the view, or is filling to be
-        // it, so tiles read out of the store would serve nothing.
+      } else if (
+        canvasRef.current?.holdsFrames(ringView.startFrame, ringView.endFrame) ||
+        canvasRef.current?.isFillingFrames(ringView.startFrame, ringView.endFrame)
+      ) {
         tiles.release();
         lacking = true;
       } else {
@@ -957,8 +956,10 @@ const FileRendererInner = memo(
       // Past the pyramid's finest level the canvas is the sharp picture, and
       // the finest level stands in wherever the canvas does not reach yet.
       const finerThanPyramid = 2 ** finestStepLog2 > Math.max(framesPerPixel, 1);
-      const canvasHolds = canvasRef.current?.holdsView() ?? true;
-      uniforms.displayCanvasFirst.value = finerThanPyramid && canvasHolds;
+      const canvas = canvasRef.current;
+      const visible = visibleFrameRange(useStore.getState());
+      const visibleRangeCovered = canvas?.holdsFrames(visible.start, visible.end) ?? true;
+      uniforms.displayCanvasFirst.value = finerThanPyramid && (canvas?.isPopulated() ?? true);
       const ready = pyramid.readyLevel;
       const choice = finerThanPyramid
         ? { fine: ready, coarse: ready, blend: 0 }
@@ -975,7 +976,7 @@ const FileRendererInner = memo(
       const levelsLoading = !finerThanPyramid && displayLevelChoice(pyramid.levels, framesPerPixel).fine < ready;
       uniforms.displayFinerWanted.value = finerThanPyramid;
       uniforms.displayLoadingAll.value = levelsLoading;
-      const lacking = levelsLoading || (finerThanPyramid && !canvasHolds && ringLacks);
+      const lacking = levelsLoading || (finerThanPyramid && !visibleRangeCovered && ringLacks);
       if (!lacking) {
         loadingSinceRef.current = null;
         uniforms.displayLoading.value = 0;
@@ -1879,7 +1880,6 @@ const FileRendererInner = memo(
             end = dabEnd;
           }
         }
-        viewAimedRef.current = start <= visible.start && end >= visible.end;
         // A stroke pages ahead of the brush every frame. Everything else — a
         // pointer crossing the file, a pan under way — waits until the aim
         // stops, and takes a frame at the moment it does.
@@ -2097,7 +2097,13 @@ const FileRendererInner = memo(
       return entry;
     };
 
-    const strokeRefusal = (state: State): string | null => reachOf(state).refusal;
+    const strokeRefusal = (state: State, aim?: { x: number; y: number }): string | null => {
+      const refusal = reachOf(state).refusal;
+      const canvas = canvasRef.current;
+      if (refusal || !canvas || !aim) return refusal;
+      const span = dabSpan(state, new Vector2(aim.x, aim.y), canvas);
+      return canvas.fitsWindow(span.startFrame, span.endFrame) ? null : overReachRefusal(["The brush"]);
+    };
 
     /**
      * Frames of the file the effect chain reads either side of the dab's own

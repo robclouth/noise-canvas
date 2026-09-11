@@ -498,7 +498,7 @@ export class WindowedCanvas {
   }
 
   /** True while the canvas holds content for every block of its view. */
-  holdsView(): boolean {
+  isPopulated(): boolean {
     const window = this.blocks;
     if (!window) return true;
     const view = this.view();
@@ -506,37 +506,38 @@ export class WindowedCanvas {
     return window.canvasLacks(view).length === 0;
   }
 
-  /**
-   * True while the canvas holds content for every block of [startFrame,
-   * endFrame), and the original holds the view too when `wantOriginal`. A dab
-   * blends out of the canvas, so one landing on a block with no content would
-   * paint silence and commit it. A span wider than the window can never fit
-   * inside one, so it asks only for the part the view covers.
-   */
+  /** True while an outstanding canvas fill will cover the screen's visible frames. */
+  isFillingFrames(startFrame: number, endFrame: number): boolean {
+    const window = this.blocks;
+    const request = this.request;
+    if (!window || !request || !this.fitsWindow(startFrame, endFrame)) return false;
+    return (
+      blockOfFrame(window.grid, startFrame) >= request.view.firstBlock &&
+      blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1)) <= request.view.lastBlock
+    );
+  }
+
+  /** True when the canvas holds the entire frame range and its original when requested. */
   holdsFrames(startFrame: number, endFrame: number, wantOriginal = false): boolean {
     const window = this.blocks;
     if (!window) return true;
     const view = this.view();
-    if (!view) return false;
+    if (!view || !this.fitsWindow(startFrame, endFrame)) return false;
     if (wantOriginal && !(this.original?.holds(view) ?? false)) return false;
     const first = blockOfFrame(window.grid, startFrame);
     const last = blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1));
-    const fits = last - first + 1 <= window.windowBlocks;
-    if (fits && (first < view.firstBlock || last > view.lastBlock)) return false;
-    const clipped = {
-      firstBlock: Math.max(first, view.firstBlock),
-      lastBlock: Math.min(last, view.lastBlock),
-    };
-    return window.canvasLacks(clipped).length === 0;
+    if (first < view.firstBlock || last > view.lastBlock) return false;
+    return window.canvasLacks({ firstBlock: first, lastBlock: last }).length === 0;
   }
 
   /**
    * Paints now when the canvas holds [startFrame, endFrame) and nothing is
    * already waiting; otherwise holds `paint` until the canvas takes the blocks.
    * Held paint runs in the order it was given, so a dab behind a waiting one
-   * waits with it. Returns false only when `paint` itself refused.
+   * waits with it. Returns false when the range cannot fit or `paint` refuses.
    */
   paintWhenHeld(startFrame: number, endFrame: number, needs: DabNeeds, paint: () => boolean): boolean {
+    if (!this.fitsWindow(startFrame, endFrame)) return false;
     if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame, needs.original) && this.othersHold(needs)) {
       const painted = paint();
       if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
