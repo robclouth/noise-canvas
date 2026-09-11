@@ -1,3 +1,4 @@
+import { FileEngine } from "../file-engine";
 import { AimRest } from "../canvas-window";
 import {
   applyDisplayPyramidUniforms,
@@ -29,7 +30,9 @@ vi.mock("../history-manager", () => ({
   deriveSideData: vi.fn(async () => ({ inverseMap: inverseSeed })),
   historyMemoryCacheBytes: () => ({ deltas: 0, audioHops: 0 }),
   getHistoryManager: () => ({
-    initialize: async () => true,
+    initialize: () => historyInitialize(),
+    addRootSnapshot: () => addRootSnapshot(),
+    setStateAudio: vi.fn(),
     currentBlockState: async () => currentSeed ?? seed,
     getManifest: () => ({ currentId: "edited" }),
     nearestFullAnchor: () => ({ id: "root" }),
@@ -54,6 +57,9 @@ vi.mock("../display-pyramid", async (original) => {
   };
 });
 
+const historyInitialize = vi.fn(async () => true);
+const addRootSnapshot = vi.fn(async (): Promise<string> => "root");
+
 let pyramidBudget: number | undefined;
 let windowBlocks = 2;
 let seed: Float32Array;
@@ -66,6 +72,8 @@ extend({ Mesh: THREE.Mesh, PlaneGeometry: THREE.PlaneGeometry });
 afterEach(async () => {
   while (disposers.length) await disposers.pop()!();
   currentSeed = null;
+  historyInitialize.mockReset().mockResolvedValue(true);
+  addRootSnapshot.mockReset().mockResolvedValue("root");
   pyramidBudget = undefined;
   vi.restoreAllMocks();
 });
@@ -589,5 +597,104 @@ describe("display residency completion", () => {
       disposeDisplayResidency(context.aimRestTimer);
       vi.useRealTimers();
     }
+  });
+});
+
+describe("component-owned file engine", () => {
+  it("retains one engine through reload and parking and replaces it on remount", async () => {
+    const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
+    const rig = await mount(brush(0), Infinity, 8);
+    const engine = contexts.mock.contexts.at(-1);
+    if (!(engine instanceof FileEngine)) throw new Error("no file engine");
+    const originalRenderer = engine.strokeRendererRef.current!;
+    const disposed = vi.spyOn(originalRenderer, "dispose");
+    const historyCalls = historyInitialize.mock.calls.length;
+    rig.ref.current!.reloadTextures();
+    expect(disposed).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(rig.ref.current!.getTextures()).toBeTruthy();
+    });
+    expect(contexts.mock.contexts.at(-1)).toBe(engine);
+    expect(engine.strokeRendererRef.current).not.toBe(originalRenderer);
+    expect(historyInitialize).toHaveBeenCalledTimes(historyCalls);
+    rig.render(true);
+    await vi.waitFor(() => expect(rig.file.parked).toBe(true));
+    expect(engine.strokeRendererRef.current).toBeNull();
+    expect(engine.canvasRef.current).toBeNull();
+    expect(engine.borrowDisplaySource()).toBeNull();
+    rig.render(false);
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(rig.ref.current!.getTextures()).toBeTruthy();
+    });
+    expect(contexts.mock.contexts.at(-1)).toBe(engine);
+    rig.render(false, 1);
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(contexts.mock.contexts.at(-1)).not.toBe(engine);
+      expect(rig.ref.current!.getTextures()).toBeTruthy();
+    });
+    expect(engine.strokeRendererRef.current).toBeNull();
+    expect(engine.canvasRef.current).toBeNull();
+    expect(engine.borrowDisplaySource()).toBeNull();
+  });
+
+  it("keeps the initial seeds until the queued root has taken them and attaches once", async () => {
+    historyInitialize.mockResolvedValue(false);
+    let finishRoot!: (id: string) => void;
+    addRootSnapshot.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRoot = resolve;
+        }),
+    );
+    const synthesizeFile = vi.fn(async () => {});
+    const rig = await mount({ ...brush(0), synthesizeFile }, Infinity, 8);
+    await vi.waitFor(() => expect(addRootSnapshot).toHaveBeenCalledTimes(1));
+    for (let i = 0; i < 3; i++) rig.frame();
+    expect(historyInitialize).toHaveBeenCalledTimes(1);
+    expect(rig.data.packedData).toBe(seed);
+    expect(rig.data.inverseMap).toBe(inverseSeed);
+    const upload = vi.spyOn(rig.gl, "initTexture");
+    finishRoot("root");
+    await vi.waitFor(() => expect(synthesizeFile).toHaveBeenCalledTimes(1));
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(rig.data.packedData).toBeUndefined();
+    expect(rig.data.inverseMap).toBeUndefined();
+    expect(synthesizeFile).toHaveBeenCalledWith("residency", undefined, seed);
+    rig.frame();
+    expect(addRootSnapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["remount", "resume"])("cancels %s installation after a close during side-data recovery", async (path) => {
+    const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
+    const rig = await mount(brush(0), Infinity, 8);
+    rig.ref.current!.releaseAnalysisData();
+    const { deriveSideData } = await import("../history-manager");
+    let finishSide!: () => void;
+    vi.mocked(deriveSideData).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishSide = () => resolve({ inverseMap: inverseSeed!, metadata: rig.data.metadata });
+        }),
+    );
+    if (path === "resume") {
+      rig.render(true);
+      await vi.waitFor(() => expect(rig.file.parked).toBe(true));
+      rig.render(false);
+    } else rig.render(false, 1);
+    await vi.waitFor(() => expect(finishSide).toBeTypeOf("function"));
+    const engine = contexts.mock.contexts.at(-1);
+    if (!(engine instanceof FileEngine)) throw new Error("no file engine");
+    const install = vi.spyOn(engine, "installTextures");
+    await rig.unmount();
+    finishSide();
+    const { serializeFileTask } = await import("../file-task-queue");
+    await serializeFileTask("residency", async () => {});
+    expect(install).not.toHaveBeenCalled();
+    expect(engine.currentSeedRef.current).toBeNull();
+    expect(engine.packedSeedRef.current).toBeNull();
+    expect(engine.borrowDisplaySource()).toBeNull();
   });
 });
