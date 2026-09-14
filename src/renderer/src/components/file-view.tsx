@@ -745,9 +745,9 @@ export const FileView = memo((props: FileViewProps) => {
           notifications.show({ id: "whole-file-brush", color: "yellow", title: "Nothing painted", message: refusal });
           return;
         }
+        if (!rendererRef.current.beginStroke()) return;
         isStrokingRef.current = true;
         state.setIsStroking(true);
-        rendererRef.current.beginStroke();
         const { beats, pitch } = aimToBeatsAndPitch(aim);
         useTransientStore.getState().setCursorPosition({ beats, pitch });
 
@@ -804,7 +804,15 @@ export const FileView = memo((props: FileViewProps) => {
 
     // A dab waiting for the canvas to take its block must land before the
     // commit reads the stroke.
-    await rendererRef.current?.settleStroke();
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    const result = await renderer.settleStroke();
+    if (result.status !== "completed" || useStore.getState().activeFileId !== fileId) {
+      if (result.status === "completed") await renderer.discardStrokePreview();
+      renderer.endStroke();
+      strokeTimeRangeRef.current = { min: null, max: null };
+      return;
+    }
 
     // The commit reads the stroke before its first await, and the stroke ends
     // right after that read: a commit takes seconds, and a stroke that starts
@@ -813,10 +821,10 @@ export const FileView = memo((props: FileViewProps) => {
       finalRange.min !== null && finalRange.max !== null
         ? state.applyStrokeAtPosition(undefined, { min: finalRange.min, max: finalRange.max })
         : state.applyStrokeAtPosition();
-    rendererRef.current?.endStroke();
+    renderer.endStroke();
     strokeTimeRangeRef.current = { min: null, max: null };
     await commit;
-  }, [stopRepeatClock]);
+  }, [stopRepeatClock, fileId]);
 
   // Window-level event listeners to handle mouse movements and releases outside the file view
   useEffect(() => {

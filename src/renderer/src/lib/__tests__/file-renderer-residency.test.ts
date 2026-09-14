@@ -249,6 +249,63 @@ function brush(anchor: number, gridSize = false, withReach = false, multiple = f
 }
 
 describe("anchored dab residency", () => {
+  it("rolls back failed keyboard paint without committing it", async () => {
+    const rig = await mount(brush(0), Infinity, 8);
+    const before = await rig.ref.current!.getFBOData();
+    const [beats, pitch] = uvToUnits(0.5, 0.5, 120, 8, rig.data.bandsPerOctave, rig.data.numBands);
+    rig.useTransientStore.setState({ cursorPosition: { beats, pitch }, cursorVisible: true });
+    const commit = vi.fn(async () => {});
+    rig.useStore.setState({ applyStrokeAtPosition: commit });
+    vi.spyOn(rig.canvas, "settle").mockImplementation(async () => {
+      rig.frame();
+      return { status: "failed", reason: "unavailable" };
+    });
+    await rig.useStore.getState().applyBrushAtPosition();
+    expect(commit).not.toHaveBeenCalled();
+    expect(await rig.ref.current!.getFBOData()).toEqual(before);
+    expect(rig.ref.current!.beginStroke()).toBe(true);
+    rig.ref.current!.endStroke();
+  });
+
+  it("cancels grid fill during settlement without creating a history commit", async () => {
+    const rig = await mount(brush(0), Infinity, 8);
+    const before = await rig.ref.current!.getFBOData();
+    const commit = vi.fn(async () => {});
+    rig.useStore.setState({ snapTime: true, snapPitch: false, applyStrokeAtPosition: commit });
+    const settle = rig.canvas.settle.bind(rig.canvas);
+    const spy = vi.spyOn(rig.canvas, "settle").mockImplementation(async (signal) => {
+      rig.useStore.getState().cancelFill();
+      expect(signal?.aborted).toBe(true);
+      return settle(signal);
+    });
+    await rig.useStore.getState().fillGrid();
+    expect(spy).toHaveBeenCalledOnce();
+    expect(commit).not.toHaveBeenCalled();
+    expect(await rig.ref.current!.getFBOData()).toEqual(before);
+    expect(rig.useStore.getState().isFilling).toBe(false);
+  });
+
+  it("blocks another stroke while settlement or a failed rollback owns the canvas", async () => {
+    const rig = await mount(brush(0), Infinity, 8);
+    const handle = rig.ref.current!;
+    handle.beginStroke();
+    let finish!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.spyOn(rig.canvas, "settle").mockImplementation(async () => {
+      await waiting;
+      return { status: "failed", reason: "read-error" };
+    });
+    vi.spyOn(rig.canvas, "discardStroke").mockResolvedValue(false);
+    const settling = handle.settleStroke();
+    expect(handle.beginStroke()).toBe(false);
+    finish();
+    expect(await settling).toEqual({ status: "failed", reason: "read-error" });
+    expect(handle.beginStroke()).toBe(false);
+    expect(await handle.settleStroke()).toEqual({ status: "failed", reason: "read-error" });
+  });
+
   it("holds the production union at a left window boundary", async () => {
     const rig = await mount(brush(1), 2);
     const canvas = rig.canvas!;

@@ -166,6 +166,7 @@ describe("a canvas that holds a window of the file", () => {
     open: () => void;
     /** Makes the next read wait for `open`. */
     close: () => void;
+    fail: (value: boolean) => void;
   };
 
   /**
@@ -175,14 +176,15 @@ describe("a canvas that holds a window of the file", () => {
   function harness(windowBlocks: number, gated = false): Harness {
     let renderer: StrokeRenderer | null = null;
     let outstanding = 0;
+    let failReads = false;
     let letThrough = !gated;
     const waiting: Array<() => void> = [];
-    const read = async (ranges: Uint32Array): Promise<Float32Array> => {
+    const read = async (ranges: Uint32Array): Promise<Float32Array | null> => {
       outstanding++;
       if (!letThrough) await new Promise<void>((resolve) => waiting.push(resolve));
       const values = gatherPixelRanges(data.packedData, ranges);
       outstanding--;
-      return values;
+      return failReads ? null : values;
     };
 
     const canvas = new WindowedCanvas({
@@ -220,6 +222,9 @@ describe("a canvas that holds a window of the file", () => {
     });
 
     return {
+      fail: (value) => {
+        failReads = value;
+      },
       canvas,
       renderer: () => renderer!,
       dab: (fileUvX) => {
@@ -513,6 +518,48 @@ describe("a canvas that holds a window of the file", () => {
       else if (!float32BitsEqual(read.subarray(o, o + 4), value)) wrong++;
     }
     expect({ missing, wrong, painted: expected.size }).toEqual({ missing: 0, wrong: 0, painted: expected.size });
+  });
+
+  it("reports unavailable held paint and restores every painted pixel before retry", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.02)).toBe(true);
+    const dirty = rig.canvas.dirtyPixelRanges()!;
+    expect(float32BitsEqual(await rig.canvas.readPixelRanges(dirty), gatherPixelRanges(data.packedData, dirty))).toBe(
+      false,
+    );
+    rig.fail(true);
+    const held = vi.fn(() => true);
+    const frames = dabFrames(0.9);
+    rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, held);
+    expect(await rig.canvas.settle()).toEqual({ status: "failed", reason: "unavailable" });
+    rig.fail(false);
+    expect(await rig.canvas.discardStroke()).toBe(true);
+    expect(float32BitsEqual(await rig.canvas.readPixelRanges(dirty), gatherPixelRanges(data.packedData, dirty))).toBe(
+      true,
+    );
+    expect(held).not.toHaveBeenCalled();
+    rig.canvas.endStroke();
+  });
+
+  it("cancels a blocked read without letting its held dab land later", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    rig.canvas.beginStroke();
+    rig.close();
+    const held = vi.fn(() => true);
+    const frames = dabFrames(0.9);
+    rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, held);
+    const abort = new AbortController();
+    const settling = rig.canvas.settle(abort.signal);
+    abort.abort();
+    expect(await settling).toEqual({ status: "cancelled" });
+    expect(await rig.canvas.discardStroke()).toBe(true);
+    rig.open();
+    await until(rig.quiet, "the cancelled read");
+    expect(held).not.toHaveBeenCalled();
+    rig.canvas.endStroke();
   });
 
   it("puts the store's values back over a discarded stroke that walked the file", async () => {

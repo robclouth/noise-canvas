@@ -4,7 +4,7 @@ import type { CanvasView } from "./canvas-view";
 import type { ImageExportOptions } from "./image-export";
 import type { PosterInfo } from "./image-export-poster";
 import type { SourceFileInfo } from "./stroke-renderer";
-import type { DabNeeds } from "./windowed-canvas";
+import type { DabNeeds, StrokeSettlement } from "./windowed-canvas";
 import type { ImpulseNeed } from "./impulse-need";
 
 /** A stroke over one region, painted from a state built for it. */
@@ -69,11 +69,11 @@ export interface FileRendererHandle {
   ) => SourceFileInfo | null;
   disposeRegionSource: (source: SourceFileInfo) => void;
   /**
-   * Opens a stroke and saves the spectrogram (or restores an already-saved
-   * one), so the strokes painted next can be taken back without touching
-   * history.
+   * Opens a stroke and saves the spectrogram so paint can be taken back
+   * without touching history. Returns false while settlement or restoration
+   * owns the canvas.
    */
-  beginStrokePreview: () => void;
+  beginStrokePreview: () => boolean;
   /** Puts back the pixels from before the preview. Resolves false if none were saved. */
   discardStrokePreview: () => Promise<boolean>;
   /**
@@ -126,10 +126,11 @@ export interface FileRendererHandle {
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
   reloadTextures: () => void;
   releaseAnalysisData: () => void;
-  beginStroke: () => void;
+  /** Opens a stroke, or returns false while its canvas cannot accept paint. */
+  beginStroke: () => boolean;
   endStroke: () => void;
-  /** Resolves once every dab of the stroke has landed. Call it before committing. */
-  settleStroke: () => Promise<void>;
+  /** Only a completed result may commit. Failure or cancellation restores the stroke first. */
+  settleStroke: (signal?: AbortSignal) => Promise<StrokeSettlement>;
   /**
    * Keeps a stroke's paint, `values` over the file pixels of `ranges`, on the
    * canvas until the function returned is called, however the window moves.

@@ -174,7 +174,7 @@ async function commitRegionStrokes(
   const renderer = edit.file.rendererRef?.current;
   if (!renderer || strokes.length === 0) return;
 
-  renderer.beginStroke();
+  if (!renderer.beginStroke()) return;
   try {
     let painted = 0;
     for (const stroke of strokes) {

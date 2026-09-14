@@ -657,26 +657,44 @@ export class FileEngine {
   discardStrokePreview = async (): Promise<boolean> => {
     const { strokeRendererRef, canvasRef, displayMode } = this;
     const { invalidateRef } = this.context;
-
-    const canvas = canvasRef.current;
-    const restored = canvas ? await canvas.discardStroke() : (strokeRendererRef.current?.restoreRollback() ?? false);
-    if (restored) {
-      displayMode.current = "committed";
-      invalidateRef.current?.();
-      this.notifyContentChanged();
+    this.restoringStroke = true;
+    try {
+      const canvas = canvasRef.current;
+      const restored = canvas ? await canvas.discardStroke() : (strokeRendererRef.current?.restoreRollback() ?? false);
+      this.rollbackFailed = !restored && Boolean(strokeRendererRef.current?.hasRollback());
+      if (restored) {
+        displayMode.current = "committed";
+        invalidateRef.current?.();
+        this.notifyContentChanged();
+      }
+      return restored;
+    } catch {
+      this.rollbackFailed = true;
+      return false;
+    } finally {
+      if (this.rollbackFailed)
+        notifications.show({
+          color: "red",
+          title: "Stroke Not Applied",
+          message: "The stroke could not be restored. Close and reopen the file before painting again.",
+        });
+      this.restoringStroke = false;
     }
-    return restored;
   };
-  beginStroke = () => {
-    const { canvasRef, discardStrokePreview } = this;
+  private settlingStroke = false;
+  private restoringStroke = false;
+  private rollbackFailed = false;
 
-    void discardStrokePreview();
-    canvasRef.current?.beginStroke();
+  beginStroke = (): boolean => {
+    if (this.settlingStroke || this.restoringStroke || this.rollbackFailed || !this.canvasRef.current) return false;
+    this.canvasRef.current.beginStroke();
+    return true;
   };
   endStroke = () => {
     const { canvasRef } = this;
     const { invalidateRef } = this.context;
 
+    if (this.rollbackFailed) return;
     canvasRef.current?.endStroke();
     this.notifyContentChanged();
     invalidateRef.current?.();
@@ -741,19 +759,14 @@ export class FileEngine {
       renderStrokeBatch: (strokes: StrokeDispatch[], ahead?: StrokeDispatch[]) => {
         const strokeRenderer = strokeRendererRef.current;
         const canvas = canvasRef.current;
-        if (!strokeRenderer?.getIsInitialized() || !canvas) return 0;
+        if (this.rollbackFailed || !strokeRenderer?.getIsInitialized() || !canvas) return 0;
         const painted = prepareStrokeBatch(strokeContext, canvas, strokes, ahead);
         if (painted > 0) displayMode.current = "committed";
         invalidateRef.current?.();
         this.notifyContentChanged();
         return painted;
       },
-      beginStrokePreview: () => {
-        const strokeRenderer = strokeRendererRef.current;
-        if (!strokeRenderer?.getIsInitialized()) return;
-        strokeRenderer.captureRollback();
-        canvasRef.current?.beginStroke();
-      },
+      beginStrokePreview: beginStroke,
       discardStrokePreview,
       maxStrokeSeconds: () => {
         const canvas = canvasRef.current;
@@ -778,7 +791,9 @@ export class FileEngine {
       endStroke,
       holdPaint: (ranges, values) => canvasRef.current?.holdPaint(ranges, values) ?? (() => {}),
       forgetBlocks: (ranges) => canvasRef.current?.forgetBlocks(ranges),
-      settleStroke: async () => {
+      settleStroke: async (signal) => {
+        if (this.settlingStroke) return { status: "cancelled" };
+        if (this.rollbackFailed) return { status: "failed", reason: "read-error" };
         const canvas = canvasRef.current;
         if (applyStroke.current && !strokePreview.current && canvas && strokeRendererRef.current?.getIsInitialized()) {
           applyStroke.current = false;
@@ -804,7 +819,25 @@ export class FileEngine {
             }
           }
         }
-        await canvas?.settle();
+        if (!canvas) return { status: "cancelled" };
+        this.settlingStroke = true;
+        try {
+          const result = await canvas.settle(signal);
+          if (result.status !== "completed") {
+            this.applyStroke.current = false;
+            const restored = await this.discardStrokePreview();
+            this.rollbackFailed = !restored;
+            if (result.status === "failed" && restored)
+              notifications.show({
+                color: "red",
+                title: "Stroke Not Applied",
+                message: "The stroke could not finish. Try painting again.",
+              });
+          }
+          return result;
+        } finally {
+          this.settlingStroke = false;
+        }
       },
       getDirtyRegion: () => regionToFileUv(strokeRendererRef.current?.getDirtyRegion() ?? null),
       clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
@@ -823,7 +856,9 @@ export class FileEngine {
       preview: boolean,
       sourceOverride?: SourceFileInfo,
       preparedSpan?: DabSpan,
-    ): boolean => dispatchFileStroke(strokeContext, state, cursorPos, preview, sourceOverride, preparedSpan),
+    ): boolean =>
+      !this.rollbackFailed &&
+      dispatchFileStroke(strokeContext, state, cursorPos, preview, sourceOverride, preparedSpan),
     span: (state: State, cursorPos: Vector2, canvas: WindowedCanvas, resolvedUnion?: BrushUnionUv): DabSpan =>
       fileDabSpan(strokeContext, state, cursorPos, canvas, resolvedUnion),
     refusal: (state: State, aim?: { x: number; y: number }): string | null =>

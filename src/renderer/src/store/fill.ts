@@ -27,6 +27,7 @@ export interface FillState {
 }
 
 let cancelRequested = false;
+let fillAbort: AbortController | null = null;
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
@@ -56,6 +57,7 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
 
   cancelFill: () => {
     cancelRequested = true;
+    fillAbort?.abort();
   },
 
   fillGrid: async () => {
@@ -73,8 +75,10 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
     }
 
     cancelRequested = false;
+    fillAbort = new AbortController();
     set({ isFilling: true });
     let renderer: FileRendererHandle | null = null;
+    let started = false;
     try {
       const resolved = resolveTarget(get());
       if (!resolved) return;
@@ -85,7 +89,8 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
       if (anchors.length === 0) return;
 
       // Saves the pixels from before the pass, so cancelling puts them back.
-      renderer.beginStrokePreview();
+      if (!renderer.beginStrokePreview()) return;
+      started = true;
 
       const total = anchors.length;
       const showProgress = total > FILL_PROGRESS_THRESHOLD;
@@ -103,13 +108,14 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
         // A canvas holding a window of the file takes the chunk's strokes as
         // the window reaches them, so each chunk lands before the next is given.
         const settleStart = performance.now();
-        await renderer.settleStroke();
+        const result = await renderer.settleStroke(fillAbort.signal);
+        if (result.status !== "completed") return;
         settleMs += performance.now() - settleStart;
         if (showProgress) {
           set({ fillProgress: { done: Math.min(start + FILL_CHUNK, total), total } });
           await nextFrame();
         }
-        if (cancelRequested) {
+        if (cancelRequested || get().activeFileId !== resolved.fileId) {
           await renderer.discardStrokePreview();
           return;
         }
@@ -133,8 +139,9 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
         false,
       );
     } finally {
-      renderer?.endStroke();
+      if (started) renderer?.endStroke();
       cancelRequested = false;
+      fillAbort = null;
       set({ isFilling: false, fillProgress: null });
     }
   },

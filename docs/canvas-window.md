@@ -105,7 +105,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    with the position it was given, and the fill that brings the block in runs
    it. Held dabs run in the order they were given, so one the canvas could
    take does not overtake one still waiting. `settle` drains what is left
-   before the commit reads the stroke.
+   before the commit reads the stroke. Settlement returns `completed`,
+   `cancelled` or `failed`; only `completed` can enter history or synthesis.
+   Unavailable blocks after eight fills without progress, or a failed read,
+   fail the whole stroke. Cancellation stops waiting and removes held dabs
+   before an outstanding read can release them. Each stroke retains a rollback
+   snapshot until its commit starts. A failed stroke restores the committed
+   store plus pending commits across its footprint. Painting cannot start
+   during settlement or restoration. If restoration also fails, painting stays
+   blocked and the user must reopen the file; incomplete pixels never become
+   a successful commit.
    A grid fill is a stroke like any other: each of its dabs goes through
    `paintWhenHeld`, and the fill settles every chunk before it gives the
    next, so the window walks the file behind the anchors and the carry keeps

@@ -61,6 +61,11 @@ type WindowRequest = { view: CanvasView; original: boolean };
 /** A stroke's paint by file range, held while its commit has still to store it. */
 type PendingPaint = { ranges: Uint32Array; values: Float32Array | null; landed: Promise<void> };
 
+export type StrokeSettlement =
+  | { status: "completed" }
+  | { status: "cancelled" }
+  | { status: "failed"; reason: "unavailable" | "read-error" };
+
 /** Fills `settle` waits through before it gives up on the paint still held. */
 const HELD_PAINT_FILLS = 8;
 
@@ -145,6 +150,8 @@ export class WindowedCanvas {
   private carried = new CarriedPaint();
   private readonly pending: PendingPaint[] = [];
   private stroking = false;
+  private strokeEpoch = 0;
+  private cancelSettlement: (() => void) | null = null;
 
   constructor(deps: WindowedCanvasDeps) {
     this.deps = deps;
@@ -577,37 +584,61 @@ export class WindowedCanvas {
     dropExcept(this.impulses, needs);
   }
 
-  /**
-   * Resolves once nothing is held back, so a commit reads a finished stroke.
-   * Each fill points the window at the oldest held dab and runs what it can
-   * take. Paint still held after `HELD_PAINT_FILLS` fills in a row that
-   * release nothing is dropped, because a read that never lands must not
-   * stall the commit.
-   */
-  async settle(): Promise<void> {
-    this.releaseHeld();
-    for (let stalls = 0; this.held.length > 0 && stalls < HELD_PAINT_FILLS; ) {
-      const before = this.held.length;
-      const next = this.held[0];
-      this.aim(next.startFrame, next.endFrame, next.needs.original);
-      for (const need of next.needs.sources) this.aimSource(need);
-      for (const need of next.needs.impulses) this.aimImpulse(need);
-      const reads = [
-        this.fill,
-        ...[...this.sources.values()].map((slot) => slot.settled()),
-        ...[...this.impulses.values()].map((slot) => slot.settled()),
-      ].filter((read): read is Promise<void> => read !== null);
-      if (reads.length === 0) break;
-      await Promise.all(reads);
+  /** Drains held dabs, or reports why the incomplete stroke must be discarded. */
+  async settle(signal?: AbortSignal): Promise<StrokeSettlement> {
+    const epoch = this.strokeEpoch;
+    let cancel!: () => void;
+    const cancelled = new Promise<void>((resolve) => {
+      cancel = resolve;
+    });
+    const abort = () => {
+      if (epoch === this.strokeEpoch) {
+        this.held.length = 0;
+        this.request = null;
+      }
+      cancel();
+    };
+    this.cancelSettlement = abort;
+    signal?.addEventListener("abort", abort, { once: true });
+    const stopped = () => signal?.aborted || this.disposed || epoch !== this.strokeEpoch;
+    try {
+      if (stopped()) return { status: "cancelled" };
       this.releaseHeld();
-      stalls = this.held.length < before ? 0 : stalls + 1;
-    }
-    if (this.held.length > 0) {
-      diag.warn("gl", "held paint dropped", { dabs: this.held.length });
+      for (let stalls = 0; this.held.length > 0 && stalls < HELD_PAINT_FILLS; ) {
+        const before = this.held.length;
+        const next = this.held[0];
+        this.aim(next.startFrame, next.endFrame, next.needs.original);
+        for (const need of next.needs.sources) this.aimSource(need);
+        for (const need of next.needs.impulses) this.aimImpulse(need);
+        const reads = [
+          this.fill,
+          ...[...this.sources.values()].map((slot) => slot.settled()),
+          ...[...this.impulses.values()].map((slot) => slot.settled()),
+        ].filter((read): read is Promise<void> => read !== null);
+        if (reads.length === 0) break;
+        await Promise.race([Promise.all(reads), cancelled]);
+        if (stopped()) return { status: "cancelled" };
+        this.releaseHeld();
+        stalls = this.held.length < before ? 0 : stalls + 1;
+      }
+      if (this.held.length > 0) {
+        this.held.length = 0;
+        this.request = null;
+        return { status: "failed", reason: "unavailable" };
+      }
+      await Promise.race([this.carried.settled(), cancelled]);
+      return stopped() ? { status: "cancelled" } : { status: "completed" };
+    } catch (error) {
+      if (stopped()) return { status: "cancelled" };
       this.held.length = 0;
+      this.request = null;
+      diag.warn("gl", "stroke settlement failed", { error: String(error) });
+      return { status: "failed", reason: "read-error" };
+    } finally {
+      if (this.cancelSettlement === abort) this.cancelSettlement = null;
+      signal?.removeEventListener("abort", abort);
+      if (signal?.aborted && epoch === this.strokeEpoch) abort();
     }
-    // The last slide's carry may still be reading; the commit reads after it.
-    await this.carried.settled();
   }
 
   /** The brush origin in the canvas's own UV. */
@@ -639,17 +670,22 @@ export class WindowedCanvas {
   }
 
   beginStroke(): void {
+    this.cancelSettlement?.();
+    this.strokeEpoch++;
     this.stroking = true;
     // Paint the last stroke never landed belongs to that stroke, not this one.
     this.held.length = 0;
     // A fresh carry per stroke, so a commit still reading the last one keeps it.
     this.carried = new CarriedPaint();
-    this.deps.renderer()?.beginStroke();
+    const renderer = this.deps.renderer();
+    if (renderer && !renderer.hasRollback()) renderer.captureRollback();
+    renderer?.beginStroke();
   }
 
   endStroke(): void {
     this.stroking = false;
     this.deps.renderer()?.endStroke();
+    this.deps.renderer()?.releaseRollback();
   }
 
   /**
@@ -663,20 +699,24 @@ export class WindowedCanvas {
     const renderer = this.deps.renderer();
     if (!renderer?.hasRollback()) return false;
     this.held.length = 0;
+    this.request = null;
+    const epoch = this.strokeEpoch;
     if (this.coversFile()) return renderer.restoreRollback();
     const ranges = this.dirtyPixelRanges();
-    renderer.releaseRollback();
-    renderer.clearDirtyRegion();
-    this.carried = new CarriedPaint();
-    if (!ranges || ranges.length === 0) return true;
+    if (!ranges || ranges.length === 0) {
+      renderer.releaseRollback();
+      renderer.clearDirtyRegion();
+      return true;
+    }
     const values = await this.deps.readCurrent(ranges);
-    if (!values) return false;
+    if (!values || epoch !== this.strokeEpoch || this.disposed) return false;
     const live = this.deps.renderer();
     if (!live?.getIsInitialized()) return false;
-    this.patchFBODataCompact(values, ranges);
     // A stroke still committing is not in the store yet, so its paint goes
     // back over the store's values.
     await Promise.all(this.pending.map((paint) => paint.landed));
+    if (epoch !== this.strokeEpoch || this.disposed) return false;
+    this.patchFBODataCompact(values, ranges);
     for (const paint of this.pending) {
       if (!paint.values) continue;
       const within = intersectPixelRanges(paint.ranges, ranges);
@@ -686,7 +726,9 @@ export class WindowedCanvas {
         within,
       );
     }
+    this.carried = new CarriedPaint();
     live.clearDirtyRegion();
+    live.releaseRollback();
     return true;
   }
 
@@ -858,6 +900,7 @@ export class WindowedCanvas {
 
   dispose(): void {
     this.disposed = true;
+    this.cancelSettlement?.();
     this.generation++;
     this.displaySeed = null;
     this.blocks?.dispose();

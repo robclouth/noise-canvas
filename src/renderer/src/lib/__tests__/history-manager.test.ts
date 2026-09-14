@@ -451,7 +451,7 @@ function installPatchRenderer(
           return out;
         },
         expandDirtyRegion: vi.fn(),
-        settleStroke: vi.fn(async () => {}),
+        settleStroke: vi.fn(async () => ({ status: "completed" as const })),
         clearDirtyRegion: vi.fn(),
         reloadTextures: vi.fn(),
         releaseAnalysisData: vi.fn(),

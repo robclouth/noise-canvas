@@ -543,11 +543,18 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       // Arrow keys render the stroke as a preview; committing it requires a
       // non-preview render before the synthesis/undo step.
-      file.rendererRef.current.beginStroke();
-      file.rendererRef.current.renderStroke(false);
-      await file.rendererRef.current.settleStroke();
-      await applyStrokeAtPosition();
-      file.rendererRef.current.endStroke();
+      const renderer = file.rendererRef.current;
+      if (!renderer.beginStroke()) return;
+      renderer.renderStroke(false);
+      const result = await renderer.settleStroke();
+      if (result.status !== "completed" || get().activeFileId !== activeFileId) {
+        if (result.status === "completed") await renderer.discardStrokePreview();
+        renderer.endStroke();
+        return;
+      }
+      const commit = applyStrokeAtPosition();
+      renderer.endStroke();
+      await commit;
     },
   };
 };

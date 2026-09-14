@@ -59,9 +59,12 @@ dispatch. Conversion into canvas coordinates stays at the window boundary.
 The reach cache retains its `State` key and engine-context lifetime. Original,
 source and impulse windows keep separate roles.
 
-Held dabs, carry, pending committed paint, readback epochs and commit ordering
-retain their existing behaviour. Typed settlement failure and slot allocation
-tuning are separate optional work; neither is part of this rendering migration.
+Held dabs keep FIFO order. Carry, pending committed paint and readback epochs
+retain their existing behaviour. Stroke settlement has explicit completion,
+cancellation and failure results.
+Only completed strokes can commit; incomplete strokes restore their rollback
+state. See `canvas-window.md` for the failure policy. Slot allocation tuning
+is a separate measured change.
 
 ## Checks
 
