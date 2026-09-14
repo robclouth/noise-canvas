@@ -21,12 +21,11 @@ import { savedViewTransform, ViewDisplay, type ViewDescriptor } from "../lib/vie
 import { captureCompositionToCanvas } from "../lib/snapshot-capture";
 import { ViewSnapshot } from "../lib/view-snapshot";
 import { perfAdd, perfEnabled, perfSyncEnabled } from "../lib/perf-probe";
-import { prepareFileEditor } from "./file-renderer";
+import { prepareFileEditor } from "../lib/file-editor";
 
 export interface ViewRendererHandle {
   display: ViewDisplay;
   captureSnapshot: () => Promise<boolean>;
-  refreshSnapshot: () => void;
 }
 export interface ViewRendererProps {
   descriptor: Pick<ViewDescriptor, "topId" | "layerIds">;
@@ -115,11 +114,7 @@ export const ViewRenderer = memo(
     };
     const capture = useRef(captureSnapshot);
     capture.current = captureSnapshot;
-    useImperativeHandle(
-      ref,
-      () => ({ display, captureSnapshot: () => capture.current(), refreshSnapshot: () => refresh.current() }),
-      [display],
-    );
+    useImperativeHandle(ref, () => ({ display, captureSnapshot: () => capture.current() }), [display]);
     useLayoutEffect(() => {
       const state = useStore.getState();
       display.update({ ...props.descriptor, transform: savedViewTransform(state, topId) }, state);
@@ -149,12 +144,6 @@ export const ViewRenderer = memo(
           invalidate();
         },
         clearPreview,
-        applyStroke: () => {
-          engine.applyStroke.current = true;
-          invalidate();
-        },
-        captureSnapshot: () => capture.current(),
-        refreshSnapshot: () => refresh.current(),
       });
       const unsubscribe = useStore.subscribe(
         (state) => state.activeFileId,

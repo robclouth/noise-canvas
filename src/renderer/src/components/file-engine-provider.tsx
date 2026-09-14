@@ -85,7 +85,6 @@ function FileEngineBridge({ id, registry }: { id: string; registry: FileEngineRe
       modulator3Texture,
       placeholderTexture,
       resourcesChanged: () => {},
-      scheduleSnapshotRefresh: () => registry.get(id)?.notifyContentChanged(),
       strokeContext: {
         fileId: id,
         spectrogramData,

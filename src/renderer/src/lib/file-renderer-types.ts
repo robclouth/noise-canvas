@@ -7,7 +7,6 @@ import type { SourceFileInfo } from "./stroke-renderer";
 import type { DabNeeds } from "./windowed-canvas";
 import type { ImpulseNeed } from "./impulse-need";
 
-/** One stroke of a batch: where it is aimed, and the state to paint it with. */
 /** A stroke over one region, painted from a state built for it. */
 export interface RegionStroke {
   aimX: number;
@@ -24,9 +23,6 @@ export interface StrokeDispatch {
   state: State;
 }
 
-/**
- * Handle for the FileRenderer component, exposing methods to parent components.
- */
 /** The union of the steps' brush rectangles for one aim, in file UV. */
 export interface BrushUnionUv {
   min: Vector2;
@@ -130,7 +126,6 @@ export interface FileRendererHandle {
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
   reloadTextures: () => void;
   releaseAnalysisData: () => void;
-  applyStroke: () => void;
   beginStroke: () => void;
   endStroke: () => void;
   /** Resolves once every dab of the stroke has landed. Call it before committing. */
@@ -156,10 +151,6 @@ export interface FileRendererHandle {
   getStrokeGeneration: () => number;
   /** Widens the dirty region to cover pixels changed outside the painted rect. */
   expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) => void;
-  /** Captures the view containing this top layer. */
-  captureSnapshot: () => Promise<boolean>;
-  /** Schedules a throttled snapshot re-capture (no-op while the view is live). */
-  refreshSnapshot: () => void;
   /**
    * Renders a standalone still image of the committed spectrogram at export
    * resolution. Resolves null when the renderer isn't ready yet.

@@ -1112,6 +1112,39 @@ describe("one direct display per view", () => {
     expect(display.backdropBytes).toBe(80 * 40 * 4);
   });
 
+  it("keeps engines and GPU allocations stable through 100 view switches", async () => {
+    const rig = await stackedView(4);
+    const display = rig.viewRef.current!.display;
+    const { createByteTarget, renderCompositionToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(80, 40);
+    disposers.push(() => target.dispose());
+    const engines = new Map(display.layers.map((layer) => [layer.engine.fileId, layer.engine]));
+    const historyCalls = historyInitialize.mock.calls.length;
+    const ids = [...display.descriptor.layerIds];
+    const draw = async (index: number) => {
+      const width = index % 2 ? 96 : 80;
+      const order = index % 2 ? [...ids].reverse() : ids;
+      display.update(
+        { ...display.descriptor, layerIds: order, topId: order[index % order.length] },
+        rig.useStore.getState(),
+      );
+      display.resize(width, 40);
+      target.setSize(width, 40);
+      display.prepare(rig.useStore.getState());
+      await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "capture"), target);
+      expect(display.backdropBytes).toBe(width * 40 * 4);
+      for (const layer of display.layers) expect(layer.engine).toBe(engines.get(layer.engine.fileId));
+    };
+    await draw(0);
+    await draw(1);
+    const memory = { ...rig.gl.info.memory };
+    for (let i = 0; i < 100; i++) await draw(i);
+    expect(rig.gl.info.memory).toEqual(memory);
+    expect(historyInitialize).toHaveBeenCalledTimes(historyCalls);
+    display.releaseBackdrop();
+    expect(display.backdropBytes).toBe(0);
+  });
+
   it("rebuilds the backdrop for background dependencies, but not top-only changes", async () => {
     const rig = await stackedView(4);
     const display = rig.viewRef.current!.display;

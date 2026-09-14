@@ -4,11 +4,11 @@ import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import type { useTransientStore } from "@renderer/store/transient";
 import type { State, OpenFile } from "@renderer/store/types";
 import { Color, Vector2, type WebGLRenderer } from "three";
-import { aimUvToBrushBlUv } from "../lib/brush-anchor";
-import { prepareVisibleRegion, type FileDisplayResidencyContext } from "../lib/file-display-residency";
-import type { FileEngine } from "../lib/file-engine";
-import { getFileOnsets } from "../lib/file-onsets";
-import { brushUnionAt, type FileStrokeContext } from "../lib/file-stroke-dispatch";
+import { aimUvToBrushBlUv } from "./brush-anchor";
+import { prepareVisibleRegion, type FileDisplayResidencyContext } from "./file-display-residency";
+import type { FileEngine } from "./file-engine";
+import { getFileOnsets } from "./file-onsets";
+import { brushUnionAt, type FileStrokeContext } from "./file-stroke-dispatch";
 import {
   destToSourceBandUv,
   resolveBrushAnchor,
@@ -16,7 +16,7 @@ import {
   sourceBandUvSlope,
   swungGridCellWidthUv,
   unitsToUv,
-} from "../lib/utils";
+} from "./utils";
 
 function resolveStepSourceFile(state: State, step: BrushStep | undefined): OpenFile | undefined {
   const named = step?.sourceFile ?? null;

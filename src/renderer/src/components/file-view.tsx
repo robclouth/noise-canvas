@@ -23,7 +23,7 @@ import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
 import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
 import FileHeader from "./file-header";
 import { FILE_VIEW_BODY_HEIGHT } from "@renderer/lib/file-view-metrics";
-import { ViewRenderer } from "./view-renderer";
+import { ViewRenderer, type ViewRendererHandle } from "./view-renderer";
 import type { FileRendererHandle } from "../lib/file-renderer-types";
 import { LoopRegion } from "./loop-region";
 import { SelectionRegion } from "./selection-region";
@@ -156,6 +156,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   }, [pickingFileParam, isPanning, isZooming, editMode, shiftHeld]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
+  const viewRendererRef = useRef<ViewRendererHandle>(null);
   const descriptor = useMemo(() => ({ topId: fileId, layerIds: stackLayerIds ?? [fileId] }), [fileId, stackLayerIds]);
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   const viewRef = useRef<HTMLDivElement>(null);
@@ -210,7 +211,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
 
   const trySnapshot = useCallback(function captureLatest() {
     if (captureInFlightRef.current) return;
-    const capture = rendererRef.current?.captureSnapshot();
+    const capture = viewRendererRef.current?.captureSnapshot();
     if (!capture) return;
     captureInFlightRef.current = true;
     capture
@@ -1116,6 +1117,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
               >
                 <View style={viewStyle} visible={phase !== "static"}>
                   <ViewRenderer
+                    ref={viewRendererRef}
                     descriptor={descriptor}
                     onFileHandle={refCallback}
                     isLive={phase !== "static"}

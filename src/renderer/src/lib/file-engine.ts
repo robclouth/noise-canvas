@@ -36,10 +36,7 @@ import { unitsToUv } from "./utils";
 import { WindowedCanvas, type UvRegion } from "./windowed-canvas";
 
 type EngineTextures = { packed: DataTexture; inverse: DataTexture; meta: DataTexture };
-type FileEngineOperations = Omit<
-  FileRendererHandle,
-  "renderStroke" | "clearPreview" | "applyStroke" | "captureSnapshot" | "refreshSnapshot"
->;
+type FileEngineOperations = Omit<FileRendererHandle, "renderStroke" | "clearPreview">;
 export interface FileEngineServices {
   getHistoryManager: typeof getHistoryManager;
   deriveSideData: typeof deriveSideData;
@@ -59,7 +56,6 @@ export interface FileEngineContext {
   modulator3Texture: StrokeTextures["modulator3Texture"];
   placeholderTexture: StrokeTextures["placeholderTexture"];
   resourcesChanged: () => void;
-  scheduleSnapshotRefresh: () => void;
   strokeContext: FileStrokeContext;
 }
 
@@ -660,14 +656,14 @@ export class FileEngine {
   };
   discardStrokePreview = async (): Promise<boolean> => {
     const { strokeRendererRef, canvasRef, displayMode } = this;
-    const { invalidateRef, scheduleSnapshotRefresh } = this.context;
+    const { invalidateRef } = this.context;
 
     const canvas = canvasRef.current;
     const restored = canvas ? await canvas.discardStroke() : (strokeRendererRef.current?.restoreRollback() ?? false);
     if (restored) {
       displayMode.current = "committed";
       invalidateRef.current?.();
-      scheduleSnapshotRefresh();
+      this.notifyContentChanged();
     }
     return restored;
   };
@@ -709,7 +705,7 @@ export class FileEngine {
       endStroke,
       fileId,
     } = this;
-    const { invalidateRef, scheduleSnapshotRefresh, strokeContext } = this.context;
+    const { invalidateRef, strokeContext } = this.context;
     const { openFiles, getState, getTransientState } = this.services;
     const { paint: dispatchStroke, span: dabSpan, refusal: strokeRefusal } = this.strokeDispatch(strokeContext);
     return {
@@ -719,7 +715,7 @@ export class FileEngine {
         if (!painted) return false;
         displayMode.current = preview ? "preview" : "committed";
         invalidateRef.current?.();
-        scheduleSnapshotRefresh();
+        this.notifyContentChanged();
         return true;
       },
       createRegionSource: (id: string, spec: SpectrogramData, onsets?: Float32Array, onsetSensitivity?: number) => {
@@ -749,7 +745,7 @@ export class FileEngine {
         const painted = prepareStrokeBatch(strokeContext, canvas, strokes, ahead);
         if (painted > 0) displayMode.current = "committed";
         invalidateRef.current?.();
-        scheduleSnapshotRefresh();
+        this.notifyContentChanged();
         return painted;
       },
       beginStrokePreview: () => {

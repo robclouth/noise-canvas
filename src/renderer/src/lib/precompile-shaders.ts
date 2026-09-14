@@ -27,7 +27,7 @@ const auxiliaryMaterials = new Map<string, RawShaderMaterial>();
 
 /**
  * A throwaway material whose shader source matches a per-instance material
- * created elsewhere (display in file-renderer, modulator in modulator-view, mask
+ * created elsewhere (display in file-display-material, modulator in modulator-view, mask
  * in stroke-renderer). Identical source + glslVersion yields the same program
  * cache key, so linking this warms the program the real material reuses. They
  * are intentionally never disposed: disposing would release the cached program

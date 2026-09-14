@@ -69,6 +69,25 @@ try {
   await noThanks.first().waitFor({ state: "hidden" });
   await page.evaluate(async () => {
     window.checkFiles = (await import("/src/store/files.ts")).openFiles;
+    const { ViewDisplay } = await import("/src/lib/view-display.ts");
+    const { captureCompositionToCanvas } = await import("/src/lib/snapshot-capture.ts");
+    const compose = ViewDisplay.prototype.compose;
+    ViewDisplay.prototype.compose = function (gl, purpose) {
+      window.checkDisplay = this;
+      window.checkGl = gl;
+      return compose.call(this, gl, purpose);
+    };
+    window.captureCheckView = async () => {
+      const display = window.checkDisplay;
+      display.prepare(window.__store.getState());
+      return captureCompositionToCanvas(
+        window.checkGl,
+        () => display.compose(window.checkGl, "capture"),
+        window.checkView.querySelector("canvas"),
+        display.width,
+        display.height,
+      );
+    };
   });
   const ids = [];
   for (const hz of [220, 880, 3520]) {
@@ -116,7 +135,11 @@ try {
   }, ids);
   const view = page.locator(`[data-file-view-id="${ids[2]}"]`);
   await page.mouse.move(10, 10);
-  await page.waitForTimeout(2200);
+  await page.waitForFunction(
+    (top) => document.querySelector(`[data-file-view-id="${top}"] canvas`)?.style.visibility === "visible",
+    ids[2],
+    { timeout: 10000 },
+  );
   await page.evaluate((top) => {
     window.checkView = document.querySelector(`[data-file-view-id="${top}"]`);
     window.checkTopHandle = window.checkFiles[top].rendererRef.current;
@@ -126,6 +149,7 @@ try {
       return Array.from(canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data);
     };
     window.checkBefore = window.checkStill();
+    if (window.checkDisplay.backdropBytes <= 0) throw new Error("the three-layer view must own a backdrop");
   }, ids[2]);
   await page.evaluate((ids) => {
     window.__store.setState({ openFileIds: [ids[0], ids[2]] });
@@ -135,17 +159,17 @@ try {
     const top = window.checkFiles[ids[2]].rendererRef.current;
     if (document.querySelector(`[data-file-view-id="${ids[2]}"]`) !== window.checkView || top !== window.checkTopHandle)
       throw new Error("the top view remounted");
+    if (window.checkDisplay.backdropBytes !== 0) throw new Error("the two-layer view must release its backdrop");
     const actual = window.checkStill();
     const changed = actual.filter((value, i) => value !== window.checkBefore[i]).length;
-    await top.captureSnapshot();
+    await window.captureCheckView();
     const expected = window.checkStill();
     return { changed, mismatches: actual.filter((value, i) => Math.abs(value - expected[i]) > 1).length };
   }, ids);
   assert(changed.changed > 0, "removing a background layer must change the static still");
   assert.equal(changed.mismatches, 0, "the static still must match the current layer count and tints");
   console.log("PASS retained static removal", changed);
-  await page.evaluate(async (top) => {
-    const current = window.checkFiles[top].rendererRef.current;
+  await page.evaluate(async () => {
     const { ViewSnapshot } = await import("/src/lib/view-snapshot.ts");
     const captureSnapshot = ViewSnapshot.prototype.capture;
     window.checkCaptures = 0;
@@ -153,13 +177,13 @@ try {
       window.releaseCheckCapture = resolve;
     });
     ViewSnapshot.prototype.capture = function (draw) {
-      window.checkCaptures++;
       return captureSnapshot.call(this, async (canPublish) => {
+        window.checkCaptures++;
         await window.checkGate;
         return draw(canPublish);
       });
     };
-    current.refreshSnapshot();
+    window.checkDisplay.layers[0].engine.notifyContentChanged();
   }, ids[2]);
   await page.waitForFunction(() => window.checkCaptures > 0);
   await page.evaluate((ids) => window.__store.setState({ openFileIds: [ids[2], ids[0]] }), ids);
@@ -168,9 +192,9 @@ try {
   await page.waitForFunction(() => window.checkCaptures >= 2, null, { timeout: 10000 });
   console.log("PASS dirty revision during capture", await page.evaluate(() => window.checkCaptures));
   await page.waitForTimeout(300);
-  const pendingMismatches = await page.evaluate(async (ids) => {
+  const pendingMismatches = await page.evaluate(async () => {
     const actual = window.checkStill();
-    await window.checkFiles[ids[2]].rendererRef.current.captureSnapshot();
+    await window.captureCheckView();
     return window.checkStill().filter((value, i) => Math.abs(value - actual[i]) > 1).length;
   }, ids);
   assert.equal(pendingMismatches, 0, "the pending revision must capture the reordered tints");

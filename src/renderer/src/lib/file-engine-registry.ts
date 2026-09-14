@@ -4,10 +4,7 @@ import { FileEngine, type FileEngineContext, type FileEngineServices } from "./f
 import { visibleFrameRange } from "./file-display-residency";
 import type { FileRendererHandle } from "./file-renderer-types";
 
-type ViewOperations = Pick<
-  FileRendererHandle,
-  "renderStroke" | "clearPreview" | "applyStroke" | "captureSnapshot" | "refreshSnapshot"
->;
+type ViewOperations = Pick<FileRendererHandle, "renderStroke" | "clearPreview">;
 interface Entry {
   engine: FileEngine;
   context: FileEngineContext;
@@ -102,9 +99,6 @@ export class FileEngineRegistry {
         reloadTextures: () => this.reload(id),
         renderStroke: (preview: boolean) => entry.view?.renderStroke(preview),
         clearPreview: () => entry.view?.clearPreview(),
-        applyStroke: () => entry.view?.applyStroke(),
-        captureSnapshot: () => entry.view?.captureSnapshot() ?? Promise.resolve(false),
-        refreshSnapshot: () => entry.view?.refreshSnapshot(),
       };
       entry.adapter = new Proxy(
         { ...entry.operations, ...viewOperations },
