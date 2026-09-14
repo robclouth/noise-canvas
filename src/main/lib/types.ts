@@ -20,6 +20,8 @@ export interface GaboratorAnalysisResult {
 }
 
 export type AnalysisParams = {
+  /** Reconstructs complete audio with uncapped synthesis support at chunk boundaries. */
+  fullSynthesisSupport?: boolean;
   bandsPerOctave: number;
   minFreq: number;
   /**

@@ -3249,6 +3249,30 @@ Napi::Value OnsetSalienceAsync(const Napi::CallbackInfo &info)
     return worker->GetPromise();
 }
 
+/** The coefficient margin for a full-support synthesis pass, in seconds. */
+Napi::Value SynthesisReadReach(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsObject()) {
+        Napi::TypeError::New(env, "Expected sample rate and analysis parameters").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    const double rate = info[0].As<Napi::Number>().DoubleValue();
+    const auto input = info[1].As<Napi::Object>();
+    const double bands = input.Get("bandsPerOctave").ToNumber().DoubleValue();
+    const double minimum = input.Get("minFreq").ToNumber().DoubleValue();
+    if (!std::isfinite(rate) || rate <= 0 || !std::isfinite(bands) || bands <= 0 ||
+        !std::isfinite(minimum) || minimum <= 0 || minimum >= rate / 2) {
+        Napi::RangeError::New(env, "Invalid synthesis parameters").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    gaborator::log_fq_scale scale(bands, minimum / rate);
+    gaborator::parameters params(scale, OVERLAP);
+    params.phase = gaborator::coef_phase::global;
+    gaborator::analyzer<float> analyzer(params);
+    return Napi::Number::New(env, 3 * std::ceil(analyzer.synthesis_support()) / rate);
+}
+
 class SynthesizeWorker : public Napi::AsyncWorker
 {
 public:
@@ -3296,6 +3320,7 @@ public:
 
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
         fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
+        fullSynthesisSupport = paramsJs.Has("fullSynthesisSupport") && paramsJs.Get("fullSynthesisSupport").ToBoolean().Value();
         // Onsets are re-derived from the packed data this pass already walks, so
         // they track what has been painted. Full-file work regardless of the
         // synthesized range, hence opt-in per call.
@@ -3447,10 +3472,10 @@ public:
             synthesisSupportSamples = static_cast<int64_t>(std::ceil(analyzer.synthesis_support()));
         }
 
-        // Cap synthesis support at 0.1 seconds
+        // Complete reconstruction uses the full filter support at every chunk edge.
         int64_t maxSupportSamples = static_cast<int64_t>(sampleRate * 0.1);
-        synthesisSupportSamples = std::min(synthesisSupportSamples, maxSupportSamples);
-        DEBUG_LOG << "[C++] synthesisSupportSamples (capped at " << maxSupportSamples << "): " << synthesisSupportSamples << std::endl << std::flush;
+        if (!fullSynthesisSupport) synthesisSupportSamples = std::min(synthesisSupportSamples, maxSupportSamples);
+        DEBUG_LOG << "[C++] synthesisSupportSamples: " << synthesisSupportSamples << std::endl << std::flush;
 
         // Crossfade duration: 10ms
         int64_t crossfadeSamples = static_cast<int64_t>(sampleRate * 0.01);
@@ -3720,6 +3745,7 @@ private:
     std::vector<int32_t> bandStepLog2s;
     int bandsPerOctave;
     double fminHz;
+    bool fullSynthesisSupport = false;
     bool detectOnsets = false;
     // Set when the packed buffer holds one span of the file rather than all of
     // it; the band tables still describe the whole file.
@@ -7051,6 +7077,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("spliceAnalyze", Napi::Function::New(env, SpliceAnalyzeAsync));
     exports.Set("spliceQuantLog2", Napi::Function::New(env, SpliceQuantLog2));
     exports.Set("getGpuMemoryInfo", Napi::Function::New(env, GetGpuMemoryInfo));
+    exports.Set("synthesisReadReach", Napi::Function::New(env, SynthesisReadReach));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("commitStroke", Napi::Function::New(env, CommitStrokeAsync));
     exports.Set("detectOnsets", Napi::Function::New(env, DetectOnsetsAsync));

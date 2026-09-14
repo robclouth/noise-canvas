@@ -142,8 +142,11 @@ const synthesize: SynthesizeFn = async (
     minFreq: params.minFreq,
     applyLimiter: applyLimiter ? 1 : 0,
     detectOnsets: params.detectOnsets ? 1 : 0,
+    fullSynthesisSupport: params.fullSynthesisSupport ? 1 : 0,
     existingChannelCount: existingAudio?.length ?? 0,
   };
+  if (analysisMetadata.viewStartFrame !== undefined) meta.viewStartFrame = analysisMetadata.viewStartFrame;
+  if (analysisMetadata.viewEndFrame !== undefined) meta.viewEndFrame = analysisMetadata.viewEndFrame;
   if (startFrame !== undefined) meta.startFrame = startFrame;
   if (endFrame !== undefined) meta.endFrame = endFrame;
   if (startBand !== undefined) meta.startBand = startBand;
@@ -421,6 +424,20 @@ export function createExtensionAnalysis(): AnalysisApi {
       if (params.maxCoefficients !== undefined) meta.maxCoefficients = params.maxCoefficients;
       return frameToAnalysis(await analysisOp("analyseChannels", arrays, meta));
     },
+    synthesisReadReach: async (sampleRate, params) =>
+      Number(
+        (
+          await analysisOp(
+            "synthesisReadReach",
+            {},
+            {
+              sampleRate,
+              bandsPerOctave: params.bandsPerOctave,
+              minFreq: params.minFreq,
+            },
+          )
+        ).meta.seconds,
+      ),
     synthesize,
     commitStroke,
     encodeHistorySnapshot: async (packed) =>

@@ -147,6 +147,7 @@ declare global {
         codec: string;
         channels: number;
       }>;
+      synthesisReadReach: (sampleRate: number, params: AnalysisParams) => Promise<number>;
       synthesize: (
         processedData: Float32Array,
         analysisMetadata: {
@@ -156,6 +157,8 @@ declare global {
           bandOffsets: Uint32Array;
           bandStepLog2s: Int32Array;
           bandLengths: Uint32Array;
+          viewStartFrame?: number;
+          viewEndFrame?: number;
         },
         sampleRate: number,
         params: AnalysisParams,

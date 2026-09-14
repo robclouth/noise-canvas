@@ -130,6 +130,7 @@ vi.mock("../host", () => ({
       decodeHistorySnapshot: async (bytes: Uint8Array) =>
         new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4),
       openAnalysisStream: vi.fn(),
+      synthesisReadReach: vi.fn(async () => 6),
       synthesize: vi.fn(async (_packed, _meta, _sampleRate, _params, _draft, channels) => ({
         channels: channels ?? [new Float32Array(64)],
         peak: 1,

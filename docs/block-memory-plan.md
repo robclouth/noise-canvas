@@ -1880,6 +1880,14 @@ deviation rather than a step, so it does not click. Fixing it means filling
 each chunk to the uncapped support, which the same measurement says costs
 about 40 % of the synthesis. That trade is Rob's to make.
 
+**Resolved on 2026-09-14.** Opening and full audio reconstruction now read and
+synthesise with the uncapped filter support. A real-addon regression compares
+96 seconds of low-frequency audio, reconstructed in 30-second chunks, with a
+whole-file pass. The largest sample difference is 5.07e-7. The earlier timing
+figures above are historical; no timing comparison was run for this correction
+because the machine was under heavy load. Interactive stroke synthesis retains
+its separate support policy.
+
 ---
 
 ## Phase 15 — an undrawn picture is a hatch, not white (2026-09-07)

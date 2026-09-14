@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { decodeFrame, encodeFrame, type NumericArray } from "../../../../extension/shared/analysis-protocol";
 
@@ -40,4 +40,40 @@ describe("extension synthesis frame", () => {
     expect(clientSource).toContain("onsetOdfMax: outMeta.onsetOdfMax");
     expect(clientSource).toContain("onsetBandMax: outArrays.onsetBandMax");
   });
+});
+
+it("sends full-support view bounds from the extension client", async () => {
+  const { createExtensionAnalysis } = await import("../host/extension-analysis");
+  const captured: Record<string, number | string>[] = [];
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    if (!(init?.body instanceof Uint8Array)) throw new Error("missing synthesis frame");
+    const request = decodeFrame(init.body.buffer as ArrayBuffer);
+    captured.push(request.meta);
+    const output = encodeFrame({
+      meta: { numChannels: 1, peak: 0, maxGainReductionDb: 0 },
+      arrays: { channel0: new Float32Array(8), gainReductionDb: new Float32Array(0) },
+    });
+    return new Response(output.buffer as ArrayBuffer);
+  });
+  try {
+    await createExtensionAnalysis().synthesize(
+      new Float32Array(4),
+      {
+        numFrames: 800,
+        numChannels: 1,
+        numBands: 1,
+        bandOffsets: new Uint32Array([0]),
+        bandLengths: new Uint32Array([800]),
+        bandStepLog2s: new Int32Array([0]),
+        viewStartFrame: 100,
+        viewEndFrame: 400,
+      },
+      8000,
+      { bandsPerOctave: 48, minFreq: 20, fullSynthesisSupport: true },
+      false,
+    );
+    expect(captured[0]).toMatchObject({ viewStartFrame: 100, viewEndFrame: 400, fullSynthesisSupport: 1 });
+  } finally {
+    fetcher.mockRestore();
+  }
 });

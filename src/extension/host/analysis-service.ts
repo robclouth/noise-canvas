@@ -22,6 +22,7 @@ import {
   mergeSpectrograms,
   nmf,
   synthesize,
+  synthesisReadReach,
 } from "../../main/lib/audio-analysis";
 import type { AnalysisParams } from "../../main/lib/types";
 export { getGpuMemoryInfo } from "../../main/lib/audio-analysis";
@@ -109,12 +110,15 @@ export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Ar
       bandOffsets: asU32(arrays.bandOffsets, "bandOffsets"),
       bandStepLog2s: asI32(arrays.bandStepLog2s, "bandStepLog2s"),
       bandLengths: asU32(arrays.bandLengths, "bandLengths"),
+      viewStartFrame: optionalNumber(meta.viewStartFrame),
+      viewEndFrame: optionalNumber(meta.viewEndFrame),
     },
     Number(meta.sampleRate),
     {
       bandsPerOctave: Number(meta.bandsPerOctave),
       minFreq: Number(meta.minFreq),
       detectOnsets: meta.detectOnsets === 1,
+      fullSynthesisSupport: meta.fullSynthesisSupport === 1,
     },
     meta.applyLimiter === 1,
     existingAudio,
@@ -262,6 +266,13 @@ const modelDownloads = new Map<string, { downloaded: number; total: number; done
 export async function runAnalysisOpFramed(request: ArrayBuffer): Promise<Uint8Array> {
   const { meta, arrays } = decodeFrame(request);
   switch (String(meta.op)) {
+    case "synthesisReadReach": {
+      const seconds = await synthesisReadReach(Number(meta.sampleRate), {
+        bandsPerOctave: Number(meta.bandsPerOctave),
+        minFreq: Number(meta.minFreq),
+      });
+      return encodeFrame({ meta: { seconds }, arrays: {} });
+    }
     case "analyseChannels": {
       const channels = planarChannels(arrays, Number(meta.numChannels));
       const params: AnalysisParams = {

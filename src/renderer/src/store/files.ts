@@ -509,7 +509,7 @@ async function wholeFileInverseMap(
  * time. With `onsets`, each chunk's detection curves are found from the same
  * read while the chunk is synthesised, and come back with the audio.
  */
-function synthesiseFromSpans(
+async function synthesiseFromSpans(
   read: (ranges: Uint32Array) => Promise<Float32Array | null>,
   layout: PackedLayout,
   sampleRate: number,
@@ -521,7 +521,7 @@ function synthesiseFromSpans(
       packed,
       meta,
       sampleRate,
-      params,
+      { ...params, fullSynthesisSupport: true },
       false,
       existingAudio,
       startFrame,
@@ -529,7 +529,8 @@ function synthesiseFromSpans(
       0,
       layout.numBands,
     );
-  return synthesiseInChunks(pass, spanReader(read), layout, sampleRate, SYNTHESIS_CHUNK_SECONDS, onsets);
+  const readReach = await host.analysis.synthesisReadReach(sampleRate, params);
+  return synthesiseInChunks(pass, spanReader(read), layout, sampleRate, readReach, SYNTHESIS_CHUNK_SECONDS, onsets);
 }
 
 /** True while the file's onsets were judged against a gate a pass over the whole file arrived at. */

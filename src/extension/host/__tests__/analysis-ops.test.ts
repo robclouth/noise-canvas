@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeFrame, encodeFrame, type Frame, type NumericArray } from "../../shared/analysis-protocol";
-import { runAnalysisOpFramed } from "../analysis-service";
+import { runAnalysisOpFramed, runSynthesizeFramed } from "../analysis-service";
 
 // runAnalysisOpFramed marshals framed requests into the native analysis calls
 // and their results back into frames. The native layer itself is exercised by
@@ -8,6 +8,8 @@ import { runAnalysisOpFramed } from "../analysis-service";
 
 const native = vi.hoisted(() => ({
   analyseChannels: vi.fn(),
+  synthesisReadReach: vi.fn(),
+  synthesize: vi.fn(),
   detectOnsets: vi.fn(),
   hpss: vi.fn(),
   nmf: vi.fn(),
@@ -23,7 +25,6 @@ const native = vi.hoisted(() => ({
 vi.mock("../../../main/lib/audio-analysis", () => ({
   ...native,
   analyze: vi.fn(),
-  synthesize: vi.fn(),
   commitStroke: vi.fn(),
   encodeHistorySnapshot: vi.fn(),
   decodeHistorySnapshot: vi.fn(),
@@ -41,6 +42,50 @@ async function runOp(meta: Record<string, number | string>, arrays: Record<strin
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("full-support synthesis transport", () => {
+  it("returns the native read margin", async () => {
+    native.synthesisReadReach.mockResolvedValue(24.027);
+    const result = await runOp({ op: "synthesisReadReach", sampleRate: 8000, bandsPerOctave: 48, minFreq: 20 });
+    expect(native.synthesisReadReach).toHaveBeenCalledWith(8000, { bandsPerOctave: 48, minFreq: 20 });
+    expect(result.meta.seconds).toBe(24.027);
+  });
+
+  it("preserves the packed view and full-support request", async () => {
+    native.synthesize.mockResolvedValue({
+      channels: [new Float32Array(8)],
+      peak: 0,
+      maxGainReductionDb: 0,
+      gainReductionDb: new Float32Array(0),
+    });
+    const request = encodeFrame({
+      meta: {
+        numFrames: 800,
+        numChannels: 1,
+        numBands: 1,
+        sampleRate: 8000,
+        bandsPerOctave: 48,
+        minFreq: 20,
+        fullSynthesisSupport: 1,
+        viewStartFrame: 100,
+        viewEndFrame: 400,
+        startFrame: 200,
+        endFrame: 300,
+        existingChannelCount: 0,
+      },
+      arrays: {
+        processedData: new Float32Array(4),
+        bandOffsets: new Uint32Array([0]),
+        bandStepLog2s: new Int32Array([0]),
+        bandLengths: new Uint32Array([800]),
+      },
+    });
+    await runSynthesizeFramed(request.buffer as ArrayBuffer);
+    const args = native.synthesize.mock.calls[0];
+    expect(args[1]).toMatchObject({ viewStartFrame: 100, viewEndFrame: 400 });
+    expect(args[3]).toMatchObject({ fullSynthesisSupport: true });
+  });
 });
 
 describe("analyseChannels op", () => {

@@ -698,6 +698,12 @@ export interface SynthesisResult {
   onsetBandMax?: Float32Array;
 }
 
+/** The native filter's coefficient margin for full-support reconstruction, in seconds. */
+export async function synthesisReadReach(sampleRate: number, params: AnalysisParams): Promise<number> {
+  const addon = init() as { synthesisReadReach: (rate: number, params: AnalysisParams) => number };
+  return addon.synthesisReadReach(sampleRate, params);
+}
+
 export async function synthesize(
   processedData: Float32Array,
   analysisMetadata: {
@@ -707,6 +713,8 @@ export async function synthesize(
     bandOffsets: Uint32Array;
     bandStepLog2s: Int32Array;
     bandLengths: Uint32Array;
+    viewStartFrame?: number;
+    viewEndFrame?: number;
   },
   sampleRate: number,
   params: AnalysisParams,

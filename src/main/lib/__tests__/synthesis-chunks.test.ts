@@ -15,17 +15,18 @@ import { SAMPLE_RATE, signal } from "./analysis-fixtures";
 const require = createRequire(import.meta.url);
 
 const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon.node")) as {
+  synthesisReadReach: (rate: number, params: { bandsPerOctave: number; minFreq: number }) => number;
   analyze: (
     channels: Float32Array[],
     numChannels: number,
     sampleRate: number,
-    params: { bandsPerOctave: number; minFreq: number },
+    params: { bandsPerOctave: number; minFreq: number; fullSynthesisSupport?: boolean },
   ) => Promise<GaboratorAnalysisResult>;
   synthesize: (
     packed: Float32Array,
     meta: PackedLayout,
     sampleRate: number,
-    params: { bandsPerOctave: number; minFreq: number },
+    params: { bandsPerOctave: number; minFreq: number; fullSynthesisSupport?: boolean },
     applyLimiter: boolean,
     existingAudio: Float32Array[],
     startFrame?: number,
@@ -56,8 +57,17 @@ async function analysed(seconds: number, channels = 1) {
   const whole = await addon.synthesize(result.data, layout, SAMPLE_RATE, PARAMS, false, []);
   const read = async (ranges: Uint32Array) => gatherPixelRanges(result.data, ranges);
   const synthesise: SynthesiseView = (packed, meta, existingAudio, startFrame, endFrame) =>
-    addon.synthesize(packed, meta, SAMPLE_RATE, PARAMS, false, existingAudio, startFrame, endFrame);
-  return { result, layout, whole, read, synthesise };
+    addon.synthesize(
+      packed,
+      meta,
+      SAMPLE_RATE,
+      { ...PARAMS, fullSynthesisSupport: true },
+      false,
+      existingAudio,
+      startFrame,
+      endFrame,
+    );
+  return { result, layout, whole, read, synthesise, reach: addon.synthesisReadReach(SAMPLE_RATE, PARAMS) };
 }
 
 /** The largest sample difference between two renderings, and the loudest either reached. */
@@ -74,35 +84,61 @@ function worstSample(a: Float32Array[], b: Float32Array[]): { worst: number; lou
 }
 
 describe("audio rebuilt a chunk at a time", () => {
+  it("preserves low-frequency audio across the production 30-second boundary", async () => {
+    const rate = 8000;
+    const params = { bandsPerOctave: 48, minFreq: 20 };
+    const audio = Float32Array.from({ length: 96 * rate }, (_, i) => {
+      const t = i / rate;
+      return (
+        0.3 * Math.sin(2 * Math.PI * 40 * t) + 0.1 * Math.exp(-Math.abs(t - 30) * 2) * Math.sin(2 * Math.PI * 75 * t)
+      );
+    });
+    const analysis = await addon.analyze([audio], 1, rate, params);
+    const layout = layoutOf(analysis);
+    const whole = await addon.synthesize(analysis.data, layout, rate, params, false, []);
+    const pass: SynthesiseView = (packed, meta, existing, start, end) =>
+      addon.synthesize(packed, meta, rate, { ...params, fullSynthesisSupport: true }, false, existing, start, end);
+    const chunked = await synthesiseInChunks(
+      pass,
+      async (ranges) => gatherPixelRanges(analysis.data, ranges),
+      layout,
+      rate,
+      addon.synthesisReadReach(rate, params),
+    );
+    const { worst } = worstSample(whole.channels, chunked.channels);
+    console.log("Chunk boundary maximum sample error", worst);
+    expect(worst, `largest low-frequency sample difference ${worst}`).toBeLessThan(2e-6);
+  }, 120000);
+
   it("gives the samples a whole-file pass gives", async () => {
-    const { layout, whole, read, synthesise } = await analysed(6);
-    const chunked = await synthesiseInChunks(synthesise, read, layout, SAMPLE_RATE, 1.5);
+    const { layout, whole, read, synthesise, reach } = await analysed(6);
+    const chunked = await synthesiseInChunks(synthesise, read, layout, SAMPLE_RATE, reach, 1.5);
 
     expect(chunked.channels[0].length).toBe(whole.channels[0].length);
     const { worst, loudest } = worstSample(whole.channels, chunked.channels);
     expect(loudest).toBeGreaterThan(0.2);
-    expect(worst, `largest sample difference ${worst}`).toBeLessThan(1e-3);
+    expect(worst, `largest sample difference ${worst}`).toBeLessThan(2e-6);
   });
 
   it("keeps both channels apart", async () => {
-    const { layout, whole, read, synthesise } = await analysed(4, 2);
-    const chunked = await synthesiseInChunks(synthesise, read, layout, SAMPLE_RATE, 1.5);
+    const { layout, whole, read, synthesise, reach } = await analysed(4, 2);
+    const chunked = await synthesiseInChunks(synthesise, read, layout, SAMPLE_RATE, reach, 1.5);
 
     expect(chunked.channels.length).toBe(2);
     const { worst } = worstSample(whole.channels, chunked.channels);
-    expect(worst).toBeLessThan(1e-3);
+    expect(worst).toBeLessThan(2e-6);
   });
 
   it("gives the same audio however the file is cut", async () => {
-    const { layout, read, synthesise } = await analysed(6);
-    const coarse = await synthesiseInChunks(synthesise, read, layout, SAMPLE_RATE, 3);
-    const fine = await synthesiseInChunks(synthesise, read, layout, SAMPLE_RATE, 1);
+    const { layout, read, synthesise, reach } = await analysed(6);
+    const coarse = await synthesiseInChunks(synthesise, read, layout, SAMPLE_RATE, reach, 3);
+    const fine = await synthesiseInChunks(synthesise, read, layout, SAMPLE_RATE, reach, 1);
     const { worst } = worstSample(coarse.channels, fine.channels);
-    expect(worst).toBeLessThan(1e-3);
+    expect(worst).toBeLessThan(2e-6);
   });
 
   it("never reads the whole run at once", async () => {
-    const { layout, read, synthesise } = await analysed(6);
+    const { layout, read, synthesise, reach } = await analysed(36);
     let widest = 0;
     const watched = async (ranges: Uint32Array) => {
       let texels = 0;
@@ -110,7 +146,7 @@ describe("audio rebuilt a chunk at a time", () => {
       widest = Math.max(widest, texels);
       return await read(ranges);
     };
-    await synthesiseInChunks(synthesise, watched, layout, SAMPLE_RATE, 1.5);
+    await synthesiseInChunks(synthesise, watched, layout, SAMPLE_RATE, reach, 1.5);
     let texels = 0;
     for (let b = 0; b < layout.numBands; b++) texels += layout.bandLengths[b];
     expect(widest).toBeLessThan(0.6 * texels);
