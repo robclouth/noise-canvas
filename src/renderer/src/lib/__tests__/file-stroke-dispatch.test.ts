@@ -15,6 +15,9 @@ import { penState } from "../pen-state";
 import { gatherPixelRanges } from "../pixel-ranges";
 import { StrokeRenderer } from "../stroke-renderer";
 import { WindowedCanvas } from "../windowed-canvas";
+import { impulseNeeds } from "../impulse-need";
+
+vi.mock("../impulse-need", { spy: true });
 
 const disposers: Array<() => void> = [];
 
@@ -111,6 +114,47 @@ async function harness() {
 }
 
 describe("file-space stroke dispatch", () => {
+  it("uses the prepared source request without calculating it again", async () => {
+    const { context, canvas, renderer } = await harness();
+    const source = { ...context.openFiles.dispatch, id: "source", filePath: "/source.wav", rendererRef: undefined };
+    context.openFiles.source = source;
+    context.getOpenFileByPath = () => source;
+    const state = createStateForEffects(["passthrough"], {
+      brushSizeTime: 1,
+      stepOverrides: { sourceFile: { path: "/source.wav", name: "source" } },
+      overrides: { activeFileId: "dispatch", filepathsBpm: { "/dispatch.wav": 120 } },
+    });
+    const resolve = vi.spyOn(renderer, "sourceReadFrames");
+    const aimSource = vi.spyOn(canvas, "aimSource");
+    vi.spyOn(canvas, "holdsFrames").mockReturnValue(true);
+    const aim = new Vector2(0.5, 0.5);
+    const span = dabSpan(context, state, aim, canvas);
+    expect(span.needs.sources).toHaveLength(1);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(dispatchStroke(context, state, aim, false, undefined, span)).toBe(false);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(aimSource.mock.calls[0][0]).toBe(span.needs.sources[0]);
+  });
+
+  it("uses the prepared impulse request without calculating it again", async () => {
+    const { context, canvas } = await harness();
+    const state = createStateForEffects(["convolve"], {
+      brushSizeTime: 1,
+      stepOverrides: { convolveIrSize: 2 },
+      overrides: { activeFileId: "dispatch", filepathsBpm: { "/dispatch.wav": 120 } },
+    });
+    vi.mocked(impulseNeeds).mockClear();
+    vi.spyOn(canvas, "holdsFrames").mockReturnValue(true);
+    const aimImpulse = vi.spyOn(canvas, "aimImpulse").mockReturnValue(null);
+    const aim = new Vector2(0.5, 0.5);
+    const span = dabSpan(context, state, aim, canvas);
+    expect(span.needs.impulses).toHaveLength(1);
+    expect(impulseNeeds).toHaveBeenCalledTimes(1);
+    expect(dispatchStroke(context, state, aim, false, undefined, span)).toBe(false);
+    expect(impulseNeeds).toHaveBeenCalledTimes(1);
+    expect(aimImpulse.mock.calls[0][0]).toBe(span.needs.impulses[0]);
+  });
+
   it("keeps held batch state, admission spans and order while reading the pen at dispatch", async () => {
     const { context, canvas, renderer, state, release } = await harness();
     const penBefore = { ...penState };

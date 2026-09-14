@@ -112,12 +112,6 @@ function impulseNeedsFor(context: FileStrokeContext, state: State): ImpulseNeed[
   });
 }
 
-function windowedImpulseNeeds(context: FileStrokeContext, state: State): SourceNeed[] {
-  return impulseNeedsFor(context, state)
-    .map((entry) => entry.need)
-    .filter((need) => responseIsWindowed(context, need.fileId));
-}
-
 export function brushUnionAt(
   context: FileStrokeContext,
   state: State,
@@ -199,24 +193,22 @@ export function dispatchStroke(
   const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
   const canvas = canvasRef.current;
-  if (canvas) {
-    const span = preparedSpan ?? dabSpan(context, state, cursorPos, canvas);
-    if (!canvas.holdsFrames(span.startFrame, span.endFrame, span.needs.original)) return false;
-  }
+  const span = preparedSpan ?? (canvas ? dabSpan(context, state, cursorPos, canvas) : null);
+  if (canvas && span && !canvas.holdsFrames(span.startFrame, span.endFrame, span.needs.original)) return false;
   const dabCursor = canvas ? canvas.dabCursor(cursorPos) : cursorPos;
   const dabDuration = canvas ? canvas.dabDuration(totalDuration) : totalDuration;
 
   if (strokeRefusal(context, state) !== null) return false;
 
   const sourceWindows = new Map<string, SourceWindowTextures>();
-  for (const need of sourceNeedsFor(context, state, cursorPos)) {
+  for (const need of span?.needs.sources ?? sourceNeedsFor(context, state, cursorPos)) {
     const window = canvas?.aimSource(need);
     if (!window) return false;
     sourceWindows.set(need.fileId, window);
   }
 
   const impulses = new Map<string, ImpulseFileInfo>();
-  for (const entry of impulseNeedsFor(context, state)) {
+  for (const entry of span?.impulseBindings ?? impulseNeedsFor(context, state)) {
     const response = openFiles[entry.need.fileId];
     const spectrogram = response?.spectrogramData;
     if (!spectrogram) return false;
@@ -401,14 +393,16 @@ export function dabSpan(
   const totalDuration = numFrames / sampleRate;
   const reach = canvas.wholeFile ? { before: 0, after: 0 } : reachFrames(context, state);
   const union = resolvedUnion ?? brushUnionAt(context, state, cursorPos, bpm, totalDuration);
+  const impulseBindings = impulseNeedsFor(context, state);
   return {
     startFrame: (union.hasSteps ? union.min.x : cursorPos.x) * numFrames - reach.before,
     endFrame: (union.hasSteps ? union.max.x : cursorPos.x) * numFrames + reach.after,
     needs: {
       sources: sourceNeedsFor(context, state, cursorPos),
-      impulses: windowedImpulseNeeds(context, state),
+      impulses: impulseBindings.map((entry) => entry.need).filter((need) => responseIsWindowed(context, need.fileId)),
       original: !canvas.wholeFile && wantsOriginal(context, state),
     },
+    impulseBindings,
   };
 }
 

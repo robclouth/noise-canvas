@@ -5,6 +5,7 @@ import type { ImageExportOptions } from "./image-export";
 import type { PosterInfo } from "./image-export-poster";
 import type { SourceFileInfo } from "./stroke-renderer";
 import type { DabNeeds } from "./windowed-canvas";
+import type { ImpulseNeed } from "./impulse-need";
 
 /** One stroke of a batch: where it is aimed, and the state to paint it with. */
 /** A stroke over one region, painted from a state built for it. */
@@ -43,6 +44,7 @@ export interface DabSpan {
   startFrame: number;
   endFrame: number;
   needs: DabNeeds;
+  impulseBindings: readonly ImpulseNeed[];
 }
 
 export interface FileRendererHandle {
