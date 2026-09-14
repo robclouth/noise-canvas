@@ -19,6 +19,7 @@ import { FileEngineRegistryContext } from "../lib/file-engine-registry";
 import type { FileRendererHandle } from "../lib/file-renderer-types";
 import { savedViewTransform, ViewDisplay, type ViewDescriptor } from "../lib/view-display";
 import { captureCompositionToCanvas } from "../lib/snapshot-capture";
+import { ViewSnapshot } from "../lib/view-snapshot";
 import { perfAdd, perfEnabled, perfSyncEnabled } from "../lib/perf-probe";
 import { prepareFileEditor } from "./file-renderer";
 
@@ -58,8 +59,12 @@ export const ViewRenderer = memo(
     const dirty = useRef(true);
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const refresh = useRef<() => void>(() => {});
-    const display = useMemo(
-      () => new ViewDisplay(registry, initialDescriptor, () => refresh.current()),
+    const scheduleSnapshot = useRef<() => void>(() => {});
+    const { display, snapshot } = useMemo(
+      () => ({
+        display: new ViewDisplay(registry, initialDescriptor, () => refresh.current()),
+        snapshot: new ViewSnapshot(() => scheduleSnapshot.current()),
+      }),
       [registry, initialDescriptor],
     );
     const scheduleSnapshotRefresh = () => {
@@ -71,7 +76,11 @@ export const ViewRenderer = memo(
         if (!latest.current.isLive) latest.current.onSnapshotRefresh?.();
       }, 150);
     };
-    refresh.current = scheduleSnapshotRefresh;
+    scheduleSnapshot.current = scheduleSnapshotRefresh;
+    refresh.current = () => {
+      snapshot.invalidate();
+      scheduleSnapshotRefresh();
+    };
     const resize = useCallback(() => {
       const rect = latest.current.snapshotCanvasRef.current?.getBoundingClientRect();
       if (rect)
@@ -86,20 +95,22 @@ export const ViewRenderer = memo(
       if (!display.top?.ready) return false;
       dirty.current = false;
       const { width, height } = display;
-      const ok = await captureCompositionToCanvas(
-        gl,
-        () => display.compose(gl, "capture"),
-        canvas,
-        width,
-        height,
-        () =>
-          latest.current.snapshotCanvasRef.current === canvas &&
-          display.width === width &&
-          display.height === height &&
-          Boolean(display.top?.ready),
+      return snapshot.capture((canPublish) =>
+        captureCompositionToCanvas(
+          gl,
+          () => display.compose(gl, "capture"),
+          canvas,
+          width,
+          height,
+          () =>
+            canPublish() &&
+            !latest.current.parked &&
+            latest.current.snapshotCanvasRef.current === canvas &&
+            display.width === width &&
+            display.height === height &&
+            Boolean(display.top?.ready),
+        ),
       );
-      if (dirty.current) refresh.current();
-      return ok;
     };
     const capture = useRef(captureSnapshot);
     capture.current = captureSnapshot;
@@ -217,9 +228,10 @@ export const ViewRenderer = memo(
     useEffect(
       () => () => {
         if (timer.current !== null) clearTimeout(timer.current);
+        snapshot.dispose();
         display.dispose();
       },
-      [display],
+      [display, snapshot],
     );
     useFrame(({ clock }) => {
       if (latest.current.parked || (!latest.current.isLive && !dirty.current)) return;
@@ -239,7 +251,7 @@ export const ViewRenderer = memo(
           invalidate,
           () => display.bind(top, state),
         );
-      } else if (wasDirty || dirty.current) refresh.current();
+      } else if (wasDirty || dirty.current) scheduleSnapshot.current();
       if (perfEnabled()) {
         if (perfSyncEnabled()) gl.getContext().finish();
         perfAdd("viewFramePrepare", performance.now() - started);

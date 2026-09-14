@@ -200,11 +200,9 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   const wantsLiveRef = useRef(wantsLive);
   wantsLiveRef.current = wantsLive;
   const captureInFlightRef = useRef(false);
-  const snapshotRevisionRef = useRef(0);
 
   const trySnapshot = useCallback(function captureLatest() {
     if (captureInFlightRef.current) return;
-    const revision = snapshotRevisionRef.current;
     const capture = rendererRef.current?.captureSnapshot();
     if (!capture) return;
     captureInFlightRef.current = true;
@@ -214,12 +212,10 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
       })
       .finally(() => {
         captureInFlightRef.current = false;
-        if (revision !== snapshotRevisionRef.current) captureLatest();
       });
   }, []);
 
   const refreshSnapshot = useCallback(() => {
-    snapshotRevisionRef.current++;
     trySnapshot();
   }, [trySnapshot]);
 

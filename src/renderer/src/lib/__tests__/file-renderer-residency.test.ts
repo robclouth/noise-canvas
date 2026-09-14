@@ -1009,6 +1009,27 @@ describe("one direct display per view", () => {
     expect(await capture).toBe(false);
   });
 
+  it("rejects a capture when background content changes during readback", async () => {
+    const rig = await stackedView(2);
+    const view = rig.viewRef.current!;
+    const capture = view.captureSnapshot();
+    view.display.layers[0].engine.notifyContentChanged();
+    expect(await capture).toBe(false);
+    expect(await view.captureSnapshot()).toBe(true);
+  });
+
+  it("rejects a capture when membership changes at the same size", async () => {
+    const rig = await stackedView(2);
+    const view = rig.viewRef.current!;
+    const capture = view.captureSnapshot();
+    view.display.update(
+      { ...view.display.descriptor, layerIds: [view.display.descriptor.topId] },
+      rig.useStore.getState(),
+    );
+    expect(await capture).toBe(false);
+    expect(await view.captureSnapshot()).toBe(true);
+  });
+
   it("coalesces background changes and keeps editor work on the top layer", async () => {
     const rig = await stackedView(4);
     const display = rig.viewRef.current!.display;
