@@ -74,7 +74,10 @@ try {
   for (const hz of [220, 880, 3520]) {
     const path = join(directory, `${hz}.wav`);
     for (let i = 0; i < frames; i++)
-      wav.writeInt16LE(Math.round(9000 * Math.sin((i * 2 * Math.PI * hz) / 44100)), 44 + i * 2);
+      wav.writeInt16LE(
+        Math.round(9000 * ((i / 44100) % 1 < 0.2 ? 1 : 0.001) * Math.sin((i * 2 * Math.PI * hz) / 44100)),
+        44 + i * 2,
+      );
     writeFileSync(path, wav);
     await app.evaluate(
       ({ BrowserWindow }, path) => BrowserWindow.getAllWindows()[0].webContents.send("open-file", path),
@@ -141,18 +144,20 @@ try {
   assert(changed.changed > 0, "removing a background layer must change the static still");
   assert.equal(changed.mismatches, 0, "the static still must match the current layer count and tints");
   console.log("PASS retained static removal", changed);
-  await page.evaluate((top) => {
+  await page.evaluate(async (top) => {
     const current = window.checkFiles[top].rendererRef.current;
-    const captureSnapshot = current.captureSnapshot;
+    const { ViewSnapshot } = await import("/src/lib/view-snapshot.ts");
+    const captureSnapshot = ViewSnapshot.prototype.capture;
     window.checkCaptures = 0;
     window.checkGate = new Promise((resolve) => {
       window.releaseCheckCapture = resolve;
     });
-    current.captureSnapshot = async (...args) => {
+    ViewSnapshot.prototype.capture = function (draw) {
       window.checkCaptures++;
-      const ok = await captureSnapshot(...args);
-      await window.checkGate;
-      return ok;
+      return captureSnapshot.call(this, async (canPublish) => {
+        await window.checkGate;
+        return draw(canPublish);
+      });
     };
     current.refreshSnapshot();
   }, ids[2]);
@@ -215,6 +220,59 @@ try {
   assert(pixels.bright > 0);
   assert.equal(pixels.mismatches, 0, "live pixels must match the pointer-away still outside the brush");
   console.log("PASS live pixels", { ...pixels, seconds: 20, directory });
+  await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.5);
+  await page.evaluate(async () => {
+    const { useTransientStore } = await import("/src/store/transient.ts");
+    useTransientStore.setState({ hoveredFile: null, cursorVisible: false });
+  });
+  await page.waitForFunction(() => window.checkView.querySelector("canvas").style.visibility === "visible");
+  const capturePage = () =>
+    app.evaluate(async ({ BrowserWindow }) =>
+      (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString("base64"),
+    );
+  const beforeZoom = await capturePage();
+  await page.keyboard.down("Meta");
+  for (let i = 0; i < 12; i++) {
+    await page.mouse.wheel(0, -10);
+    await page.waitForTimeout(50);
+    assert.equal(
+      await page.evaluate(() => window.checkView.querySelector("canvas").style.visibility),
+      "hidden",
+      "a changing transform must keep the view live without hover",
+    );
+  }
+  await page.keyboard.up("Meta");
+  const afterZoom = await capturePage();
+  writeFileSync(join(directory, "zoom-before.png"), Buffer.from(beforeZoom, "base64"));
+  writeFileSync(join(directory, "zoom-after.png"), Buffer.from(afterZoom, "base64"));
+  const zoomChanges = await page.evaluate(
+    async ({ beforeZoom, afterZoom, box }) => {
+      const decode = async (base64) => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${base64}`;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0);
+        const scale = image.width / innerWidth;
+        return context.getImageData(
+          Math.round((box.x + box.width * 0.1) * scale),
+          Math.round((box.y + box.height * 0.1) * scale),
+          Math.round(box.width * 0.4 * scale),
+          Math.round(box.height * 0.8 * scale),
+        ).data;
+      };
+      const a = await decode(beforeZoom),
+        b = await decode(afterZoom);
+      return a.filter((v, i) => i % 4 !== 3 && Math.abs(v - b[i]) > 2).length;
+    },
+    { beforeZoom, afterZoom, box },
+  );
+  assert(zoomChanges > 100, "time-varying spectrogram pixels must move during live zoom");
+  await page.waitForFunction(() => window.checkView.querySelector("canvas").style.visibility === "visible");
+  console.log("PASS live zoom without hover", { changedChannels: zoomChanges });
 } finally {
   await app.close();
   await server.close();

@@ -143,6 +143,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   });
 
   const [isPanning, setIsPanning] = useState(false);
+  const [isViewMoving, setIsViewMoving] = useState(false);
   const editMode = useStore((state) => state.editMode);
   const shiftHeld = useTransientStore((state) => state.shiftHeld);
 
@@ -186,13 +187,19 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
   const repeatClockRef = useRef<number | null>(null);
   const snapshotCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // A view is live only while it can show cursor-dependent UI: hovered (brush
+  // A view stays live while its transform moves or it shows cursor-dependent UI: hovered (brush
   // preview), active with a cursor anywhere (stroking + implicit-source
   // rectangle), a step's explicit source file (sampling rectangle), fullscreen,
   // or an axis-legend drag zooming/panning the view. Everything else is
   // presented as a static snapshot.
   const wantsLive =
-    isHovered || isFullscreen || isAxisDragging || (isActive && (cursorVisible || isStroking)) || isExplicitSource;
+    isViewMoving ||
+    isPanning ||
+    isHovered ||
+    isFullscreen ||
+    isAxisDragging ||
+    (isActive && (cursorVisible || isStroking)) ||
+    isExplicitSource;
 
   const [phase, setPhase] = useState<ViewPhase>("live");
   const phaseRef = useRef(phase);
@@ -1115,6 +1122,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
                     parked={isMinimized}
                     snapshotCanvasRef={snapshotCanvasRef}
                     onSnapshotRefresh={refreshSnapshot}
+                    onMotionChange={setIsViewMoving}
                     onLiveFrame={handleLiveFrame}
                   />
                 </View>

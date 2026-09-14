@@ -32,6 +32,7 @@ import { getHistoryManager } from "./history-manager";
 import { layerTint, LONE_LAYER_TINT } from "./layer-tint";
 import { perfAdd, perfEnabled } from "./perf-probe";
 import { ViewBackdrop } from "./view-backdrop";
+import { ViewMotion } from "./view-motion";
 
 export type ViewTransform = Pick<FileViewDescriptor, "viewZoomPower" | "viewOffset" | "viewZoomPowerY" | "viewOffsetY">;
 export interface ViewDescriptor {
@@ -59,6 +60,7 @@ export function savedViewTransform(state: State, id: string): ViewTransform {
 
 /** Owns an ordered direct display while borrowing its file engines. */
 export class ViewDisplay {
+  readonly motion = new ViewMotion();
   layers: ViewLayer[] = [];
   top: ViewLayer | undefined;
   descriptor: ViewDescriptor;
@@ -192,6 +194,7 @@ export class ViewDisplay {
     )
       return;
     this.descriptor = { ...this.descriptor, transform };
+    this.motion.touch();
     this.backdrop?.invalidate();
     for (const layer of this.layers) {
       layer.residency.transform = transform;
@@ -275,7 +278,13 @@ export class ViewDisplay {
     const calls = gl.info.render.calls;
     try {
       gl.getCurrentViewport(this.viewport);
-      if (cached && this.layers.length > 2 && this.viewport.z === this.width && this.viewport.w === this.height) {
+      if (
+        cached &&
+        (purpose === "capture" || !this.motion.active) &&
+        this.layers.length > 2 &&
+        this.viewport.z === this.width &&
+        this.viewport.w === this.height
+      ) {
         this.backdrop ??= new ViewBackdrop();
         this.backdrop.ensure(gl, this.width, this.height, () => this.drawLayers(gl, "capture", false));
         this.mesh.material = this.backdrop.material;
@@ -332,6 +341,7 @@ export class ViewDisplay {
     disposeFileDisplayMaterial(layer.material);
   }
   dispose(): void {
+    this.motion.dispose();
     this.releaseBackdrop();
     for (const layer of this.layers) this.release(layer);
     this.layers = [];

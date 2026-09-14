@@ -1148,6 +1148,29 @@ describe("one direct display per view", () => {
     expect(display.backdropBytes).toBe(0);
   });
 
+  it("draws directly during transform movement and captures the final cache", async () => {
+    const rig = await stackedView(4);
+    const display = rig.viewRef.current!.display;
+    const { createByteTarget, renderCompositionToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(80, 40);
+    disposers.push(() => target.dispose());
+    display.resize(80, 40);
+    display.prepare(rig.useStore.getState());
+    await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "capture"), target);
+    display.updateTransform({ ...display.descriptor.transform, viewZoomPower: 2 });
+    expect(display.motion.active).toBe(true);
+    display.prepare(rig.useStore.getState());
+    const before = rig.gl.info.render.calls;
+    const live = await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "live"), target);
+    expect(rig.gl.info.render.calls - before).toBe(4);
+    const still = await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "capture"), target);
+    expect(still).toEqual(live);
+    await vi.waitFor(() => expect(display.motion.active).toBe(false));
+    const settled = rig.gl.info.render.calls;
+    await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "live"), target);
+    expect(rig.gl.info.render.calls - settled).toBe(2);
+  });
+
   it("preserves the caller's scissor and view rectangle across direct capture", async () => {
     const rig = await stackedView(2);
     const { createByteTarget, renderCompositionToBytes } = await import("../snapshot-capture");

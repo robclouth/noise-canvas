@@ -35,6 +35,7 @@ export interface ViewRendererProps {
   snapshotCanvasRef: RefObject<HTMLCanvasElement | null>;
   onLiveFrame?: () => void;
   onSnapshotRefresh?: () => void;
+  onMotionChange?: (moving: boolean) => void;
   onFileHandle?: (handle: FileRendererHandle | null) => void;
 }
 
@@ -176,6 +177,10 @@ export const ViewRenderer = memo(
         onFileHandle?.(null);
       };
     }, [registry, topId, onFileHandle, engineRevision, invalidate]);
+    useEffect(() => {
+      latest.current.onMotionChange?.(display.motion.active);
+      return display.motion.subscribe(() => latest.current.onMotionChange?.(display.motion.active));
+    }, [display]);
     useEffect(() => {
       const unsubscribe = useStore.subscribe((state) => {
         display.updateTransform(savedViewTransform(state, display.descriptor.topId));
