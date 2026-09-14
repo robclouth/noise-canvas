@@ -82,6 +82,17 @@ function firstDifference(a: ArrayLike<number>, b: ArrayLike<number>): number {
 }
 
 describe("BlockStore", () => {
+  it("counts each decoded original block once and releases it on disposal", async () => {
+    const { store } = await seeded();
+    const currentBytes = store.residentBytes;
+    const original = await store.readRootBlock(0);
+    expect(store.residentBytes).toBe(currentBytes + original.byteLength);
+    await store.readRootBlock(0);
+    expect(store.residentBytes).toBe(currentBytes + original.byteLength);
+    await store.dispose();
+    expect(store.residentBytes).toBe(0);
+  });
+
   it("gives back everything it was seeded with", async () => {
     const { store } = await seeded();
     const all = await store.readAll();

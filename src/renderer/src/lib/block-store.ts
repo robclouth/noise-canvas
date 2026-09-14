@@ -149,8 +149,13 @@ export class BlockStore implements PackedStateStore {
     return this.seeded;
   }
 
-  /** Bytes the decoded blocks hold, clean and dirty together. */
+  /** Bytes in decoded current and original blocks, each cache counted once. */
   get residentBytes(): number {
+    return this.currentResidentBytes + this.root.byteCount;
+  }
+
+  /** The current tier's flush budget excludes the independently bounded original cache. */
+  private get currentResidentBytes(): number {
     let bytes = this.clean.byteCount;
     for (const block of this.dirty.values()) bytes += block.byteLength;
     return bytes;
@@ -344,7 +349,7 @@ export class BlockStore implements PackedStateStore {
       copyCompactOverlap(block, this.blockRanges(index), values, ranges);
       this.markDirty(index, block);
     }
-    if (this.residentBytes > this.maxResidentBytes) await this.flush();
+    if (this.currentResidentBytes > this.maxResidentBytes) await this.flush();
   }
 
   /**
@@ -384,7 +389,7 @@ export class BlockStore implements PackedStateStore {
             at += count;
           }
           this.markDirty(index, block);
-          if (this.residentBytes > this.maxResidentBytes) await this.flush();
+          if (this.currentResidentBytes > this.maxResidentBytes) await this.flush();
         }
       }
     }

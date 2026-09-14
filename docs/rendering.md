@@ -64,7 +64,9 @@ retain their existing behaviour. Stroke settlement has explicit completion,
 cancellation and failure results.
 Only completed strokes can commit; incomplete strokes restore their rollback
 state. See `canvas-window.md` for the failure policy. Slot allocation tuning
-is a separate measured change.
+was measured separately. The tested reuse paths reduced object creation, but
+timing was inconclusive under heavy machine load, so the existing copy path
+remains. See `slot-copy-profile.md` for the measurements.
 
 ## Checks
 
