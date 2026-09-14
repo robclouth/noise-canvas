@@ -6,6 +6,7 @@ import {
   OrthographicCamera,
   PlaneGeometry,
   Scene,
+  Vector4,
   type WebGLRenderer,
 } from "three";
 import type { State } from "../store/types";
@@ -30,6 +31,7 @@ import type { FileViewDescriptor } from "./file-renderer-types";
 import { getHistoryManager } from "./history-manager";
 import { layerTint, LONE_LAYER_TINT } from "./layer-tint";
 import { perfAdd, perfEnabled } from "./perf-probe";
+import { ViewBackdrop } from "./view-backdrop";
 
 export type ViewTransform = Pick<FileViewDescriptor, "viewZoomPower" | "viewOffset" | "viewZoomPowerY" | "viewOffsetY">;
 export interface ViewDescriptor {
@@ -70,6 +72,11 @@ export class ViewDisplay {
   private geometry = new PlaneGeometry(2, 2);
   private mesh: Mesh = new Mesh(this.geometry, []);
   private camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+  private backdrop: ViewBackdrop | null = null;
+  private viewport = new Vector4();
+  get backdropBytes(): number {
+    return this.backdrop?.bytes ?? 0;
+  }
   constructor(
     private registry: FileEngineRegistry,
     descriptor: ViewDescriptor,
@@ -130,6 +137,7 @@ export class ViewDisplay {
       layer.residency.transform = descriptor.transform;
       layer.residency.spectrogramData = spec;
       if (presentationChanged) {
+        this.backdrop?.invalidate();
         const index = descriptor.layerIds.indexOf(id);
         const tint = descriptor.layerIds.length > 1 ? layerTint(index, descriptor.layerIds.length) : LONE_LAYER_TINT;
         (layer.material.uniforms.leftTint.value as Color).setRGB(...tint.left);
@@ -146,6 +154,8 @@ export class ViewDisplay {
       return [layer];
     });
     this.top = this.layers.find((layer) => layer.engine.fileId === descriptor.topId);
+    if (membershipChanged) this.backdrop?.invalidate();
+    if (this.layers.length <= 2) this.releaseBackdrop();
     for (const layer of previous.values()) this.release(layer);
     this.updateState(state);
     if (membershipChanged || this.pending.size) this.changed();
@@ -162,6 +172,7 @@ export class ViewDisplay {
       state.filepathsOnsetSensitivity,
     ];
     if (spectral.some((value, i) => value !== this.spectral[i])) {
+      this.backdrop?.invalidate();
       this.spectral = spectral;
       for (const layer of this.layers) this.pending.add(layer);
       this.changed();
@@ -181,6 +192,7 @@ export class ViewDisplay {
     )
       return;
     this.descriptor = { ...this.descriptor, transform };
+    this.backdrop?.invalidate();
     for (const layer of this.layers) {
       layer.residency.transform = transform;
       this.pending.add(layer);
@@ -191,10 +203,12 @@ export class ViewDisplay {
     if (this.width === width && this.height === height) return;
     this.width = width;
     this.height = height;
+    this.backdrop?.invalidate();
     for (const layer of this.layers) this.pending.add(layer);
     this.changed();
   }
   mark(layer: ViewLayer): void {
+    if (layer !== this.top) this.backdrop?.invalidate();
     this.pending.add(layer);
     this.changed();
   }
@@ -245,6 +259,13 @@ export class ViewDisplay {
     }
   }
   compose(gl: WebGLRenderer, purpose: "live" | "capture"): void {
+    this.render(gl, purpose, true);
+  }
+  /** Draws each contribution directly, without using the backdrop. */
+  composeDirect(gl: WebGLRenderer, purpose: "live" | "capture"): void {
+    this.render(gl, purpose, false);
+  }
+  private render(gl: WebGLRenderer, purpose: "live" | "capture", cached: boolean): void {
     const timed = perfEnabled(),
       start = timed ? performance.now() : 0;
     const autoReset = gl.info.autoReset;
@@ -253,33 +274,14 @@ export class ViewDisplay {
     gl.autoClear = false;
     const calls = gl.info.render.calls;
     try {
-      for (const layer of this.layers) {
-        if (!layer.ready) continue;
-        const u = layer.material.uniforms;
-        const previous = [
-          u.sourceSpectrogramTex.value,
-          u.previewActive.value,
-          u.showTargetRectangle.value,
-          u.showSourceRectangle.value,
-        ];
-        if (purpose === "capture" || layer !== this.top) {
-          u.sourceSpectrogramTex.value = layer.engine.strokeRendererRef.current?.getDisplayTexture();
-          u.previewActive.value = false;
-          u.showTargetRectangle.value = false;
-          u.showSourceRectangle.value = false;
-        }
-        this.mesh.material = layer.material;
-        try {
-          gl.render(this.scene, this.camera);
-        } finally {
-          [
-            u.sourceSpectrogramTex.value,
-            u.previewActive.value,
-            u.showTargetRectangle.value,
-            u.showSourceRectangle.value,
-          ] = previous;
-        }
-      }
+      gl.getCurrentViewport(this.viewport);
+      if (cached && this.layers.length > 2 && this.viewport.z === this.width && this.viewport.w === this.height) {
+        this.backdrop ??= new ViewBackdrop();
+        this.backdrop.ensure(gl, this.width, this.height, () => this.drawLayers(gl, "capture", false));
+        this.mesh.material = this.backdrop.material;
+        gl.render(this.scene, this.camera);
+        this.drawLayers(gl, purpose, true);
+      } else this.drawLayers(gl, purpose);
     } finally {
       if (timed) {
         perfAdd("viewDisplayDraws", gl.info.render.calls - calls);
@@ -289,6 +291,40 @@ export class ViewDisplay {
       gl.autoClear = autoClear;
     }
   }
+  private drawLayers(gl: WebGLRenderer, purpose: "live" | "capture", topOnly?: boolean): void {
+    for (const layer of this.layers) {
+      if (topOnly !== undefined && (layer === this.top) !== topOnly) continue;
+      if (!layer.ready) continue;
+      const u = layer.material.uniforms;
+      const previous = [
+        u.sourceSpectrogramTex.value,
+        u.previewActive.value,
+        u.showTargetRectangle.value,
+        u.showSourceRectangle.value,
+      ];
+      if (purpose === "capture" || layer !== this.top) {
+        u.sourceSpectrogramTex.value = layer.engine.strokeRendererRef.current?.getDisplayTexture();
+        u.previewActive.value = false;
+        u.showTargetRectangle.value = false;
+        u.showSourceRectangle.value = false;
+      }
+      this.mesh.material = layer.material;
+      try {
+        gl.render(this.scene, this.camera);
+      } finally {
+        [
+          u.sourceSpectrogramTex.value,
+          u.previewActive.value,
+          u.showTargetRectangle.value,
+          u.showSourceRectangle.value,
+        ] = previous;
+      }
+    }
+  }
+  releaseBackdrop(): void {
+    this.backdrop?.dispose();
+    this.backdrop = null;
+  }
   private release(layer: ViewLayer): void {
     layer.unsubscribe();
     this.pending.delete(layer);
@@ -296,6 +332,7 @@ export class ViewDisplay {
     disposeFileDisplayMaterial(layer.material);
   }
   dispose(): void {
+    this.releaseBackdrop();
     for (const layer of this.layers) this.release(layer);
     this.layers = [];
     this.top = undefined;

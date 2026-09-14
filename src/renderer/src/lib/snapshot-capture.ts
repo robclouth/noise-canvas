@@ -88,6 +88,12 @@ export async function renderCompositionToBytes(
   draw: () => void,
   target: WebGLRenderTarget,
 ): Promise<Uint8Array> {
+  drawCompositionToTarget(gl, draw, target);
+  return readRenderTargetBytesAsync(gl, target, 0, 0, target.width, target.height);
+}
+
+/** Draws synchronously into a target and restores the caller's graphics state. */
+export function drawCompositionToTarget(gl: WebGLRenderer, draw: () => void, target: WebGLRenderTarget): void {
   const context = gl.getContext();
   const readTarget = "READ_FRAMEBUFFER" in context ? context.READ_FRAMEBUFFER : context.FRAMEBUFFER;
   const drawTarget = "DRAW_FRAMEBUFFER" in context ? context.DRAW_FRAMEBUFFER : context.FRAMEBUFFER;
@@ -115,8 +121,6 @@ export async function renderCompositionToBytes(
     context.bindFramebuffer(readTarget, prevReadFramebuffer);
     context.bindFramebuffer(drawTarget, prevDrawFramebuffer);
   }
-
-  return readRenderTargetBytesAsync(gl, target, 0, 0, target.width, target.height);
 }
 
 /**

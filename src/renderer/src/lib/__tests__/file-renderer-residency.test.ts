@@ -1090,6 +1090,64 @@ describe("one direct display per view", () => {
     expect(top.material.uniforms.showTargetRectangle.value).toBe(true);
   });
 
+  it.each([3, 4, 8])("matches direct pixels with a byte backdrop at %i layers", async (count) => {
+    const rig = await stackedView(count);
+    const display = rig.viewRef.current!.display;
+    const { createByteTarget, renderCompositionToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(80, 40);
+    disposers.push(() => target.dispose());
+    display.resize(80, 40);
+    display.prepare(rig.useStore.getState());
+    for (const minDb of [-72, -30, -12]) {
+      const state = { ...rig.useStore.getState(), displayMinDb: minDb, displayMaxDb: minDb + 12 };
+      display.updateState(state);
+      display.prepare(state);
+      for (const purpose of ["live", "capture"] as const) {
+        const direct = await renderCompositionToBytes(rig.gl, () => display.composeDirect(rig.gl, purpose), target);
+        const cached = await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, purpose), target);
+        expect(cached).toEqual(direct);
+        expect(cached.some((v, i) => i % 4 !== 3 && v > 0)).toBe(true);
+      }
+    }
+    expect(display.backdropBytes).toBe(80 * 40 * 4);
+  });
+
+  it("rebuilds the backdrop for background dependencies, but not top-only changes", async () => {
+    const rig = await stackedView(4);
+    const display = rig.viewRef.current!.display;
+    const { createByteTarget, renderCompositionToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(80, 40);
+    disposers.push(() => target.dispose());
+    display.resize(80, 40);
+    const drawCount = async () => {
+      display.prepare(rig.useStore.getState());
+      const before = rig.gl.info.render.calls;
+      await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "capture"), target);
+      return rig.gl.info.render.calls - before;
+    };
+    expect(await drawCount()).toBe(5);
+    expect(await drawCount()).toBe(2);
+    display.top!.engine.notifyContentChanged();
+    expect(await drawCount()).toBe(2);
+    rig.useStore.setState({ gridSizeSemis: 12 });
+    expect(await drawCount()).toBe(2);
+    for (let i = 0; i < 3; i++) display.layers[0].engine.notifyContentChanged();
+    expect(await drawCount()).toBe(5);
+    expect(await drawCount()).toBe(2);
+    display.layers[0].engine.notifyResidencyChanged();
+    expect(await drawCount()).toBe(5);
+    display.updateTransform({ ...display.descriptor.transform, viewZoomPower: 1 });
+    expect(await drawCount()).toBe(5);
+    rig.useStore.setState({ displayMinDb: -50 });
+    expect(await drawCount()).toBe(5);
+    display.update(
+      { ...display.descriptor, layerIds: display.descriptor.layerIds.slice(0, 2) },
+      rig.useStore.getState(),
+    );
+    expect(await drawCount()).toBe(2);
+    expect(display.backdropBytes).toBe(0);
+  });
+
   it("preserves the caller's scissor and view rectangle across direct capture", async () => {
     const rig = await stackedView(2);
     const { createByteTarget, renderCompositionToBytes } = await import("../snapshot-capture");

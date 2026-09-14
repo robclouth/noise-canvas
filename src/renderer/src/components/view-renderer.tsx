@@ -225,6 +225,9 @@ export const ViewRenderer = memo(
     useEffect(() => {
       if (props.isLive) invalidate();
     }, [props.isLive, invalidate]);
+    useEffect(() => {
+      if (props.parked) display.releaseBackdrop();
+    }, [display, props.parked]);
     useEffect(
       () => () => {
         if (timer.current !== null) clearTimeout(timer.current);
