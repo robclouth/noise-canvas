@@ -12,8 +12,10 @@ to the current view. Snapshot capture belongs to `ViewRendererHandle`.
 
 `ViewDisplay` owns the visible layer list, tint and display materials, presentation
 residency and shared view transform. Each layer retains its own file metadata.
-The existing normalised alignment and additive tint rules also apply to files
-with different lengths. `file-editor.ts` prepares the selected layer's brush and
+The normalised alignment and additive blending also apply to files with different
+lengths. Only the editing layer retains its colour; background layers use
+greyscale tints at the same luminance. Selecting another layer updates both the
+live composition and its snapshot. `file-editor.ts` prepares the selected layer's brush and
 overlays; it does not own a React component or file lifetime.
 
 ## Frames and snapshots

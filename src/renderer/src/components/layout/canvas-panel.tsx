@@ -1,10 +1,9 @@
 import { useStore } from "@/store";
-import { Box, Group, Loader, Stack, Text } from "@mantine/core";
+import { Box, Group, Loader, Stack, Tabs, Text } from "@mantine/core";
 import { openFiles, selectFileColor } from "@renderer/store/files";
-import { getLayerSegments, stackColor } from "@renderer/store/layers";
+import { getLayerSegments, selectLayerStack, stackColor } from "@renderer/store/layers";
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
-import { layerTint } from "@renderer/lib/layer-tint";
 import { helpProps } from "@renderer/lib/ui-controls";
 import { Layers, Link2, Link2Off, Merge, Plus, Rows3, Ungroup, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
@@ -12,6 +11,8 @@ import { FileReorderProvider } from "@renderer/contexts/file-reorder";
 import { type FileDropTarget } from "@renderer/lib/file-reorder";
 import { FileView } from "../file-view";
 import { Tooltip } from "../tooltip";
+import { FileMixControls } from "../file-mix-controls";
+import { layerTabLabel } from "@renderer/lib/layer-tab-label";
 
 const DockedFile = memo(({ fileId }: { fileId: string }) => {
   const file = openFiles[fileId];
@@ -154,46 +155,50 @@ const LayerBox = memo(
 );
 LayerBox.displayName = "LayerBox";
 
-/**
- * The tabs of an overlaid stack: one per layer, in its own hue, with the layer
- * on top lit. Clicking one moves where you paint without stopping the mix.
- */
+/** Selects the editing layer while keeping each layer's mix controls available. */
 const LayerTabs = memo(({ layerIds, currentId }: { layerIds: string[]; currentId: string }) => {
+  const stack = useStore((state) => selectLayerStack(state, currentId));
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    tabsRef.current
+      ?.querySelector('[role="tab"][data-active]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [currentId, layerIds.length]);
   return (
-    <Group gap={2} wrap="nowrap" style={{ overflowX: "auto", minWidth: 0, flex: "0 1 auto" }}>
-      {layerIds.map((layerId, index) => {
-        const file = openFiles[layerId];
-        if (!file) return null;
-        const { left, right } = layerTint(index, layerIds.length);
-        const hue = `rgb(${left.map((c, i) => Math.round((c + right[i]) * 127.5)).join(",")})`;
-        const isCurrent = layerId === currentId;
-        return (
-          <Tooltip key={layerId} help="stack-layer-tab" detail={file.displayName}>
-            <Box
-              {...helpProps("stack-layer-tab")}
-              onClick={() => void useStore.getState().setActiveFileId(layerId)}
-              px={8}
-              py={2}
-              style={{
-                cursor: "pointer",
-                borderRadius: 3,
-                borderBottom: `2px solid ${hue}`,
-                backgroundColor: isCurrent ? "var(--mantine-color-dark-5)" : "transparent",
-                opacity: isCurrent ? 1 : 0.6,
-                whiteSpace: "nowrap",
-                maxWidth: 180,
-                flexShrink: 0,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                fontSize: 11,
-              }}
-            >
-              {file.displayName}
+    <Tabs
+      ref={tabsRef}
+      value={currentId}
+      onChange={(id) => {
+        if (id) void useStore.getState().setActiveFileId(id);
+      }}
+      variant="default"
+      style={{ overflowX: "auto", minWidth: 0, maxWidth: "100%", flex: "0 1 auto" }}
+    >
+      <Tabs.List style={{ flexWrap: "nowrap", width: "max-content", minWidth: "100%" }}>
+        {layerIds.map((layerId) => {
+          const file = openFiles[layerId];
+          if (!file) return null;
+          return (
+            <Box key={layerId} pos="relative" style={{ flexShrink: 0 }} {...helpProps("stack-layer-tab")}>
+              <Tooltip help="stack-layer-tab" detail={file.displayName}>
+                <Tabs.Tab
+                  value={layerId}
+                  fz="xs"
+                  pr={58}
+                  style={{ maxWidth: 180 }}
+                  styles={{ tabLabel: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }}
+                >
+                  {layerId === stack?.originId ? "Original" : layerTabLabel(file.displayName, stack?.label)}
+                </Tabs.Tab>
+              </Tooltip>
+              <Box pos="absolute" right={8} top="50%" style={{ transform: "translateY(-50%)" }}>
+                <FileMixControls fileId={layerId} compact />
+              </Box>
             </Box>
-          </Tooltip>
-        );
-      })}
-    </Group>
+          );
+        })}
+      </Tabs.List>
+    </Tabs>
   );
 });
 LayerTabs.displayName = "LayerTabs";

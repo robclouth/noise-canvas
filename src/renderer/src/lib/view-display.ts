@@ -29,7 +29,7 @@ import type { FileEngine } from "./file-engine";
 import type { FileEngineRegistry } from "./file-engine-registry";
 import type { FileViewDescriptor } from "./file-renderer-types";
 import { getHistoryManager } from "./history-manager";
-import { layerTint, LONE_LAYER_TINT } from "./layer-tint";
+import { greyscaleTint, layerTint, LONE_LAYER_TINT } from "./layer-tint";
 import { perfAdd, perfEnabled } from "./perf-probe";
 import { ViewBackdrop } from "./view-backdrop";
 import { ViewMotion } from "./view-motion";
@@ -141,7 +141,8 @@ export class ViewDisplay {
       if (presentationChanged) {
         this.backdrop?.invalidate();
         const index = descriptor.layerIds.indexOf(id);
-        const tint = descriptor.layerIds.length > 1 ? layerTint(index, descriptor.layerIds.length) : LONE_LAYER_TINT;
+        const colour = descriptor.layerIds.length > 1 ? layerTint(index, descriptor.layerIds.length) : LONE_LAYER_TINT;
+        const tint = id === descriptor.topId ? colour : greyscaleTint(colour);
         (layer.material.uniforms.leftTint.value as Color).setRGB(...tint.left);
         (layer.material.uniforms.rightTint.value as Color).setRGB(...tint.right);
         layer.material.uniforms.drawOverlays.value = id === descriptor.topId;

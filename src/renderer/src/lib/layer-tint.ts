@@ -44,3 +44,12 @@ export function layerTint(index: number, count: number): LayerTint {
 
 /** What a layer with nothing behind it paints in. */
 export const LONE_LAYER_TINT: LayerTint = layerTint(0, 1);
+
+/** Removes hue from a background layer while retaining each channel's luminance. */
+export function greyscaleTint(tint: LayerTint): LayerTint {
+  const grey = ([r, g, b]: Rgb): Rgb => {
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return [luminance, luminance, luminance];
+  };
+  return { left: grey(tint.left), right: grey(tint.right) };
+}

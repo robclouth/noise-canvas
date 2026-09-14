@@ -1112,6 +1112,32 @@ describe("one direct display per view", () => {
     expect(display.backdropBytes).toBe(80 * 40 * 4);
   });
 
+  it("colours only the editing layer and refreshes the backdrop when it changes", async () => {
+    const rig = await stackedView(4);
+    const display = rig.viewRef.current!.display;
+    const { createByteTarget, renderCompositionToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(80, 40);
+    disposers.push(() => target.dispose());
+    display.resize(80, 40);
+    for (const topId of display.descriptor.layerIds) {
+      display.update({ ...display.descriptor, topId }, rig.useStore.getState());
+      display.prepare(rig.useStore.getState());
+      for (const layer of display.layers) {
+        for (const name of ["leftTint", "rightTint"]) {
+          const tint = layer.material.uniforms[name].value as import("three").Color;
+          if (layer.engine.fileId === topId) expect(tint.r === tint.g && tint.g === tint.b).toBe(false);
+          else {
+            expect(tint.r).toBe(tint.g);
+            expect(tint.g).toBe(tint.b);
+          }
+        }
+      }
+      const direct = await renderCompositionToBytes(rig.gl, () => display.composeDirect(rig.gl, "capture"), target);
+      const cached = await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "capture"), target);
+      expect(cached).toEqual(direct);
+    }
+  });
+
   it("keeps engines and GPU allocations stable through 100 view switches", async () => {
     const rig = await stackedView(4);
     const display = rig.viewRef.current!.display;

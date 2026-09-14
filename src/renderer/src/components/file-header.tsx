@@ -18,6 +18,7 @@ import { ChevronDown, Copy, Grid3x3, GripVertical, Maximize2, Minimize2, Plus, S
 import { memo, useCallback, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
+import { FileMixControls } from "./file-mix-controls";
 
 // ONNX Runtime has no macOS x86_64 build past 1.23, so the separation addon is
 // not compiled for Intel Macs. It would download the model and then fail, so
@@ -133,42 +134,6 @@ function FileHeaderNumbox({
   );
 }
 
-/**
- * One letter of the mix strip. Lit when engaged, so a stack reads at a glance.
- */
-const MixToggle = memo(function MixToggle({
-  letter,
-  help,
-  engaged,
-  color,
-  onToggle,
-}: {
-  letter: string;
-  help: UiControlName;
-  engaged: boolean;
-  color: string;
-  onToggle: () => void;
-}) {
-  const uiSize = useUiSize();
-  return (
-    <Tooltip help={help}>
-      <ActionIcon
-        {...helpProps(help)}
-        size={uiSize}
-        color={engaged ? color : "dark.5"}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-      >
-        <Text size="xs" fw={700} lh={1}>
-          {letter}
-        </Text>
-      </ActionIcon>
-    </Tooltip>
-  );
-});
-
 // Component to display filename with middle truncation
 const TruncatedFilename = memo(function TruncatedFilename({
   displayName,
@@ -208,8 +173,6 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
   const reorder = useFileReorder();
   const layerCount = useStore((state) => state.openFileIds.filter((id) => !state.minimizedFileIds.includes(id)).length);
   const volumeDb = useStore((state) => state.filesVolumeDb[fileId] ?? DEFAULT_LAYER_VOLUME_DB);
-  const isMuted = useStore((state) => state.filesMuted[fileId] ?? false);
-  const isSoloed = useStore((state) => state.filesSoloed[fileId] ?? false);
   // Solo and mute only mean something against siblings that sound at the same
   // time, so a file that plays alone shows neither.
   const inMix = useStore((state) => (selectLayerStack(state, fileId)?.layerIds.length ?? 1) > 1);
@@ -335,24 +298,7 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
               <Plus size={16} />
             </HelpActionIcon>
           )}
-          {inMix && (
-            <>
-              <MixToggle
-                letter="S"
-                help="file-solo"
-                engaged={isSoloed}
-                color="yellow.5"
-                onToggle={() => useStore.getState().setFileSoloed(fileId, !isSoloed)}
-              />
-              <MixToggle
-                letter="M"
-                help="file-mute"
-                engaged={isMuted}
-                color="red.7"
-                onToggle={() => useStore.getState().setFileMuted(fileId, !isMuted)}
-              />
-            </>
-          )}
+          {inMix && !headerExtras && <FileMixControls fileId={fileId} />}
           <FileHeaderNumbox
             label="Vol"
             help="file-volume"
