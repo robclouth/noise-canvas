@@ -79,6 +79,20 @@ drive, because the extension host runs them too:
 | `main/lib/onset-scan.ts`       | onsets, a chunk of the file at a time             |
 | `main/lib/synthesis-chunks.ts` | the audio, a chunk of the file at a time          |
 
+Audio reconstruction writes 30 seconds per pass. Each coefficient read includes
+the full synthesis filter support on both sides: one support for the synthesis
+range and two more for the coefficients that feed it. The native
+`synthesisReadReach` query derives this margin from the sample rate and analysis
+settings. It is not a fixed fraction of a second. Low-frequency bands need
+several seconds of context to keep the audio continuous across chunk boundaries.
+The interactive stroke commit has its own support policy.
+
+Replacing the full canvas state or disposing the canvas cancels held painting
+and advances the stroke revision. Pending reads from the previous revision
+cannot replay dabs or patch the restored display. The file engine checks that
+revision before rolling back a cancelled settlement, so an old settlement cannot
+roll back a newer state.
+
 ## The one rule that keeps it findable
 
 > The stroke renderer speaks the canvas's space.

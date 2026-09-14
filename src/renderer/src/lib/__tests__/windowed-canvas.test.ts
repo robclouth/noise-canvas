@@ -543,6 +543,67 @@ describe("a canvas that holds a window of the file", () => {
     rig.canvas.endStroke();
   });
 
+  it("keeps a delayed carry read from repainting a restored display", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.02)).toBe(true);
+    const renderer = rig.renderer();
+    const read = renderer.readPixelRanges.bind(renderer);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let waiting: Promise<Float32Array> | null = null;
+    const spy = vi.spyOn(renderer, "readPixelRanges").mockImplementation((ranges) => {
+      const values = read(ranges);
+      waiting = held.then(() => values);
+      return waiting;
+    });
+    rig.canvas.aim(grid.blockFrames * 4, grid.blockFrames * 4 + 1);
+    await until(() => waiting !== null, "the carried read");
+    rig.canvas.setFBOData(data.packedData);
+    const patch = vi.spyOn(renderer, "patchDisplayFromCompact");
+    release();
+    await waiting;
+    await Promise.resolve();
+    expect(patch).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("abandons held paint when a whole-state replacement arrives during a read", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    rig.canvas.beginStroke();
+    rig.close();
+    const held = vi.fn(() => true);
+    const frames = dabFrames(0.9);
+    rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, held);
+    const settling = rig.canvas.settle();
+    rig.canvas.setFBOData(data.packedData);
+    rig.open();
+    expect(await settling).toEqual({ status: "cancelled" });
+    await until(rig.quiet, "the obsolete read");
+    expect(held).not.toHaveBeenCalled();
+    expect(rig.canvas.isStroking).toBe(false);
+  });
+
+  it("settles cancellation on disposal before a held read finishes", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    rig.canvas.beginStroke();
+    rig.close();
+    const held = vi.fn(() => true);
+    const frames = dabFrames(0.9);
+    rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, held);
+    const settling = rig.canvas.settle();
+    rig.canvas.dispose();
+    expect(await settling).toEqual({ status: "cancelled" });
+    rig.open();
+    await until(rig.quiet, "the disposed read");
+    expect(held).not.toHaveBeenCalled();
+  });
+
   it("cancels a blocked read without letting its held dab land later", async () => {
     const rig = harness(1);
     await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");

@@ -285,6 +285,28 @@ describe("anchored dab residency", () => {
     expect(rig.useStore.getState().isFilling).toBe(false);
   });
 
+  it("leaves a replacement state usable when the previous stroke finishes settling", async () => {
+    const rig = await mount(brush(0), Infinity, 8);
+    const handle = rig.ref.current!;
+    handle.beginStroke();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(rig.canvas, "settle").mockImplementation(async () => {
+      await pending;
+      return { status: "cancelled" };
+    });
+    const discard = vi.spyOn(rig.canvas, "discardStroke");
+    const settling = handle.settleStroke();
+    handle.setFBOData(seed);
+    release();
+    expect(await settling).toEqual({ status: "cancelled" });
+    expect(discard).not.toHaveBeenCalled();
+    expect(handle.beginStroke()).toBe(true);
+    handle.endStroke();
+  });
+
   it("blocks another stroke while settlement or a failed rollback owns the canvas", async () => {
     const rig = await mount(brush(0), Infinity, 8);
     const handle = rig.ref.current!;

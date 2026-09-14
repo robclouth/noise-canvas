@@ -559,7 +559,10 @@ export class FileEngine {
   setFBOData = (data: Float32Array) => {
     const { canvasRef, afterStateMove } = this;
 
-    if (canvasRef.current?.setFBOData(data)) afterStateMove();
+    if (canvasRef.current?.setFBOData(data)) {
+      this.rollbackFailed = false;
+      afterStateMove();
+    }
   };
   applyPhaseTurns = (turns: ArrayLike<number>) => {
     const { canvasRef, afterStateMove } = this;
@@ -658,9 +661,13 @@ export class FileEngine {
     const { strokeRendererRef, canvasRef, displayMode } = this;
     const { invalidateRef } = this.context;
     this.restoringStroke = true;
+    const canvas = canvasRef.current;
+    let revision = canvas?.strokeRevision;
     try {
-      const canvas = canvasRef.current;
-      const restored = canvas ? await canvas.discardStroke() : (strokeRendererRef.current?.restoreRollback() ?? false);
+      const restoration = canvas ? canvas.discardStroke() : (strokeRendererRef.current?.restoreRollback() ?? false);
+      revision = canvas?.strokeRevision;
+      const restored = await restoration;
+      if (canvas !== canvasRef.current || revision !== canvas?.strokeRevision) return false;
       this.rollbackFailed = !restored && Boolean(strokeRendererRef.current?.hasRollback());
       if (restored) {
         displayMode.current = "committed";
@@ -669,7 +676,7 @@ export class FileEngine {
       }
       return restored;
     } catch {
-      this.rollbackFailed = true;
+      if (canvas === canvasRef.current && revision === canvas?.strokeRevision) this.rollbackFailed = true;
       return false;
     } finally {
       if (this.rollbackFailed)
@@ -821,12 +828,14 @@ export class FileEngine {
         }
         if (!canvas) return { status: "cancelled" };
         this.settlingStroke = true;
+        const revision = canvas.strokeRevision;
         try {
           const result = await canvas.settle(signal);
+          if (canvas !== canvasRef.current || revision !== canvas.strokeRevision) return { status: "cancelled" };
           if (result.status !== "completed") {
             this.applyStroke.current = false;
             const restored = await this.discardStrokePreview();
-            this.rollbackFailed = !restored;
+
             if (result.status === "failed" && restored)
               notifications.show({
                 color: "red",

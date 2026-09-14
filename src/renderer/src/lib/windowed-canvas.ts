@@ -166,6 +166,11 @@ export class WindowedCanvas {
     this.windowBlocks = windowBlocks;
   }
 
+  /** Changes when a stroke starts, is discarded, or its state is replaced. */
+  get strokeRevision(): number {
+    return this.strokeEpoch;
+  }
+
   /** True when this file is short enough for the canvas to hold all of it. */
   get wholeFile(): boolean {
     return this.blocks === null;
@@ -698,6 +703,9 @@ export class WindowedCanvas {
   async discardStroke(): Promise<boolean> {
     const renderer = this.deps.renderer();
     if (!renderer?.hasRollback()) return false;
+    this.cancelSettlement?.();
+    this.strokeEpoch++;
+    this.stroking = false;
     this.held.length = 0;
     this.request = null;
     const epoch = this.strokeEpoch;
@@ -821,6 +829,12 @@ export class WindowedCanvas {
   setFBOData(data: Float32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
+    this.cancelSettlement?.();
+    this.strokeEpoch++;
+    this.held.length = 0;
+    this.request = null;
+    this.stroking = false;
+    this.carried = new CarriedPaint();
     if (this.displaySeed) this.recordDisplayEdit(this.fullFilePixelRanges());
     if (this.coversFile()) {
       renderer.setFBOData(data);
@@ -834,7 +848,6 @@ export class WindowedCanvas {
     window?.invalidate();
     // The whole view was written, so the canvas lacks none of it.
     window?.markOnCanvas(window.blocksOf(view));
-    this.carried = new CarriedPaint();
     return true;
   }
 
@@ -901,6 +914,7 @@ export class WindowedCanvas {
   dispose(): void {
     this.disposed = true;
     this.cancelSettlement?.();
+    this.strokeEpoch++;
     this.generation++;
     this.displaySeed = null;
     this.blocks?.dispose();
@@ -1092,8 +1106,9 @@ export class WindowedCanvas {
     if (!window) return;
     const carried = carryPaintOut(renderer, window, this.carried, next, this.numFrames);
     if (!carried) return;
+    const revision = this.strokeEpoch;
     void carried.read.then((values) => {
-      if (this.deps.renderer() !== renderer) return;
+      if (this.disposed || revision !== this.strokeEpoch || this.deps.renderer() !== renderer) return;
       renderer.patchDisplayFromCompact(values, carried.fileRanges);
       renderer.getDisplayTiles()?.dropTiles(carried.fileRanges);
       this.deps.onChanged();
