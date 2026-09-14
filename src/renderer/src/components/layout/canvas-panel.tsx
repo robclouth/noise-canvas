@@ -3,11 +3,11 @@ import { Box, Group, Loader, Stack, Text } from "@mantine/core";
 import { openFiles, selectFileColor } from "@renderer/store/files";
 import { getLayerSegments, stackColor } from "@renderer/store/layers";
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
-import { useUiSize } from "@renderer/lib/ui-density";
+import { FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { layerTint } from "@renderer/lib/layer-tint";
 import { helpProps } from "@renderer/lib/ui-controls";
 import { Layers, Link2, Link2Off, Merge, Plus, Rows3, Ungroup, X } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
 import { FileReorderProvider } from "@renderer/contexts/file-reorder";
 import { type FileDropTarget } from "@renderer/lib/file-reorder";
 import { FileView } from "../file-view";
@@ -112,6 +112,7 @@ type LayerBoxProps = {
   fileId: string;
   /** Every layer of an overlaid stack, so one box can draw them all. */
   stackLayerIds?: string[];
+  headerExtras?: ReactNode;
   activeFileId: string | null;
   activeRef: RefObject<HTMLDivElement | null>;
   fullscreenFileId: string | null;
@@ -119,7 +120,15 @@ type LayerBoxProps = {
 };
 
 const LayerBox = memo(
-  ({ fileId, stackLayerIds, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: LayerBoxProps) => {
+  ({
+    fileId,
+    stackLayerIds,
+    headerExtras,
+    activeFileId,
+    activeRef,
+    fullscreenFileId,
+    minimizedFileIds,
+  }: LayerBoxProps) => {
     const isFullscreen = fullscreenFileId === fileId;
     const isMinimized = minimizedFileIds.includes(fileId);
     const displayLayerIds = useMemo(() => stackLayerIds ?? [fileId], [stackLayerIds, fileId]);
@@ -137,6 +146,7 @@ const LayerBox = memo(
           isFullscreen={isFullscreen}
           isMinimized={isMinimized}
           stackLayerIds={displayLayerIds}
+          headerExtras={headerExtras}
         />
       </Box>
     );
@@ -145,17 +155,12 @@ const LayerBox = memo(
 LayerBox.displayName = "LayerBox";
 
 /**
- * Wraps the layers of one stack in a rail carrying its colour, with a header for
- * the operations that act on the whole stack. The rail is what makes the layers
- * read as connected rather than as files that happen to be adjacent.
- */
-/**
  * The tabs of an overlaid stack: one per layer, in its own hue, with the layer
  * on top lit. Clicking one moves where you paint without stopping the mix.
  */
 const LayerTabs = memo(({ layerIds, currentId }: { layerIds: string[]; currentId: string }) => {
   return (
-    <Group gap={2} wrap="nowrap" px={4} pb={4} style={{ overflowX: "auto" }}>
+    <Group gap={2} wrap="nowrap" style={{ overflowX: "auto", minWidth: 0, flex: "0 1 auto" }}>
       {layerIds.map((layerId, index) => {
         const file = openFiles[layerId];
         if (!file) return null;
@@ -177,6 +182,7 @@ const LayerTabs = memo(({ layerIds, currentId }: { layerIds: string[]; currentId
                 opacity: isCurrent ? 1 : 0.6,
                 whiteSpace: "nowrap",
                 maxWidth: 180,
+                flexShrink: 0,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 fontSize: 11,
@@ -203,8 +209,7 @@ const LayerStackSection = memo(
     const anyLoading = useStore((state) => fileIds.some((id) => !!state.filesLoading[id] || !!state.filesBusy[id]));
     const uiSize = useUiSize();
 
-    // Fullscreen takes over the canvas, so the stack chrome would just be a
-    // stray bar above it.
+    // Fullscreen presents the selected file without stack controls.
     const chromeHidden = laneProps.fullscreenFileId !== null;
     if (!stack) {
       return (
@@ -222,12 +227,98 @@ const LayerStackSection = memo(
     const currentId = fileIds.includes(laneProps.activeFileId ?? "") ? laneProps.activeFileId! : fileIds[0];
 
     const color = stackColor(stack.hue);
+    const header = (
+      <Group gap="xs" wrap="nowrap" p={FILE_HEADER_PAD} onPointerDown={(event) => event.stopPropagation()}>
+        <Group gap={4} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+          {overlaid ? (
+            <LayerTabs layerIds={fileIds} currentId={currentId} />
+          ) : (
+            <>
+              <Layers size={16} color={color} style={{ flexShrink: 0 }} />
+              <Text size="xs" c="dimmed" truncate="end" style={{ minWidth: 0, flex: 1 }}>
+                {stack.label}
+              </Text>
+              {anyLoading && <Loader size={10} color="gray" />}
+            </>
+          )}
+          <HelpActionIcon
+            help="stack-add-layer"
+            size={uiSize}
+            variant="subtle"
+            color="gray"
+            loading={anyLoading}
+            onClick={() => void useStore.getState().addEmptyLayer(currentId)}
+          >
+            <Plus size={16} />
+          </HelpActionIcon>
+        </Group>
+        <Group gap={4} wrap="nowrap" style={{ flexShrink: 0, marginLeft: "auto" }}>
+          <HelpActionIcon
+            help="stack-layout"
+            detail={overlaid ? "Overlaid" : "Stacked"}
+            size={uiSize}
+            variant="subtle"
+            color="gray"
+            onClick={() => useStore.getState().setLayerStackLayout(stackId, overlaid ? "stacked" : "overlaid")}
+          >
+            {overlaid ? <Layers size={16} /> : <Rows3 size={16} />}
+          </HelpActionIcon>
+          {/* Overlaid layers share one viewport, so the link has nothing to tie. */}
+          {!overlaid && (
+            <HelpActionIcon
+              help="stack-sync-view"
+              detail={stack.syncView ? "Linked" : "Unlinked"}
+              size={uiSize}
+              variant="subtle"
+              color={stack.syncView ? "gray" : "dark.3"}
+              onClick={() => useStore.getState().setLayerStackSyncView(stackId, !stack.syncView)}
+            >
+              {stack.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
+            </HelpActionIcon>
+          )}
+
+          <HelpActionIcon
+            help="stack-merge"
+            detail={`${stack.layerIds.length} layers`}
+            size={uiSize}
+            variant="subtle"
+            color="gray"
+            loading={anyLoading}
+            // One file has nothing to sum with.
+            disabled={stack.layerIds.length < 2}
+            onClick={() => useStore.getState().mergeLayerStack(stackId)}
+          >
+            <Merge size={16} />
+          </HelpActionIcon>
+          <HelpActionIcon
+            help="stack-unstack"
+            detail={`${stack.layerIds.length} layers`}
+            size={uiSize}
+            variant="subtle"
+            color="gray"
+            onClick={() => useStore.getState().unstackLayers(stackId)}
+          >
+            <Ungroup size={16} />
+          </HelpActionIcon>
+          <HelpActionIcon
+            help="stack-close"
+            detail={`${stack.layerIds.length} layers`}
+            size={uiSize}
+            variant="subtle"
+            color="gray"
+            onClick={() => useStore.getState().closeLayerStack(stackId)}
+          >
+            <X size={16} />
+          </HelpActionIcon>
+        </Group>
+      </Group>
+    );
 
     return (
       <Box
         style={{
-          borderLeft: chromeHidden ? undefined : `2px solid ${color}`,
-          paddingLeft: chromeHidden ? undefined : 6,
+          borderLeft: chromeHidden || overlaid ? undefined : `2px solid ${color}`,
+          paddingLeft: chromeHidden || overlaid ? undefined : 6,
           borderRadius: 2,
           // A drag heading into this stack tints the whole section, so the
           // indicator line reads as "inside here" rather than "somewhere near".
@@ -237,89 +328,14 @@ const LayerStackSection = memo(
         h={laneProps.fullscreenFileId !== null ? "100%" : undefined}
         flex={laneProps.fullscreenFileId !== null ? 1 : undefined}
       >
-        {/* The space above the header row is already the canvas gap — the panel's
-            own padding for the first segment, the inter-segment gap otherwise —
-            so the row pads only below, by the same amount, to sit evenly. */}
-        {!chromeHidden && (
-          <Group gap="xs" wrap="nowrap" pb="xs" px={4} style={{ minHeight: 24 }}>
-            <Layers size={16} color={color} style={{ flexShrink: 0 }} />
-            <Text size="xs" c="dimmed" truncate="end" style={{ minWidth: 0, flex: 1 }}>
-              {stack.label}
-            </Text>
-            {anyLoading && <Loader size={10} color="gray" />}
-            <HelpActionIcon
-              help="stack-layout"
-              detail={overlaid ? "Overlaid" : "Stacked"}
-              size={uiSize}
-              variant="subtle"
-              color="gray"
-              onClick={() => useStore.getState().setLayerStackLayout(stackId, overlaid ? "stacked" : "overlaid")}
-            >
-              {overlaid ? <Layers size={16} /> : <Rows3 size={16} />}
-            </HelpActionIcon>
-            {/* Overlaid layers share one viewport, so the link has nothing to tie. */}
-            {!overlaid && (
-              <HelpActionIcon
-                help="stack-sync-view"
-                detail={stack.syncView ? "Linked" : "Unlinked"}
-                size={uiSize}
-                variant="subtle"
-                color={stack.syncView ? "gray" : "dark.3"}
-                onClick={() => useStore.getState().setLayerStackSyncView(stackId, !stack.syncView)}
-              >
-                {stack.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
-              </HelpActionIcon>
-            )}
-            <HelpActionIcon
-              help="stack-add-layer"
-              size={uiSize}
-              variant="subtle"
-              color="gray"
-              loading={anyLoading}
-              onClick={() => void useStore.getState().addEmptyLayer(currentId)}
-            >
-              <Plus size={16} />
-            </HelpActionIcon>
-            <HelpActionIcon
-              help="stack-merge"
-              detail={`${stack.layerIds.length} layers`}
-              size={uiSize}
-              variant="subtle"
-              color="gray"
-              loading={anyLoading}
-              // One file has nothing to sum with.
-              disabled={stack.layerIds.length < 2}
-              onClick={() => useStore.getState().mergeLayerStack(stackId)}
-            >
-              <Merge size={16} />
-            </HelpActionIcon>
-            <HelpActionIcon
-              help="stack-unstack"
-              detail={`${stack.layerIds.length} layers`}
-              size={uiSize}
-              variant="subtle"
-              color="gray"
-              onClick={() => useStore.getState().unstackLayers(stackId)}
-            >
-              <Ungroup size={16} />
-            </HelpActionIcon>
-            <HelpActionIcon
-              help="stack-close"
-              detail={`${stack.layerIds.length} layers`}
-              size={uiSize}
-              variant="subtle"
-              color="gray"
-              onClick={() => useStore.getState().closeLayerStack(stackId)}
-            >
-              <X size={16} />
-            </HelpActionIcon>
-          </Group>
-        )}
+        {!chromeHidden && !overlaid && header}
         {overlaid ? (
-          <>
-            {!chromeHidden && <LayerTabs layerIds={fileIds} currentId={currentId} />}
-            <LayerBox fileId={currentId} stackLayerIds={fileIds} {...laneProps} />
-          </>
+          <LayerBox
+            fileId={currentId}
+            stackLayerIds={fileIds}
+            {...laneProps}
+            headerExtras={chromeHidden ? undefined : header}
+          />
         ) : (
           <Stack gap="xs" h={chromeHidden ? "100%" : undefined} style={chromeHidden ? { minHeight: 0 } : undefined}>
             {fileIds.map((fileId) => (

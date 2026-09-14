@@ -15,7 +15,7 @@ import { DEFAULT_LAYER_VOLUME_DB, MAX_LAYER_VOLUME_DB, MIN_LAYER_VOLUME_DB } fro
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Grid3x3, GripVertical, Maximize2, Minimize2, Plus, Split, X } from "lucide-react";
-import { memo, useCallback, useMemo, useSyncExternalStore } from "react";
+import { memo, useCallback, useMemo, useSyncExternalStore, type ReactNode } from "react";
 import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
 
@@ -192,7 +192,7 @@ const TruncatedFilename = memo(function TruncatedFilename({
   );
 });
 
-export default memo(function FileHeader({ fileId }: { fileId: string }) {
+export default memo(function FileHeader({ fileId, headerExtras }: { fileId: string; headerExtras?: ReactNode }) {
   const uiSize = useUiSize();
   const file = openFiles[fileId];
   const filePath = file.filePath;
@@ -221,11 +221,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const tooltipLabel = isManagedFilePath(filePath) ? displayName : filePath;
 
   return (
-    <Group
-      justify="space-between"
-      align="center"
-      p={FILE_HEADER_PAD}
-      wrap="nowrap"
+    <Box
       bg={isHighlighted ? "dark.6" : "dark.7"}
       style={{
         borderLeft: `3px solid ${fileColor}`,
@@ -233,268 +229,271 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
       }}
       {...anchorProps("file-header")}
     >
-      <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
-        {canReorder && (
-          <Tooltip help="file-reorder">
-            <Box
-              {...helpProps("file-reorder")}
-              c="dark.2"
-              style={{ display: "flex", alignItems: "center", flexShrink: 0, cursor: "grab" }}
-              onPointerDown={(e) => reorder.beginDrag(fileId, e)}
-            >
-              <GripVertical size={14} />
+      {headerExtras}
+      <Group justify="space-between" align="center" p={FILE_HEADER_PAD} wrap="nowrap">
+        <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
+          {canReorder && (
+            <Tooltip help="file-reorder">
+              <Box
+                {...helpProps("file-reorder")}
+                c="dark.2"
+                style={{ display: "flex", alignItems: "center", flexShrink: 0, cursor: "grab" }}
+                onPointerDown={(e) => reorder.beginDrag(fileId, e)}
+              >
+                <GripVertical size={14} />
+              </Box>
+            </Tooltip>
+          )}
+          <Tooltip label={tooltipLabel}>
+            <Box style={{ minWidth: 0, flex: 1 }}>
+              <TruncatedFilename displayName={displayName} isDirty={isDirty} />
             </Box>
           </Tooltip>
-        )}
-        <Tooltip label={tooltipLabel}>
-          <Box style={{ minWidth: 0, flex: 1 }}>
-            <TruncatedFilename displayName={displayName} isDirty={isDirty} />
-          </Box>
-        </Tooltip>
-        {bandsPerOctave && (
-          <Menu position="bottom-start" withinPortal>
-            <Tooltip help="file-resolution" detail={getResolutionDetail(bandsPerOctave)}>
-              <Menu.Target>
-                <Badge
-                  {...helpProps("file-resolution")}
-                  size="sm"
-                  variant="light"
-                  color="orange"
-                  rightSection={<ChevronDown size={10} />}
-                  style={{ flexShrink: 0, cursor: "pointer" }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {getResolutionLabel(bandsPerOctave)}
-                </Badge>
-              </Menu.Target>
-            </Tooltip>
-            <Menu.Dropdown>
-              {BANDS_PER_OCTAVE_VALUES.map((option) => (
-                <Menu.Item
-                  key={option.value}
-                  fw={option.value === bandsPerOctave ? 700 : undefined}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (option.value === bandsPerOctave) return;
-                    void useStore.getState().reanalyzeFile(fileId, option.value);
-                  }}
-                >
-                  {option.label}
-                </Menu.Item>
-              ))}
-            </Menu.Dropdown>
-          </Menu>
-        )}
-        {channelCount !== undefined && (
-          <Menu position="bottom-start" withinPortal>
-            <Tooltip help="file-channels" detail={getChannelDetail(channelCount)}>
-              <Menu.Target>
-                <Badge
-                  {...helpProps("file-channels")}
-                  size="sm"
-                  variant="light"
-                  color="teal"
-                  rightSection={<ChevronDown size={10} />}
-                  style={{ flexShrink: 0, cursor: "pointer" }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {channelCount === 1 ? "Mono" : "Stereo"}
-                </Badge>
-              </Menu.Target>
-            </Tooltip>
-            <Menu.Dropdown>
-              {CHANNEL_OPTIONS.map((option) => (
-                <Menu.Item
-                  key={option.value}
-                  fw={option.value === channelCount ? 700 : undefined}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (option.value === channelCount) return;
-                    void useStore.getState().setFileChannelCount(fileId, option.value);
-                  }}
-                >
-                  {option.label}
-                </Menu.Item>
-              ))}
-            </Menu.Dropdown>
-          </Menu>
-        )}
-      </Group>
-      <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-        {/* A file on its own has no stack header to carry the button, so it
+          {bandsPerOctave && (
+            <Menu position="bottom-start" withinPortal>
+              <Tooltip help="file-resolution" detail={getResolutionDetail(bandsPerOctave)}>
+                <Menu.Target>
+                  <Badge
+                    {...helpProps("file-resolution")}
+                    size="sm"
+                    variant="light"
+                    color="orange"
+                    rightSection={<ChevronDown size={10} />}
+                    style={{ flexShrink: 0, cursor: "pointer" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {getResolutionLabel(bandsPerOctave)}
+                  </Badge>
+                </Menu.Target>
+              </Tooltip>
+              <Menu.Dropdown>
+                {BANDS_PER_OCTAVE_VALUES.map((option) => (
+                  <Menu.Item
+                    key={option.value}
+                    fw={option.value === bandsPerOctave ? 700 : undefined}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (option.value === bandsPerOctave) return;
+                      void useStore.getState().reanalyzeFile(fileId, option.value);
+                    }}
+                  >
+                    {option.label}
+                  </Menu.Item>
+                ))}
+              </Menu.Dropdown>
+            </Menu>
+          )}
+          {channelCount !== undefined && (
+            <Menu position="bottom-start" withinPortal>
+              <Tooltip help="file-channels" detail={getChannelDetail(channelCount)}>
+                <Menu.Target>
+                  <Badge
+                    {...helpProps("file-channels")}
+                    size="sm"
+                    variant="light"
+                    color="teal"
+                    rightSection={<ChevronDown size={10} />}
+                    style={{ flexShrink: 0, cursor: "pointer" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {channelCount === 1 ? "Mono" : "Stereo"}
+                  </Badge>
+                </Menu.Target>
+              </Tooltip>
+              <Menu.Dropdown>
+                {CHANNEL_OPTIONS.map((option) => (
+                  <Menu.Item
+                    key={option.value}
+                    fw={option.value === channelCount ? 700 : undefined}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (option.value === channelCount) return;
+                      void useStore.getState().setFileChannelCount(fileId, option.value);
+                    }}
+                  >
+                    {option.label}
+                  </Menu.Item>
+                ))}
+              </Menu.Dropdown>
+            </Menu>
+          )}
+        </Group>
+        <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+          {/* A file on its own has no stack header to carry the button, so it
             gets one here; adding a layer is what makes it a stack. */}
-        {!inMix && (
+          {!inMix && (
+            <HelpActionIcon
+              help="stack-add-layer"
+              size={uiSize}
+              variant="subtle"
+              color="gray"
+              onClick={(e) => {
+                e.stopPropagation();
+                void useStore.getState().addEmptyLayer(fileId);
+              }}
+            >
+              <Plus size={16} />
+            </HelpActionIcon>
+          )}
+          {inMix && (
+            <>
+              <MixToggle
+                letter="S"
+                help="file-solo"
+                engaged={isSoloed}
+                color="yellow.5"
+                onToggle={() => useStore.getState().setFileSoloed(fileId, !isSoloed)}
+              />
+              <MixToggle
+                letter="M"
+                help="file-mute"
+                engaged={isMuted}
+                color="red.7"
+                onToggle={() => useStore.getState().setFileMuted(fileId, !isMuted)}
+              />
+            </>
+          )}
+          <FileHeaderNumbox
+            label="Vol"
+            help="file-volume"
+            value={volumeDb}
+            setValue={(v) => useStore.getState().setFileVolumeDb(fileId, v)}
+            min={MIN_LAYER_VOLUME_DB}
+            max={MAX_LAYER_VOLUME_DB}
+            step={1}
+            unit="dB"
+          />
+          <FileHeaderNumbox
+            label="Onsets"
+            help="file-onsets"
+            value={onsetSensitivity}
+            setValue={(v) => useStore.getState().setFilepathOnsetSensitivity(filePath, v)}
+            min={0}
+            max={100}
+            step={1}
+            unit="%"
+          />
+          <FileHeaderNumbox
+            label="BPM"
+            help="file-bpm"
+            value={bpm ?? 120}
+            setValue={(v) => useStore.getState().setFilepathBpm(filePath, v)}
+            min={10}
+            max={999}
+            step={1}
+          />
+          <Menu position="bottom-end" withinPortal>
+            <Tooltip help="file-split">
+              <Menu.Target>
+                <ActionIcon
+                  size={uiSize}
+                  color="dark.5"
+                  onClick={(e) => e.stopPropagation()}
+                  {...helpProps("file-split")}
+                >
+                  <Split size={16} />
+                </ActionIcon>
+              </Menu.Target>
+            </Tooltip>
+            <Menu.Dropdown>
+              <Menu.Item
+                onClick={(e) => {
+                  e.stopPropagation();
+                  useStore.getState().hpssFile(fileId);
+                }}
+              >
+                Split Harmonic and Percussive (HPSS)
+              </Menu.Item>
+              <Menu.Divider />
+              <Menu.Item
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openSplitPartsPrompt({
+                    onConfirm: (parts) => {
+                      useStore.getState().nmfFile(fileId, parts);
+                    },
+                  });
+                }}
+              >
+                Split into N Parts (NMF)…
+              </Menu.Item>
+              {AI_SEPARATION_SUPPORTED && (
+                <>
+                  <Menu.Divider />
+                  <Menu.Item
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      useStore.getState().aiSeparateFile(fileId);
+                    }}
+                  >
+                    Split Drums / Bass / Other / Vocals (AI)
+                  </Menu.Item>
+                </>
+              )}
+            </Menu.Dropdown>
+          </Menu>
           <HelpActionIcon
-            help="stack-add-layer"
+            help="file-fill-grid"
+            {...anchorProps("file-fill-grid")}
             size={uiSize}
-            variant="subtle"
-            color="gray"
+            color="dark.5"
             onClick={(e) => {
               e.stopPropagation();
-              void useStore.getState().addEmptyLayer(fileId);
+              void useStore
+                .getState()
+                .setActiveFileId(fileId)
+                .then(() => useStore.getState().fillGrid());
             }}
           >
-            <Plus size={16} />
+            <Grid3x3 size={16} />
           </HelpActionIcon>
-        )}
-        {inMix && (
-          <>
-            <MixToggle
-              letter="S"
-              help="file-solo"
-              engaged={isSoloed}
-              color="yellow.5"
-              onToggle={() => useStore.getState().setFileSoloed(fileId, !isSoloed)}
-            />
-            <MixToggle
-              letter="M"
-              help="file-mute"
-              engaged={isMuted}
-              color="red.7"
-              onToggle={() => useStore.getState().setFileMuted(fileId, !isMuted)}
-            />
-          </>
-        )}
-        <FileHeaderNumbox
-          label="Vol"
-          help="file-volume"
-          value={volumeDb}
-          setValue={(v) => useStore.getState().setFileVolumeDb(fileId, v)}
-          min={MIN_LAYER_VOLUME_DB}
-          max={MAX_LAYER_VOLUME_DB}
-          step={1}
-          unit="dB"
-        />
-        <FileHeaderNumbox
-          label="Onsets"
-          help="file-onsets"
-          value={onsetSensitivity}
-          setValue={(v) => useStore.getState().setFilepathOnsetSensitivity(filePath, v)}
-          min={0}
-          max={100}
-          step={1}
-          unit="%"
-        />
-        <FileHeaderNumbox
-          label="BPM"
-          help="file-bpm"
-          value={bpm ?? 120}
-          setValue={(v) => useStore.getState().setFilepathBpm(filePath, v)}
-          min={10}
-          max={999}
-          step={1}
-        />
-        <Menu position="bottom-end" withinPortal>
-          <Tooltip help="file-split">
-            <Menu.Target>
-              <ActionIcon
-                size={uiSize}
-                color="dark.5"
-                onClick={(e) => e.stopPropagation()}
-                {...helpProps("file-split")}
-              >
-                <Split size={16} />
-              </ActionIcon>
-            </Menu.Target>
-          </Tooltip>
-          <Menu.Dropdown>
-            <Menu.Item
-              onClick={(e) => {
-                e.stopPropagation();
-                useStore.getState().hpssFile(fileId);
-              }}
-            >
-              Split Harmonic and Percussive (HPSS)
-            </Menu.Item>
-            <Menu.Divider />
-            <Menu.Item
-              onClick={(e) => {
-                e.stopPropagation();
-                openSplitPartsPrompt({
-                  onConfirm: (parts) => {
-                    useStore.getState().nmfFile(fileId, parts);
-                  },
-                });
-              }}
-            >
-              Split into N Parts (NMF)…
-            </Menu.Item>
-            {AI_SEPARATION_SUPPORTED && (
-              <>
-                <Menu.Divider />
-                <Menu.Item
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    useStore.getState().aiSeparateFile(fileId);
-                  }}
-                >
-                  Split Drums / Bass / Other / Vocals (AI)
-                </Menu.Item>
-              </>
-            )}
-          </Menu.Dropdown>
-        </Menu>
-        <HelpActionIcon
-          help="file-fill-grid"
-          {...anchorProps("file-fill-grid")}
-          size={uiSize}
-          color="dark.5"
-          onClick={(e) => {
-            e.stopPropagation();
-            void useStore
-              .getState()
-              .setActiveFileId(fileId)
-              .then(() => useStore.getState().fillGrid());
-          }}
-        >
-          <Grid3x3 size={16} />
-        </HelpActionIcon>
-        <HelpActionIcon
-          help="file-duplicate"
-          size={uiSize}
-          color="dark.5"
-          onClick={(e) => {
-            e.stopPropagation();
-            useStore.getState().duplicateFile(fileId);
-          }}
-        >
-          <Copy size={16} />
-        </HelpActionIcon>
-        <HelpActionIcon
-          help="file-minimize"
-          size={uiSize}
-          color="dark.5"
-          onClick={(e) => {
-            e.stopPropagation();
-            useStore.getState().setFileMinimized(fileId, true);
-          }}
-        >
-          <ChevronDown size={16} />
-        </HelpActionIcon>
-        <HelpActionIcon
-          help="file-fullscreen"
-          detail={isFullscreen ? "Exit fullscreen" : "Expand"}
-          size={uiSize}
-          color={isFullscreen ? "orange" : "dark.5"}
-          onClick={(e) => {
-            e.stopPropagation();
-            useStore.getState().setFullscreenFileId(isFullscreen ? null : fileId);
-          }}
-        >
-          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-        </HelpActionIcon>
-        <HelpActionIcon
-          help="file-close"
-          size={uiSize}
-          color="dark.5"
-          onClick={(e) => {
-            e.stopPropagation();
-            useStore.getState().tryCloseFile(fileId);
-          }}
-        >
-          <X size={16} />
-        </HelpActionIcon>
+          <HelpActionIcon
+            help="file-duplicate"
+            size={uiSize}
+            color="dark.5"
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().duplicateFile(fileId);
+            }}
+          >
+            <Copy size={16} />
+          </HelpActionIcon>
+          <HelpActionIcon
+            help="file-minimize"
+            size={uiSize}
+            color="dark.5"
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().setFileMinimized(fileId, true);
+            }}
+          >
+            <ChevronDown size={16} />
+          </HelpActionIcon>
+          <HelpActionIcon
+            help="file-fullscreen"
+            detail={isFullscreen ? "Exit fullscreen" : "Expand"}
+            size={uiSize}
+            color={isFullscreen ? "orange" : "dark.5"}
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().setFullscreenFileId(isFullscreen ? null : fileId);
+            }}
+          >
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </HelpActionIcon>
+          <HelpActionIcon
+            help="file-close"
+            size={uiSize}
+            color="dark.5"
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().tryCloseFile(fileId);
+            }}
+          >
+            <X size={16} />
+          </HelpActionIcon>
+        </Group>
       </Group>
-    </Group>
+    </Box>
   );
 });

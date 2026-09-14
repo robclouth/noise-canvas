@@ -5,7 +5,7 @@ import { notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { openFiles, viewSyncTargets } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
-import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { type AimUv } from "../lib/aim";
 import { aimUvToBrushBlUv, brushUnionForAim } from "../lib/brush-anchor";
 import { heldRepeatIntervalMs } from "../lib/brush-repeat";
@@ -55,6 +55,7 @@ export interface FileViewProps {
    * keeps its colour whichever layer is on top.
    */
   stackLayerIds?: string[];
+  headerExtras?: ReactNode;
 }
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
@@ -116,7 +117,8 @@ function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): numbe
   return aimToBrushRectBlUv(aim, fileId, bpm).blX * totalDuration;
 }
 
-export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stackLayerIds }: FileViewProps) => {
+export const FileView = memo((props: FileViewProps) => {
+  const { fileId, isFullscreen = false, isMinimized, stackLayerIds, headerExtras } = props;
   const file = openFiles[fileId];
   const filePath = file?.filePath || "";
 
@@ -1055,7 +1057,7 @@ export const FileView = memo(({ fileId, isFullscreen = false, isMinimized, stack
       }}
       {...layerAnchorProps(fileId)}
     >
-      <FileHeader fileId={fileId} />
+      <FileHeader fileId={fileId} headerExtras={headerExtras} />
       {/* The body keeps one height whether the file is loading or drawn, so
           nothing below it jumps when the analysis lands. */}
       <Box
