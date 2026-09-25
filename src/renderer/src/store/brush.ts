@@ -340,7 +340,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
                   if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
                     renderer.patchFBODataCompact(values, uploadRanges);
                   } else {
-                    renderer.landUnderStroke(uploadRanges, values);
+                    renderer.landUnderStroke(uploadRanges, values, painted);
                   }
                 }
                 diag.timing("timing", "commit FBO upload", performance.now() - uploadStart);
@@ -356,7 +356,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
               // phase of pixels it has painted, so they wait for the next
               // commit, or the next navigation, to put them on the canvas.
               try {
-                if (uploadRanges) renderer.landUnderStroke(uploadRanges, await gather(uploadRanges));
+                if (uploadRanges) renderer.landUnderStroke(uploadRanges, await gather(uploadRanges), painted);
               } catch (error) {
                 console.error("the commit patch could not reach the canvas:", error);
                 historyManager.markFboOutOfSync();

@@ -7,11 +7,12 @@ import { sourceNeedsOver, type SourceRead, type SourceWindowTextures } from "./s
 import type { WindowedCanvas } from "./windowed-canvas";
 import { blockOfFrame } from "./block-grid";
 import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
-import { strokeReach, type ReachContext } from "./effect-reach";
-import { strokeRefusal as refusalFor, overReachRefusal } from "./whole-file-gate";
+import { pieceReach, strokeReach, type ReachContext } from "./effect-reach";
+import type { EffectType } from "../effects/types";
+import { strokeRefusal as refusalFor, overReachRefusal, wholeBrushRefusal, liveReadRefusal } from "./whole-file-gate";
 import { impulseNeeds, type ImpulseNeed } from "./impulse-need";
 import { GpuMemoryError, type ImpulseFileInfo, type SourceFileInfo, type StrokeRenderer } from "./stroke-renderer";
-import { DEFAULT_ONSET_SENSITIVITY } from "./constants";
+import { DEFAULT_ONSET_SENSITIVITY, EFFECT_LABELS } from "./constants";
 import { getOnsetTexture, type Onset } from "./onset-map";
 import { countDiagStroke } from "./diag-sampler";
 import { diag } from "./diag-log";
@@ -34,7 +35,7 @@ export interface FileStrokeContext {
   createStepStateView: (state: State, index: number) => State;
   getFileOnsets: (fileId: string) => Onset[];
   closeFile: (fileId: string) => void;
-  reachByState: WeakMap<State, { refusal: string | null; frames: { before: number; after: number } }>;
+  reachByState: WeakMap<State, StateReach>;
 }
 
 function sourceReadsFor(context: FileStrokeContext, state: State, cursorPos: Vector2): SourceRead[] {
@@ -347,25 +348,39 @@ function reachContext(context: FileStrokeContext, state: State): ReachContext | 
   };
 }
 
-function reachOf(
-  context: FileStrokeContext,
-  state: State,
-): { refusal: string | null; frames: { before: number; after: number } } {
+/**
+ * What a state's brush reads, in frames of the file: past the dab, and
+ * around each frame it writes (null when only the whole dab can serve it,
+ * with the effects that make it so).
+ */
+export type StateReach = {
+  refusal: string | null;
+  frames: { before: number; after: number };
+  piece: { before: number; after: number } | null;
+  wholeBrush: EffectType[];
+};
+
+function reachOf(context: FileStrokeContext, state: State): StateReach {
   const { spectrogramData, canvasRef, reachByState } = context;
   const known = reachByState.get(state);
   if (known) return known;
   const ctx = reachContext(context, state);
   const refusal = refusalFor(state, ctx);
+  const { numFrames, sampleRate } = spectrogramData;
+  const toFrames = (reach: { before: number; after: number }) => ({
+    before: Math.min(reach.before * sampleRate, numFrames),
+    after: Math.min(reach.after * sampleRate, numFrames),
+  });
   let frames = { before: 0, after: 0 };
+  let piece: StateReach["piece"] = { before: 0, after: 0 };
+  let wholeBrush: EffectType[] = [];
   if (ctx) {
-    const reach = strokeReach(state, ctx);
-    const { numFrames, sampleRate } = spectrogramData;
-    frames = {
-      before: Math.min(reach.before * sampleRate, numFrames),
-      after: Math.min(reach.after * sampleRate, numFrames),
-    };
+    frames = toFrames(strokeReach(state, ctx));
+    const around = pieceReach(state, ctx);
+    piece = around.reach ? toFrames(around.reach) : null;
+    wholeBrush = around.wholeBrush;
   }
-  const entry = { refusal, frames };
+  const entry = { refusal, frames, piece, wholeBrush };
   // A reach calculated before the canvas exists must not be cached.
   if (canvasRef.current) reachByState.set(state, entry);
   return entry;
@@ -373,22 +388,31 @@ function reachOf(
 
 export function strokeRefusal(context: FileStrokeContext, state: State, aim?: { x: number; y: number }): string | null {
   const { canvasRef } = context;
-  const refusal = reachOf(context, state).refusal;
+  const reach = reachOf(context, state);
   const canvas = canvasRef.current;
-  if (refusal || !canvas || !aim) return refusal;
+  if (reach.refusal || !canvas || !aim) return reach.refusal;
   const span = dabSpan(context, state, new Vector2(aim.x, aim.y), canvas);
-  return canvas.servable(span.extent) ? null : overReachRefusal(["The brush"]);
+  if (canvas.servable(span.extent)) return null;
+  if (!span.extent.piece) {
+    if (reach.wholeBrush.length > 0)
+      return wholeBrushRefusal(reach.wholeBrush.map((effect) => EFFECT_LABELS[effect] ?? effect));
+    if (span.extent.readsLive) return liveReadRefusal();
+  }
+  return overReachRefusal(["The brush"]);
 }
 
 /** What a dab reads while it writes `clip`. */
 function readSpanOf(extent: DabExtent, clip: FrameSpan): FrameSpan {
-  return { start: Math.max(0, clip.start - extent.before), end: clip.end + extent.after };
+  const before = Math.max(extent.before, extent.piece?.before ?? 0);
+  const after = Math.max(extent.after, extent.piece?.after ?? 0);
+  return { start: Math.max(0, clip.start - before), end: clip.end + after };
 }
 
 /** What a dab that writes one span reads; null for one that wraps past the end of the file. */
 function wholeReadSpan(extent: DabExtent): FrameSpan | null {
   if (extent.writes.length !== 1) return null;
-  return readSpanOf(extent, extent.writes[0]);
+  const [write] = extent.writes;
+  return { start: Math.max(0, write.start - extent.before), end: write.end + extent.after };
 }
 
 /**
@@ -412,10 +436,6 @@ function dabWrites(union: BrushUnionUv, cursorX: number, numFrames: number): Fra
   ];
 }
 
-function reachFrames(context: FileStrokeContext, state: State): { before: number; after: number } {
-  return reachOf(context, state).frames;
-}
-
 export function dabSpan(
   context: FileStrokeContext,
   state: State,
@@ -428,18 +448,24 @@ export function dabSpan(
   const bpm = state.filepathsBpm[file.filePath] || 120;
   const { numFrames, sampleRate } = spectrogramData;
   const totalDuration = numFrames / sampleRate;
-  const reach = canvas.holdsWholeFile ? { before: 0, after: 0 } : reachFrames(context, state);
+  const none = { before: 0, after: 0 };
+  const reach: StateReach = canvas.holdsWholeFile
+    ? { refusal: null, frames: none, piece: none, wholeBrush: [] }
+    : reachOf(context, state);
   const union = resolvedUnion ?? brushUnionAt(context, state, cursorPos, bpm, totalDuration);
   const impulseBindings = impulseNeedsFor(context, state);
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const readsLive = steps.some(
     (step, index) => step.enabled !== false && context.createStepStateView(state, index).accumulate,
   );
+  // A dab that reads the canvas as it leaves it would read, across a cut,
+  // what its own earlier piece painted, so it is painted whole.
   const extent: DabExtent = {
     writes: dabWrites(union, cursorPos.x, numFrames),
-    before: reach.before,
-    after: reach.after,
+    before: reach.frames.before,
+    after: reach.frames.after,
     readsLive,
+    piece: readsLive && !canvas.holdsWholeFile ? null : reach.piece,
   };
   const whole = wholeReadSpan(extent);
   const cursorBlock = blockOfFrame(canvas.grid, Math.min(numFrames - 1, Math.max(0, cursorPos.x * numFrames)));

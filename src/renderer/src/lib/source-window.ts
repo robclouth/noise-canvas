@@ -78,10 +78,14 @@ export type SourceRead = {
 function readOfPart(read: SourceRead, part: { start: number; end: number }): { start: number; end: number } {
   const length = read.dest.end - read.dest.start;
   if (length <= 0) return read.read;
+  // A dab that wraps writes past one end of the file as frames at the other.
   let { start, end } = part;
   if (end <= read.dest.start) {
     start += read.destFrames;
     end += read.destFrames;
+  } else if (start >= read.dest.end) {
+    start -= read.destFrames;
+    end -= read.destFrames;
   }
   start = Math.min(read.dest.end, Math.max(read.dest.start, start));
   end = Math.min(read.dest.end, Math.max(start, end));

@@ -43,6 +43,16 @@ const NO_REACH: TimeReach = { before: 0, after: 0 };
 // fold it back inside, so the effect reads nothing the brush does not cover.
 const READS_PAST_BRUSH: ReadonlySet<number> = new Set([1, 5]);
 
+// The edge mode that folds a read past one end of the brush in at the other.
+const WRAP_EDGE = 2;
+
+// Sort directions that order a band along time.
+const SORTS_ALONG_TIME: ReadonlySet<number> = new Set([0, 2]);
+
+// The attract time pass gathers over three kernels and reads its field a
+// kernel past that.
+const ATTRACT_PIECE_KERNELS = 4;
+
 // Below this the shader applies no time scale at all, so the read stays the
 // size of the brush instead of dividing by a value close to zero.
 const NO_SCALE_BELOW = 1e-5;
@@ -109,7 +119,13 @@ function tapAt(table: number[], index: number): number {
  * one-sided.
  */
 function blurReach(effect: State, ctx: ReachContext): TimeReach {
-  if (!READS_PAST_BRUSH.has(Number(effect.blurEdgeMode)) || ctx.canvasSeconds <= 0) return NO_REACH;
+  if (!READS_PAST_BRUSH.has(Number(effect.blurEdgeMode))) return NO_REACH;
+  return blurSmear(effect, ctx);
+}
+
+/** How far the smear reads either side of a pixel, wherever the edge mode sends it. */
+function blurSmear(effect: State, ctx: ReachContext): TimeReach {
+  if (ctx.canvasSeconds <= 0) return NO_REACH;
   const uvPerBeat = 60 / ctx.bpm / ctx.canvasSeconds;
   const uvRange = { min: 0, max: 0.1 };
   const smearUv = ((Number(effect.blurAmountTime) * 4) / 100) * uvPerBeat;
@@ -123,8 +139,14 @@ function blurReach(effect: State, ctx: ReachContext): TimeReach {
 
 /** Copies are read at whole multiples of the gap, spaced by the shape table. */
 function cloneReach(effect: State, ctx: ReachContext): TimeReach {
+  if (!READS_PAST_BRUSH.has(Number(effect.cloneEdgeMode))) return NO_REACH;
+  return cloneTaps(effect, ctx);
+}
+
+/** How far the furthest copy is read from a pixel. */
+function cloneTaps(effect: State, ctx: ReachContext): TimeReach {
   const copies = Number(effect.cloneCountX);
-  if (!READS_PAST_BRUSH.has(Number(effect.cloneEdgeMode)) || copies <= 0) return NO_REACH;
+  if (copies <= 0) return NO_REACH;
   const taps = copies + 1;
   const gap = widest(stateRange(effect, "cloneSpaceBeats"));
   const table = buildShapeTable(effect.cloneShapeX as CloneShapeKey, taps);
@@ -265,6 +287,83 @@ export function brushReaches(state: State, ctx: ReachContext): StepReach[] {
     }
   }
   return out;
+}
+
+/** True while the range holds only `value`. */
+function only(range: ValueRange, value: number): boolean {
+  return range.lo === value && range.hi === value;
+}
+
+/**
+ * How far from each pixel it paints one effect reads, in seconds of the file,
+ * or null when it may read anywhere in the brush: a warp that scales, turns or
+ * mirrors, a sort along time, and any read an edge mode wraps round to the
+ * brush's far end.
+ */
+function pieceReachOf(effect: EffectType, state: State, ctx: ReachContext): TimeReach | null {
+  switch (effect) {
+    case "blur": {
+      const smear = blurSmear(state, ctx);
+      const wraps = Number(state.blurEdgeMode) === WRAP_EDGE && (smear.before > 0 || smear.after > 0);
+      return wraps ? null : smear;
+    }
+    case "clone": {
+      const taps = cloneTaps(state, ctx);
+      const wraps = Number(state.cloneEdgeMode) === WRAP_EDGE && (taps.before > 0 || taps.after > 0);
+      return wraps ? null : taps;
+    }
+    case "transform": {
+      const warps =
+        !only(stateRange(state, "transformScaleTime"), 1) ||
+        !only(stateRange(state, "transformSpeed"), 1) ||
+        !only(stateRange(state, "transformRotation"), 0);
+      const shift = widest(stateRange(state, "transformShiftBeats")) * (60 / ctx.bpm);
+      if (warps || (shift > 0 && Number(state.transformEdgeMode) === WRAP_EDGE)) return null;
+      return { before: shift, after: shift };
+    }
+    case "sort":
+      return SORTS_ALONG_TIME.has(Number(state.sortDirection)) ? null : NO_REACH;
+    case "attract": {
+      if (widest(stateRange(state, "attractAmountX")) === 0) return NO_REACH;
+      const span = ATTRACT_PIECE_KERNELS * widest(stateRange(state, "attractSmoothX")) * (60 / ctx.bpm);
+      return { before: span, after: span };
+    }
+    case "transmute":
+      return transmuteReach(state, ctx);
+    case "evolve":
+      return evolveReach(state, ctx);
+    case "convolve":
+      return convolveReach(state, ctx);
+    default:
+      return NO_REACH;
+  }
+}
+
+/**
+ * How far from each pixel it paints the brush reads, in seconds of the file:
+ * what a dab painted a piece at a time must hold around each piece. Null, with
+ * the effects that make it so, when some effect may read anywhere in the
+ * brush, so only the whole dab at once can serve it.
+ */
+export function pieceReach(state: State, ctx: ReachContext): { reach: TimeReach | null; wholeBrush: EffectType[] } {
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+  let before = 0;
+  let after = 0;
+  const wholeBrush: EffectType[] = [];
+  for (let index = 0; index < steps.length; index++) {
+    const step = createStepStateView(state, index);
+    for (const item of step.effects) {
+      if (!item.enabled) continue;
+      const reach = pieceReachOf(item.effect, createEffectStateView(state, index, item), ctx);
+      if (!reach) {
+        if (!wholeBrush.includes(item.effect)) wholeBrush.push(item.effect);
+        continue;
+      }
+      before = Math.max(before, reach.before);
+      after = Math.max(after, reach.after);
+    }
+  }
+  return { reach: wholeBrush.length > 0 ? null : { before, after }, wholeBrush };
 }
 
 /**

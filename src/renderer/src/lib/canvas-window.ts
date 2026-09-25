@@ -260,6 +260,25 @@ export class CanvasWindow {
     for (const block of blocks) this.ahead.add(block);
   }
 
+  /**
+   * The blocks among `blocks`, in order, that can take slots ahead of the
+   * store alongside `taken` without pushing out the view the window reads
+   * towards or each other.
+   */
+  fitAhead(blocks: readonly number[], taken: readonly number[]): number[] {
+    const pinned = new Set(this.requested);
+    for (const block of taken) pinned.add(block);
+    const fits: number[] = [];
+    for (const block of blocks) {
+      if (!pinned.has(block)) {
+        if (pinned.size >= this.cache.slotCount) continue;
+        pinned.add(block);
+      }
+      fits.push(block);
+    }
+    return fits;
+  }
+
   /** Takes the blocks from `from`, ahead of the store, as `takeAhead` does. */
   copyAhead(from: BlockSlotCache, blocks: number[]): void {
     if (blocks.length === 0) return;

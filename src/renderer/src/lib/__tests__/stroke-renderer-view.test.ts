@@ -719,6 +719,27 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     },
   );
 
+  // A step with no source of its own reads the canvas it paints on, which is a
+  // window of the file like any other: a position or an offset in the file
+  // lands on the frames it names, not on the span's own UV.
+  it.each([
+    ["a fixed position", { sourcePositionMode: "fixed", sourceTimeOffset: 40 }],
+    ["a locked offset", { sourcePositionMode: "anchored", lockedOffset: { beats: -0.1, pitch: 0 } }],
+  ])("reads this file at %s through a sub-view", async (_, step) => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Clone",
+        overrides: { ...step, effects: [{ id: "passthrough", effect: "passthrough", enabled: true, params: {} }] },
+      },
+    ]);
+    state.isStroking = "lockedOffset" in step;
+    const parity = await parityOf(state);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.subChanged).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-5);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
+
   it("clips a stroke to a selection at the same file frames through a sub-view", async () => {
     const state = createMockState();
     // The dab starts 0.8 s into the file; the selection takes a middle part of it.

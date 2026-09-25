@@ -612,19 +612,20 @@ export class WindowedCanvas {
    * Puts a stroke's blocks into the block slots at its pen-up, ahead of its
    * commit, so a block the window brings in while the commit stores it needs
    * nothing laid over it: the blocks on the canvas are copied from it, those
-   * the stroke slots hold from there. A block the stroke left in RAM loses
-   * its slot, so it is read from the store and the paint laid over it.
-   * Returns the blocks taken.
+   * the stroke slots hold from there, as many as the slots have room for. A
+   * block left over, or one the stroke left in RAM, loses its slot, so it is
+   * read from the store and the paint laid over it. Returns the blocks taken.
    */
   private takePaintAhead(renderer: StrokeRenderer, ranges: Uint32Array): number[] {
     const window = this.blocks;
     const { view, texture } = renderer.committedSource();
     const painted = blocksForPixelRanges(this.grid, ranges);
     const lacking = new Set(window.canvasLacks(view));
-    const onCanvas = painted.filter(
-      (block) => block >= view.firstBlock && block <= view.lastBlock && !lacking.has(block),
+    const onCanvas = window.fitAhead(
+      painted.filter((block) => block >= view.firstBlock && block <= view.lastBlock && !lacking.has(block)),
+      [],
     );
-    const held = this.strokeSlots?.heldAmong(painted) ?? [];
+    const held = window.fitAhead(this.strokeSlots?.heldAmong(painted) ?? [], onCanvas);
     const taken = new Set([...onCanvas, ...held]);
     window.invalidate(painted.filter((block) => !taken.has(block) && window.hasSlot(block)));
     window.takeAhead(view, onCanvas, texture);
@@ -674,16 +675,23 @@ export class WindowedCanvas {
    * stroke-start snapshot takes them at once, and the block slots over them
    * are read again. The canvas and the picture take them except where a
    * stroke not yet stored has painted, because that paint is what those
-   * pixels will hold.
+   * pixels will hold. `own` names the landing stroke's held paint, which
+   * gives way to them at once.
    */
-  landUnderStroke(ranges: Uint32Array, values: Float32Array): void {
+  landUnderStroke(ranges: Uint32Array, values: Float32Array, own?: Uint32Array | null): void {
     const renderer = this.deps.renderer();
     if (!renderer || this.disposed) return;
     // The slots over them read the store again, with the paint of strokes
     // still committing laid over it.
     this.blocks.invalidate(blocksForPixelRanges(this.grid, ranges));
     let unstored: Uint32Array = new Uint32Array(0);
-    for (const paint of this.pending) unstored = mergePixelRanges(unstored, paint.ranges);
+    for (const paint of this.pending) {
+      if (own && paint.ranges === own) {
+        paint.shown = subtractPixelRanges(paint.shown ?? paint.ranges, ranges);
+        continue;
+      }
+      unstored = mergePixelRanges(unstored, paint.ranges);
+    }
     const base = unstored.length > 0 ? subtractPixelRanges(ranges, unstored) : ranges;
     const view = renderer.committedSource().view;
     const layout = this.layout();
@@ -803,7 +811,7 @@ export class WindowedCanvas {
         return painted;
       }
     }
-    this.held.push(extent, needs, paint, needs.sources.length > 0);
+    this.held.push(extent, needs, paint, needs.sources.length > 0 && extent.piece !== null);
     this.releaseHeld();
     return true;
   }

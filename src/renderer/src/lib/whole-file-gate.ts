@@ -57,6 +57,17 @@ export function overReachRefusal(needs: string[]): string {
   return `${listOf(needs)} ${one ? "reaches" : "reach"} too far for this file. Turn ${one ? "it" : "them"} down to paint here.`;
 }
 
+/** The refusal a brush wider than the canvas gets when an effect reads anywhere in it. */
+export function wholeBrushRefusal(needs: string[]): string {
+  const one = needs.length === 1;
+  return `${listOf(needs)} ${one ? "reads" : "read"} across the whole brush, and this brush is too long for this file. Shorten it to paint here.`;
+}
+
+/** The refusal a brush wider than the canvas gets when it builds up on what it has just painted. */
+export function liveReadRefusal(): string {
+  return "Accumulate reads what the brush has just painted, and this brush is too long for this file. Shorten it to paint here.";
+}
+
 /**
  * Why the brush cannot paint on a canvas holding a window of the file, or null
  * when it can. A canvas over the whole file passes no context and never

@@ -145,8 +145,12 @@ export interface FileRendererHandle {
     ranges: Uint32Array,
     values: Promise<Float32Array>,
   ) => (stored: boolean, except?: Uint32Array | null) => Promise<void>;
-  /** Takes a commit that landed while a later stroke was on the canvas: the store now holds `values` over `ranges`. */
-  landUnderStroke: (ranges: Uint32Array, values: Float32Array) => void;
+  /**
+   * Takes a commit that landed while a later stroke was on the canvas: the
+   * store now holds `values` over `ranges`. `own` is the ranges the landing
+   * stroke's paint was held with.
+   */
+  landUnderStroke: (ranges: Uint32Array, values: Float32Array, own?: Uint32Array | null) => void;
   /** Drops the canvas's cached copies of the blocks over the named file pixels. */
   forgetBlocks: (ranges: Uint32Array) => void;
   /** Gets the dirty region (UV range modified since last clear). Returns null if no modifications. */

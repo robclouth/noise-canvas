@@ -5,15 +5,18 @@ export type FrameSpan = { start: number; end: number };
 
 /**
  * What one dab paints and reads, in file frames: the spans it writes (two
- * when it wraps past the end of the file), how far either side of a written
- * frame it reads, and whether it reads the canvas as the dabs before it left
- * it rather than as the stroke found it.
+ * when it wraps past the end of the file), how far past them it reads, and
+ * whether it reads the canvas as the dabs before it left it rather than as
+ * the stroke found it. `piece` is how far from each frame it writes it reads,
+ * which a piece of the dab must hold around it; null when the dab can only be
+ * painted whole.
  */
 export type DabExtent = {
   writes: readonly FrameSpan[];
   before: number;
   after: number;
   readsLive: boolean;
+  piece: { before: number; after: number } | null;
 };
 
 /**
@@ -57,30 +60,49 @@ export function blockWriteSpan(grid: BlockGrid, extent: DabExtent, block: number
 }
 
 /**
- * The file frames a dab reads while it writes its part of one block: its
- * reach either side of that part, and one bin of the coarsest band past each
- * block edge the dab continues across, because a pixel next to a cut
- * interpolates over it.
+ * The file frames a dab reads while it writes its part of one block: what it
+ * reads around that part, and one bin of the coarsest band past each block
+ * edge the dab continues across, because a pixel next to a cut interpolates
+ * over it. A dab that can only be painted whole reads all it reads for every
+ * block.
  */
 export function blockReadSpan(grid: BlockGrid, extent: DabExtent, block: number): FrameSpan {
-  const frames = frameRangeOfBlock(grid, block);
   const { start, end } = blockWriteSpan(grid, extent, block);
   if (end <= start) return { start, end };
+  const { piece } = extent;
+  if (!piece) {
+    let first = Infinity;
+    let last = -Infinity;
+    for (const span of extent.writes) {
+      first = Math.min(first, span.start);
+      last = Math.max(last, span.end);
+    }
+    return { start: Math.max(0, first - extent.before), end: Math.min(grid.numFrames, last + extent.after) };
+  }
+  const frames = frameRangeOfBlock(grid, block);
   const margin = grid.blockFrames / Math.min(...grid.binsPerBlock);
   const continues = (edge: number): boolean => extent.writes.some((span) => span.start < edge && span.end > edge);
   return {
-    start: Math.max(0, start - extent.before - (start === frames.start && continues(start) ? margin : 0)),
-    end: Math.min(grid.numFrames, end + extent.after + (end === frames.end && continues(end) ? margin : 0)),
+    start: Math.max(
+      0,
+      start - Math.max(extent.before, piece.before) - (start === frames.start && continues(start) ? margin : 0),
+    ),
+    end: Math.min(
+      grid.numFrames,
+      end + Math.max(extent.after, piece.after) + (end === frames.end && continues(end) ? margin : 0),
+    ),
   };
 }
 
 /**
  * Dabs waiting for the canvas to hold what they paint, painted a block at a
  * time. A block of a dab waits only for the dabs before it that still have
- * that block to paint, and, when it reads the canvas as they leave it, for
- * those with a block within its reach; everything else may go ahead. So the
- * canvas paints whatever it holds at once, however far behind an older dab
- * waits, and every pixel still takes its dabs in the order they came.
+ * that block to paint, or that read the canvas as the dabs before them left
+ * it and still have that block to read; and, when it reads the canvas that
+ * way itself, for those with a block within its reach. Everything else may go
+ * ahead. So the canvas paints whatever it holds at once, however far behind
+ * an older dab waits, and every pixel still takes its dabs in the order they
+ * came.
  */
 export class HeldDabs<T> {
   private readonly grid: BlockGrid;
@@ -123,19 +145,20 @@ export class HeldDabs<T> {
   release(holds: (extent: DabExtent, payload: T, block: number) => boolean): void {
     const blockFrames = this.grid.blockFrames;
     const older = new Set<number>();
+    const olderReads = new Set<number>();
     for (const dab of this.queue) {
       const { extent } = dab;
       const reachBefore = Math.ceil(extent.before / blockFrames);
       const reachAfter = Math.ceil(extent.after / blockFrames);
       const waitsOn = (block: number): boolean => {
-        if (older.has(block)) return true;
+        if (older.has(block) || olderReads.has(block)) return true;
         if (!extent.readsLive) return false;
         for (let near = block - reachBefore; near <= block + reachAfter; near++) if (older.has(near)) return true;
         return false;
       };
       const runnable = dab.blocks.filter((block) => !waitsOn(block) && holds(extent, dab.payload, block));
       if (runnable.length > 0) {
-        const whole = runnable.length === dab.total && extent.writes.length === 1;
+        const whole = !dab.byBlock && runnable.length === dab.total && extent.writes.length === 1;
         const done = new Set<number>();
         for (const run of dab.byBlock ? runnable.map((block) => [block]) : contiguousRuns(runnable)) {
           const clip = whole
@@ -149,7 +172,14 @@ export class HeldDabs<T> {
         }
         dab.blocks = dab.blocks.filter((block) => !done.has(block));
       }
-      for (const block of dab.blocks) older.add(block);
+      for (const block of dab.blocks) {
+        older.add(block);
+        if (!extent.readsLive) continue;
+        const read = blockReadSpan(this.grid, extent, block);
+        if (read.end <= read.start) continue;
+        for (let near = blockOfFrame(this.grid, read.start); near <= blockOfFrame(this.grid, read.end - 1); near++)
+          olderReads.add(near);
+      }
     }
     this.queue = this.queue.filter((dab) => dab.blocks.length > 0);
   }

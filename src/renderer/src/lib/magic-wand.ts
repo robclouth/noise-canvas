@@ -24,6 +24,45 @@ const ABOVE = 2;
 // walking every bin.
 const MAX_GROWN_BINS = 2_000_000;
 
+/** One byte a bin, kept only for the chunks of the file something touched. */
+class ChunkBytes {
+  private readonly chunks = new Map<number, Uint8Array>();
+
+  constructor(
+    private readonly numBands: number,
+    private readonly bandStepLog2s: ArrayLike<number>,
+    private readonly bandLengths: ArrayLike<number>,
+    private readonly chunkFrames: number,
+  ) {}
+
+  /** The chunk `band`'s bin `bin` starts in. */
+  chunkOf(band: number, bin: number): number {
+    return Math.floor((bin << this.bandStepLog2s[band]) / this.chunkFrames);
+  }
+
+  get(band: number, bin: number): number {
+    const chunk = this.chunkOf(band, bin);
+    const bytes = this.chunks.get(chunk * this.numBands + band);
+    return bytes ? bytes[bin - this.firstBin(band, chunk)] : 0;
+  }
+
+  set(band: number, bin: number, value: number): void {
+    const chunk = this.chunkOf(band, bin);
+    const key = chunk * this.numBands + band;
+    let bytes = this.chunks.get(key);
+    if (!bytes) {
+      const next = Math.min(this.bandLengths[band], this.firstBin(band, chunk + 1));
+      bytes = new Uint8Array(next - this.firstBin(band, chunk));
+      this.chunks.set(key, bytes);
+    }
+    bytes[bin - this.firstBin(band, chunk)] = value;
+  }
+
+  private firstBin(band: number, chunk: number): number {
+    return Math.ceil((chunk * this.chunkFrames) / (1 << this.bandStepLog2s[band]));
+  }
+}
+
 /** The louder channel's level at `band`'s bin `bin`, or -Infinity where the span holds no such bin. */
 const binDb = (span: PackedSpan, band: number, bin: number): number => {
   const pixel = span.pixel(band, bin);
@@ -57,7 +96,7 @@ export async function growWandSelection(
   if (seedBin < 0) return null;
 
   // Each bin's level against the floor, UNREAD until its chunk is read.
-  const levels: (Uint8Array | null)[] = new Array(numBands).fill(null);
+  const levels = new ChunkBytes(numBands, bandStepLog2s, bandLengths, chunkFrames);
   const readChunks = new Set<number>();
   let floorDb = Number.NaN;
   const readChunk = async (chunk: number): Promise<boolean> => {
@@ -67,23 +106,21 @@ export async function growWandSelection(
     if (Number.isNaN(floorDb)) floorDb = binDb(span, seedBand, seedBin) - toleranceDb;
     const { metadata } = span.view.layout;
     for (let band = 0; band < numBands; band++) {
-      const level = (levels[band] ??= new Uint8Array(bandLengths[band]));
       const k0 = span.view.bandK0[band];
       const count = Math.min(metadata[band * 4 + 1], bandLengths[band] - k0);
-      for (let k = 0; k < count; k++) level[k0 + k] = binDb(span, band, k0 + k) < floorDb ? BELOW : ABOVE;
+      for (let k = 0; k < count; k++) levels.set(band, k0 + k, binDb(span, band, k0 + k) < floorDb ? BELOW : ABOVE);
     }
     return true;
   };
-  const chunkOf = (band: number, bin: number): number => Math.floor((bin << bandStepLog2s[band]) / chunkFrames);
+  const chunkOf = (band: number, bin: number): number => levels.chunkOf(band, bin);
 
   if (!(await readChunk(chunkOf(seedBand, seedBin)))) return null;
   if (!Number.isFinite(floorDb)) return null;
 
-  const visited: (Uint8Array | null)[] = new Array(numBands).fill(null);
+  const visited = new ChunkBytes(numBands, bandStepLog2s, bandLengths, chunkFrames);
   const visit = (band: number, bin: number): boolean => {
-    const seen = (visited[band] ??= new Uint8Array(bandLengths[band]));
-    if (seen[bin]) return false;
-    seen[bin] = 1;
+    if (visited.get(band, bin)) return false;
+    visited.set(band, bin, 1);
     return true;
   };
 
@@ -106,7 +143,7 @@ export async function growWandSelection(
     const bin = stack[stack.length - 1];
     const band = stack[stack.length - 2];
     stack.length -= 2;
-    const level = levels[band]?.[bin] ?? UNREAD;
+    const level = levels.get(band, bin);
     if (level === UNREAD && !readChunks.has(chunkOf(band, bin))) {
       unread.push(band, bin);
       continue;

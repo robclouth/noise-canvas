@@ -110,6 +110,13 @@ describe("sourceNeedsOver", () => {
     ]);
   });
 
+  it("maps a part at the file's end onto the start of a dab that wraps before it", () => {
+    const reads = [read("a", 5000, 5400, -200, 200)];
+    expect(sourceNeedsOver(reads, { start: 900, end: 1000 })).toEqual([
+      { fileId: "a", startFrame: 5000, endFrame: 5300, wantOriginal: false },
+    ]);
+  });
+
   it("asks once per file, over every step reading it", () => {
     const reads = [read("a", 1000, 1100, 0, 100), read("a", 3000, 3100, 0, 100), read("b", 0, 100, 0, 100)];
     expect(sourceNeedsOver(reads, null)).toEqual([

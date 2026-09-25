@@ -782,7 +782,7 @@ export class FileEngine {
       beginStroke,
       endStroke,
       holdPaint: (ranges, values) => canvasRef.current?.holdPaint(ranges, values) ?? (async () => {}),
-      landUnderStroke: (ranges, values) => canvasRef.current?.landUnderStroke(ranges, values),
+      landUnderStroke: (ranges, values, own) => canvasRef.current?.landUnderStroke(ranges, values, own),
       forgetBlocks: (ranges) => canvasRef.current?.forgetBlocks(ranges),
       settleStroke: async (signal) => {
         if (this.settlingStroke) return { status: "cancelled" };

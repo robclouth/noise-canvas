@@ -73,7 +73,7 @@ const NO_OTHER_FILES = { sources: [], impulses: [], original: false };
 
 /** A dab that writes [start, end) and reads nothing beyond it. */
 function dabExtent(start: number, end: number): DabExtent {
-  return { writes: [{ start, end }], before: 0, after: 0, readsLive: false };
+  return { writes: [{ start, end }], before: 0, after: 0, readsLive: false, piece: { before: 0, after: 0 } };
 }
 
 describe("a canvas that holds a window of the file", () => {
@@ -809,6 +809,44 @@ describe("a canvas that holds a window of the file", () => {
     }
   });
 
+  it("keeps a stroke over more blocks than the slots hold when its pen-up takes them ahead", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
+    rig.canvas.beginStroke();
+    const blocks = Math.min(grid.blockCount, 8);
+    for (let block = 0; block < blocks; block++) {
+      const at = (block + 0.25) / grid.blockCount;
+      const frames = dabFrames(at);
+      const end = Math.min(frames.end, frameRangeOfBlock(grid, block).end);
+      rig.canvas.aim(frames.start, end);
+      await until(() => rig.canvas.holdsFrames(frames.start, end), `block ${block}`);
+      expect(
+        rig.canvas.paintWhenHeld(dabExtent(frames.start, end), NO_OTHER_FILES, (clip) => rig.dab(at, undefined, clip)),
+      ).toBe(true);
+    }
+    expect((await rig.canvas.settle()).status).toBe("completed");
+    const dirty = rig.canvas.dirtyPixelRanges()!;
+    const painted = await rig.canvas.readPixelRanges(dirty);
+    const release = rig.canvas.holdPaint(dirty, Promise.resolve(painted));
+    rig.canvas.endStroke();
+
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    for (let block = 0; block < blocks; block++) {
+      const frames = frameRangeOfBlock(grid, block);
+      rig.canvas.aim(frames.start, frames.end);
+      await until(() => rig.canvas.holdsFrames(frames.start, frames.end), `block ${block} back`);
+      const list = blockPixelRanges(grid, block);
+      const onBlock = intersectPixelRanges(dirty, list.ranges.slice(0, list.count * 2));
+      const viewRanges = fileRangesToView(rig.renderer().committedSource().view, layout, onBlock)!;
+      const shown = await rig.renderer().readPixelRanges(viewRanges);
+      expect(
+        float32BitsEqual(shown, composePixelRangeValues(onBlock, [{ ranges: dirty, values: painted }])),
+        `block ${block}`,
+      ).toBe(true);
+    }
+    await release(false);
+  });
+
   it("shows a stored stroke on a block whose slot was filled before it", async () => {
     const rig = harness(1);
     await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
@@ -932,6 +970,44 @@ describe("a canvas that holds a window of the file", () => {
     rig.canvas.aim(0, 1);
     await until(() => rig.canvas.holdsFrames(0, 1), "the first block again");
     expect(float32BitsEqual(await canvasAt(untouched), cut(untouched))).toBe(true);
+  });
+
+  it("lands a commit's own stored values over its held paint while a later stroke is on the canvas", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    const canvasAt = async (fileRanges: Uint32Array): Promise<Float32Array> => {
+      const viewRanges = fileRangesToView(rig.renderer().committedSource().view, layout, fileRanges);
+      if (!viewRanges) throw new Error("the pixels are not on the canvas");
+      return await rig.renderer().readPixelRanges(viewRanges);
+    };
+
+    rig.canvas.beginStroke();
+    expect(rig.dab(0)).toBe(true);
+    const first = rig.canvas.dirtyPixelRanges()!;
+    const painted = await canvasAt(first);
+    const release = rig.canvas.holdPaint(first, Promise.resolve(painted));
+    rig.canvas.endStroke();
+
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.08)).toBe(true);
+    expect(pixelRangeCount(intersectPixelRanges(first, rig.canvas.dirtyPixelRanges()!))).toBe(0);
+
+    // The first commit stores values of its own over its stroke, as the
+    // limiter does, and they land while the second stroke paints.
+    const stored = painted.map((v) => v * 0.5);
+    scatterCompactPixelRanges(data.packedData, stored, first);
+    rig.canvas.landUnderStroke(first, stored, first);
+    expect(float32BitsEqual(await canvasAt(first), stored)).toBe(true);
+
+    const away = grid.blockFrames * 3;
+    rig.canvas.aim(away, away + 1);
+    await until(() => rig.canvas.holdsFrames(away, away + 1), "a block away");
+    rig.canvas.aim(0, 1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first block again");
+    expect(float32BitsEqual(await canvasAt(first), stored)).toBe(true);
+    await release(true, first);
+    rig.canvas.endStroke();
   });
 
   it("keeps the values a commit stored of its own when the slots take its paint", async () => {

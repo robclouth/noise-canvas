@@ -121,17 +121,27 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    commit silence. `holdsFrames` gates it, `paintWhenHeld` holds the dab back
    with the position it was given, and the fill that brings the block in runs
    it. A dab is held per block (`lib/held-dabs.ts`): each block it writes
-   paints once the canvas holds that block plus the dab's reach either side,
-   and one bin of the coarsest band past each cut the dab continues across,
+   paints once the canvas holds that block plus what the dab reads from each
+   pixel of it (`pieceReach` in `effect-reach.ts`, which is more than the
+   reach past the brush: a blur with Cut edges still smears inside it), and
+   one bin of the coarsest band past each cut the dab continues across,
    because a pixel next to a cut interpolates over it. Neighbouring blocks
    that are ready paint as one run under a write clip (`StrokeParams.clip`),
    with the brush laid out over the file, not the canvas, so every piece
    paints the same pixels a whole-file canvas would. A dab that fits and finds
-   nothing held paints whole, at once. A block of a dab waits for the older
-   dabs that still have that block to paint, and, when it reads the canvas as
-   those dabs leave it (Accumulate), for the older dabs within its reach; so
-   every pixel takes its dabs in the order they came, and a dab far from an
-   older one does not wait for it. `settle` aims the window at the oldest
+   nothing held paints whole, at once.
+   Some dabs cannot be cut. An effect that may read anywhere in the brush (a
+   warp that scales, turns or mirrors time, a sort along time, any read an
+   edge mode wraps round) would read blocks the canvas does not hold, and an
+   Accumulate dab would read, across a cut, what its own earlier piece
+   painted. `DabExtent.piece` is null for them, every block reads the whole
+   dab, and one wider than the window is refused with a notice that names why.
+   A block of a dab waits for the older dabs that still have that block to
+   paint or, when they read the canvas as the dabs before them left it
+   (Accumulate), still have it to read; and, when it reads the canvas that way
+   itself, for the older dabs within its reach. So every pixel takes its dabs
+   in the order they came, and a dab far from an older one does not wait for
+   it. `settle` aims the window at the oldest
    waiting block and widens over what follows while one window holds it.
    `settle` drains what is left
    before the commit reads the stroke. Settlement returns `completed`,

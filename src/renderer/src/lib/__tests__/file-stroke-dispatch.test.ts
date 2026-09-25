@@ -9,7 +9,14 @@ import {
   disposeHarnessTextures,
   toStrokeTextures,
 } from "../../test/render-harness";
-import { dabSpan, dispatchStroke, prepareStrokeBatch, type FileStrokeContext } from "../file-stroke-dispatch";
+import {
+  dabSpan,
+  dispatchStroke,
+  prepareStrokeBatch,
+  strokeRefusal,
+  type FileStrokeContext,
+} from "../file-stroke-dispatch";
+import { liveReadRefusal, wholeBrushRefusal } from "../whole-file-gate";
 import { sourceNeedsOver } from "../source-window";
 import { disposeOnsetTexture } from "../onset-map";
 import { penState } from "../pen-state";
@@ -27,7 +34,7 @@ afterEach(() => {
   while (disposers.length) disposers.pop()!();
 });
 
-async function harness() {
+async function harness(windowBlocks = 2) {
   const { passThroughEffect } = await import("../../effects/passthrough-effect");
   const data = createMockSpectrogramData({
     numFrames: 300 * 64,
@@ -54,7 +61,7 @@ async function harness() {
     readRoot: read,
     onChanged: () => {},
     sourceBlocks: () => null,
-    windowBlocks: 2,
+    windowBlocks,
   });
   const view = canvas.firstView(0, 1);
   const renderer = new StrokeRenderer(
@@ -115,6 +122,22 @@ async function harness() {
 }
 
 describe("file-space stroke dispatch", () => {
+  it("paints a full-length brush a piece at a time, and refuses one only the whole dab can serve", async () => {
+    const { context } = await harness(3);
+    const full = (effect: "passthrough" | "transform", step: Record<string, unknown>) =>
+      createStateForEffects([effect], {
+        brushSizeTime: 32,
+        stepOverrides: step,
+        overrides: { activeFileId: "dispatch", filepathsBpm: { "/dispatch.wav": 120 } },
+      });
+    const aim = { x: 0.5, y: 0.5 };
+    expect(strokeRefusal(context, full("passthrough", {}), aim)).toBeNull();
+    expect(strokeRefusal(context, full("transform", { transformScaleTime: -1, transformEdgeMode: 0 }), aim)).toBe(
+      wholeBrushRefusal(["Transform"]),
+    );
+    expect(strokeRefusal(context, full("passthrough", { accumulate: true }), aim)).toBe(liveReadRefusal());
+  });
+
   it("uses the prepared source request without calculating it again", async () => {
     const { context, canvas, renderer } = await harness();
     const source = { ...context.openFiles.dispatch, id: "source", filePath: "/source.wav", rendererRef: undefined };

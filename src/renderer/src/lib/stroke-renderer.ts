@@ -31,6 +31,7 @@ import { metadataTextureRows, type BandLayout } from "./band-layout";
 import { copyMaterial } from "../components/copy-material";
 import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
+import { scatterIntoTargets } from "./target-scatter";
 import { phaseTurnMaterial } from "../components/phase-turn-material";
 import { rangeCopyMaterial } from "../components/range-copy-material";
 import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
@@ -936,6 +937,8 @@ export class StrokeRenderer {
     uniforms.sourceSampleRate = uniforms.destSampleRate;
     uniforms.sourceSpectrogramTextureSize = uniforms.destSpectrogramTextureSize;
     uniforms.sourceOnsetTex = { value: destOnsetTexture ?? this.textures.placeholderTexture };
+    uniforms.sourceViewStartFrame = uniforms.destViewStartFrame;
+    uniforms.sourceFileFrameCount = uniforms.destFileFrameCount;
     uniforms.sourceTimeScale = { value: 1 };
     uniforms.sourceBandScale = { value: 1 };
   }
@@ -979,20 +982,24 @@ export class StrokeRenderer {
    * against the two files' durations — and is then moved onto the span the
    * source textures hold, so a window of either file reads the frames the
    * whole file would. Whole-file spans on both sides return the file-space
-   * value untouched.
+   * value untouched. `positionUv` is the step's own source position, which
+   * the shader adds: on a window, a dab whose read runs past either end of
+   * the file is moved a whole file length back into it, as the shader's wrap
+   * of a whole-file source would move it, because the window was placed there.
    */
   private sourceOffsetForViews(
-    sourceFile: SourceFileInfo,
+    sourceSpec: SpectrogramData,
+    sourceView: CanvasView | undefined,
     lockedOffset: { beats: number; pitch: number } | null | undefined,
     mode: string,
     anchor: Vector2,
     timeScale: number,
     bandScale: number,
     beatRatio: number,
+    positionUv: number,
   ): Vector2 {
-    const sourceSpec = sourceFile.spectrogramData;
-    const sourceStart = sourceFile.view?.startFrame ?? 0;
-    const sourceFrames = sourceViewFrames(sourceFile);
+    const sourceStart = sourceView?.startFrame ?? 0;
+    const sourceFrames = sourceView ? sourceView.endFrame - sourceView.startFrame : sourceSpec.numFrames;
     const wholeSource = sourceStart === 0 && sourceFrames === sourceSpec.numFrames;
     if (wholeSource && viewCoversFile(this.view, this.spectrogramData.numFrames)) {
       return this.calculateSourceOffset(lockedOffset, mode, anchor, timeScale, bandScale);
@@ -1001,7 +1008,12 @@ export class StrokeRenderer {
     const fileOffset = this.sourceFileOffset(sourceSpec, lockedOffset, mode, anchor, bandScale, beatRatio);
     // Where the destination span's first frame falls in the source, beat for beat.
     const spanStartSec = (beatRatio * this.view.startFrame) / this.spectrogramData.sampleRate;
-    const readFrame = (spanStartSec + fileOffset.x * sourceDuration) * sourceSpec.sampleRate;
+    let readFrame = (spanStartSec + fileOffset.x * sourceDuration) * sourceSpec.sampleRate;
+    if (!wholeSource) {
+      const scale = (beatRatio * sourceSpec.sampleRate) / this.spectrogramData.sampleRate;
+      const dabRead = readFrame + anchor.x * this.viewFrameCount * scale + positionUv * sourceSpec.numFrames;
+      readFrame -= Math.floor(dabRead / sourceSpec.numFrames) * sourceSpec.numFrames;
+    }
     return new Vector2((readFrame - sourceStart) / sourceFrames, fileOffset.y);
   }
 
@@ -1500,17 +1512,32 @@ export class StrokeRenderer {
       const stepSourceDuration = sourceViewFrames(stepSource) / stepSource.spectrogramData.sampleRate;
       const stepLockedOffset = state.isStroking ? steps[geometry.index]?.lockedOffset : null;
       const stepPositionMode = stepState.sourcePositionMode as string;
+      // A step reading this file reads the canvas, which is a window of it
+      // like any other, so its file-space offset lands on the canvas's span.
+      const stepPositionUv = stepPositionMode === "follow" ? 0 : Number(stepState.sourceTimeOffset ?? 0) / 100;
       const sourceOffsetUv = readsSourceFile
         ? this.sourceOffsetForViews(
-            stepSource,
+            stepSource.spectrogramData,
+            stepSource.view,
             stepLockedOffset,
             stepPositionMode,
             stepAnchor,
             (bpm * totalDuration) / (sourceBpm * stepSourceDuration),
             sourceBandUvSlope(this.spectrogramData, stepSource.spectrogramData),
             bpm / sourceBpm,
+            stepPositionUv,
           )
-        : this.calculateSourceOffset(stepLockedOffset, stepPositionMode, stepAnchor, 1, 1);
+        : this.sourceOffsetForViews(
+            this.spectrogramData,
+            viewCoversFile(this.view, this.spectrogramData.numFrames) ? undefined : this.view,
+            stepLockedOffset,
+            stepPositionMode,
+            stepAnchor,
+            1,
+            1,
+            1,
+            stepPositionUv,
+          );
 
       // Build common uniforms for this step
       const commonUniforms = this.buildStepUniforms(
@@ -2381,76 +2408,7 @@ export class StrokeRenderer {
    * target. False when the ranges name no pixel.
    */
   private patchTargets(values: Float32Array, pixelRanges: Uint32Array, targets: WebGLRenderTarget[]): boolean {
-    const { textureWidth: width, textureHeight: height } = this.view;
-
-    let patchPixels = 0;
-    let numRanges = 0;
-    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
-      if (pixelRanges[i + 1] === 0) continue;
-      patchPixels += pixelRanges[i + 1];
-      numRanges++;
-    }
-    if (patchPixels === 0) return false;
-    if (values.length !== patchPixels * 4) throw new Error("the patch values do not match the ranges");
-
-    // Record where each range sits in the compact block so the shader can
-    // scatter it back.
-    const instances = new Uint32Array(numRanges * 3);
-    let srcPixel = 0;
-    let inst = 0;
-    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
-      const start = pixelRanges[i];
-      const count = pixelRanges[i + 1];
-      if (count === 0) continue;
-      instances[inst * 3] = start;
-      instances[inst * 3 + 1] = count;
-      instances[inst * 3 + 2] = srcPixel;
-      srcPixel += count;
-      inst++;
-    }
-
-    const patchWidth = Math.min(width, patchPixels);
-    const patchHeight = Math.ceil(patchPixels / patchWidth);
-    let padded = values;
-    if (values.length !== patchWidth * patchHeight * 4) {
-      padded = new Float32Array(patchWidth * patchHeight * 4);
-      padded.set(values);
-    }
-    const patchTex = new DataTexture(padded, patchWidth, patchHeight, RGBAFormat, FloatType);
-    patchTex.needsUpdate = true;
-    this.gl.initTexture(patchTex);
-
-    const geometry = new InstancedBufferGeometry();
-    geometry.setAttribute("position", new BufferAttribute(PATCH_QUAD_POSITIONS, 3));
-    geometry.setIndex(new BufferAttribute(PATCH_QUAD_INDICES, 1));
-    geometry.setAttribute("aRange", new InstancedBufferAttribute(instances, 3));
-    geometry.instanceCount = numRanges;
-
-    patchMaterial.uniforms.patchTex.value = patchTex;
-    patchMaterial.uniforms.destWidth.value = width;
-    patchMaterial.uniforms.destHeight.value = height;
-    patchMaterial.uniforms.patchWidth.value = patchWidth;
-
-    const mesh = new Mesh(geometry, patchMaterial);
-    mesh.frustumCulled = false;
-    const scene = new Scene();
-    scene.add(mesh);
-
-    // Only the patched pixels are drawn, so the rest of the target must survive
-    // the render — no clear.
-    const prevAutoClear = this.gl.autoClear;
-    this.gl.autoClear = false;
-    for (const target of targets) {
-      this.gl.setRenderTarget(target);
-      this.gl.render(scene, this.camera);
-    }
-    this.gl.setRenderTarget(null);
-    this.gl.autoClear = prevAutoClear;
-
-    patchMaterial.uniforms.patchTex.value = null;
-    geometry.dispose();
-    patchTex.dispose();
-    return true;
+    return scatterIntoTargets(this.gl, values, pixelRanges, targets);
   }
 
   /**

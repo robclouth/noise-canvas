@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
-import { brushReaches, strokeReach, type ReachContext, type TimeReach } from "../effect-reach";
+import { brushReaches, pieceReach, strokeReach, type ReachContext, type TimeReach } from "../effect-reach";
 
 // A 60-second file at 120 bpm, on a canvas holding 16 seconds of it. The mock
 // brush is one beat wide, so its own span is half a second.
@@ -332,5 +332,41 @@ describe("the brush's reach as a whole", () => {
     expect(entries[0].effect).toBe("transform");
     expect(entries[0].step).toBe(1);
     expect(entries[0].brushSeconds).toBeCloseTo(BRUSH_SECONDS, 10);
+  });
+});
+
+describe("piece reach", () => {
+  function pieceOf(...steps: Array<Partial<TestBrushStep>>) {
+    return pieceReach(createMockStateWithSteps(steps.map((overrides, i) => ({ name: `Step ${i}`, overrides }))), CTX);
+  }
+
+  it("reads a blur's smear around every pixel, even where the edge cuts it at the brush", () => {
+    expect(pieceOf(withEffect("blur", { blurAmountTime: 25, blurEdgeMode: 0, blurOrigin: 1 }))).toEqual({
+      reach: { before: 0.5, after: 0.5 },
+      wholeBrush: [],
+    });
+  });
+
+  it("reads a shift around every pixel", () => {
+    expect(pieceOf(withEffect("transform", { transformShiftBeats: 2, transformEdgeMode: 0 })).reach).toEqual({
+      before: 1,
+      after: 1,
+    });
+  });
+
+  it.each([
+    ["a reversal", "transform", { transformScaleTime: -1, transformEdgeMode: 1 }],
+    ["a stretch", "transform", { transformScaleTime: 0.5, transformEdgeMode: 0 }],
+    ["a turn", "transform", { transformRotation: 30 }],
+    ["a shift wrapped round the brush", "transform", { transformShiftBeats: 1, transformEdgeMode: 2 }],
+    ["a smear wrapped round the brush", "blur", { blurAmountTime: 25, blurEdgeMode: 2 }],
+    ["copies wrapped round the brush", "clone", { cloneCountX: 3, cloneSpaceBeats: 0.25, cloneEdgeMode: 2 }],
+    ["a sort along time", "sort", { sortDirection: 0 }],
+  ])("reads anywhere in the brush for %s", (_, effect, overrides) => {
+    expect(pieceOf(withEffect(effect, overrides))).toEqual({ reach: null, wholeBrush: [effect] });
+  });
+
+  it("reads only the pixel for a sort along pitch", () => {
+    expect(pieceOf(withEffect("sort", { sortDirection: 1 })).reach).toEqual({ before: 0, after: 0 });
   });
 });

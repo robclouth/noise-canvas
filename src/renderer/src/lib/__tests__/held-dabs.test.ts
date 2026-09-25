@@ -9,7 +9,7 @@ const grid = blockGrid({ numBands: data.numBands, metadata: data.metadata }, dat
 const B = grid.blockFrames;
 
 function extent(start: number, end: number, reach = 0, readsLive = false): DabExtent {
-  return { writes: [{ start, end }], before: reach, after: reach, readsLive };
+  return { writes: [{ start, end }], before: reach, after: reach, readsLive, piece: { before: reach, after: reach } };
 }
 
 describe("held dabs", () => {
@@ -27,6 +27,7 @@ describe("held dabs", () => {
       before: 0,
       after: 0,
       readsLive: false,
+      piece: { before: 0, after: 0 },
     };
     expect(blocksOfDab(grid, wrapped)).toEqual([0, grid.blockCount - 1]);
   });
@@ -38,6 +39,14 @@ describe("held dabs", () => {
     const margin = B / Math.min(...grid.binsPerBlock);
     expect(blockReadSpan(grid, wide, 1)).toEqual({ start: B + 100, end: 2 * B + margin });
     expect(blockReadSpan(grid, wide, 2)).toEqual({ start: 2 * B - margin, end: 3 * B });
+  });
+
+  it("reads around each piece as far as the dab reads from a pixel, or all of it for a dab painted whole", () => {
+    const wide = { ...extent(B + 100, 3 * B, 0), piece: { before: 40, after: 60 } };
+    const margin = B / Math.min(...grid.binsPerBlock);
+    expect(blockReadSpan(grid, wide, 2)).toEqual({ start: 2 * B - 40 - margin, end: 3 * B + 60 });
+    const whole = { ...extent(B + 100, 3 * B, 20), piece: null };
+    expect(blockReadSpan(grid, whole, 2)).toEqual({ start: B + 80, end: 3 * B + 20 });
   });
 
   it("paints what the canvas holds at once, a run of blocks at a time, and waits only on the same block", () => {
@@ -93,12 +102,51 @@ describe("held dabs", () => {
       painted.push("start");
       return true;
     });
-    // The older dab cannot paint yet. The live dab reads its block, so it waits;
-    // the one that reads the canvas as the stroke found it goes ahead.
+    held.push(extent(5 * B + 10, 5 * B + 20, B, false), "apart", () => {
+      painted.push("apart");
+      return true;
+    });
+    // The older dab cannot paint yet. The live dab reads its block, so it
+    // waits; the next writes where the live dab still has to read, so it
+    // waits too. The last reads the canvas as the stroke found it, clear of
+    // both, and goes ahead.
     held.release((_, name) => name !== "older");
-    expect(painted).toEqual(["start"]);
+    expect(painted).toEqual(["apart"]);
     held.release(() => true);
-    expect(painted).toEqual(["start", "older", "live"]);
+    expect(painted).toEqual(["apart", "older", "live", "start"]);
+  });
+
+  it("paints a dab that asks for it a block at a time, each block clipped, even when all of it is ready", () => {
+    const held = new HeldDabs<string>(grid);
+    const clips: (FrameSpan | null)[] = [];
+    held.push(
+      extent(B + 10, 3 * B - 10),
+      "apart",
+      (clip) => {
+        clips.push(clip);
+        return true;
+      },
+      true,
+    );
+    held.release(() => true);
+    expect(clips).toEqual([frameRangeOfBlock(grid, 1), frameRangeOfBlock(grid, 2)]);
+  });
+
+  it("holds a dab off a block that an older dab reading the canvas as it is left still has to read", () => {
+    const held = new HeldDabs<string>(grid);
+    const painted: string[] = [];
+    held.push(extent(3 * B + 10, 3 * B + 20, B, true), "reader", () => {
+      painted.push("reader");
+      return true;
+    });
+    held.push(extent(2 * B + 10, 2 * B + 20), "writer", () => {
+      painted.push("writer");
+      return true;
+    });
+    held.release((_, name) => name !== "reader");
+    expect(painted).toEqual([]);
+    held.release(() => true);
+    expect(painted).toEqual(["reader", "writer"]);
   });
 
   it("keeps a run that could not paint for the next release", () => {
