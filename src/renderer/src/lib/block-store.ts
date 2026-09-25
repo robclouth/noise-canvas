@@ -12,6 +12,7 @@ import {
   tapCount,
   tapSpanRanges,
 } from "./pixel-ranges";
+import { yieldIfLong } from "./frame-yield";
 
 // Blocks a whole-state read or write keeps in flight at once.
 const READ_ALL_AHEAD = 4;
@@ -308,8 +309,10 @@ export class BlockStore implements PackedStateStore {
   async readRootRanges(ranges: Uint32Array): Promise<Float32Array> {
     if (this.disposed) throw new Error("block store is disposed");
     const out = new Float32Array(pixelRangeCount(ranges) * 4);
+    let since = performance.now();
     for (const index of blocksForPixelRanges(this.grid, ranges)) {
       copyCompactOverlap(out, ranges, await this.rootBlock(index), this.blockRanges(index));
+      since = await yieldIfLong(since);
     }
     return out;
   }
@@ -321,8 +324,10 @@ export class BlockStore implements PackedStateStore {
   async readRanges(ranges: Uint32Array): Promise<Float32Array> {
     const out = new Float32Array(pixelRangeCount(ranges) * 4);
     const blocks = blocksForPixelRanges(this.grid, ranges);
+    let since = performance.now();
     for (const index of blocks) {
       copyCompactOverlap(out, ranges, await this.block(index), this.blockRanges(index));
+      since = await yieldIfLong(since);
     }
     return out;
   }

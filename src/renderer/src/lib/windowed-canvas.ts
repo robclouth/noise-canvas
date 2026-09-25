@@ -25,6 +25,7 @@ import { canvasExtraSlotBlocks, canvasWindowBlocks, CANVAS_WINDOW_SPARE_BLOCKS }
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
 import type { CoarseStrip } from "./coarse-strip";
 import { diag } from "./diag-log";
+import { yieldIfLong } from "./frame-yield";
 import { PackedWindow } from "./packed-window";
 import {
   composePixelRangeValues,
@@ -829,9 +830,18 @@ export class WindowedCanvas {
     if (clipped.covered) return inView;
     // What the canvas no longer holds was carried off it as the window slid;
     // the carry wins where both hold a pixel.
+    // Range by range, so a stroke over most of the file leaves room for frames.
     const out = new Float32Array(pixelRangeCount(pixelRanges) * 4);
-    copyCompactOverlap(out, pixelRanges, inView, clipped.fileRanges);
-    carried.copyInto(out, pixelRanges);
+    let since = performance.now();
+    let at = 0;
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      const range = pixelRanges.subarray(i, i + 2);
+      const part = out.subarray(at, at + range[1] * 4);
+      copyCompactOverlap(part, range, inView, clipped.fileRanges);
+      carried.copyInto(part, range);
+      at += range[1] * 4;
+      since = await yieldIfLong(since);
+    }
     return out;
   }
 
