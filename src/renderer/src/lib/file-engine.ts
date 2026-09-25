@@ -209,6 +209,7 @@ export class FileEngine {
         readRoot: (ranges) => getHistoryManager(fileId).rootRanges(ranges),
         readCurrentBlock: (index) => getHistoryManager(fileId).currentBlock(index),
         readRootBlock: (index) => getHistoryManager(fileId).rootBlock(index),
+        revision: () => getHistoryManager(fileId).revision,
         onChanged: () => {
           this.notifyResidencyChanged();
           invalidateRef.current?.();

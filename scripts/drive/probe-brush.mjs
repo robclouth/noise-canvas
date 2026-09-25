@@ -1,7 +1,7 @@
-// Checks brushes wider than the canvas window on a long file: one dab of a
-// brush the length of the file, one dab of a brush that wraps past the file's
-// end, and one full-length dab that paints from a second long file, each read
-// back from the store across the frames it covers.
+// Checks brushes that reach past the canvas window on a long file: one dab of
+// a brush the length of the file, one dab of a brush that wraps past the
+// file's end, one full-length dab that paints from a second long file, and one
+// dab that copies this file from far along it, each read back from the store.
 //
 // Usage: node scripts/drive/probe-brush.mjs [--seconds 285] [--no-build]
 import { copyFileSync } from "node:fs";
@@ -121,12 +121,48 @@ try {
     const missed = copied.map((ok, i) => (ok ? null : ((i + 0.5) / 30).toFixed(3))).filter(Boolean);
     console.log(`copy: ${copied.length - missed.length}/${copied.length} match the source (${unlike} differed before)`);
     if (missed.length > 0)
-      for (const i of [0, 7, 15, 22, 29])
+      for (const i of copied.map((ok, i) => (ok ? -1 : i)).filter((i) => i >= 0))
         console.log(
           `  at ${((i + 0.5) / 30).toFixed(3)}: dest ${dest[i].store.toExponential(2)} (was ${dest[i].original.toExponential(2)}), source ${source[i].store.toExponential(2)}`,
         );
     if (unlike < 20) failures.push("the two files are too alike to tell a copy");
     if (missed.length > 0) failures.push(`the full-length copy missed ${missed.join(", ")}`);
+  }
+  // A dab near the start that copies this file from 80% of the way along. Fixed
+  // holds pitch as well, so a first dab finds the brush's pitch and Source
+  // Pitch is set to it: the clone then reads the band it writes.
+  await setStep("brushSizeTime", 1);
+  await page.evaluate(() => {
+    const state = globalThis.__store.getState();
+    state.setParameter("sourceFile", null);
+    state.setParameter("sourcePositionMode", "fixed");
+    state.setParameter("sourceTimeOffset", 80);
+  });
+  const found = await clickAt(0.05, 0.3);
+  if (found) await setStep("sourcePitchOffset", found.y * 100);
+  const clone = await clickAt(0.1, 0.3);
+  if (!clone) failures.push("the far clone dab was never logged");
+  else {
+    const p = clone.y + clone.height / 2;
+    const at = [0.3, 0.5, 0.7].map((g) => clone.width * g);
+    const dest = await truth(at.map((dx) => ({ f: clone.x + dx, p })));
+    const src = await truth(at.map((dx) => ({ f: 0.8 + dx, p })));
+    // The read falls between bins, so a copied point is near its source value
+    // and much nearer it than the value it had before.
+    const matched = dest.filter((r, i) => {
+      const off = Math.abs(Math.log(r.store / src[i].store));
+      return off < 0.35 && off < 0.5 * Math.abs(Math.log(r.original / src[i].store));
+    }).length;
+    const differed = dest.filter((r, i) => Math.abs(Math.log(r.original / src[i].store)) > 0.05).length;
+    console.log(
+      `far clone: dab at ${clone.x.toFixed(4)}, ${matched}/${dest.length} match 80% (${differed} differed before)`,
+    );
+    for (let i = 0; i < dest.length; i++)
+      console.log(
+        `  +${at[i].toFixed(5)}: dest ${dest[i].store.toExponential(3)} (was ${dest[i].original.toExponential(3)}), 80% ${src[i].store.toExponential(3)}`,
+      );
+    if (differed < 2) failures.push("the dab and 80% are too alike to tell a clone");
+    if (matched < dest.length) failures.push("the far clone did not copy from 80% of the file");
   }
   for (const c of consoleLines)
     if (c.type === "error" && !/HRTF|valid audio stream/.test(c.text))

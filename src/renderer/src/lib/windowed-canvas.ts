@@ -1,4 +1,7 @@
-import { Vector2, type WebGLRenderer } from "three";
+import { Vector2, type WebGLRenderer, type WebGLRenderTarget } from "three";
+import { BlockSlotCache, PACKED_SLOT_TEXEL } from "./block-slot-cache";
+import { SelfWindow, type PaintLayer, type SelfState } from "./self-window";
+import { scatterIntoTargets } from "./target-scatter";
 import type { SpectrogramData } from "../store/types";
 import type { BandLayout } from "./band-layout";
 import {
@@ -158,6 +161,8 @@ export type WindowedCanvasDeps = {
   onChanged: () => void;
   /** Another open file's blocks, for a brush painting from it. Null when it has none. */
   sourceBlocks: (fileId: string) => SourceFileBlocks | null;
+  /** Changes whenever the file's committed state moves. */
+  revision?: () => number;
   /** Blocks the canvas holds at once. Defaults to the build's setting. */
   windowBlocks?: number;
 };
@@ -210,6 +215,12 @@ export class WindowedCanvas {
   private strokeSlots: StrokeSlots | null = null;
   private readonly pending: PendingPaint[] = [];
   private slotWrites: Promise<void> = Promise.resolve();
+  private selfWindow: SelfWindow | null = null;
+  private bridge: BlockSlotCache | null = null;
+  // Counts the changes to the held paint of strokes still committing.
+  private pendingKey = 0;
+  // Counts the dabs the stroke on the canvas has painted.
+  private strokeKey = 0;
   private stroking = false;
   // Set from `beginStroke` until the stroke ends or is discarded.
   private discardable = false;
@@ -589,9 +600,12 @@ export class WindowedCanvas {
       shown: null,
     };
     this.pending.push(paint);
+    this.pendingKey++;
+    void paint.landed.then(() => this.pendingKey++);
     const letGo = (): void => {
       const at = this.pending.indexOf(paint);
       if (at >= 0) this.pending.splice(at, 1);
+      this.pendingKey++;
     };
     return async (stored, except) => {
       if (!this.pending.includes(paint)) return;
@@ -604,6 +618,7 @@ export class WindowedCanvas {
       }
       const ranges = except ? subtractPixelRanges(paint.ranges, except) : paint.ranges;
       paint.shown = ranges;
+      this.pendingKey++;
       await this.writeSlots(ranges, paint.ranges, paint.values).finally(letGo);
     };
   }
@@ -688,6 +703,7 @@ export class WindowedCanvas {
     for (const paint of this.pending) {
       if (own && paint.ranges === own) {
         paint.shown = subtractPixelRanges(paint.shown ?? paint.ranges, ranges);
+        this.pendingKey++;
         continue;
       }
       unstored = mergePixelRanges(unstored, paint.ranges);
@@ -785,12 +801,17 @@ export class WindowedCanvas {
 
   /**
    * True when the canvas can paint every block of the dab: each block, with
-   * what the dab reads either side of it, fits one window.
+   * what the dab reads either side of it, fits one window, and so does what
+   * it reads of other files, or of this one far from the dab, while it writes
+   * that block.
    */
-  servable(extent: DabExtent): boolean {
+  servable(extent: DabExtent, needs?: DabNeeds): boolean {
     return blocksOfDab(this.grid, extent).every((block) => {
       const read = blockReadSpan(this.grid, extent, block);
-      return this.fitsWindow(read.start, read.end);
+      if (!this.fitsWindow(read.start, read.end)) return false;
+      if (!needs || needs.sources.length === 0) return true;
+      const part = extent.piece ? blockWriteSpan(this.grid, extent, block) : null;
+      return sourceNeedsOver(needs.sources, part).every((need) => this.sourceFits(need));
     });
   }
 
@@ -801,17 +822,22 @@ export class WindowedCanvas {
    * Returns false when the canvas can never serve it or `paint` refuses.
    */
   paintWhenHeld(extent: DabExtent, needs: DabNeeds, paint: DabPainter): boolean {
-    if (!this.servable(extent)) return false;
+    if (!this.servable(extent, needs)) return false;
+    const counted: DabPainter = (clip) => {
+      const painted = paint(clip);
+      if (painted) this.strokeKey++;
+      return painted;
+    };
     if (this.held.size === 0 && extent.writes.length === 1 && this.othersHold(needs, null)) {
       const write = extent.writes[0];
       const read = { start: Math.max(0, write.start - extent.before), end: write.end + extent.after };
       if (this.fitsWindow(read.start, read.end) && this.holdsFrames(read.start, read.end, needs.original)) {
-        const painted = paint(null);
+        const painted = counted(null);
         if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
         return painted;
       }
     }
-    this.held.push(extent, needs, paint, needs.sources.length > 0 && extent.piece !== null);
+    this.held.push(extent, needs, counted, needs.sources.length > 0 && extent.piece !== null);
     this.releaseHeld();
     return true;
   }
@@ -835,7 +861,21 @@ export class WindowedCanvas {
    * because every step names its own source.
    */
   aimSource(need: SourceNeed): SourceWindowTextures | null {
+    if (need.self) {
+      const window = this.selfWindowFor();
+      window.aim(need.startFrame, need.endFrame, need.wantOriginal);
+      return window.holdsFrames(need.startFrame, need.endFrame, need.wantOriginal) ? window.textures("start") : null;
+    }
     return this.aimIn(this.sources, need);
+  }
+
+  /**
+   * The textures to read this file through far from the dab: as the stroke
+   * found it, or with its own paint on it. Null until a self need has placed
+   * the window and it can serve.
+   */
+  selfTextures(state: SelfState): SourceWindowTextures | null {
+    return this.selfWindow?.textures(state) ?? null;
   }
 
   /**
@@ -892,6 +932,7 @@ export class WindowedCanvas {
         const reads = [
           this.fill,
           ...[...this.sources.values()].map((slot) => slot.settled()),
+          this.selfWindow?.settled() ?? null,
           ...[...this.impulses.values()].map((slot) => slot.settled()),
         ].filter((read): read is Promise<void> => read !== null);
         if (reads.length === 0) break;
@@ -1201,6 +1242,10 @@ export class WindowedCanvas {
     this.sources.clear();
     for (const slot of this.impulses.values()) slot.dispose();
     this.impulses.clear();
+    this.selfWindow?.dispose();
+    this.selfWindow = null;
+    this.bridge?.dispose();
+    this.bridge = null;
     this.request = null;
     this.held.clear();
   }
@@ -1252,11 +1297,118 @@ export class WindowedCanvas {
     return this.original;
   }
 
-  /** True while every other-file window holds what the dab reads while it writes `part`, or all of it for null. */
+  /** True while every other window holds what the dab reads while it writes `part`, or all of it for null. */
   private othersHold(needs: DabNeeds, part: FrameSpan | null): boolean {
     const sources = sourceNeedsOver(needs.sources, part);
-    if (!sources.every((need) => this.sources.get(need.fileId)?.holds(need) ?? false)) return false;
+    const holds = (need: SourceNeed): boolean =>
+      need.self
+        ? (this.selfWindow?.holdsFrames(need.startFrame, need.endFrame, need.wantOriginal) ?? false)
+        : (this.sources.get(need.fileId)?.holds(need) ?? false);
+    if (!sources.every(holds)) return false;
     return needs.impulses.every((need) => this.impulses.get(need.fileId)?.holds(need) ?? false);
+  }
+
+  /** True when one window over the need's file can hold what it asks for. */
+  private sourceFits(need: SourceNeed): boolean {
+    const grid = need.self ? this.grid : this.sourceGrid(need.fileId);
+    if (!grid) return true;
+    const first = blockOfFrame(grid, need.startFrame);
+    const last = blockOfFrame(grid, Math.max(need.startFrame, need.endFrame - 1));
+    return last - first + 1 <= Math.min(this.windowBlocks, grid.blockCount);
+  }
+
+  private readonly sourceGrids = new Map<string, BlockGrid>();
+
+  private sourceGrid(fileId: string): BlockGrid | null {
+    const known = this.sourceGrids.get(fileId);
+    if (known) return known;
+    const spectrogram = this.deps.sourceBlocks(fileId)?.spectrogram;
+    if (!spectrogram) return null;
+    const { numBands, metadata, numFrames, sampleRate } = spectrogram;
+    const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
+    this.sourceGrids.set(fileId, grid);
+    return grid;
+  }
+
+  /** The window over this file for reads far from the dab, made on first use. */
+  private selfWindowFor(): SelfWindow {
+    if (!this.selfWindow) {
+      const { deps } = this;
+      this.selfWindow = new SelfWindow({
+        gl: deps.gl,
+        grid: this.grid,
+        windowBlocks: this.windowBlocks,
+        read: deps.readCurrent,
+        readBlock: deps.readCurrentBlock,
+        readRoot: deps.readRoot,
+        readRootBlock: deps.readRootBlock,
+        revision: deps.revision ?? (() => 0),
+        pending: () => {
+          if (!this.carried.settledNow || this.pending.some((paint) => !paint.values)) return null;
+          const layers: PaintLayer[] = [];
+          for (const paint of this.pending) {
+            const layer = this.pendingLayer(paint);
+            if (layer) layers.push(layer);
+          }
+          return { key: this.pendingKey, layers };
+        },
+        strokeKey: () => this.strokeKey,
+        drawStroke: (view, target) => this.drawStrokePaint(view, target),
+      });
+    }
+    return this.selfWindow;
+  }
+
+  /**
+   * Draws what the stroke has painted on `view`'s blocks into `target`, where
+   * `view` places them: off the canvas for the blocks it holds, out of the
+   * stroke slots and the carry for those that left it.
+   */
+  private drawStrokePaint(view: CanvasView, target: WebGLRenderTarget): void {
+    const renderer = this.deps.renderer();
+    if (!renderer) return;
+    let within: Uint32Array = new Uint32Array(0);
+    for (let block = view.firstBlock; block <= view.lastBlock; block++) {
+      const list = blockPixelRanges(this.grid, block);
+      within = mergePixelRanges(within, list.ranges.subarray(0, list.count * 2));
+    }
+    const dirty = renderer.getDirtyPixelRanges();
+    if (dirty) {
+      const { view: canvasView, texture } = renderer.committedSource();
+      const lacking = new Set(this.blocks.canvasLacks(canvasView));
+      let onCanvas: Uint32Array = new Uint32Array(0);
+      for (
+        let block = Math.max(view.firstBlock, canvasView.firstBlock);
+        block <= Math.min(view.lastBlock, canvasView.lastBlock);
+        block++
+      ) {
+        if (lacking.has(block)) continue;
+        const list = blockPixelRanges(this.grid, block);
+        onCanvas = mergePixelRanges(onCanvas, list.ranges.subarray(0, list.count * 2));
+      }
+      const painted = intersectPixelRanges(viewRangesToFile(canvasView, dirty), onCanvas);
+      if (pixelRangeCount(painted) > 0) {
+        const bridge = (this.bridge ??= new BlockSlotCache(
+          this.deps.gl,
+          this.grid,
+          this.windowBlocks * blockTexels(this.grid, 0) * PACKED_SLOT_TEXEL.bytes,
+          undefined,
+          PACKED_SLOT_TEXEL,
+        ));
+        bridge.invalidate();
+        bridge.take(canvasView, blocksForPixelRanges(this.grid, painted), texture);
+        bridge.composeRanges(view, painted, target);
+      }
+    }
+    const held = this.strokeSlots?.within(within);
+    if (held && pixelRangeCount(held) > 0) this.strokeSlots!.paintCache.composeRanges(view, held, target);
+    if (this.carried.size > 0) {
+      const carried = this.carried.snapshot();
+      const ranges = intersectPixelRanges(carried.ranges, within);
+      const viewRanges = pixelRangeCount(ranges) > 0 ? fileRangesToView(view, this.layout(), ranges) : null;
+      if (viewRanges)
+        scatterIntoTargets(this.deps.gl, composePixelRangeValues(ranges, [carried]), viewRanges, [target]);
+    }
   }
 
   /** The slot in `slots` for the need's file, building one on first use. */

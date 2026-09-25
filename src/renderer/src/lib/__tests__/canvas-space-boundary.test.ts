@@ -34,6 +34,7 @@ const ALLOWED = new Map([
   ["windowed-canvas.ts", "the boundary itself: the file-space face of the canvas"],
   ["carried-paint.ts", "names the pixels a stroke painted on blocks leaving the window"],
   ["block-slot-cache.ts", "places a block's own pixels inside the view it composes into"],
+  ["self-window.ts", "lays paint the store lacks over the window of the file it composes"],
 ]);
 
 /** The glob's keys are relative to this file; drop the climb out of it. */

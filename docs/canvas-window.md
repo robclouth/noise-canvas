@@ -246,13 +246,17 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    window serves the other file's **committed** state, so it re-reads when that
    state moves — a stroke still under the other file's brush is not in it.
    A dab asks for what each of its steps reads as a `SourceRead`: the source
-   frames against the frames it writes, one mapped linearly onto the other.
+   frames against the frames it writes, one mapped linearly onto the other,
+   padded by what its effects read around them and a bin of the source's
+   coarsest band. A first step that names no file reads the active file, which
+   gets a window the same way.
    `sourceNeedsOver` turns that into the window for one piece of the dab, so
    a dab wider than a window reads its source a block at a time too, and a
-   dab with such a read paints each block on its own. A window asked for more
-   than it can hold serves what it has and clamps the rest, so a piece that
-   asked for the whole dab's read would paint its far end from the wrong
-   frames. The
+   dab with such a read paints each block on its own. A window never says it
+   holds a span wider than itself, and a dab whose piece asks for more than a
+   window holds is refused (`servable`), because a read past a window's edge
+   takes the edge's values. The window's texture takes a newly read view a
+   step before the window does, and it serves nothing while the two differ. The
    canvas keeps one window for the file a step paints from, and one for each
    file a convolve step filters through. A convolve that names no response file
    filters through the file it paints from, which is the file it paints on when
@@ -268,12 +272,20 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    spans the file's frames, so on a window it paints a block at a time like
    any wide dab. Wrapping in time folds modulo the file's frames
    (`brushWrapSpanX`), and a wrapping dab writes two spans, the file's end and
-   its start. Random and Time modulation read file UV. Only a read that can
-   land anywhere in the file is still refused: source tracking away from
-   Follow, or a source time offset, on a step that reads the canvas it paints
-   on. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab and the
-   file view says so once. The gate is off while the canvas holds the whole
-   file.
+   its start. Random and Time modulation read file UV.
+   A step that reads this file away from the dab (source tracking off Follow,
+   or a source time offset) reads it off the canvas when the canvas can hold
+   the read beside the dab: the dab's reach widens to cover it
+   (`withSelfReads`), and the offset lands on the canvas's span like any
+   other window's (`sourceOffsetForViews`). Further away, it reads through a
+   window over this file of its own (`lib/self-window.ts`): the store's
+   blocks with the paint of strokes still committing laid over them, which is
+   the file as a stroke finds it, and, for a step that reads the canvas as the
+   stroke leaves it (Accumulate, or a step after the first), this stroke's own
+   paint on top, from the canvas, the stroke slots and the carry. A read that
+   runs past either end of the file is moved a whole file length back in, as
+   a whole-file canvas's wrap would; half a frame of slack keeps rounding from
+   moving one that starts on frame 0 (`wholeFilesPast`).
 10. **The canvas holds what an effect reads, not only what the dab covers.** A
     blur smear, a repeat gap and a warp's turn, stretch or shift all read past
     the brush when the edge mode is Bleed or Invert; the other edge modes fold

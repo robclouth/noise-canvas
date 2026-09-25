@@ -267,6 +267,16 @@ export interface ImpulseFileInfo {
 }
 
 /** Frames the source textures lay out. */
+/**
+ * How many whole file lengths `frame` lies past the file's start, negative
+ * before it. Half a frame of slack keeps a frame that rounding put a hair
+ * before 0 or past the end in the file.
+ */
+export function wholeFilesPast(frame: number, numFrames: number): number {
+  if (frame >= -0.5 && frame < numFrames + 0.5) return 0;
+  return Math.floor(frame / numFrames);
+}
+
 function sourceViewFrames(source: SourceFileInfo): number {
   return source.view ? source.view.endFrame - source.view.startFrame : source.spectrogramData.numFrames;
 }
@@ -1012,7 +1022,7 @@ export class StrokeRenderer {
     if (!wholeSource) {
       const scale = (beatRatio * sourceSpec.sampleRate) / this.spectrogramData.sampleRate;
       const dabRead = readFrame + anchor.x * this.viewFrameCount * scale + positionUv * sourceSpec.numFrames;
-      readFrame -= Math.floor(dabRead / sourceSpec.numFrames) * sourceSpec.numFrames;
+      readFrame -= wholeFilesPast(dabRead, sourceSpec.numFrames) * sourceSpec.numFrames;
     }
     return new Vector2((readFrame - sourceStart) / sourceFrames, fileOffset.y);
   }
@@ -1331,15 +1341,13 @@ export class StrokeRenderer {
     const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const destinationFbo = this.pingPong === 0 ? this.fbo2 : this.fbo1;
 
-    // What the first step reads when it names no source file of its own. A
-    // non-cumulative stroke reads the stroke-start snapshot so its dabs cannot
-    // feed back into themselves.
+    // What the first step reads when it reads this file. A non-cumulative
+    // stroke reads the stroke-start snapshot so its dabs cannot feed back into
+    // themselves.
     const isSameFile = sourceFile.id === this.fileId;
     const firstStepState = stepGeometries[0].state;
-    let selfInputFbo: WebGLRenderTarget | { texture: Texture } = isSameFile
-      ? currentReadFBO
-      : sourceFile.textures.packed;
-    if (!firstStepState.accumulate && isSameFile && firstStepState.sourceDataMode !== "original") {
+    let selfInputFbo: WebGLRenderTarget | { texture: Texture } = currentReadFBO;
+    if (!firstStepState.accumulate && firstStepState.sourceDataMode !== "original") {
       selfInputFbo = scratch.strokeStartFbo;
     }
 

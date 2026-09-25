@@ -15,6 +15,7 @@ import { needsCanvasWindow, type BlockReader, type BlockValueReader } from "./ca
 import { canvasWindowBlocks } from "./gpu-budget";
 import { PackedWindow } from "./packed-window";
 import { metadataTextureRows } from "./band-layout";
+import type { SelfState } from "./self-window";
 
 /** What a source window needs to read another file's blocks. */
 export type SourceFileBlocks = {
@@ -31,8 +32,17 @@ export type SourceFileBlocks = {
   revision: () => number;
 };
 
-/** The file and frames a dab reads through a window the destination owns. */
-export type SourceNeed = { fileId: string; startFrame: number; endFrame: number; wantOriginal: boolean };
+/**
+ * The file and frames a dab reads through a window the destination owns.
+ * `self` marks a read of the painted file itself.
+ */
+export type SourceNeed = {
+  fileId: string;
+  startFrame: number;
+  endFrame: number;
+  wantOriginal: boolean;
+  self?: boolean;
+};
 
 /** The textures a brush samples a source window through. */
 export type SourceWindowTextures = {
@@ -47,17 +57,21 @@ export type SourceWindowTextures = {
 /**
  * The frames a source window should hold to serve a dab that reads
  * [start, end) of the file. The read wraps into the file — the shaders wrap a
- * source UV — and is then widened either side, because effects read around the
- * dab's own span. A read that wraps across the file's end spans both of its
- * edges and no one window holds both; this keeps the end it starts at.
+ * source UV — and is then widened either side by `pad`, what the dab's
+ * effects read around it, or by its own length when that is not known. A read
+ * that wraps across the file's end spans both of its edges and no one window
+ * holds both; this keeps the end it starts at.
  */
 export function sourceReadSpan(
   read: { start: number; end: number },
   numFrames: number,
+  pad?: { before: number; after: number },
 ): { startFrame: number; endFrame: number } {
   const span = Math.max(1, read.end - read.start);
   const start = ((read.start % numFrames) + numFrames) % numFrames;
-  return { startFrame: Math.max(0, start - span), endFrame: Math.min(numFrames, start + 2 * span) };
+  const before = pad ? pad.before : span;
+  const after = pad ? pad.after : span;
+  return { startFrame: Math.max(0, start - before), endFrame: Math.min(numFrames, start + span + after) };
 }
 
 /**
@@ -68,6 +82,13 @@ export function sourceReadSpan(
 export type SourceRead = {
   fileId: string;
   wantOriginal: boolean;
+  /**
+   * A read of the painted file itself, far from the dab: the step it is, and
+   * which state of the file it takes.
+   */
+  self?: { step: number; state: SelfState };
+  /** Source frames the dab's effects read around what it reads, when known. */
+  pad?: { before: number; after: number };
   read: { start: number; end: number };
   dest: { start: number; end: number };
   numFrames: number;
@@ -107,8 +128,9 @@ export function sourceNeedsOver(
 ): SourceNeed[] {
   const needs = new Map<string, SourceNeed>();
   for (const read of reads) {
-    const span = sourceReadSpan(part ? readOfPart(read, part) : read.read, read.numFrames);
+    const span = sourceReadSpan(part ? readOfPart(read, part) : read.read, read.numFrames, read.pad);
     const held = needs.get(read.fileId);
+    const self = read.self ? { self: true } : {};
     needs.set(
       read.fileId,
       held
@@ -117,8 +139,9 @@ export function sourceNeedsOver(
             startFrame: Math.min(held.startFrame, span.startFrame),
             endFrame: Math.max(held.endFrame, span.endFrame),
             wantOriginal: held.wantOriginal || read.wantOriginal,
+            ...self,
           }
-        : { fileId: read.fileId, ...span, wantOriginal: read.wantOriginal },
+        : { fileId: read.fileId, ...span, wantOriginal: read.wantOriginal, ...self },
     );
   }
   return [...needs.values()];
@@ -183,23 +206,23 @@ export class SourceWindow {
   /** The textures to sample the window through, or null until it holds a span. */
   textures(): SourceWindowTextures | null {
     const view = this.held;
-    if (!view || !this.metadataTex) return null;
+    // The texture takes a newly read view a step before this window does.
+    if (!view || !this.metadataTex || !this.current.holds(view)) return null;
     const original = this.original?.holds(view) ? this.original.texture : undefined;
     return { packed: this.current.renderTarget, metadata: this.metadataTex, view, original };
   }
 
   /**
    * True while the textures hold every frame of [startFrame, endFrame), and
-   * the original too when `wantOriginal`. A span wider than the window can
-   * never fit inside one, so it asks only that the window holds something.
+   * the original too when `wantOriginal`. False for a span wider than the
+   * window: a read past its edges would take the edge's values.
    */
   holdsFrames(startFrame: number, endFrame: number, wantOriginal: boolean): boolean {
     const view = this.held;
-    if (!view) return false;
+    if (!view || !this.current.holds(view)) return false;
     if (wantOriginal && !(this.original?.holds(view) ?? false)) return false;
     const first = blockOfFrame(this.grid, startFrame);
     const last = blockOfFrame(this.grid, Math.max(startFrame, endFrame - 1));
-    if (last - first + 1 > this.windowBlocks) return true;
     return first >= view.firstBlock && last <= view.lastBlock;
   }
 

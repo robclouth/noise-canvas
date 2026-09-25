@@ -4,7 +4,8 @@ import type { State, OpenFile, SpectrogramData } from "../store/types";
 import type { BrushUnionUv, DabSpan, StrokeDispatch, FileRendererHandle } from "./file-renderer-types";
 import { viewCoversFile } from "./canvas-view";
 import { sourceNeedsOver, type SourceRead, type SourceWindowTextures } from "./source-window";
-import type { WindowedCanvas } from "./windowed-canvas";
+import type { DabNeeds, WindowedCanvas } from "./windowed-canvas";
+import type { SelfState } from "./self-window";
 import { blockOfFrame } from "./block-grid";
 import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
 import { pieceReach, strokeReach, type ReachContext } from "./effect-reach";
@@ -38,7 +39,34 @@ export interface FileStrokeContext {
   reachByState: WeakMap<State, StateReach>;
 }
 
-function sourceReadsFor(context: FileStrokeContext, state: State, cursorPos: Vector2): SourceRead[] {
+/**
+ * Which state of the painted file a step takes when it reads it far from
+ * the dab, as the renderer would read it off a canvas holding the whole file:
+ * the original, the file as the stroke found it, or as the stroke has left
+ * it so far.
+ */
+function selfStateOf(step: State, first: boolean): SelfState {
+  if (step.sourceDataMode === "original" || step.sourceDataMode === "start") return "start";
+  return first && !step.accumulate ? "start" : "live";
+}
+
+/** True when a step may read its file somewhere other than under the dab. */
+function tracksSource(step: State): boolean {
+  return step.sourcePositionMode !== "follow" || Number(step.sourceTimeOffset ?? 0) !== 0;
+}
+
+/**
+ * What each step of a dab reads of a file its canvas does not hold: another
+ * windowed file it names, or the active file for a first step naming none;
+ * and this file, where a step reads it away from the dab. `reach` is what the
+ * dab's effects read around what it reads, in its own frames.
+ */
+function sourceReadsFor(
+  context: FileStrokeContext,
+  state: State,
+  cursorPos: Vector2,
+  reach: { before: number; after: number } = { before: 0, after: 0 },
+): SourceRead[] {
   const { fileId, spectrogramData, strokeRendererRef, canvasRef, openFiles, getOpenFileByPath, createStepStateView } =
     context;
   const strokeRenderer = strokeRendererRef.current;
@@ -48,16 +76,25 @@ function sourceReadsFor(context: FileStrokeContext, state: State, cursorPos: Vec
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
   const bpm = state.filepathsBpm[file.filePath] || 120;
+  const activeFile = state.activeFileId ? openFiles[state.activeFileId] : undefined;
   const reads: SourceRead[] = [];
+  let first = true;
   for (let index = 0; index < steps.length; index++) {
     if (steps[index].enabled === false) continue;
+    const isFirst = first;
+    first = false;
+    const step = createStepStateView(state, index);
     const sourcePath = steps[index].sourceFile?.path;
-    if (!sourcePath) continue;
-    const source = getOpenFileByPath(sourcePath);
+    const source = sourcePath ? getOpenFileByPath(sourcePath) : isFirst && activeFile ? activeFile : file;
     const sourceSpectrogram = source?.spectrogramData;
-    if (!source || !sourceSpectrogram || source.id === fileId) continue;
-    const sourceView = source.rendererRef?.current?.getCanvasView();
-    if (sourceView && viewCoversFile(sourceView, sourceSpectrogram.numFrames)) continue;
+    if (!source || !sourceSpectrogram) continue;
+    const self = source.id === fileId;
+    if (self) {
+      if (canvas.holdsWholeFile || !tracksSource(step)) continue;
+    } else {
+      const sourceView = source.rendererRef?.current?.getCanvasView();
+      if (sourceView && viewCoversFile(sourceView, sourceSpectrogram.numFrames)) continue;
+    }
 
     const read = strokeRenderer.sourceReadFrames(
       state,
@@ -67,9 +104,14 @@ function sourceReadsFor(context: FileStrokeContext, state: State, cursorPos: Vec
       { filePath: source.filePath, spectrogramData: sourceSpectrogram },
       index,
     );
+    const destLength = read.dest.end - read.dest.start;
+    const scale = destLength > 0 ? Math.abs(read.end - read.start) / destLength : 1;
+    const margin = 1 << Math.max(...sourceSpectrogram.synthesisMetadata.bandStepLog2s);
     reads.push({
       fileId: source.id,
-      wantOriginal: createStepStateView(state, index).sourceDataMode === "original",
+      wantOriginal: step.sourceDataMode === "original",
+      ...(self ? { self: { step: index, state: selfStateOf(step, isFirst) } } : {}),
+      pad: { before: reach.before * scale + margin, after: reach.after * scale + margin },
       read: { start: read.start, end: read.end },
       dest: read.dest,
       numFrames: sourceSpectrogram.numFrames,
@@ -77,6 +119,28 @@ function sourceReadsFor(context: FileStrokeContext, state: State, cursorPos: Vec
     });
   }
   return reads;
+}
+
+/**
+ * The dab's reach widened to cover the frames its reads of this file take,
+ * when they fall past the dab, so a canvas holding both serves them without
+ * a window of their own.
+ */
+function withSelfReads(extent: DabExtent, reads: readonly SourceRead[]): DabExtent {
+  let { before, after } = extent;
+  let piece = extent.piece;
+  for (const read of reads) {
+    if (!read.self) continue;
+    const shift = read.read.start - read.dest.start;
+    before = Math.max(before, extent.before - shift);
+    after = Math.max(after, extent.after + shift);
+    if (piece)
+      piece = {
+        before: Math.max(piece.before, piece.before - shift),
+        after: Math.max(piece.after, piece.after + shift),
+      };
+  }
+  return { ...extent, before, after, piece };
 }
 
 function wantsOriginal(context: FileStrokeContext, state: State): boolean {
@@ -204,11 +268,33 @@ export function dispatchStroke(
 
   if (strokeRefusal(context, state) !== null) return false;
 
+  const reads = span?.needs.sources ?? sourceReadsFor(context, state, cursorPos);
   const sourceWindows = new Map<string, SourceWindowTextures>();
-  for (const need of sourceNeedsOver(span?.needs.sources ?? sourceReadsFor(context, state, cursorPos), clip ?? null)) {
+  for (const need of sourceNeedsOver(reads, clip ?? null)) {
     const window = canvas?.aimSource(need);
     if (!window) return false;
-    sourceWindows.set(need.fileId, window);
+    if (!need.self) sourceWindows.set(need.fileId, window);
+  }
+  // Steps that read this file far from the dab read it through its window.
+  const selfSources = new Map<number, SourceFileInfo>();
+  for (const read of reads) {
+    if (!read.self || !canvas || !file.spectrogramData) continue;
+    const textures = canvas.selfTextures(read.self.state);
+    if (!textures) return false;
+    selfSources.set(read.self.step, {
+      id: `${fileId}:self`,
+      filePath: file.filePath,
+      displayName: file.displayName,
+      spectrogramData: file.spectrogramData,
+      textures,
+      view: textures.view,
+      onsetTexture: getOnsetTexture(
+        fileId,
+        file.onsets,
+        totalDuration,
+        state.filepathsOnsetSensitivity[file.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
+      ),
+    });
   }
 
   const impulses = new Map<string, ImpulseFileInfo>();
@@ -265,7 +351,9 @@ export function dispatchStroke(
 
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const resolved = new Map<string, SourceFileInfo | undefined>();
-  const stepSources = steps.map((step) => {
+  const stepSources = steps.map((step, index) => {
+    const self = selfSources.get(index);
+    if (self) return self;
     const path = step.sourceFile?.path;
     if (path === undefined) return undefined;
     if (sourceOverride) return sourceOverride;
@@ -460,27 +548,47 @@ export function dabSpan(
   );
   // A dab that reads the canvas as it leaves it would read, across a cut,
   // what its own earlier piece painted, so it is painted whole.
-  const extent: DabExtent = {
+  let extent: DabExtent = {
     writes: dabWrites(union, cursorPos.x, numFrames),
     before: reach.frames.before,
     after: reach.frames.after,
     readsLive,
     piece: readsLive && !canvas.holdsWholeFile ? null : reach.piece,
   };
+  const around = extent.piece
+    ? { before: Math.max(extent.before, extent.piece.before), after: Math.max(extent.after, extent.piece.after) }
+    : { before: extent.before, after: extent.after };
+  let sources = sourceReadsFor(context, state, cursorPos, around);
+  const needs: DabNeeds = {
+    sources,
+    impulses: impulseBindings.map((entry) => entry.need).filter((need) => responseIsWindowed(context, need.fileId)),
+    original: wantsOriginal(context, state),
+  };
+  // A read of this file near enough for the canvas to hold alongside the dab
+  // is read off the canvas; one further away goes through a window of its own.
+  if (sources.some((read) => read.self)) {
+    const near = withSelfReads(extent, sources);
+    const others = sources.filter((read) => !read.self);
+    if (canvas.servable(near, { ...needs, sources: others }) && selfReadsInFile(sources)) {
+      extent = near;
+      sources = others;
+      needs.sources = others;
+    }
+  }
   const whole = wholeReadSpan(extent);
   const cursorBlock = blockOfFrame(canvas.grid, Math.min(numFrames - 1, Math.max(0, cursorPos.x * numFrames)));
   const hover =
     whole && canvas.fitsWindow(whole.start, whole.end) ? whole : blockReadSpan(canvas.grid, extent, cursorBlock);
-  return {
-    extent,
-    hover,
-    needs: {
-      sources: sourceReadsFor(context, state, cursorPos),
-      impulses: impulseBindings.map((entry) => entry.need).filter((need) => responseIsWindowed(context, need.fileId)),
-      original: wantsOriginal(context, state),
-    },
-    impulseBindings,
-  };
+  return { extent, hover, needs, impulseBindings };
+}
+
+/** True when every read of this file stays inside the file, where the canvas can hold it. */
+function selfReadsInFile(reads: readonly SourceRead[]): boolean {
+  return reads.every(
+    (read) =>
+      !read.self ||
+      (Math.min(read.read.start, read.read.end) >= 0 && Math.max(read.read.start, read.read.end) <= read.numFrames),
+  );
 }
 
 export function prepareStrokeBatch(

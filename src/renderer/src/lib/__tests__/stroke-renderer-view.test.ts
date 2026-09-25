@@ -40,7 +40,14 @@ import { DisplayTileRing } from "../display-tiles-textures";
 import { PackedWindow } from "../packed-window";
 import { gatherPixelRanges } from "../pixel-ranges";
 import type { Selection } from "../selection";
-import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import {
+  EffectsRegistry,
+  SourceFileInfo,
+  StrokeParams,
+  StrokeRenderer,
+  StrokeTextures,
+  wholeFilesPast,
+} from "../stroke-renderer";
 import { metadataTextureRows } from "../band-layout";
 
 async function loadEffects(): Promise<EffectsRegistry> {
@@ -92,6 +99,19 @@ function firstDifference(a: ArrayLike<number>, b: ArrayLike<number>, length: num
 }
 
 const SAMPLE_RATE = 8000;
+
+describe("wholeFilesPast", () => {
+  it("keeps a read that rounding put a hair before the file's start in the file", () => {
+    expect(wholeFilesPast(-1e-6, 1000)).toBe(0);
+    expect(wholeFilesPast(999.9, 1000)).toBe(0);
+  });
+
+  it("counts the whole file lengths a read runs past either end", () => {
+    expect(wholeFilesPast(-10, 1000)).toBe(-1);
+    expect(wholeFilesPast(1010, 1000)).toBe(1);
+    expect(wholeFilesPast(2500, 1000)).toBe(2);
+  });
+});
 
 describe("stroke parity between a whole-file canvas and a sub-view canvas", () => {
   let gl: WebGLRenderer;
