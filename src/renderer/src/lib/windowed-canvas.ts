@@ -85,6 +85,8 @@ function canvasWindowSlotBytes(grid: BlockGrid, windowBlocks: number): number {
 
 /** Longest idle wait between two blocks the slot warm-up reads. */
 const SLOT_WARM_STEP_MS = 50;
+/** Blocks the slot warm-up reads at once. */
+const SLOT_WARM_READS = 3;
 /** How long the warm-up waits while a stroke paints or a commit lands. */
 const SLOT_WARM_RETRY_MS = 500;
 
@@ -309,10 +311,13 @@ export class WindowedCanvas {
         return;
       }
       const view = renderer.committedSource().view;
-      window.warmOne(Math.round((view.firstBlock + view.lastBlock) / 2)).then(
-        (took) => {
-          if (took) {
-            warmed++;
+      const near = Math.round((view.firstBlock + view.lastBlock) / 2);
+      const reads = Array.from({ length: SLOT_WARM_READS }, () => window.warmOne(near));
+      Promise.all(reads).then(
+        (taken) => {
+          const took = taken.filter(Boolean).length;
+          if (took > 0) {
+            warmed += took;
             later(step, SLOT_WARM_STEP_MS);
             return;
           }
