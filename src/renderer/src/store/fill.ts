@@ -46,7 +46,6 @@ function resolveTarget(state: State) {
     bpm: state.filepathsBpm[file.filePath] || 120,
     totalDuration: spectrogramData.numFrames / spectrogramData.sampleRate,
     region: activeLoopRegion(state),
-    maxStrokeSeconds: renderer.maxStrokeSeconds() ?? undefined,
   };
   return { fileId: activeFileId, renderer, target };
 }

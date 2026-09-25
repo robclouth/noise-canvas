@@ -6,7 +6,6 @@ import {
   normaliseSelection,
   selectionBandRange,
   selectionFrameRange,
-  selectionUvRect,
   type SelectionCorner,
 } from "@renderer/lib/selection";
 import { Vector2 } from "three";
@@ -125,16 +124,6 @@ describe("selectionFrameRange", () => {
     const sampleRate = 48000;
     const selection = { start: 0.5, end: 1.25, pitchLo: 0, pitchHi: 1 };
     expect(selectionFrameRange(selection, sampleRate)).toEqual({ startFrame: 24000, endFrame: 60000 });
-  });
-});
-
-describe("selectionUvRect", () => {
-  it("gives the bottom-left origin and size the brush extent is clipped against", () => {
-    const rect = selectionUvRect({ start: 2, end: 6, pitchLo: 0.25, pitchHi: 0.75 }, DURATION);
-    expect(rect.anchor.x).toBeCloseTo(0.2, 9);
-    expect(rect.anchor.y).toBeCloseTo(0.25, 9);
-    expect(rect.size.x).toBeCloseTo(0.4, 9);
-    expect(rect.size.y).toBeCloseTo(0.5, 9);
   });
 });
 

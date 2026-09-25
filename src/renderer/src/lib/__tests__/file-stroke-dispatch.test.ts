@@ -174,7 +174,7 @@ describe("file-space stroke dispatch", () => {
     expect(canvas.holdsWholeFile).toBe(false);
     expect(prepareStrokeBatch(context, canvas, strokes, ahead)).toBe(2);
     expect(render).not.toHaveBeenCalled();
-    expect(prefetch).toHaveBeenCalledWith(aheadSpan.startFrame, aheadSpan.endFrame);
+    expect(prefetch).toHaveBeenCalledWith(aheadSpan.hover.start, aheadSpan.hover.end);
     expect(prefetch.mock.invocationCallOrder[0]).toBeLessThan(admit.mock.invocationCallOrder[0]);
     const admitted = [...admit.mock.calls];
     const otherState = createStateForEffects(["passthrough"], { brushSizeTime: 8 });
@@ -198,8 +198,13 @@ describe("file-space stroke dispatch", () => {
         tiltY: -8,
       });
     }
-    for (const [start, end, needs] of admitted) {
-      expect(held).toHaveBeenCalledWith(start, end, needs.original);
+    for (const [extent, needs] of admitted) {
+      const [write] = extent.writes;
+      expect(held).toHaveBeenCalledWith(
+        Math.max(0, write.start - extent.before),
+        write.end + extent.after,
+        needs.original,
+      );
     }
     expect(canvas.committedFootprintUv()).not.toBeNull();
     expect(context.closeFile).not.toHaveBeenCalled();
@@ -213,13 +218,18 @@ describe("file-space stroke dispatch", () => {
     const render = vi.spyOn(renderer, "renderStroke");
     const onsetCalls = vi.mocked(context.getFileOnsets).mock.calls.length;
     canvas.beginStroke();
-    canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () =>
-      dispatchStroke(context, state, aim, false, undefined, span),
+    canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
+      dispatchStroke(context, state, aim, false, undefined, span, clip),
     );
     release();
     await canvas.settle();
     expect(render).toHaveBeenCalledTimes(1);
-    expect(held).toHaveBeenCalledWith(span.startFrame, span.endFrame, span.needs.original);
+    const [write] = span.extent.writes;
+    expect(held).toHaveBeenCalledWith(
+      Math.max(0, write.start - span.extent.before),
+      write.end + span.extent.after,
+      span.needs.original,
+    );
     expect(context.getFileOnsets).toHaveBeenCalledTimes(onsetCalls);
     expect(render.mock.calls[0][0].cursorPos).toEqual(canvas.dabCursor(aim));
     expect(render.mock.calls[0][0].totalDuration).toBe(canvas.dabDuration(300));

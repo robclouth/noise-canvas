@@ -350,8 +350,9 @@ describe("anchored dab residency", () => {
     expect(canvas.holdsFrames(origin.x * rig.data.numFrames, (origin.x + size.x) * rig.data.numFrames)).toBe(false);
     rig.ref.current!.beginStroke();
     rig.ref.current!.renderStrokeBatch([{ state: rig.state, aimX: aim, aimY: 0.5 }]);
-    expect(held.mock.calls[0][0]).toBeCloseTo(origin.x * rig.data.numFrames, 6);
-    expect(held.mock.calls[0][1]).toBeCloseTo((origin.x + size.x) * rig.data.numFrames, 6);
+    const [write] = held.mock.calls[0][0].writes;
+    expect(write.start).toBeCloseTo(origin.x * rig.data.numFrames, 6);
+    expect(write.end).toBeCloseTo((origin.x + size.x) * rig.data.numFrames, 6);
     expect(dispatch.mock.calls.length).toBe(0);
     await rig.ref.current!.settleStroke();
     expect(dispatch).toHaveBeenCalledTimes(1);
@@ -386,9 +387,11 @@ describe("anchored dab residency", () => {
     const end = (origin.x + size.x) * rig.data.numFrames + reach.after * rig.data.sampleRate;
     expect(aimed.mock.calls[0][0]).toBeCloseTo(start, 6);
     expect(aimed.mock.calls[0][1]).toBeCloseTo(end, 6);
-    expect(held.mock.calls[0].slice(0, 2)).toEqual(aimed.mock.calls[0].slice(0, 2));
+    const extent = held.mock.calls[0][0];
+    const [write] = extent.writes;
+    expect([write.start - extent.before, write.end + extent.after]).toEqual(aimed.mock.calls[0].slice(0, 2));
     await rig.ref.current!.settleStroke();
-    expect(holds.mock.calls.at(-1)).toEqual([...held.mock.calls[0].slice(0, 2), false]);
+    expect(holds).toHaveBeenCalledWith(...aimed.mock.calls[0].slice(0, 2), false);
   });
 
   it.each([

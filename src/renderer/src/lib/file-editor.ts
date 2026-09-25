@@ -188,9 +188,9 @@ export function prepareFileEditor(
 
   const canvas = engine.canvasFor(gl);
   const span = dabSpan(state, cursorPos, canvas, union);
-  const { startFrame: dabStart, endFrame: dabEnd, needs } = span;
+  const { hover, needs } = span;
   const original = needs.original;
-  prepareVisibleRegion(residencyContext, canvas, cursorPos, dabStart, dabEnd, original);
+  prepareVisibleRegion(residencyContext, canvas, cursorPos, hover.start, hover.end, original);
 
   if (applyStroke.current && cursorPos.x >= 0) {
     const preview = strokePreview.current;
@@ -199,7 +199,10 @@ export function prepareFileEditor(
     canvas.dropSourcesExcept(needs.sources);
     canvas.dropImpulsesExcept(needs.impulses);
     if (preview) {
-      if (!canvas.holdsFrames(dabStart, dabEnd, original) || !dispatchStroke(state, cursorPos, true, undefined, span)) {
+      if (
+        !canvas.holdsFrames(hover.start, hover.end, original) ||
+        !dispatchStroke(state, cursorPos, true, undefined, span)
+      ) {
         displayMode.current = "committed";
       } else {
         displayMode.current = "preview";
@@ -211,8 +214,8 @@ export function prepareFileEditor(
       const dabState = state;
       const dabPos = cursorPos.clone();
       const record = recordDab(fileId, brushOriginUv.x, brushOriginUv.y, brushSizeUv.x, brushSizeUv.y);
-      canvas.paintWhenHeld(dabStart, dabEnd, needs, () => {
-        const painted = dispatchStroke(dabState, dabPos, false, undefined, span);
+      canvas.paintWhenHeld(span.extent, needs, (clip) => {
+        const painted = dispatchStroke(dabState, dabPos, false, undefined, span, clip);
         if (painted && record) record.paintedAt = Date.now();
         return painted;
       });

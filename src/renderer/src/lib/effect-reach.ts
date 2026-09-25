@@ -28,6 +28,8 @@ export type ReachContext = {
   fileSeconds: number;
   /** The span the canvas holds. */
   canvasSeconds: number;
+  /** The span one block of the canvas holds: a dab is painted a block at a time. */
+  blockSeconds?: number;
   bandsPerOctave: number;
   numBands: number;
 };

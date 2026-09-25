@@ -100,6 +100,7 @@ export type CommonUniforms = {
   bpm: { value: number };
   blendMode: { value: number };
   wrapMode: { value: number };
+  brushWrapSpanX: { value: number };
   algorithm: { value: number };
   useLinearBlend?: { value: boolean };
   bypassBrushWeight?: { value: boolean };
@@ -189,6 +190,7 @@ export function createDefaultUniforms(): CommonUniforms {
     blendMode: { value: 0 },
     magnitudeLimit: { value: 0.0 },
     wrapMode: { value: 0 },
+    brushWrapSpanX: { value: 1 },
     algorithm: { value: 0 },
     useLinearBlend: { value: false },
     bypassBrushWeight: { value: false },

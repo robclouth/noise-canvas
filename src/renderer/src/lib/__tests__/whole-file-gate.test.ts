@@ -25,18 +25,12 @@ describe("wholeFileNeeds", () => {
     expect(needsOf({})).toEqual([]);
   });
 
-  it.each([
-    { wrapMode: 0, named: false },
-    { wrapMode: 1, named: true },
-    { wrapMode: 2, named: false },
-    { wrapMode: 3, named: true },
-  ])("names wrap mode $wrapMode as reading the file: $named", ({ wrapMode, named }) => {
-    expect(needsOf({ brushWrapMode: wrapMode }).includes("Wrap in time")).toBe(named);
+  it.each([0, 1, 2, 3])("leaves wrap mode %s alone: a wrapped dab is painted at both ends", (wrapMode) => {
+    expect(needsOf({ brushWrapMode: wrapMode })).toEqual([]);
   });
 
-  it("names a brush as long as the file", () => {
-    expect(needsOf({ brushSizeTime: BRUSH_SIZE_TIME_FULL })).toEqual(["A brush the length of the file"]);
-    expect(needsOf({ brushSizeTime: BRUSH_SIZE_TIME_FULL - 1 })).toEqual([]);
+  it("leaves a brush as long as the file alone: it is painted a window at a time", () => {
+    expect(needsOf({ brushSizeTime: BRUSH_SIZE_TIME_FULL })).toEqual([]);
   });
 
   // Every effect reads a span around the brush that its own settings bound,
@@ -49,11 +43,11 @@ describe("wholeFileNeeds", () => {
   );
 
   it("reads every step of the brush, not only the active one", () => {
-    expect(needsOf({}, { brushWrapMode: 1 })).toEqual(["Wrap in time"]);
+    expect(needsOf({}, { sourceTimeOffset: 20 })).toEqual(["A source time offset"]);
   });
 
   it("names each thing once, however many steps ask for it", () => {
-    expect(needsOf({ brushWrapMode: 1 }, { brushWrapMode: 3 })).toEqual(["Wrap in time"]);
+    expect(needsOf({ sourceTimeOffset: 20 }, { sourceTimeOffset: 40 })).toEqual(["A source time offset"]);
   });
 
   it.each(["fixed", "anchored"])("names %s source tracking, which reads the canvas from anywhere", (mode) => {
@@ -80,10 +74,15 @@ describe("overReachNeeds", () => {
     expect(overReachNeeds(stateOf(reachStep({ transformShiftBeats: 4, transformEdgeMode: 1 })), CTX)).toEqual([]);
   });
 
-  it("names an effect that reads further than the canvas holds", () => {
-    // Sixteen beats is eight seconds either side, so the brush needs more than
-    // sixteen seconds of the file.
-    expect(overReachNeeds(stateOf(reachStep({ transformShiftBeats: 16, transformEdgeMode: 1 })), CTX)).toEqual([
+  it("names an effect that reads further than the canvas holds around one block", () => {
+    // Twenty beats is ten seconds either side, more than the sixteen the canvas holds.
+    expect(overReachNeeds(stateOf(reachStep({ transformShiftBeats: 20, transformEdgeMode: 1 })), CTX)).toEqual([
+      "Transform",
+    ]);
+    // Twelve beats is six seconds either side: with a two-second block, fourteen fit.
+    const blocks = { ...CTX, blockSeconds: 2 };
+    expect(overReachNeeds(stateOf(reachStep({ transformShiftBeats: 12, transformEdgeMode: 1 })), blocks)).toEqual([]);
+    expect(overReachNeeds(stateOf(reachStep({ transformShiftBeats: 16, transformEdgeMode: 1 })), blocks)).toEqual([
       "Transform",
     ]);
   });
@@ -95,7 +94,7 @@ describe("overReachNeeds", () => {
 
 describe("strokeRefusal", () => {
   it("says nothing while the canvas holds the whole file", () => {
-    const state = stateOf({ brushWrapMode: 1 });
+    const state = stateOf({ sourceTimeOffset: 20 });
     expect(strokeRefusal(state, null)).toBeNull();
   });
 
@@ -105,25 +104,23 @@ describe("strokeRefusal", () => {
 
   it("puts what reads the whole file before what reads too far", () => {
     const state = stateOf({
-      brushWrapMode: 1,
-      transformShiftBeats: 16,
+      sourceTimeOffset: 20,
+      transformShiftBeats: 20,
       transformEdgeMode: 1,
       effects: [{ id: "mock-transform", effect: "transform", enabled: true, params: {} }],
     });
     expect(strokeRefusal(state, CTX)).toBe(
-      "Wrap in time reads the whole file, and this file is too long for that. Switch it off to paint here.",
+      "A source time offset reads the whole file, and this file is too long for that. Switch it off to paint here.",
     );
   });
 
   it("reports a reach the canvas cannot hold", () => {
     const state = stateOf({
-      transformShiftBeats: 16,
+      transformShiftBeats: 20,
       transformEdgeMode: 1,
       effects: [{ id: "mock-transform", effect: "transform", enabled: true, params: {} }],
     });
-    expect(strokeRefusal(state, CTX)).toBe(
-      "Transform reaches too far for this file. Turn it down, or paint a shorter brush, to paint here.",
-    );
+    expect(strokeRefusal(state, CTX)).toBe("Transform reaches too far for this file. Turn it down to paint here.");
   });
 });
 
@@ -143,14 +140,12 @@ describe("wholeFileRefusal", () => {
 
 describe("overReachRefusal", () => {
   it("reads as one sentence for a single effect", () => {
-    expect(overReachRefusal(["Blur"])).toBe(
-      "Blur reaches too far for this file. Turn it down, or paint a shorter brush, to paint here.",
-    );
+    expect(overReachRefusal(["Blur"])).toBe("Blur reaches too far for this file. Turn it down to paint here.");
   });
 
   it("joins several effects and agrees the verb with them", () => {
     expect(overReachRefusal(["Blur", "Repeat"])).toBe(
-      "Blur and Repeat reach too far for this file. Turn them down, or paint a shorter brush, to paint here.",
+      "Blur and Repeat reach too far for this file. Turn them down to paint here.",
     );
   });
 });

@@ -1,3 +1,4 @@
+import type { FrameSpan } from "./held-dabs";
 import { notifications } from "@mantine/notifications";
 import type { Texture, WebGLRenderer, WebGLRenderTarget } from "three";
 import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat, RGFormat, Vector2 } from "three";
@@ -66,6 +67,7 @@ type StrokePainter = (
   preview: boolean,
   sourceOverride?: SourceFileInfo,
   preparedSpan?: DabSpan,
+  clip?: FrameSpan | null,
 ) => boolean;
 /** The frames and reads one dab at `cursorPos` needs. */
 type StrokeSpanner = (
@@ -494,8 +496,8 @@ export class FileEngine {
         ? brushUnionForAim(state, aim.x, aim.y, bpm, totalDuration, spec.bandsPerOctave, spec.numBands)
         : null;
       const record = union ? recordDab(this.fileId, union.blX, union.blY, union.sizeUvX, union.sizeUvY) : null;
-      canvas.paintWhenHeld(dab.startFrame, dab.endFrame, dab.needs, () => {
-        const painted = paint(state, aim, false, undefined, dab);
+      canvas.paintWhenHeld(dab.extent, dab.needs, (clip) => {
+        const painted = paint(state, aim, false, undefined, dab, clip);
         if (painted && record) record.paintedAt = Date.now();
         return painted;
       });
@@ -719,8 +721,8 @@ export class FileEngine {
           // Like a brush dab, a region lands once the canvas holds its frames;
           // `settleStroke` waits for it.
           const span = dabSpan(stroke.state, aim, canvas);
-          painted = canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () =>
-            dispatchStroke(stroke.state, aim, false, stroke.source, span),
+          painted = canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
+            dispatchStroke(stroke.state, aim, false, stroke.source, span, clip),
           );
         }
         if (!painted) return false;
@@ -765,12 +767,6 @@ export class FileEngine {
       whenStrokeFree: this.whenStrokeFree,
       beginStrokePreview: beginStroke,
       discardStrokePreview,
-      maxStrokeSeconds: () => {
-        const canvas = canvasRef.current;
-        if (!canvas || canvas.holdsWholeFile) return null;
-
-        return canvas.windowSeconds() / 2;
-      },
       getFBOData,
       readPixelRanges,
       applyPhaseTurns,
@@ -820,8 +816,8 @@ export class FileEngine {
             if (aim.x >= 0) {
               this.lastStrokeDab = cursorPosition;
               const span = dabSpan(state, aim, canvas);
-              canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () =>
-                dispatchStroke(state, aim, false, undefined, span),
+              canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
+                dispatchStroke(state, aim, false, undefined, span, clip),
               );
             }
           }
@@ -867,9 +863,10 @@ export class FileEngine {
       preview: boolean,
       sourceOverride?: SourceFileInfo,
       preparedSpan?: DabSpan,
+      clip?: FrameSpan | null,
     ): boolean =>
       !this.rollbackFailed &&
-      dispatchFileStroke(strokeContext, state, cursorPos, preview, sourceOverride, preparedSpan),
+      dispatchFileStroke(strokeContext, state, cursorPos, preview, sourceOverride, preparedSpan, clip),
     span: (state: State, cursorPos: Vector2, canvas: WindowedCanvas, resolvedUnion?: BrushUnionUv): DabSpan =>
       fileDabSpan(strokeContext, state, cursorPos, canvas, resolvedUnion),
     refusal: (state: State, aim?: { x: number; y: number }): string | null =>

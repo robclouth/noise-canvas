@@ -174,6 +174,7 @@ function getExportMaterial(): RawShaderMaterial {
       probeMinDb: { value: PROBE_MIN_DB },
       probeMaxDb: { value: PROBE_MAX_DB },
       wrapMode: { value: 0 },
+      brushWrapSpanX: { value: 1 },
     },
     vertexShader: passThroughVert,
     fragmentShader: exportFrag,

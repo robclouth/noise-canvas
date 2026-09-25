@@ -1,4 +1,3 @@
-import { Vector2 } from "three";
 import { pitchUvToBandIndex } from "./utils";
 
 /**
@@ -128,15 +127,5 @@ export function selectionFrameRange(
   return {
     startFrame: Math.floor(selection.start * sampleRate + 0.5),
     endFrame: Math.floor(selection.end * sampleRate + 0.5),
-  };
-}
-
-/** The selection as a bottom-left origin and size in UV, for clipping the brush's extent. */
-export function selectionUvRect(selection: Selection, totalDuration: number): { anchor: Vector2; size: Vector2 } {
-  const start = selection.start / totalDuration;
-  const end = selection.end / totalDuration;
-  return {
-    anchor: new Vector2(start, selection.pitchLo),
-    size: new Vector2(end - start, selection.pitchHi - selection.pitchLo),
   };
 }

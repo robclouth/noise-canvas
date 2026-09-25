@@ -40,6 +40,7 @@ export function createDisplayTestMaterial(): RawShaderMaterial {
       viewZoomPowerY: { value: 0 },
       viewOffsetY: { value: 0 },
       wrapMode: { value: 0 },
+      brushWrapSpanX: { value: 1 },
       fullScaleDbOffset: { value: 0 },
       previewTex: { value: null },
       previewBinRangesTex: { value: null },

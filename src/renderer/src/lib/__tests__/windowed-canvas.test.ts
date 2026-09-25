@@ -35,6 +35,7 @@ import { displayPyramidLevels } from "../display-pyramid";
 import { packedFold, padToFold } from "../constants";
 import { metadataTextureRows } from "../band-layout";
 import type { SourceNeed } from "../source-window";
+import type { DabExtent, FrameSpan } from "../held-dabs";
 import { createByteTarget, renderMaterialToBytes } from "../snapshot-capture";
 import passThroughVert from "../../glsl/pass-through.vert";
 
@@ -69,6 +70,11 @@ async function until(check: () => boolean, what: string): Promise<void> {
 
 // A dab that reads no other file: no source window, no impulse window.
 const NO_OTHER_FILES = { sources: [], impulses: [], original: false };
+
+/** A dab that writes [start, end) and reads nothing beyond it. */
+function dabExtent(start: number, end: number): DabExtent {
+  return { writes: [{ start, end }], before: 0, after: 0, readsLive: false };
+}
 
 describe("a canvas that holds a window of the file", () => {
   let gl: WebGLRenderer;
@@ -168,8 +174,13 @@ describe("a canvas that holds a window of the file", () => {
     canvas: WindowedCanvas;
     /** The renderer behind the canvas. */
     renderer: () => StrokeRenderer;
-    /** Paints one dab at a file-UV time, through the canvas's own translation, at `strength` percent. */
-    dab: (fileUvX: number, strength?: number) => boolean;
+    /**
+     * Paints one dab at a file-UV time, through the canvas's own translation,
+     * at `strength` percent, writing only the file frames of `clip` when given.
+     */
+    dab: (fileUvX: number, strength?: number, clip?: FrameSpan | null) => boolean;
+    /** Paints one dab `beats` long with a shaped time envelope, as `dab` does. */
+    wideDab: (fileUvX: number, beats: number, clip?: FrameSpan | null) => boolean;
     /** True once no read is outstanding. */
     quiet: () => boolean;
     /** Lets the reads waiting now, and any that follow, resolve. */
@@ -240,10 +251,35 @@ describe("a canvas that holds a window of the file", () => {
       },
       canvas,
       renderer: () => renderer!,
-      dab: (fileUvX, strength) => {
+      dab: (fileUvX, strength, clip) => {
         renderer!.renderStroke(
-          strokeParams(canvas.dabCursor(new Vector2(fileUvX, 0.35)), canvas.dabDuration(fileDuration())),
+          {
+            ...strokeParams(canvas.dabCursor(new Vector2(fileUvX, 0.35)), canvas.dabDuration(fileDuration())),
+            clip: canvas.clipToCanvas(clip ?? null),
+          },
           strength === undefined ? state : stateAt(strength),
+          source(),
+        );
+        return true;
+      },
+      wideDab: (fileUvX, beats, clip) => {
+        const wide = createMockStateWithSteps([
+          {
+            name: "Wide",
+            overrides: {
+              brushSizeTime: beats,
+              brushCurveTime: 0,
+              transformShiftSemis: 3,
+              effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
+            },
+          },
+        ]);
+        renderer!.renderStroke(
+          {
+            ...strokeParams(canvas.dabCursor(new Vector2(fileUvX, 0.35)), canvas.dabDuration(fileDuration())),
+            clip: canvas.clipToCanvas(clip ?? null),
+          },
+          wide,
           source(),
         );
         return true;
@@ -294,16 +330,79 @@ describe("a canvas that holds a window of the file", () => {
     expect(rig.canvas.isFillingFrames(start, end)).toBe(false);
   });
 
-  it("refuses a sub-capacity duration that crosses too many block boundaries", async () => {
+  it("paints a dab wider than its window a run of blocks at a time", async () => {
+    const { canvas } = harness(3);
+    await until(() => canvas.holdsFrames(0, 1), "the first window");
+    canvas.beginStroke();
+    const start = grid.blockFrames - 1;
+    const end = grid.blockFrames * 5 + 1;
+    expect(canvas.fitsWindow(start, end)).toBe(false);
+    const clips: (FrameSpan | null)[] = [];
+    expect(
+      canvas.paintWhenHeld(dabExtent(start, end), NO_OTHER_FILES, (clip) => {
+        clips.push(clip);
+        return true;
+      }),
+    ).toBe(true);
+    expect((await canvas.settle()).status).toBe("completed");
+    // Every block the dab writes is painted once, in runs no wider than a window.
+    const painted: number[] = [];
+    for (const clip of clips) {
+      expect(clip).not.toBeNull();
+      for (let block = blockOfFrame(grid, clip!.start); block <= blockOfFrame(grid, clip!.end - 1); block++) {
+        painted.push(block);
+      }
+      expect(canvas.fitsWindow(clip!.start, clip!.end)).toBe(true);
+    }
+    expect(painted.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5]);
+    canvas.endStroke();
+  });
+
+  it("paints a dab wider than its window as a canvas over the whole file does", async () => {
+    // Twelve beats is six seconds: three blocks, painted through a window of
+    // three whose later pieces start past the dab's own origin.
+    const beats = 12;
+    const at = 0.1;
+    const start = at * data.numFrames;
+    const end = start + (beats * 60 * SAMPLE_RATE) / 120;
+    const paint = async (windowBlocks: number): Promise<Float32Array> => {
+      const rig = harness(windowBlocks);
+      await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+      rig.canvas.beginStroke();
+      expect(
+        rig.canvas.paintWhenHeld(dabExtent(start, end), NO_OTHER_FILES, (clip) => rig.wideDab(at, beats, clip)),
+      ).toBe(true);
+      expect((await rig.canvas.settle()).status).toBe("completed");
+      const dirty = rig.canvas.dirtyPixelRanges()!;
+      const whole = Float32Array.from(data.packedData);
+      scatterCompactPixelRanges(whole, await rig.canvas.readPixelRanges(dirty), dirty);
+      rig.canvas.endStroke();
+      return whole;
+    };
+    const expected = await paint(grid.blockCount);
+    const windowed = await paint(3);
+    let changed = 0;
+    let magnitude = 0;
+    let phase = 0;
+    for (let i = 0; i < expected.length; i++) {
+      if (expected[i] !== data.packedData[i]) changed++;
+      const diff = Math.abs(expected[i] - windowed[i]);
+      if (i % 2 === 0) magnitude = Math.max(magnitude, diff);
+      else phase = Math.max(phase, diff);
+    }
+    expect(changed).toBeGreaterThan(0);
+    // Phase runs to several radians and the two canvases address it from
+    // different bases, so it keeps a looser bound than magnitude.
+    expect(magnitude, `largest magnitude difference ${magnitude}`).toBeLessThan(1e-4);
+    expect(phase, `largest phase difference ${phase}`).toBeLessThan(1e-3);
+  });
+
+  it("refuses a dab whose reach one window cannot hold around a single block", async () => {
     const { canvas } = harness(2);
     await until(() => canvas.holdsFrames(0, 1), "the first window");
-    const start = grid.blockFrames - 1;
-    const end = grid.blockFrames * 2 + 1;
-    expect(end - start).toBeLessThan(grid.blockFrames * 2);
-    expect(canvas.fitsWindow(start, end)).toBe(false);
-    expect(canvas.holdsFrames(start, end)).toBe(false);
     const paint = vi.fn(() => true);
-    expect(canvas.paintWhenHeld(start, end, NO_OTHER_FILES, paint)).toBe(false);
+    const reaching = { ...dabExtent(0, 1), before: grid.blockFrames * 2, after: grid.blockFrames * 2 };
+    expect(canvas.paintWhenHeld(reaching, NO_OTHER_FILES, paint)).toBe(false);
     expect(paint).not.toHaveBeenCalled();
   });
 
@@ -317,7 +416,7 @@ describe("a canvas that holds a window of the file", () => {
     const far = dabFrames(0.9);
     rig.canvas.aim(far.start, far.end);
     let painted = false;
-    rig.canvas.paintWhenHeld(far.start, far.end, NO_OTHER_FILES, () => {
+    rig.canvas.paintWhenHeld(dabExtent(far.start, far.end), NO_OTHER_FILES, () => {
       painted = true;
       return rig.dab(0.9);
     });
@@ -329,7 +428,7 @@ describe("a canvas that holds a window of the file", () => {
     expect(rig.canvas.holdsFrames(far.start, far.end)).toBe(true);
   });
 
-  it("runs held paint in the order it was given", async () => {
+  it("runs held paint on a block in the order it was given, and lets paint on another block go ahead", async () => {
     const rig = harness(2, true);
     rig.open();
     await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
@@ -339,22 +438,27 @@ describe("a canvas that holds a window of the file", () => {
     const order: number[] = [];
     const far = dabFrames(0.9);
     rig.canvas.aim(far.start, far.end);
-    rig.canvas.paintWhenHeld(far.start, far.end, NO_OTHER_FILES, () => {
+    rig.canvas.paintWhenHeld(dabExtent(far.start, far.end), NO_OTHER_FILES, () => {
       order.push(1);
       return rig.dab(0.9);
     });
-    // The canvas still holds the start of the file, but a dab there must not
-    // overtake the one already waiting.
+    // A dab on a block the canvas holds does not wait for one on another block.
     const near = dabFrames(0.01);
-    rig.canvas.paintWhenHeld(near.start, near.end, NO_OTHER_FILES, () => {
+    rig.canvas.paintWhenHeld(dabExtent(near.start, near.end), NO_OTHER_FILES, () => {
       order.push(2);
       return true;
     });
-    expect(order).toEqual([]);
+    expect(order).toEqual([2]);
+    // A later dab over the waiting one's block waits behind it.
+    rig.canvas.paintWhenHeld(dabExtent(far.start, far.end), NO_OTHER_FILES, () => {
+      order.push(3);
+      return true;
+    });
+    expect(order).toEqual([2]);
 
     rig.open();
     await rig.canvas.settle();
-    expect(order).toEqual([1, 2]);
+    expect(order).toEqual([2, 1, 3]);
   });
 
   it("brings the window back to a waiting dab when the commit settles", async () => {
@@ -364,7 +468,7 @@ describe("a canvas that holds a window of the file", () => {
 
     const far = dabFrames(0.9);
     let paintedAt: number | null = null;
-    rig.canvas.paintWhenHeld(far.start, far.end, NO_OTHER_FILES, () => {
+    rig.canvas.paintWhenHeld(dabExtent(far.start, far.end), NO_OTHER_FILES, () => {
       paintedAt = 0.9;
       return rig.dab(0.9);
     });
@@ -393,7 +497,7 @@ describe("a canvas that holds a window of the file", () => {
     for (let i = 0; i < dabs; i++) {
       const at = i % 2 === 0 ? 0.9 : 0.05;
       const frames = dabFrames(at);
-      rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => {
+      rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, () => {
         landed.push(i);
         return rig.dab(at);
       });
@@ -401,7 +505,10 @@ describe("a canvas that holds a window of the file", () => {
     expect(landed.length).toBeLessThan(dabs);
 
     await rig.canvas.settle();
-    expect(landed).toEqual([...Array(dabs).keys()]);
+    // Every dab lands once, and the dabs on each block land in the order they came.
+    expect([...landed].sort((a, b) => a - b)).toEqual([...Array(dabs).keys()]);
+    expect(landed.filter((i) => i % 2 === 0)).toEqual([0, 2, 4, 6, 8, 10]);
+    expect(landed.filter((i) => i % 2 === 1)).toEqual([1, 3, 5, 7, 9, 11]);
   });
 
   it("follows the oldest held dab while the brush runs ahead, not the pointer", async () => {
@@ -416,9 +523,9 @@ describe("a canvas that holds a window of the file", () => {
     for (const [i, at] of positions.entries()) {
       const frames = dabFrames(at);
       rig.canvas.aim(frames.start, frames.end);
-      rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => {
-        landed.push(i);
-        return rig.dab(at);
+      rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, (clip) => {
+        if (!landed.includes(i)) landed.push(i);
+        return rig.dab(at, undefined, clip);
       });
     }
     // The pointer keeps moving past the end of the file's last block.
@@ -501,7 +608,11 @@ describe("a canvas that holds a window of the file", () => {
       await until(() => rig.canvas.holdsFrames(frames.start, frames.end), `the block under ${at}`);
       const block = blockOfFrame(grid, frames.start);
       const before = await readBlock(block);
-      expect(rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => rig.dab(at))).toBe(true);
+      expect(
+        rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, (clip) =>
+          rig.dab(at, undefined, clip),
+        ),
+      ).toBe(true);
       const after = await readBlock(block);
       let p = 0;
       for (let i = 0; i + 1 < after.ranges.length; i += 2) {
@@ -552,9 +663,11 @@ describe("a canvas that holds a window of the file", () => {
       rig.canvas.beginStroke();
       for (const { at, strength } of positions) {
         const frames = dabFrames(at);
-        expect(rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => rig.dab(at, strength))).toBe(
-          true,
-        );
+        expect(
+          rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, (clip) =>
+            rig.dab(at, strength, clip),
+          ),
+        ).toBe(true);
         await rig.canvas.settle();
       }
       return await rig.canvas.readPixelRanges(block0Ranges);
@@ -579,7 +692,7 @@ describe("a canvas that holds a window of the file", () => {
     rig.fail(true);
     const held = vi.fn(() => true);
     const frames = dabFrames(0.9);
-    rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, held);
+    rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, held);
     expect(await rig.canvas.settle()).toEqual({ status: "failed", reason: "unavailable" });
     rig.fail(false);
     expect(await rig.canvas.discardStroke()).toBe(true);
@@ -612,7 +725,7 @@ describe("a canvas that holds a window of the file", () => {
     rig.close();
     const held = vi.fn(() => true);
     const frames = dabFrames(0.9);
-    rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, held);
+    rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, held);
     const settling = rig.canvas.settle();
     rig.canvas.setFBOData(data.packedData);
     rig.open();
@@ -629,7 +742,7 @@ describe("a canvas that holds a window of the file", () => {
     rig.close();
     const held = vi.fn(() => true);
     const frames = dabFrames(0.9);
-    rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, held);
+    rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, held);
     const settling = rig.canvas.settle();
     rig.canvas.dispose();
     expect(await settling).toEqual({ status: "cancelled" });
@@ -645,7 +758,7 @@ describe("a canvas that holds a window of the file", () => {
     rig.close();
     const held = vi.fn(() => true);
     const frames = dabFrames(0.9);
-    rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, held);
+    rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, held);
     const abort = new AbortController();
     const settling = rig.canvas.settle(abort.signal);
     abort.abort();
@@ -667,7 +780,11 @@ describe("a canvas that holds a window of the file", () => {
       const frames = dabFrames(at);
       rig.canvas.aim(frames.start, frames.end);
       await until(() => rig.canvas.holdsFrames(frames.start, frames.end), `the block under ${at}`);
-      expect(rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => rig.dab(at))).toBe(true);
+      expect(
+        rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, (clip) =>
+          rig.dab(at, undefined, clip),
+        ),
+      ).toBe(true);
       touched.push(blockOfFrame(grid, frames.start));
     }
     await rig.canvas.settle();
@@ -1006,9 +1123,9 @@ describe("a canvas that holds a window of the file", () => {
       if (i === 2) rig.close();
       const frames = dabFrames(at);
       rig.canvas.aim(frames.start, frames.end);
-      rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => {
-        landed.push(i);
-        return rig.dab(at);
+      rig.canvas.paintWhenHeld(dabExtent(frames.start, frames.end), NO_OTHER_FILES, (clip) => {
+        if (!landed.includes(i)) landed.push(i);
+        return rig.dab(at, undefined, clip);
       });
     }
     expect(landed).toEqual([0, 1]);
@@ -1069,7 +1186,7 @@ describe("a canvas that holds a window of the file", () => {
 
     let painted = false;
     const far = dabFrames(0.9);
-    canvas.paintWhenHeld(far.start, far.end, NO_OTHER_FILES, () => {
+    canvas.paintWhenHeld(dabExtent(far.start, far.end), NO_OTHER_FILES, () => {
       painted = true;
       return true;
     });
@@ -1084,7 +1201,7 @@ describe("a canvas that holds a window of the file", () => {
     let painted = false;
     const near = dabFrames(0.01);
     expect(
-      rig.canvas.paintWhenHeld(near.start, near.end, NO_OTHER_FILES, () => {
+      rig.canvas.paintWhenHeld(dabExtent(near.start, near.end), NO_OTHER_FILES, () => {
         painted = true;
         return true;
       }),
@@ -1126,7 +1243,7 @@ describe("a canvas that holds a window of the file", () => {
     // brings it in.
     canvas.beginStroke();
     let painted = false;
-    canvas.paintWhenHeld(0, 1, { ...NO_OTHER_FILES, original: true }, () => {
+    canvas.paintWhenHeld(dabExtent(0, 1), { ...NO_OTHER_FILES, original: true }, () => {
       painted = true;
       return true;
     });
@@ -1474,7 +1591,7 @@ describe("a canvas that holds a window of the file", () => {
 
     let painted = false;
     canvas.beginStroke();
-    const canPaint = canvas.paintWhenHeld(0, 100, { sources: [need], impulses: [], original: false }, () => {
+    const canPaint = canvas.paintWhenHeld(dabExtent(0, 100), { sources: [need], impulses: [], original: false }, () => {
       const windowTextures = canvas.aimSource(need);
       expect(windowTextures).not.toBeNull();
       const sourceInfo: SourceFileInfo = {
@@ -1507,7 +1624,7 @@ describe("a canvas that holds a window of the file", () => {
     expect(canvas.aimSource(need)).toBeNull();
 
     let paintedAfterBump = false;
-    canvas.paintWhenHeld(0, 100, { sources: [need], impulses: [], original: false }, () => {
+    canvas.paintWhenHeld(dabExtent(0, 100), { sources: [need], impulses: [], original: false }, () => {
       paintedAfterBump = true;
       return true;
     });

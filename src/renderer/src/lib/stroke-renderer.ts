@@ -58,7 +58,7 @@ import { footprintAimToBlUv } from "./brush-anchor";
 import { ATTRACT_MODULATOR_MAP_START, padToFold } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { getQuantizeLutTexture } from "./quantize-lut";
-import { selectionBandRange, selectionFrameRange, selectionUvRect, type Selection } from "./selection";
+import { selectionBandRange, selectionFrameRange, type Selection } from "./selection";
 import { buildModulatorUniforms } from "./modulator-utils";
 import {
   brushFootprintRanges,
@@ -301,6 +301,13 @@ export interface StrokeParams {
   stepSources?: readonly (SourceFileInfo | undefined)[];
   // The file's selection rectangle, which the stroke cannot paint outside.
   selection?: Selection | null;
+  /**
+   * The canvas frames the dab may write, [frameStart, frameEnd): a dab too
+   * wide for one window is painted a span at a time. Its shape, envelope and
+   * reads stay those of the whole dab. A bin belongs to the span its left
+   * edge falls in.
+   */
+  clip?: { frameStart: number; frameEnd: number } | null;
 }
 
 /** The selection clip as the shader reads it. `active` is 0 when there is none. */
@@ -316,9 +323,13 @@ function selectionClipFor(
   selection: Selection | null,
   data: SpectrogramData,
   maskTexture: Texture | null,
+  viewStartFrame: number,
 ): SelectionClip {
   if (!selection) return { active: 0, frames: new Vector2(), bands: new Vector2(), maskActive: 0, maskTexture: null };
-  const { startFrame, endFrame } = selectionFrameRange(selection, data.sampleRate);
+  // The shader counts frames from the start of the span the canvas holds.
+  const range = selectionFrameRange(selection, data.sampleRate);
+  const startFrame = range.startFrame - viewStartFrame;
+  const endFrame = range.endFrame - viewStartFrame;
   const { lowBand, highBand } = selectionBandRange(selection, data.numBands);
   return {
     active: 1,
@@ -569,6 +580,25 @@ export class StrokeRenderer {
   /** Frames the view spans; the dest frame count the shaders address with. */
   private get viewFrameCount(): number {
     return this.view.endFrame - this.view.startFrame;
+  }
+
+  /** The selection as a rectangle in the canvas's own UV. */
+  private selectionViewRect(selection: Selection): { anchor: Vector2; size: Vector2 } {
+    const { startFrame, endFrame } = selectionFrameRange(selection, this.spectrogramData.sampleRate);
+    const frames = this.viewFrameCount;
+    const start = (startFrame - this.view.startFrame) / frames;
+    const end = (endFrame - this.view.startFrame) / frames;
+    return {
+      anchor: new Vector2(start, selection.pitchLo),
+      size: new Vector2(end - start, selection.pitchHi - selection.pitchLo),
+    };
+  }
+
+  /** A time in the canvas's UV as a time in the file's; unchanged while the canvas holds the whole file. */
+  private fileUvX(viewUvX: number): number {
+    const frames = this.spectrogramData.numFrames;
+    if (this.view.startFrame === 0 && this.viewFrameCount === frames) return viewUvX;
+    return (this.view.startFrame + viewUvX * this.viewFrameCount) / frames;
   }
 
   /**
@@ -870,11 +900,20 @@ export class StrokeRenderer {
         gridSizeBeats: stepState.gridSizeBeats,
         snapTime: stepState.snapTime,
       });
+      const anchor = resolveBrushAnchor(new Vector2(blX, blY), footprint.fullTime, footprint.fullPitch);
+      const sizeUv = footprint.sizeUv.clone();
+      if (footprint.fullTime) {
+        // A brush the length of the file spans the file, not the canvas: on a
+        // canvas holding a span of it, it starts before the span and ends past it.
+        const viewFrames = this.viewFrameCount;
+        anchor.x = -this.view.startFrame / viewFrames;
+        sizeUv.x = this.spectrogramData.numFrames / viewFrames;
+      }
       geometries.push({
         index: stepIndex,
         state: stepState,
-        sizeUv: footprint.sizeUv,
-        anchor: resolveBrushAnchor(new Vector2(blX, blY), footprint.fullTime, footprint.fullPitch),
+        sizeUv,
+        anchor,
         fullTime: footprint.fullTime,
         fullPitch: footprint.fullPitch,
       });
@@ -1139,6 +1178,7 @@ export class StrokeRenderer {
       algorithm: { value: stepState.algorithm },
       magnitudeLimit: { value: magnitudeLimit },
       wrapMode: { value: stepState.brushWrapMode },
+      brushWrapSpanX: { value: this.spectrogramData.numFrames / this.viewFrameCount },
       modulators: { value: modulatorUniforms },
       gainLut: { value: modulatorScaleLut || placeholderTexture },
       quantizeLutTex: { value: getQuantizeLutTexture() },
@@ -1211,6 +1251,7 @@ export class StrokeRenderer {
     window: FrameWindow,
     wholeBands: boolean,
     rows: { rowStart: number; rowCount: number } | null,
+    clip?: { frameStart: number; frameEnd: number } | null,
   ): StrokeFootprint | null {
     const { numBands, textureWidth } = this.viewSpec;
     const bands = wholeBands
@@ -1226,6 +1267,7 @@ export class StrokeRenderer {
       footprint.ranges,
       footprint.binRanges,
       rows ? { start: rows.rowStart * textureWidth, end: (rows.rowStart + rows.rowCount) * textureWidth } : undefined,
+      clip ?? undefined,
     );
     footprint.pixels = 0;
     for (let i = 0; i < footprint.count; i++) footprint.pixels += footprint.ranges[i * 2 + 1];
@@ -1255,7 +1297,8 @@ export class StrokeRenderer {
       tiltY,
     } = params;
 
-    if (cursorPos.x < 0) return;
+    // A piece of a dab wider than the canvas may start before it.
+    if (cursorPos.x < 0 && !params.clip) return;
 
     // Every source-space conversion below divides by the source's duration and
     // band count, so an empty source would put NaN coordinates into the shaders
@@ -1319,9 +1362,14 @@ export class StrokeRenderer {
     // too. With no overlap the extent collapses, which leaves an empty
     // footprint: the passes draw nothing and no preview is composited.
     const selection = params.selection ?? null;
-    const selectionClip = selectionClipFor(selection, this.spectrogramData, this.selectionMaskTexture(selection));
+    const selectionClip = selectionClipFor(
+      selection,
+      this.spectrogramData,
+      this.selectionMaskTexture(selection),
+      this.view.startFrame,
+    );
     if (selection) {
-      const rect = selectionUvRect(selection, totalDuration);
+      const rect = this.selectionViewRect(selection);
       const selMaxX = rect.anchor.x + rect.size.x;
       const selMaxY = rect.anchor.y + rect.size.y;
       const clipMinX = wholeTime ? rect.anchor.x : Math.max(unionMin.x, rect.anchor.x);
@@ -1346,15 +1394,24 @@ export class StrokeRenderer {
     const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
     const { textureWidth } = this.view;
     const numFrames = this.viewFrameCount;
-    const window: FrameWindow = wholeTime
+    const clip = preview ? null : (params.clip ?? null);
+    let window: FrameWindow = wholeTime
       ? null
       : {
           frameStart: Math.floor(unionAnchor.x * numFrames + 0.5),
           frameEnd: Math.floor((unionAnchor.x + maxBrushSizeUv.x) * numFrames + 0.5),
         };
-    const footprint = this.disableScissorCopyBack
-      ? null
-      : this.calculateFootprint(unionAnchor, maxBrushSizeUv, window, yWrapsOutOfBounds, scissorRows);
+    if (clip) {
+      window = {
+        frameStart: Math.max(window ? window.frameStart : 0, clip.frameStart),
+        frameEnd: Math.min(window ? window.frameEnd : numFrames, clip.frameEnd),
+      };
+      if (window.frameEnd <= window.frameStart) return;
+    }
+    const footprint =
+      this.disableScissorCopyBack && !clip
+        ? null
+        : this.calculateFootprint(unionAnchor, maxBrushSizeUv, window, yWrapsOutOfBounds, scissorRows, clip);
     const passRanges = scissorRows
       ? rowRange(textureWidth, scissorRows.rowStart, scissorRows.rowCount)
       : this.fullRange();
@@ -1364,6 +1421,7 @@ export class StrokeRenderer {
     const { textureHeight } = this.view;
     const swapWhole =
       footprint !== null &&
+      clip === null &&
       scissorRows === null &&
       footprint.pixels >= SWAP_FOOTPRINT_FRACTION * textureWidth * textureHeight;
     const copyBack = footprint !== null && !swapWhole;
@@ -1375,7 +1433,7 @@ export class StrokeRenderer {
     }
 
     // Generate random value seeded by position using Perlin noise
-    const strokeRandom = this.randomAt(cursorPos);
+    const strokeRandom = this.randomAt(new Vector2(this.fileUvX(cursorPos.x), cursorPos.y));
 
     for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
       const geometry = stepGeometries[stepIndex];
@@ -1421,7 +1479,7 @@ export class StrokeRenderer {
       // footprint anchors to 0, so the aim is read straight from the cursor.
       const stepContext: StrokeContext = {
         iteration: 0,
-        time: geometry.fullTime ? cursorPos.x : stepAnchor.x + stepBrushSizeUv.x / 2,
+        time: this.fileUvX(geometry.fullTime ? cursorPos.x : stepAnchor.x + stepBrushSizeUv.x / 2),
         pitch: geometry.fullPitch ? cursorPos.y : stepAnchor.y + stepBrushSizeUv.y / 2,
         random: strokeRandom,
         step: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
@@ -1749,14 +1807,19 @@ export class StrokeRenderer {
           tiltX,
           tiltY,
           selectionClip,
+          clip && footprint ? footprint : null,
         );
       }
 
       // Update dirty region to include this stroke's bounds. Every step of
       // the brush painted, so the bounds are the union of the steps' extents,
       // not the active step's alone.
-      const strokeStartX = unionAnchor.x;
-      const strokeEndX = unionAnchor.x + maxBrushSizeUv.x;
+      // A clipped span of a brush that wraps lies wherever the clip does,
+      // not between the brush's own edges on this canvas.
+      const clipStartX = clip ? clip.frameStart / numFrames : -Infinity;
+      const clipEndX = clip ? clip.frameEnd / numFrames : Infinity;
+      const strokeStartX = clip && wholeTime ? clipStartX : Math.max(unionAnchor.x, clipStartX);
+      const strokeEndX = clip && wholeTime ? clipEndX : Math.min(unionAnchor.x + maxBrushSizeUv.x, clipEndX);
       const strokeStartY = unionAnchor.y;
       const strokeEndY = unionAnchor.y + maxBrushSizeUv.y;
 
@@ -1804,6 +1867,7 @@ export class StrokeRenderer {
     tiltX: number,
     tiltY: number,
     selectionClip: SelectionClip,
+    clipped: PixelRangeList | null,
   ): void {
     const numSteps = stepGeometries.length;
     if (numSteps === 0) return;
@@ -1831,10 +1895,13 @@ export class StrokeRenderer {
     uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;
 
     const rows = this.maskRows;
+    // A clipped dab raises the masks only where it writes, so the rest of its
+    // span stays open for the dabs before it that have still to paint there.
     const maskRanges =
-      rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.view.textureHeight
+      clipped ??
+      (rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.view.textureHeight
         ? rowRange(this.view.textureWidth, rows.rowStart, rows.rowEnd - rows.rowStart)
-        : this.fullRange();
+        : this.fullRange());
 
     let renderedAny = false;
 
@@ -1849,7 +1916,7 @@ export class StrokeRenderer {
       // The mask is the envelope of the whole stroke, so it reads the last iteration.
       const maskContext = createModContext(stepState, {
         iteration: 1,
-        time: geometry.fullTime ? cursorPos.x : brushAnchor.x + brushSizeUv.x / 2,
+        time: this.fileUvX(geometry.fullTime ? cursorPos.x : brushAnchor.x + brushSizeUv.x / 2),
         pitch: geometry.fullPitch ? cursorPos.y : brushAnchor.y + brushSizeUv.y / 2,
         random: strokeRandom,
         step: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
@@ -1874,6 +1941,10 @@ export class StrokeRenderer {
 
       (uniforms.brushBottomLeftUv.value as Vector2).copy(brushAnchor);
       (uniforms.brushSizeUv.value as Vector2).copy(brushSizeUv);
+      uniforms.wrapMode.value = stepState.brushWrapMode;
+      uniforms.brushWrapSpanX.value = this.spectrogramData.numFrames / this.viewFrameCount;
+      uniforms.destFileFrameCount.value = this.spectrogramData.numFrames;
+      uniforms.destViewStartFrame.value = this.view.startFrame;
 
       writeParameterUniform(
         uniforms.brushIntensity.value as ParameterUniform,

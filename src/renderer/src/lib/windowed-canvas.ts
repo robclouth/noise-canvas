@@ -31,6 +31,7 @@ import { CarriedPaint, type PaintBox } from "./carried-paint";
 import type { CoarseStrip } from "./coarse-strip";
 import { diag } from "./diag-log";
 import { yieldIfLong } from "./frame-yield";
+import { blockReadSpan, blocksOfDab, HeldDabs, type DabExtent, type DabPainter, type FrameSpan } from "./held-dabs";
 import { PackedWindow } from "./packed-window";
 import {
   composePixelRangeValues,
@@ -61,9 +62,6 @@ export type { SourceNeed } from "./source-window";
  * this canvas owns, and this file's original state.
  */
 export type DabNeeds = { sources: readonly SourceNeed[]; impulses: readonly SourceNeed[]; original: boolean };
-
-/** Paint waiting for the canvas to hold the frames it lands on. */
-type HeldPaint = { startFrame: number; endFrame: number; needs: DabNeeds; paint: () => boolean };
 
 /** A window the canvas is reading towards, and whether the original reads alongside. */
 type WindowRequest = { view: CanvasView; original: boolean };
@@ -180,7 +178,7 @@ export type WindowedCanvasDeps = {
 export class WindowedCanvas {
   private readonly deps: WindowedCanvasDeps;
   private readonly numFrames: number;
-  private readonly grid: BlockGrid;
+  readonly grid: BlockGrid;
   private readonly blocks: CanvasWindow;
   private original: PackedWindow | null = null;
   private readonly sources = new Map<string, SourceWindowSlot>();
@@ -192,7 +190,7 @@ export class WindowedCanvas {
   private displaySeed: { edited: Uint32Array } | null = null;
   private generation = 0;
   private disposed = false;
-  private readonly held: HeldPaint[] = [];
+  private readonly held: HeldDabs<DabNeeds>;
   private carried = new CarriedPaint();
   private strokeSlots: StrokeSlots | null = null;
   private readonly pending: PendingPaint[] = [];
@@ -218,6 +216,7 @@ export class WindowedCanvas {
       readBlock: deps.readCurrentBlock,
     });
     this.windowBlocks = windowBlocks;
+    this.held = new HeldDabs(grid);
   }
 
   /** Changes when a stroke starts, is discarded, or its state is replaced. */
@@ -449,11 +448,11 @@ export class WindowedCanvas {
     const window = this.blocks;
     const renderer = this.deps.renderer();
     if (!renderer?.getIsInitialized()) return;
-    if (this.stroking && this.held.length > 0) {
-      const span = this.heldSpan();
-      startFrame = span.startFrame;
-      endFrame = span.endFrame;
-      wantOriginal = wantOriginal || span.original;
+    const waiting = this.stroking ? this.held.target((start, end) => this.fitsWindow(start, end)) : null;
+    if (waiting) {
+      startFrame = waiting.span.start;
+      endFrame = waiting.span.end;
+      wantOriginal = wantOriginal || waiting.payloads.some((needs) => needs.original);
     }
     const current = renderer.committedSource().view;
     const next = window.plan(current, startFrame, endFrame);
@@ -762,20 +761,47 @@ export class WindowedCanvas {
   }
 
   /**
-   * Paints now when the canvas holds [startFrame, endFrame) and nothing is
-   * already waiting; otherwise holds `paint` until the canvas takes the blocks.
-   * Held paint runs in the order it was given, so a dab behind a waiting one
-   * waits with it. Returns false when the range cannot fit or `paint` refuses.
+   * True when the canvas can paint every block of the dab: each block, with
+   * what the dab reads either side of it, fits one window.
    */
-  paintWhenHeld(startFrame: number, endFrame: number, needs: DabNeeds, paint: () => boolean): boolean {
-    if (!this.fitsWindow(startFrame, endFrame)) return false;
-    if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame, needs.original) && this.othersHold(needs)) {
-      const painted = paint();
-      if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
-      return painted;
+  servable(extent: DabExtent): boolean {
+    return blocksOfDab(this.grid, extent).every((block) => {
+      const read = blockReadSpan(this.grid, extent, block);
+      return this.fitsWindow(read.start, read.end);
+    });
+  }
+
+  /**
+   * Paints the dab now when nothing is waiting and the canvas holds all it
+   * reads; otherwise holds it and paints it a run of blocks at a time as the
+   * canvas takes them, each block after the dabs before it that paint there.
+   * Returns false when the canvas can never serve it or `paint` refuses.
+   */
+  paintWhenHeld(extent: DabExtent, needs: DabNeeds, paint: DabPainter): boolean {
+    if (!this.servable(extent)) return false;
+    if (this.held.size === 0 && extent.writes.length === 1 && this.othersHold(needs)) {
+      const write = extent.writes[0];
+      const read = { start: Math.max(0, write.start - extent.before), end: write.end + extent.after };
+      if (this.fitsWindow(read.start, read.end) && this.holdsFrames(read.start, read.end, needs.original)) {
+        const painted = paint(null);
+        if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
+        return painted;
+      }
     }
-    this.held.push({ startFrame, endFrame, needs, paint });
+    this.held.push(extent, needs, paint);
+    this.releaseHeld();
     return true;
+  }
+
+  /** A span of file frames in the canvas's own frames, clamped to what it holds; null stays null. */
+  clipToCanvas(clip: FrameSpan | null): { frameStart: number; frameEnd: number } | null {
+    const view = this.view();
+    if (!clip || !view) return null;
+    const frames = view.endFrame - view.startFrame;
+    return {
+      frameStart: Math.max(0, clip.start - view.startFrame),
+      frameEnd: Math.min(frames, clip.end - view.startFrame),
+    };
   }
 
   /**
@@ -817,7 +843,7 @@ export class WindowedCanvas {
     });
     const abort = () => {
       if (epoch === this.strokeEpoch) {
-        this.held.length = 0;
+        this.held.clear();
         this.request = null;
       }
       cancel();
@@ -828,12 +854,18 @@ export class WindowedCanvas {
     try {
       if (stopped()) return { status: "cancelled" };
       this.releaseHeld();
-      for (let stalls = 0; this.held.length > 0 && stalls < HELD_PAINT_FILLS; ) {
-        const before = this.held.length;
-        const next = this.held[0];
-        this.aim(next.startFrame, next.endFrame, next.needs.original);
-        for (const need of next.needs.sources) this.aimSource(need);
-        for (const need of next.needs.impulses) this.aimImpulse(need);
+      for (let stalls = 0; this.held.size > 0 && stalls < HELD_PAINT_FILLS; ) {
+        const before = this.held.pieces;
+        const next = this.held.target((start, end) => this.fitsWindow(start, end));
+        if (!next) break;
+        this.aim(
+          next.span.start,
+          next.span.end,
+          next.payloads.some((needs) => needs.original),
+        );
+        const [oldest] = next.payloads;
+        for (const need of oldest.sources) this.aimSource(need);
+        for (const need of oldest.impulses) this.aimImpulse(need);
         const reads = [
           this.fill,
           ...[...this.sources.values()].map((slot) => slot.settled()),
@@ -843,10 +875,10 @@ export class WindowedCanvas {
         await Promise.race([Promise.all(reads), cancelled]);
         if (stopped()) return { status: "cancelled" };
         this.releaseHeld();
-        stalls = this.held.length < before ? 0 : stalls + 1;
+        stalls = this.held.pieces < before ? 0 : stalls + 1;
       }
-      if (this.held.length > 0) {
-        this.held.length = 0;
+      if (this.held.size > 0) {
+        this.held.clear();
         this.request = null;
         return { status: "failed", reason: "unavailable" };
       }
@@ -854,7 +886,7 @@ export class WindowedCanvas {
       return stopped() ? { status: "cancelled" } : { status: "completed" };
     } catch (error) {
       if (stopped()) return { status: "cancelled" };
-      this.held.length = 0;
+      this.held.clear();
       this.request = null;
       diag.warn("gl", "stroke settlement failed", { error: String(error) });
       return { status: "failed", reason: "read-error" };
@@ -897,7 +929,7 @@ export class WindowedCanvas {
     this.strokeEpoch++;
     this.stroking = true;
     // Paint the last stroke never landed belongs to that stroke, not this one.
-    this.held.length = 0;
+    this.held.clear();
     // A fresh carry per stroke, so a commit still reading the last one keeps it.
     this.resetCarry();
     this.discardable = true;
@@ -924,7 +956,7 @@ export class WindowedCanvas {
     this.strokeEpoch++;
     this.stroking = false;
     this.discardable = false;
-    this.held.length = 0;
+    this.held.clear();
     this.request = null;
     const epoch = this.strokeEpoch;
     const ranges = this.dirtyPixelRanges();
@@ -1071,7 +1103,7 @@ export class WindowedCanvas {
     if (!renderer) return false;
     this.cancelSettlement?.();
     this.strokeEpoch++;
-    this.held.length = 0;
+    this.held.clear();
     this.request = null;
     this.stroking = false;
     this.discardable = false;
@@ -1147,7 +1179,7 @@ export class WindowedCanvas {
     for (const slot of this.impulses.values()) slot.dispose();
     this.impulses.clear();
     this.request = null;
-    this.held.length = 0;
+    this.held.clear();
   }
 
   // ---------- inside ----------
@@ -1162,42 +1194,24 @@ export class WindowedCanvas {
 
   /** Points the canvas at the held paint still waiting, so the next read serves it. */
   private aimHeld(): void {
-    if (!this.stroking || this.held.length === 0) return;
-    const next = this.held[0];
-    this.aim(next.startFrame, next.endFrame, next.needs.original);
+    if (!this.stroking) return;
+    const next = this.held.target((start, end) => this.fitsWindow(start, end));
+    if (next)
+      this.aim(
+        next.span.start,
+        next.span.end,
+        next.payloads.some((needs) => needs.original),
+      );
   }
 
-  /**
-   * The frames of the oldest held dab, widened over the dabs behind it while
-   * one window still holds them all, so one read serves a run of them, and
-   * whether any of those dabs reads the original.
-   */
-  private heldSpan(): { startFrame: number; endFrame: number; original: boolean } {
-    let startFrame = this.held[0].startFrame;
-    let endFrame = this.held[0].endFrame;
-    let original = this.held[0].needs.original;
-    for (let i = 1; i < this.held.length; i++) {
-      const start = Math.min(startFrame, this.held[i].startFrame);
-      const end = Math.max(endFrame, this.held[i].endFrame);
-      if (!this.fitsWindow(start, end)) break;
-      startFrame = start;
-      endFrame = end;
-      original = original || this.held[i].needs.original;
-    }
-    return { startFrame, endFrame, original };
-  }
-
-  /** Runs the held paint the canvas can now take, oldest first. */
+  /** Paints the held blocks the canvas can now take. */
   private releaseHeld(): void {
-    while (this.held.length > 0) {
-      const next = this.held[0];
-      if (!this.holdsFrames(next.startFrame, next.endFrame, next.needs.original) || !this.othersHold(next.needs)) {
-        return;
-      }
-      this.held.shift();
-      next.paint();
-      if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
-    }
+    if (this.held.size === 0) return;
+    this.held.release((extent, needs, block) => {
+      const read = blockReadSpan(this.grid, extent, block);
+      return this.holdsFrames(read.start, read.end, needs.original) && this.othersHold(needs);
+    });
+    if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
   }
 
   /** The window over the file's original, built the first time a dab asks to read it. */

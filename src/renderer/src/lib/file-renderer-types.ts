@@ -1,3 +1,4 @@
+import type { DabExtent, FrameSpan } from "./held-dabs";
 import type { DataTexture, Texture, Vector2, WebGLRenderTarget } from "three";
 import type { StrokePosition } from "../store/transient";
 import type { State, SpectrogramData } from "../store/types";
@@ -38,8 +39,9 @@ export interface BrushUnionUv {
 
 /** The frames a dab reads and writes, with what it reads of other files. */
 export interface DabSpan {
-  startFrame: number;
-  endFrame: number;
+  extent: DabExtent;
+  /** The frames to hold for a hover over the dab: all it reads, or, when that is wider than a window, what the block under the pointer reads. */
+  hover: FrameSpan;
   needs: DabNeeds;
   impulseBindings: readonly ImpulseNeed[];
 }
@@ -85,11 +87,6 @@ export interface FileRendererHandle {
   beginStrokePreview: () => boolean;
   /** Puts back the pixels from before the preview. Resolves false if none were saved. */
   discardStrokePreview: () => Promise<boolean>;
-  /**
-   * The longest stroke the canvas takes at once, in seconds, while it holds a
-   * window of the file; null while it holds all of it.
-   */
-  maxStrokeSeconds: () => number | null;
   /** The whole packed state from the frame buffer, or null when the canvas view does not hold the whole file. */
   getFBOData: () => Promise<Float32Array | null>;
   /**

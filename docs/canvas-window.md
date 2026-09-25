@@ -49,8 +49,8 @@ says every block of the canvas's current view has content. `holdsFrames` checks
 that the entire requested file-frame range is present; `isFillingFrames` checks
 that an outstanding fill's layout can cover it. `fitsWindow` measures capacity
 in blocks, and both dab refusal and admission use that decision. A screen range
-may be wider than the canvas and use the pyramid and tile ring; an impossible
-dab is refused.
+may be wider than the canvas and use the pyramid and tile ring. A dab may be
+wider than the canvas too: it paints a block at a time (rule 1).
 
 ## Who owns what
 
@@ -120,8 +120,20 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    block is zeros, and painting blends out of the canvas, so the dab would
    commit silence. `holdsFrames` gates it, `paintWhenHeld` holds the dab back
    with the position it was given, and the fill that brings the block in runs
-   it. Held dabs run in the order they were given, so one the canvas could
-   take does not overtake one still waiting. `settle` drains what is left
+   it. A dab is held per block (`lib/held-dabs.ts`): each block it writes
+   paints once the canvas holds that block plus the dab's reach either side,
+   and one bin of the coarsest band past each cut the dab continues across,
+   because a pixel next to a cut interpolates over it. Neighbouring blocks
+   that are ready paint as one run under a write clip (`StrokeParams.clip`),
+   with the brush laid out over the file, not the canvas, so every piece
+   paints the same pixels a whole-file canvas would. A dab that fits and finds
+   nothing held paints whole, at once. A block of a dab waits for the older
+   dabs that still have that block to paint, and, when it reads the canvas as
+   those dabs leave it (Accumulate), for the older dabs within its reach; so
+   every pixel takes its dabs in the order they came, and a dab far from an
+   older one does not wait for it. `settle` aims the window at the oldest
+   waiting block and widens over what follows while one window holds it.
+   `settle` drains what is left
    before the commit reads the stroke. Settlement returns `completed`,
    `cancelled` or `failed`; only `completed` can enter history or synthesis.
    Unavailable blocks after eight fills without progress, or a failed read,
@@ -140,9 +152,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    and queues the positions; the next frame paints each one before the
    cursor's own dab, so a fast stroke leaves no gaps. A position equal to the
    last dab is skipped.
-   A region edit (silence, cut, paste, duplicate) is one dab the size of the
-   region, held the same way and settled before its commit; a region wider
-   than one window is refused with a notice. Reads for a region (copy, the
+   A region edit (silence, cut, paste, duplicate) is a row of dabs, each no
+   longer than the longest brush (`regionParts`), held the same way and
+   settled before its commit; a paste's later parts read further into the
+   clipboard. So a region of any length paints, whatever the window holds.
+   A selection clips the stroke at file frames; the shader gets them less the
+   canvas view's start. Reads for a region (copy, the
    wand, auditioning a selection) take the store's committed state over the
    blocks they cover (`readPackedSpan`), never the canvas.
    A grid fill is a stroke like any other: each of its dabs goes through
@@ -229,12 +244,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    every band by the file's duration. `destFileAxisSec` and `sourceFileAxisSec`
    read the file's frame count; the canvas's own frame count is the span it
    holds. A canvas over the whole file returns the value it always did.
-9. **A brush that reads the whole file does not paint on a window.** Wrapping in
-   time folds a read onto the far end of the canvas, a full-length brush spans
-   the canvas, and source tracking away from Follow puts the read anywhere in
-   the file. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab and
-   the file view says so once. No effect is among them: each declares a reach
-   instead. The gate is off while the canvas holds the whole file.
+9. **A brush is laid out over the file, not the canvas.** A full-length brush
+   spans the file's frames, so on a window it paints a block at a time like
+   any wide dab. Wrapping in time folds modulo the file's frames
+   (`brushWrapSpanX`), and a wrapping dab writes two spans, the file's end and
+   its start. Random and Time modulation read file UV. Only a read that can
+   land anywhere in the file is still refused: source tracking away from
+   Follow, or a source time offset, on a step that reads the canvas it paints
+   on. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab and the
+   file view says so once. The gate is off while the canvas holds the whole
+   file.
 10. **The canvas holds what an effect reads, not only what the dab covers.** A
     blur smear, a repeat gap and a warp's turn, stretch or shift all read past
     the brush when the edge mode is Bleed or Invert; the other edge modes fold
@@ -244,8 +263,9 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     convolve steps the read one response bin per tap, the way Rate's sign
     points. `effect-reach.ts` says how far, in seconds of the file, and the aim
     and the dab's own wait widen by it.
-    A brush whose dab plus reach is wider than a whole window can never be
-    served, so `overReachNeeds` names it and the dab is refused.
+    A dab is painted a block at a time, so only an effect whose one block plus
+    reach is wider than a whole window can never be served: `overReachNeeds`
+    names it and the dab is refused.
 11. **An offset added to a source UV converts against the span the source
     textures hold.** A blur's beats and a repeat's gap are source-UV distances
     (`sourceLayout`), a warp's shift is a destination-UV one

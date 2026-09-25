@@ -1319,9 +1319,9 @@ float getBrushTimeCoverage(vec2 unpackedUv, vec4 meta, out float localX) {
   float spanFrames = endFrame - blFrame;
   float edgeFrame = binIndex * cellFrames;
   float offFrames = edgeFrame - blFrame;
-  // On a wrapping axis the span continues from the far edge of the canvas, so
+  // On a wrapping axis the span continues from the far edge of the file, so
   // fold the offset there — in frames, where it stays exact.
-  if (wrapsTimeAxis()) offFrames = mod(offFrames + destFrameCount, destFrameCount);
+  if (wrapsTimeAxis()) offFrames = mod(offFrames + destFileFrameCount, destFileFrameCount);
   float edgeOff = offFrames / destFrameCount;
   // The envelope samples at the center of the bin's overlap with the span, not
   // at the bin's own center: either endpoint of the envelope is a hard zero, so

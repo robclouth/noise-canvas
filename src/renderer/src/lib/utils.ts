@@ -6,6 +6,8 @@ import type { Onset } from "./onset-map";
 //   value === 0          → "Grid" mode (track the current time/pitch grid)
 //   value >= *_FULL_*    → "Full" mode (brush spans the entire file on this axis)
 export const BRUSH_SIZE_TIME_FULL = 32;
+/** The longest brush, in beats, that is still a size rather than "the whole file". */
+export const MAX_FIXED_BRUSH_BEATS = BRUSH_SIZE_TIME_FULL - 0.1;
 export const BRUSH_SIZE_PITCH_FULL = 128;
 
 // Fallback grid interval in semis when the pitch grid is set to "Scale" mode

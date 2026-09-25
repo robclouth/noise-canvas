@@ -83,6 +83,7 @@ export function brushFootprintRanges(
   ranges: Uint32Array,
   binRanges: BinRanges,
   pixelClamp?: { start: number; end: number },
+  clip?: { frameStart: number; frameEnd: number },
 ): number {
   const { metadata, numBands, textureWidth, textureHeight } = layout;
   const clampStart = pixelClamp ? pixelClamp.start : 0;
@@ -98,6 +99,11 @@ export function brushFootprintRanges(
     if (window) {
       binStart = Math.max(0, Math.floor(window.frameStart / cell) - marginBins);
       binEnd = Math.min(length, Math.ceil(window.frameEnd / cell) + marginBins + 1);
+    }
+    if (clip) {
+      // A bin belongs to the span its left edge falls in.
+      binStart = Math.max(binStart, Math.ceil(clip.frameStart / cell));
+      binEnd = Math.min(binEnd, Math.ceil(clip.frameEnd / cell));
     }
     if (binEnd <= binStart) continue;
     binRanges[band * 4] = binStart;

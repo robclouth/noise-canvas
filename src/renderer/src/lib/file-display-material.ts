@@ -45,6 +45,7 @@ export function createFileDisplayMaterial(
       viewZoomPowerY: { value: 0.0 },
       viewOffsetY: { value: 0.0 },
       wrapMode: { value: 0 },
+      brushWrapSpanX: { value: 1 },
       fullScaleDbOffset: { value: FULL_SCALE_DB_OFFSET },
       previewTex: { value: null as Texture | null },
       previewBinRangesTex: { value: null as Texture | null },

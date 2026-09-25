@@ -1,11 +1,8 @@
 import { getFileOnsets } from "@renderer/lib/file-onsets";
-import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL, unitsToUv } from "@renderer/lib/utils";
+import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL, MAX_FIXED_BRUSH_BEATS, unitsToUv } from "@renderer/lib/utils";
 import type { BrushStep } from "@renderer/parameters";
 import type { LoopRegion, SpectrogramData, State } from "@renderer/store/types";
 import { resolvePitchCells, resolveTimeCells } from "./grid-cells";
-
-/** Longest stroke the brush size parameter accepts before it means "Full file". */
-const MAX_FIXED_BEATS = BRUSH_SIZE_TIME_FULL - 0.1;
 
 export interface GridFillTarget {
   fileId: string;
@@ -14,11 +11,6 @@ export interface GridFillTarget {
   totalDuration: number;
   /** The span to fill, in seconds. The whole file when absent. */
   region: LoopRegion | null;
-  /**
-   * The longest stroke the canvas can take at once, in seconds, when it holds
-   * a window of the file. Absent when it holds all of it.
-   */
-  maxStrokeSeconds?: number;
 }
 
 /** Where one stroke is aimed, in pitch UV. Each step anchors its own brush to it. */
@@ -52,13 +44,13 @@ function fillState(state: State, timeSpanBeats: number, hasRegion: boolean, cell
 
   if (!state.snapTime && stepNumber(state, "brushSizeTime") <= 0) {
     // Full anchors to the file's edge, so a region takes its measured length
-    // instead or the stroke would paint past the region. A canvas holding a
-    // window of the file takes the span in cells, each stroke one cell long.
+    // instead or the stroke would paint past the region. A region longer than
+    // a brush can be is taken in cells, each stroke one cell long.
     overrides.brushSizeTime =
       cellBeats !== null
-        ? Math.min(cellBeats, MAX_FIXED_BEATS)
+        ? Math.min(cellBeats, MAX_FIXED_BRUSH_BEATS)
         : hasRegion
-          ? Math.min(timeSpanBeats, MAX_FIXED_BEATS)
+          ? Math.min(timeSpanBeats, MAX_FIXED_BRUSH_BEATS)
           : BRUSH_SIZE_TIME_FULL;
   }
   if (!state.snapPitch && stepNumber(state, "brushSizePitch") <= 0) {
@@ -108,14 +100,14 @@ export function resolveGridFill(state: State, target: GridFillTarget): GridFill 
     bpm,
     onsets: getFileOnsets(target.fileId),
   });
-  // With time snapping off the span is one cell. A canvas holding a window of
-  // the file cannot take a stroke that long, so the span is cut into equal
-  // cells no longer than the canvas takes, and the brush is sized to one.
+  // With time snapping off the span is one cell. A region longer than a
+  // brush can be is cut into equal cells a brush can span, and the brush is
+  // sized to one.
   let cellBeats: number | null = null;
-  const maxSeconds = target.maxStrokeSeconds;
-  if (!state.snapTime && stepNumber(state, "brushSizeTime") <= 0 && maxSeconds !== undefined && maxSeconds > 0) {
-    const spanSeconds = timeRange.max - timeRange.min;
-    const count = Math.max(1, Math.ceil(spanSeconds / Math.min(maxSeconds, MAX_FIXED_BEATS * secondsPerBeat)));
+  const maxSeconds = MAX_FIXED_BRUSH_BEATS * secondsPerBeat;
+  const spanSeconds = timeRange.max - timeRange.min;
+  if (!state.snapTime && stepNumber(state, "brushSizeTime") <= 0 && region !== null && spanSeconds > maxSeconds) {
+    const count = Math.ceil(spanSeconds / maxSeconds);
     const cellSeconds = spanSeconds / count;
     timeCells = Array.from({ length: count }, (_, index) => ({
       start: timeRange.min + index * cellSeconds,

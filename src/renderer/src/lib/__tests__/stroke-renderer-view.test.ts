@@ -33,12 +33,13 @@ import {
 import { NEUTRAL_ALGORITHM, packedFold, padToFold } from "../constants";
 import { bakeOnsetTexture } from "../onset-map";
 import { BlockSlotCache } from "../block-slot-cache";
-import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
+import { canvasViewOf, composeViewContent, fileRangesToView, type CanvasView } from "../canvas-view";
 import { strokeReach } from "../effect-reach";
 import { levelDecimation } from "../display-pyramid";
 import { DisplayTileRing } from "../display-tiles-textures";
 import { PackedWindow } from "../packed-window";
 import { gatherPixelRanges } from "../pixel-ranges";
+import type { Selection } from "../selection";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { metadataTextureRows } from "../band-layout";
 
@@ -271,6 +272,104 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     return pixels;
   }
 
+  /** The largest magnitude and phase gaps between two packed states, over their first `texels`. */
+  function gaps(a: Float32Array, b: Float32Array, texels: number): { magnitude: number; phase: number } {
+    let magnitude = 0;
+    let phase = 0;
+    for (let i = 0; i < texels * 4; i++) {
+      const diff = Math.abs(a[i] - b[i]);
+      if (i % 2 === 0) magnitude = Math.max(magnitude, diff);
+      else phase = Math.max(phase, diff);
+    }
+    return { magnitude, phase };
+  }
+
+  it("paints a dab in clipped spans as it paints it whole, reach and all", async () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Blurred",
+        overrides: {
+          blurAmountTime: 4,
+          blurAmountPitch: 0,
+          blurNoiseTime: 0,
+          blurEdgeMode: 1,
+          effects: [{ id: "blur", effect: "blur", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    state.filepathsBpm = { "/parity.wav": 120 };
+    const duration = data.numFrames / SAMPLE_RATE;
+    const paint = async (clips: ({ frameStart: number; frameEnd: number } | null)[]): Promise<Float32Array> => {
+      const renderer = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+      renderer.initialize();
+      renderer.setFBOData(data.packedData);
+      disposers.push(() => renderer.dispose());
+      renderer.beginStroke();
+      for (const clip of clips) {
+        renderer.renderStroke({ ...strokeParams(fileCursor, duration), clip }, state, sourceFor(renderer));
+      }
+      return await renderer.getFBOData();
+    };
+    const whole = await paint([null]);
+    // The dab starts at 0.4 of the file and runs a beat; a block edge falls inside it.
+    const edge = 4 * grid.blockFrames;
+    expect(edge).toBeGreaterThan(fileCursor.x * data.numFrames);
+    const split = await paint([
+      { frameStart: edge, frameEnd: data.numFrames },
+      { frameStart: 0, frameEnd: edge },
+    ]);
+    expect(firstDifference(whole, data.packedData, data.texels * 4)).not.toBe(-1);
+    const gap = gaps(split, whole, data.texels);
+    expect(gap.magnitude, `largest magnitude difference ${gap.magnitude}`).toBeLessThan(1e-6);
+    expect(gap.phase, `largest phase difference ${gap.phase}`).toBeLessThan(1e-5);
+  });
+
+  it("paints a brush the length of the file over a sub-view as over the whole file", async () => {
+    const state = createMockStateWithSteps([
+      // A curve over time, so the brush weighs each part of the file differently.
+      { name: "Full", overrides: { brushSizeTime: 32, brushCurveTime: 0, transformShiftSemis: 3 } },
+    ]);
+    state.filepathsBpm = { "/parity.wav": 120 };
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+    whole.initialize();
+    whole.setFBOData(data.packedData);
+    disposers.push(() => whole.dispose());
+    whole.beginStroke();
+    whole.renderStroke(strokeParams(fileCursor, data.numFrames / SAMPLE_RATE), state, sourceFor(whole));
+    const inView = composeViewContent(view, await whole.getFBOData());
+
+    // The span stops a block short of the view's end, as the window keeps a
+    // block past what it paints: the last bin's reads reach past the view.
+    const sub = subViewRenderer();
+    sub.setFBOData(composeViewContent(view, data.packedData));
+    sub.beginStroke();
+    const clipEnd = viewFrames - grid.blockFrames;
+    sub.renderStroke(
+      { ...strokeParams(viewCursor, viewFrames / SAMPLE_RATE), clip: { frameStart: 0, frameEnd: clipEnd } },
+      state,
+      sourceFor(sub, view),
+    );
+    const subData = await sub.getFBOData();
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    const painted: number[] = [];
+    for (let block = view.firstBlock; block < view.lastBlock; block++) {
+      const list = blockPixelRanges(grid, block);
+      painted.push(...fileRangesToView(view, layout, list.ranges.slice(0, list.count * 2))!);
+    }
+    const within = Uint32Array.from(painted);
+    const before = gatherPixelRanges(composeViewContent(view, data.packedData), within);
+    expect(firstDifference(gatherPixelRanges(inView, within), before, before.length)).not.toBe(-1);
+    // Past the span the sub-view leaves the canvas as it was.
+    const last = blockPixelRanges(grid, view.lastBlock);
+    const outside = fileRangesToView(view, layout, last.ranges.slice(0, last.count * 2))!;
+    const untouched = gatherPixelRanges(composeViewContent(view, data.packedData), outside);
+    expect(firstDifference(gatherPixelRanges(subData, outside), untouched, untouched.length)).toBe(-1);
+    const withinSub = gatherPixelRanges(subData, within);
+    const gap = gaps(withinSub, gatherPixelRanges(inView, within), withinSub.length / 4);
+    expect(gap.magnitude, `largest magnitude difference ${gap.magnitude}`).toBeLessThan(1e-4);
+    expect(gap.phase, `largest phase difference ${gap.phase}`).toBeLessThan(1e-2);
+  });
+
   it("commits the same coefficients through a sub-view as through the whole file", async () => {
     const state = createMockState();
 
@@ -329,7 +428,8 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     state: State,
     onsetTexture?: Texture,
     span: CanvasView = view,
-  ): Promise<{ magnitude: number; phase: number; changed: number }> {
+    selection: Selection | null = null,
+  ): Promise<{ magnitude: number; phase: number; changed: number; subChanged: number }> {
     const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
     whole.initialize();
     whole.setFBOData(data.packedData);
@@ -342,13 +442,13 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
 
     whole.beginStroke();
     whole.renderStroke(
-      strokeParams(fileCursor, data.numFrames / SAMPLE_RATE, 1, onsetTexture),
+      { ...strokeParams(fileCursor, data.numFrames / SAMPLE_RATE, 1, onsetTexture), selection },
       state,
       sourceFor(whole, undefined, onsetTexture),
     );
     sub.beginStroke();
     sub.renderStroke(
-      strokeParams(spanCursor, spanFrames / SAMPLE_RATE, 1, onsetTexture),
+      { ...strokeParams(spanCursor, spanFrames / SAMPLE_RATE, 1, onsetTexture), selection },
       state,
       sourceFor(sub, span, onsetTexture),
     );
@@ -359,13 +459,15 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     let magnitude = 0;
     let phase = 0;
     let changed = 0;
+    let subChanged = 0;
     for (let i = 0; i < span.texels * 4; i++) {
       if (inView[i] !== before[i]) changed++;
+      if (subData[i] !== before[i]) subChanged++;
       const diff = Math.abs(subData[i] - inView[i]);
       if (i % 2 === 0) magnitude = Math.max(magnitude, diff);
       else phase = Math.max(phase, diff);
     }
-    return { magnitude, phase, changed };
+    return { magnitude, phase, changed, subChanged };
   }
 
   /**
@@ -616,6 +718,17 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(0.1);
     },
   );
+
+  it("clips a stroke to a selection at the same file frames through a sub-view", async () => {
+    const state = createMockState();
+    // The dab starts 0.8 s into the file; the selection takes a middle part of it.
+    const selection: Selection = { start: 0.9, end: 1.1, pitchLo: 0.2, pitchHi: 0.6 };
+    const parity = await parityOf(state, undefined, view, selection);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.subChanged).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-5);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
 
   // A smear and a repeat gap are offsets added to a source UV, so the beats
   // they are given convert against the span the source textures hold. Against

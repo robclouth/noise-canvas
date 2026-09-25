@@ -4,6 +4,7 @@ import { createDefaultStep, type BrushStep } from "../parameters";
 import { DEFAULT_PALETTE_ID } from "../store/palette-id";
 import type { SpectrogramData, State } from "../store/types";
 import type { Selection } from "./selection";
+import { MAX_FIXED_BRUSH_BEATS } from "./utils";
 
 /** The level the app's own eraser drops a region to. */
 const WIPE_GAIN_DB = -80;
@@ -73,38 +74,72 @@ function withStep(state: State, step: BrushStep, clip: { fileId: string; rect: S
   };
 }
 
-/** A stroke that wipes `rect`, the way the eraser brush does. */
-export function silenceStrokeState(state: State, rect: Selection, geometry: StrokeGeometry, fileId: string): State {
-  return withStep(
-    state,
-    regionStep("Silence", rect, geometry, [
-      { id: "selection-silence", effect: "dynamics", enabled: true, params: { dynamicsGainDb: WIPE_GAIN_DB } },
-    ]),
-    { fileId, rect },
-  );
+/** One stroke of a region edit: the state it paints with, and the part of the region it covers. */
+export type RegionStroke = { state: State; rect: Selection };
+
+/**
+ * `rect` cut into equal parts along time, none longer than a brush can be
+ * before it means the whole file. Most regions are one part.
+ */
+export function regionParts(rect: Selection, geometry: StrokeGeometry): Selection[] {
+  const maxSeconds = (MAX_FIXED_BRUSH_BEATS * 60) / geometry.bpm;
+  const count = Math.max(1, Math.ceil((rect.end - rect.start) / maxSeconds));
+  const length = (rect.end - rect.start) / count;
+  return Array.from({ length: count }, (_, index) => ({
+    ...rect,
+    start: rect.start + index * length,
+    end: index === count - 1 ? rect.end : rect.start + (index + 1) * length,
+  }));
 }
 
 /**
- * A stroke that writes the clipboard into `rect`. The source position is fixed
- * rather than following the stroke, so the copied corner lands under the
- * brush's corner wherever the brush is put down.
+ * Strokes that wipe `rect`, the way the eraser brush does. A masked region
+ * keeps the whole rectangle as each part's clip, so the mask lands as drawn.
  */
-export function pasteStrokeState(
+export function silenceStrokes(
   state: State,
   rect: Selection,
   geometry: StrokeGeometry,
-  source: { path: string; timeFraction: number; pitchFraction: number },
   fileId: string,
-): State {
-  const step = regionStep("Paste", rect, geometry, [
-    { id: "selection-paste", effect: "passthrough", enabled: true, params: {} },
-  ]);
-  const writable: Record<string, unknown> = step;
-  writable.sourceFile = { path: source.path };
-  writable.sourcePositionMode = "fixed";
-  writable.sourceTimeOffset = source.timeFraction * 100;
-  writable.sourcePitchOffset = source.pitchFraction * 100;
-  // The faithful warp, pinned: a paste is a translation, not a brush choice.
-  writable.algorithm = NEUTRAL_ALGORITHM;
-  return withStep(state, step, { fileId, rect });
+): RegionStroke[] {
+  return regionParts(rect, geometry).map((part) => ({
+    state: withStep(
+      state,
+      regionStep("Silence", part, geometry, [
+        { id: "selection-silence", effect: "dynamics", enabled: true, params: { dynamicsGainDb: WIPE_GAIN_DB } },
+      ]),
+      { fileId, rect },
+    ),
+    rect: part,
+  }));
+}
+
+/**
+ * Strokes that write the clipboard into `rect`. The source position is fixed
+ * rather than following the stroke, so the copied corner lands under the
+ * brush's corner wherever the brush is put down; a later part reads as much
+ * further into the clipboard as it starts into the region, `secondsPerFraction`
+ * converting the clipboard's length.
+ */
+export function pasteStrokes(
+  state: State,
+  rect: Selection,
+  geometry: StrokeGeometry,
+  source: { path: string; timeFraction: number; pitchFraction: number; secondsPerFraction: number },
+  fileId: string,
+): RegionStroke[] {
+  return regionParts(rect, geometry).map((part) => {
+    const step = regionStep("Paste", part, geometry, [
+      { id: "selection-paste", effect: "passthrough", enabled: true, params: {} },
+    ]);
+    const writable: Record<string, unknown> = step;
+    const timeFraction = source.timeFraction + (part.start - rect.start) / Math.max(1e-9, source.secondsPerFraction);
+    writable.sourceFile = { path: source.path };
+    writable.sourcePositionMode = "fixed";
+    writable.sourceTimeOffset = timeFraction * 100;
+    writable.sourcePitchOffset = source.pitchFraction * 100;
+    // The faithful warp, pinned: a paste is a translation, not a brush choice.
+    writable.algorithm = NEUTRAL_ALGORITHM;
+    return { state: withStep(state, step, { fileId, rect }), rect: part };
+  });
 }

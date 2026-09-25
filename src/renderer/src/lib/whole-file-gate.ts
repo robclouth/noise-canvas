@@ -1,30 +1,22 @@
 import { EFFECT_LABELS } from "@renderer/lib/constants";
 import { brushReaches, type ReachContext } from "@renderer/lib/effect-reach";
-import { BRUSH_SIZE_TIME_FULL } from "@renderer/lib/utils";
 import { createStepStateView } from "@renderer/store";
 import type { State } from "@renderer/store/types";
 
-const TIME_WRAP = "Wrap in time";
-const FULL_BRUSH = "A brush the length of the file";
 const SOURCE_TRACKING = "Source tracking";
 const SOURCE_TIME = "A source time offset";
 
 /**
  * What in the active brush reads the whole file, named as the user sees it.
  * Empty means the brush paints the same over a window of the file as it does
- * over all of it. Wrapping in time folds a read back onto the far end of the
- * canvas, and a full-length brush spans the canvas, so both read whatever span
- * the canvas holds rather than the file. Effects are absent: each one declares
- * a reach around the dab in `effect-reach.ts`, which `overReachNeeds` measures.
+ * over all of it. Effects are absent: each one declares a reach around the
+ * dab in `effect-reach.ts`, which `overReachNeeds` measures.
  */
 export function wholeFileNeeds(state: State): string[] {
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const needs = new Set<string>();
   for (let index = 0; index < steps.length; index++) {
     const step = createStepStateView(state, index);
-    const wrapMode = step.brushWrapMode as number;
-    if (wrapMode === 1 || wrapMode === 3) needs.add(TIME_WRAP);
-    if ((step.brushSizeTime as number) >= BRUSH_SIZE_TIME_FULL) needs.add(FULL_BRUSH);
     if (!step.sourceFile) {
       // A step with no source file of its own reads the canvas it paints on.
       // Tracking and the time offset put that read anywhere in the file.
@@ -36,14 +28,14 @@ export function wholeFileNeeds(state: State): string[] {
 }
 
 /**
- * Effects the canvas cannot hold enough of the file for: the brush plus what
- * the effect reads either side of it is wider than the span the canvas holds.
- * Named as the user sees them.
+ * Effects the canvas cannot hold enough of the file for: a dab is painted a
+ * block at a time, and one block plus what the effect reads either side of it
+ * is wider than the span the canvas holds. Named as the user sees them.
  */
 export function overReachNeeds(state: State, ctx: ReachContext): string[] {
   const needs = new Set<string>();
   for (const entry of brushReaches(state, ctx)) {
-    const span = entry.brushSeconds + entry.reach.before + entry.reach.after;
+    const span = (ctx.blockSeconds ?? 0) + entry.reach.before + entry.reach.after;
     if (span > ctx.canvasSeconds) needs.add(EFFECT_LABELS[entry.effect] ?? entry.effect);
   }
   return [...needs];
@@ -62,7 +54,7 @@ export function wholeFileRefusal(needs: string[]): string {
 /** The refusal a brush gets when an effect reads further than the canvas holds. */
 export function overReachRefusal(needs: string[]): string {
   const one = needs.length === 1;
-  return `${listOf(needs)} ${one ? "reaches" : "reach"} too far for this file. Turn ${one ? "it" : "them"} down, or paint a shorter brush, to paint here.`;
+  return `${listOf(needs)} ${one ? "reaches" : "reach"} too far for this file. Turn ${one ? "it" : "them"} down to paint here.`;
 }
 
 /**

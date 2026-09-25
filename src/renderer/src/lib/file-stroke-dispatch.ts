@@ -5,6 +5,8 @@ import type { BrushUnionUv, DabSpan, StrokeDispatch, FileRendererHandle } from "
 import { viewCoversFile } from "./canvas-view";
 import { sourceReadSpan, type SourceWindowTextures } from "./source-window";
 import type { WindowedCanvas, SourceNeed } from "./windowed-canvas";
+import { blockOfFrame } from "./block-grid";
+import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
 import { strokeReach, type ReachContext } from "./effect-reach";
 import { strokeRefusal as refusalFor, overReachRefusal } from "./whole-file-gate";
 import { impulseNeeds, type ImpulseNeed } from "./impulse-need";
@@ -183,6 +185,7 @@ export function dispatchStroke(
   preview: boolean,
   sourceOverride?: SourceFileInfo,
   preparedSpan?: DabSpan,
+  clip?: FrameSpan | null,
 ): boolean {
   const { fileId, strokeRendererRef, canvasRef, openFiles, getOpenFileByPath } = context;
   const strokeRenderer = strokeRendererRef.current;
@@ -194,7 +197,13 @@ export function dispatchStroke(
 
   const canvas = canvasRef.current;
   const span = preparedSpan ?? (canvas ? dabSpan(context, state, cursorPos, canvas) : null);
-  if (canvas && span && !canvas.holdsFrames(span.startFrame, span.endFrame, span.needs.original)) return false;
+  if (canvas && span) {
+    // A preview draws what the canvas holds of a dab wider than a window.
+    const reads = clip ? readSpanOf(span.extent, clip) : wholeReadSpan(span.extent);
+    const wide = !reads || !canvas.fitsWindow(reads.start, reads.end);
+    if (!(preview && wide) && (!reads || !canvas.holdsFrames(reads.start, reads.end, span.needs.original)))
+      return false;
+  }
   const dabCursor = canvas ? canvas.dabCursor(cursorPos) : cursorPos;
   const dabDuration = canvas ? canvas.dabDuration(totalDuration) : totalDuration;
 
@@ -298,6 +307,7 @@ export function dispatchStroke(
           impulses,
           stepSources,
           selection: state.filesSelection[fileId] ?? null,
+          clip: canvas ? canvas.clipToCanvas(clip ?? null) : null,
         },
         state,
         sourceFileInfo,
@@ -331,6 +341,7 @@ function reachContext(context: FileStrokeContext, state: State): ReachContext | 
     bpm: state.filepathsBpm[file.filePath] || 120,
     fileSeconds: spectrogram.numFrames / spectrogram.sampleRate,
     canvasSeconds: canvas.windowSeconds(),
+    blockSeconds: canvas.grid.blockFrames / spectrogram.sampleRate,
     bandsPerOctave: spectrogram.bandsPerOctave,
     numBands: spectrogram.numBands,
     responseSpan: (path) => {
@@ -372,7 +383,39 @@ export function strokeRefusal(context: FileStrokeContext, state: State, aim?: { 
   const canvas = canvasRef.current;
   if (refusal || !canvas || !aim) return refusal;
   const span = dabSpan(context, state, new Vector2(aim.x, aim.y), canvas);
-  return canvas.fitsWindow(span.startFrame, span.endFrame) ? null : overReachRefusal(["The brush"]);
+  return canvas.servable(span.extent) ? null : overReachRefusal(["The brush"]);
+}
+
+/** What a dab reads while it writes `clip`. */
+function readSpanOf(extent: DabExtent, clip: FrameSpan): FrameSpan {
+  return { start: Math.max(0, clip.start - extent.before), end: clip.end + extent.after };
+}
+
+/** What a dab that writes one span reads; null for one that wraps past the end of the file. */
+function wholeReadSpan(extent: DabExtent): FrameSpan | null {
+  if (extent.writes.length !== 1) return null;
+  return readSpanOf(extent, extent.writes[0]);
+}
+
+/**
+ * The file frames a dab writes: its union's time span, cut in two where a
+ * wrapping brush runs past either end of the file.
+ */
+function dabWrites(union: BrushUnionUv, cursorX: number, numFrames: number): FrameSpan[] {
+  const start = (union.hasSteps ? union.min.x : cursorX) * numFrames;
+  const end = (union.hasSteps ? union.max.x : cursorX) * numFrames;
+  if (!union.wrapsTime || (start >= 0 && end <= numFrames)) {
+    return [{ start: Math.max(0, start), end: Math.min(numFrames, Math.max(end, start)) }];
+  }
+  if (start < 0)
+    return [
+      { start: start + numFrames, end: numFrames },
+      { start: 0, end },
+    ];
+  return [
+    { start, end: numFrames },
+    { start: 0, end: end - numFrames },
+  ];
 }
 
 function reachFrames(context: FileStrokeContext, state: State): { before: number; after: number } {
@@ -394,9 +437,23 @@ export function dabSpan(
   const reach = canvas.holdsWholeFile ? { before: 0, after: 0 } : reachFrames(context, state);
   const union = resolvedUnion ?? brushUnionAt(context, state, cursorPos, bpm, totalDuration);
   const impulseBindings = impulseNeedsFor(context, state);
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+  const readsLive = steps.some(
+    (step, index) => step.enabled !== false && context.createStepStateView(state, index).accumulate,
+  );
+  const extent: DabExtent = {
+    writes: dabWrites(union, cursorPos.x, numFrames),
+    before: reach.before,
+    after: reach.after,
+    readsLive,
+  };
+  const whole = wholeReadSpan(extent);
+  const cursorBlock = blockOfFrame(canvas.grid, Math.min(numFrames - 1, Math.max(0, cursorPos.x * numFrames)));
+  const hover =
+    whole && canvas.fitsWindow(whole.start, whole.end) ? whole : blockReadSpan(canvas.grid, extent, cursorBlock);
   return {
-    startFrame: (union.hasSteps ? union.min.x : cursorPos.x) * numFrames - reach.before,
-    endFrame: (union.hasSteps ? union.max.x : cursorPos.x) * numFrames + reach.after,
+    extent,
+    hover,
     needs: {
       sources: sourceNeedsFor(context, state, cursorPos),
       impulses: impulseBindings.map((entry) => entry.need).filter((need) => responseIsWindowed(context, need.fileId)),
@@ -415,9 +472,9 @@ export function prepareStrokeBatch(
   if (ahead && ahead.length > 0) {
     const first = ahead[0];
     const last = ahead[ahead.length - 1];
-    const from = dabSpan(context, first.state, new Vector2(first.aimX, first.aimY), canvas);
-    const to = dabSpan(context, last.state, new Vector2(last.aimX, last.aimY), canvas);
-    canvas.prefetch(Math.min(from.startFrame, to.startFrame), Math.max(from.endFrame, to.endFrame));
+    const from = dabSpan(context, first.state, new Vector2(first.aimX, first.aimY), canvas).hover;
+    const to = dabSpan(context, last.state, new Vector2(last.aimX, last.aimY), canvas).hover;
+    canvas.prefetch(Math.min(from.start, to.start), Math.max(from.end, to.end));
   }
   let painted = 0;
   for (const stroke of strokes) {
@@ -426,8 +483,8 @@ export function prepareStrokeBatch(
     const span = dabSpan(context, stroke.state, aim, canvas);
     const dabState = stroke.state;
     if (
-      canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () =>
-        dispatchStroke(context, dabState, aim, false, undefined, span),
+      canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
+        dispatchStroke(context, dabState, aim, false, undefined, span, clip),
       )
     ) {
       painted++;

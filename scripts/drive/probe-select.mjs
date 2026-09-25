@@ -1,7 +1,7 @@
 // Checks the selection features on a long file: silence a region, copy it,
 // paste it elsewhere, and audition it, reading the stored result.
 //
-// Usage: node scripts/drive/probe-select.mjs [--seconds 285] [--no-build]
+// Usage: node scripts/drive/probe-select.mjs [--seconds 285] [--length 60] [--no-build]
 import { copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ const option = (name, fallback) => {
   return i >= 0 ? args[i + 1] : fallback;
 };
 const SECONDS = Number(option("seconds", 285));
+const LENGTH = Number(option("length", 60));
 
 const audioDir = join(tmpdir(), "noisecanvas-noise");
 const longPath = join(audioDir, `long-${SECONDS}s-${process.pid}.wav`);
@@ -30,7 +31,21 @@ try {
     await page.evaluate(async ({ id, points }) => await globalThis.__readTruth(id, points), { id, points });
   const ratio = (r) => r.store / r.original;
 
-  const source = { start: SECONDS * 0.52, end: SECONDS * 0.52 + 6, pitchLo: 0.4, pitchHi: 0.7 };
+  const source = { start: SECONDS * 0.1, end: SECONDS * 0.1 + LENGTH, pitchLo: 0.4, pitchHi: 0.7 };
+  // Points inside a region at its start, middle and end, and one each side just outside it.
+  const across = (start, end) => [start + 0.3, (start + end) / 2, end - 0.3].map((t) => at(t / SECONDS, 0.55));
+  const outside = (start, end) => [start - 2, end + 2].map((t) => at(t / SECONDS, 0.55));
+  const settle = async () => {
+    for (let i = 0; i < 240; i++) {
+      const busy = await page.evaluate(() => {
+        const state = globalThis.__store.getState();
+        return Object.values(state.filesBusy ?? {}).some(Boolean) || Boolean(state.placing);
+      });
+      if (!busy) break;
+      await sleep(250);
+    }
+    await sleep(1500);
+  };
   await page.evaluate(
     async ({ id, source }) => {
       const state = globalThis.__store.getState();
@@ -40,10 +55,14 @@ try {
     },
     { id, source },
   );
-  await sleep(4000);
-  const silenced = await truth([at((source.start + 3) / SECONDS, 0.55)]);
-  console.log(`silenced: store/original ${ratio(silenced[0]).toExponential(2)}`);
-  if (ratio(silenced[0]) > 0.01) failures.push("silence did not reach the store");
+  await settle();
+  const silenced = await truth([...across(source.start, source.end), ...outside(source.start, source.end)]);
+  console.log(
+    `silenced ${LENGTH} s: ${silenced.map((r) => ratio(r).toExponential(1)).join(", ")} (start, middle, end, before, after)`,
+  );
+  if (silenced.slice(0, 3).some((r) => ratio(r) > 0.01))
+    failures.push("silence did not reach every part of the region");
+  if (silenced.slice(3).some((r) => ratio(r) < 0.5)) failures.push("silence reached past the region");
 
   const audition = await page.evaluate(
     async ({ id, source }) => {
@@ -62,17 +81,20 @@ try {
   const placing = await page.evaluate(() => Boolean(globalThis.__store.getState().placing));
   console.log(`copy started placing: ${placing}`);
   if (!placing) failures.push("copy did not pick the region up");
-  const to = SECONDS * 0.7;
+  const to = SECONDS * 0.6;
   await page.evaluate(async (to) => {
     const state = globalThis.__store.getState();
     state.movePlacing(to, 0.4);
     await state.dropPlacing();
   }, to);
-  await sleep(6000);
-  const pasted = await truth([at((to + 3) / SECONDS, 0.55), at((source.start + 0.5) / SECONDS, 0.55), at(0.97, 0.55)]);
-  console.log(`pasted: ${pasted.map((r) => ratio(r).toExponential(2)).join(", ")} (paste, source, untouched)`);
-  if (ratio(pasted[0]) > 0.01) failures.push("the pasted region is not the silenced copy");
-  if (ratio(pasted[2]) < 0.5) failures.push("an untouched region changed");
+  await settle();
+  const pasted = await truth([...across(to, to + LENGTH), ...outside(to, to + LENGTH), at(0.99, 0.55)]);
+  console.log(
+    `pasted: ${pasted.map((r) => ratio(r).toExponential(1)).join(", ")} (start, middle, end, before, after, far)`,
+  );
+  if (pasted.slice(0, 3).some((r) => ratio(r) > 0.01))
+    failures.push("the paste did not reach every part of the region");
+  if (pasted.slice(3).some((r) => ratio(r) < 0.5)) failures.push("the paste reached past the region");
   for (const c of consoleLines)
     if (c.type === "error" && !/HRTF|valid audio stream/.test(c.text))
       failures.push(`console: ${c.text.slice(0, 200)}`);
