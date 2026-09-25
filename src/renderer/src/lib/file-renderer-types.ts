@@ -1,4 +1,5 @@
 import type { DataTexture, Texture, Vector2, WebGLRenderTarget } from "three";
+import type { StrokePosition } from "../store/transient";
 import type { State, SpectrogramData } from "../store/types";
 import type { CanvasView } from "./canvas-view";
 import type { ImageExportOptions } from "./image-export";
@@ -46,6 +47,14 @@ export interface DabSpan {
 export interface FileRendererHandle {
   /** Renders a brush stroke at the current cursor position. */
   renderStroke: (preview: boolean) => void;
+  /** Queues positions the pointer crossed since the last frame; the next committed dab paints them first, in order. */
+  queueStrokeDabs: (points: readonly StrokePosition[]) => void;
+  /**
+   * Runs `start` once the stroke now settling or restoring has ended, so a
+   * stroke begun meanwhile starts after the last one's commit has read it.
+   * False when no stroke can start again on this canvas.
+   */
+  whenStrokeFree: (start: () => void) => boolean;
   /**
    * Paints a batch of strokes into the FBO, each from its own state snapshot,
    * as part of the stroke already opened with beginStrokePreview(). A stroke
@@ -81,6 +90,8 @@ export interface FileRendererHandle {
    * window of the file; null while it holds all of it.
    */
   maxStrokeSeconds: () => number | null;
+  /** True while the canvas holds a window of the file rather than all of it. */
+  paintsThroughWindow: () => boolean;
   /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
   keepStrokePreview: () => void;
   /** The whole packed state from the frame buffer, or null when the canvas view does not hold the whole file. */

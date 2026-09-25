@@ -922,7 +922,9 @@ export class HistoryManager {
     // The delta's two sides, and the painted footprint values the tier's
     // patch writes. Null when the stroke has to store whole.
     let deltaSides: { base: Float32Array; after: Float32Array; patch: Float32Array } | null = null;
-    if (sameDims && ranges != null && ranges.length > 0 && footprintPixels < texturePixels * 0.5) {
+    // Past half the file a whole snapshot is cheaper to store, but only when
+    // the caller has one; a footprint commit has only the footprint.
+    if (sameDims && ranges != null && ranges.length > 0 && (footprintPixels < texturePixels * 0.5 || !opts.data)) {
       const compact =
         opts.baseFootprint?.length === footprintPixels * 4
           ? opts.baseFootprint
@@ -970,7 +972,12 @@ export class HistoryManager {
         // A checkpoint is stored whole on disk, but its delta still carries
         // the hops to and from it in memory.
         deltaBytes = await host.analysis.encodeHistoryDelta(deltaBase, after, ranges, true, true, turnsIn ?? undefined);
-        storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";
+        // A tier on disk already holds the state, and a checkpoint of it would
+        // read every block into one array, so a paged file stays on deltas.
+        storage =
+          this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL && (opts.data || !this.tierOnDisk)
+            ? "packed"
+            : "delta";
         const spec = openFiles[this.fileId]?.spectrogramData;
         const footprint = spec?.synthesisMetadata
           ? packedRangesToUvRegion(ranges, spec.synthesisMetadata, spec.numFrames, spec.numBands)
@@ -2096,10 +2103,9 @@ export class HistoryManager {
     const node = this.manifest.nodes[nodeId];
     if (!node) return;
     const dir = await this.ensureDir();
+    // An AudioBuffer is never written after it is built, so the encoder reads its channels in place.
     const channels: Float32Array[] = [];
-    for (let i = 0; i < audioBuffer.numberOfChannels; i++) {
-      channels.push(new Float32Array(audioBuffer.getChannelData(i)));
-    }
+    for (let i = 0; i < audioBuffer.numberOfChannels; i++) channels.push(audioBuffer.getChannelData(i));
     const path = this.audioPath(dir, nodeId);
     try {
       await host.analysis.exportAudio(channels, path, audioBuffer.sampleRate, AUDIO_CACHE_FORMAT);

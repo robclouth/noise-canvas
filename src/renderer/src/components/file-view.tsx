@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { useTransientStore } from "@renderer/store/transient";
+import { useTransientStore, type StrokePosition } from "@renderer/store/transient";
 import { Box, Loader, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
@@ -20,6 +20,7 @@ import {
 import { normaliseSelection, type Selection, type SelectionCorner } from "../lib/selection";
 import { lassoSelection, unionSelections, type LassoPoint } from "../lib/selection-mask";
 import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
+import { strokeTrail, type ClientPoint } from "../lib/stroke-trail";
 import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
 import FileHeader from "./file-header";
 import { FILE_VIEW_BODY_HEIGHT } from "@renderer/lib/file-view-metrics";
@@ -117,6 +118,62 @@ function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): numbe
   return aimToBrushRectBlUv(aim, fileId, bpm).blX * totalDuration;
 }
 
+/**
+ * The snapped positions a stroke crossed on its way from `from` to this move,
+ * the start included and the move's own position left for the frame: sampled
+ * along the pointer's coalesced path at most half a brush apart.
+ */
+function crossedStrokePositions(
+  event: React.PointerEvent<HTMLDivElement>,
+  from: ClientPoint,
+  aim: AimUv,
+  fileId: string,
+  bpm: number,
+  toUnits: (aim: AimUv) => StrokePosition,
+): StrokePosition[] {
+  const spectrogramData = openFiles[fileId]?.spectrogramData;
+  if (!spectrogramData) return [];
+  const rect = event.currentTarget.getBoundingClientRect();
+  const state = useStore.getState();
+  const union = brushUnionForAim(
+    state,
+    aim.x,
+    aim.y,
+    bpm,
+    spectrogramData.numFrames / spectrogramData.sampleRate,
+    spectrogramData.bandsPerOctave,
+    spectrogramData.numBands,
+  );
+  const stepX = union.fullTime
+    ? 0
+    : Math.max(1, 0.5 * union.sizeUvX * rect.width * Math.pow(2, state.filesZoom[fileId]));
+  const stepY = Math.max(1, 0.5 * union.sizeUvY * rect.height * Math.pow(2, state.filesZoomY[fileId] ?? 0));
+  const resolve = (point: ClientPoint): StrokePosition | null => {
+    const snapped = getSnappedCoordinates(point.x, point.y, rect, fileId, bpm);
+    return snapped ? toUnits(snapped) : null;
+  };
+  const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [];
+  const path = [
+    from,
+    ...coalesced.map((e) => ({ x: e.clientX, y: e.clientY })),
+    { x: event.clientX, y: event.clientY },
+  ];
+  const same = (a: StrokePosition, b: StrokePosition) => a.beats === b.beats && a.pitch === b.pitch;
+  const start = resolve(from);
+  const end = resolve(path[path.length - 1]);
+  const crossed = strokeTrail(path, stepX, stepY, resolve, same);
+  return start && !(end && same(start, end)) ? [start, ...crossed] : crossed;
+}
+
+/** A stroke the pointer began while the canvas was still landing the last one. */
+type WaitingStroke = {
+  aim: AimUv;
+  bpm: number;
+  points: StrokePosition[];
+  range: { min: number | null; max: number | null };
+  released: boolean;
+};
+
 export const FileView = memo((props: FileViewProps) => {
   const { fileId, isFullscreen = false, isMinimized, stackLayerIds, headerExtras } = props;
   const file = openFiles[fileId];
@@ -163,6 +220,10 @@ export const FileView = memo((props: FileViewProps) => {
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);
+  // Strokes begun while the last one was still landing, oldest first; each
+  // starts, with every position it crossed meanwhile, once the one before ends.
+  const waitingStrokesRef = useRef<WaitingStroke[]>([]);
+  const startWaitingRef = useRef<() => void>(() => {});
   // The corner a selection drag started from, or null when none is running.
   const selectionStartRef = useRef<SelectionCorner | null>(null);
   // The freehand path under way, in the file's seconds and pitch UV.
@@ -411,6 +472,7 @@ export const FileView = memo((props: FileViewProps) => {
   }, []);
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const strokeClientRef = useRef<ClientPoint | null>(null);
 
   const aimToBeatsAndPitch = useCallback(
     (aim: AimUv) => {
@@ -485,6 +547,21 @@ export const FileView = memo((props: FileViewProps) => {
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushTime);
       }
 
+      // A quick pointer crosses cells between frames; each one it crossed gets its own dab.
+      const from = strokeClientRef.current;
+      const waiting = waitingStrokesRef.current.at(-1);
+      const collecting = waiting && !waiting.released ? waiting : null;
+      if (isStrokingRef.current && from && rendererRef.current) {
+        const points = crossedStrokePositions(event, from, aim, fileId, bpm, aimToBeatsAndPitch);
+        if (collecting) {
+          collecting.points.push(...points, aimToBeatsAndPitch(aim));
+        } else if (points.length > 0) {
+          rendererRef.current.queueStrokeDabs(points);
+          rendererRef.current.renderStroke(false);
+        }
+      }
+      if (isStrokingRef.current) strokeClientRef.current = { x: event.clientX, y: event.clientY };
+
       // Only update if position actually changed
       if (
         !lastSnappedPositionRef.current ||
@@ -502,7 +579,7 @@ export const FileView = memo((props: FileViewProps) => {
         // Preview is handled by the renderer watching cursorPosition
         const repeating = isStrokingRef.current && repeatIntervalRef.current !== null;
         if (rendererRef.current && !repeating) {
-          rendererRef.current.renderStroke(!isStrokingRef.current);
+          rendererRef.current.renderStroke(!isStrokingRef.current || collecting !== null);
         }
       }
     },
@@ -651,6 +728,35 @@ export const FileView = memo((props: FileViewProps) => {
     if (wand.latest) useStore.getState().setFileSelection(fileId, wand.latest);
   }, [fileId]);
 
+  // Lock the source offset of every anchored step. Tracking, Source and the
+  // brush origin are all per-step, so each step measures its own offset from
+  // its own origin against its own source file.
+  const lockSourceOffsets = useCallback(
+    (aim: AimUv, bpm: number) => {
+      const state = useStore.getState();
+      const spectrogramData = file?.spectrogramData;
+      if (!spectrogramData) return;
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const destBpm = state.filepathsBpm[file.filePath] || 120;
+      state.lockStepSourceOffsets(
+        state.getSteps().map((step, index) => {
+          const sourceFileValue = step?.sourceFile ?? null;
+          if (!sourceFileValue) return null;
+          if ((step?.sourcePositionMode ?? "anchored") !== "anchored") return null;
+          const sourceOpenFile = Object.values(openFiles).find((f) => f.filePath === sourceFileValue.path);
+          if (!sourceOpenFile?.spectrogramData) return null;
+          const srcBpm = state.filepathsBpm[sourceOpenFile.filePath] || 120;
+          const srcDur = sourceOpenFile.spectrogramData.numFrames / sourceOpenFile.spectrogramData.sampleRate;
+          const tScale = (destBpm * totalDuration) / (srcBpm * srcDur);
+          const bScale = sourceBandUvSlope(spectrogramData, sourceOpenFile.spectrogramData);
+          const { blX, blY } = aimToBrushBlUv(aim, fileId, bpm, index);
+          return { beats: -blX * tScale, pitch: -blY * bScale };
+        }),
+      );
+    },
+    [file, fileId],
+  );
+
   const handleCanvasMouseDown: PointerEventHandler<HTMLDivElement> = useCallback(
     async (event) => {
       if (event.button !== 0) return;
@@ -745,41 +851,33 @@ export const FileView = memo((props: FileViewProps) => {
           notifications.show({ id: "whole-file-brush", color: "yellow", title: "Nothing painted", message: refusal });
           return;
         }
-        if (!rendererRef.current.beginStroke()) return;
+        const began = rendererRef.current.beginStroke();
+        if (!began && !rendererRef.current.whenStrokeFree(() => startWaitingRef.current())) return;
         isStrokingRef.current = true;
+        strokeClientRef.current = { x: event.clientX, y: event.clientY };
         state.setIsStroking(true);
         const { beats, pitch } = aimToBeatsAndPitch(aim);
         useTransientStore.getState().setCursorPosition({ beats, pitch });
 
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const strokeStartSeconds = aimToStrokeStartSeconds(aim, fileId, bpm);
         strokeTimeRangeRef.current = { min: strokeStartSeconds, max: strokeStartSeconds };
-
-        // Lock the source offset of every anchored step. Tracking, Source and
-        // the brush origin are all per-step, so each step measures its own
-        // offset from its own origin against its own source file.
-        const destBpm = state.filepathsBpm[file.filePath] || 120;
-        state.lockStepSourceOffsets(
-          state.getSteps().map((step, index) => {
-            const sourceFileValue = step?.sourceFile ?? null;
-            if (!sourceFileValue) return null;
-            if ((step?.sourcePositionMode ?? "anchored") !== "anchored") return null;
-            const sourceOpenFile = Object.values(openFiles).find((f) => f.filePath === sourceFileValue.path);
-            if (!sourceOpenFile?.spectrogramData) return null;
-            const srcBpm = state.filepathsBpm[sourceOpenFile.filePath] || 120;
-            const srcDur = sourceOpenFile.spectrogramData.numFrames / sourceOpenFile.spectrogramData.sampleRate;
-            const tScale = (destBpm * totalDuration) / (srcBpm * srcDur);
-            const bScale = sourceBandUvSlope(spectrogramData, sourceOpenFile.spectrogramData);
-            const { blX, blY } = aimToBrushBlUv(aim, fileId, bpm, index);
-            return { beats: -blX * tScale, pitch: -blY * bScale };
-          }),
-        );
+        if (!began) {
+          waitingStrokesRef.current.push({
+            aim,
+            bpm,
+            points: [{ beats, pitch }],
+            range: strokeTimeRangeRef.current,
+            released: false,
+          });
+          return;
+        }
+        lockSourceOffsets(aim, bpm);
 
         rendererRef.current.renderStroke(false);
         startRepeatClock();
       }
     },
-    [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock, runWand],
+    [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock, runWand, lockSourceOffsets],
   );
 
   const handleCanvasMouseUp: PointerEventHandler<HTMLDivElement> = useCallback(
@@ -793,38 +891,75 @@ export const FileView = memo((props: FileViewProps) => {
   );
 
   // Helper to finish a stroke - used by both handleCanvasMouseUp and window mouseup
+  /** Lands the stroke's held dabs, then commits the stroke that spans `range`. */
+  const commitStroke = useCallback(
+    async (range: { min: number | null; max: number | null }) => {
+      stopRepeatClock();
+      const state = useStore.getState();
+      state.setIsStroking(false);
+
+      // A dab waiting for the canvas to take its block must land before the
+      // commit reads the stroke.
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      const result = await renderer.settleStroke();
+      if (result.status !== "completed" || useStore.getState().activeFileId !== fileId) {
+        if (result.status === "completed") await renderer.discardStrokePreview();
+        if (strokeTimeRangeRef.current === range) strokeTimeRangeRef.current = { min: null, max: null };
+        renderer.endStroke();
+        return;
+      }
+
+      // The commit reads the stroke before its first await, and the stroke ends
+      // right after that read: a commit takes seconds, and a stroke that starts
+      // meanwhile must not be ended by this one.
+      const commit =
+        range.min !== null && range.max !== null
+          ? state.applyStrokeAtPosition(undefined, { min: range.min, max: range.max })
+          : state.applyStrokeAtPosition();
+      if (strokeTimeRangeRef.current === range) strokeTimeRangeRef.current = { min: null, max: null };
+      renderer.endStroke();
+      await commit;
+    },
+    [stopRepeatClock, fileId],
+  );
+
+  // Helper to finish a stroke - used by both handleCanvasMouseUp and window mouseup
   const finishStroke = useCallback(async () => {
     if (!isStrokingRef.current) return;
     isStrokingRef.current = false;
-    stopRepeatClock();
-
-    const state = useStore.getState();
-    state.setIsStroking(false);
-    const finalRange = strokeTimeRangeRef.current;
-
-    // A dab waiting for the canvas to take its block must land before the
-    // commit reads the stroke.
-    const renderer = rendererRef.current;
-    if (!renderer) return;
-    const result = await renderer.settleStroke();
-    if (result.status !== "completed" || useStore.getState().activeFileId !== fileId) {
-      if (result.status === "completed") await renderer.discardStrokePreview();
-      renderer.endStroke();
-      strokeTimeRangeRef.current = { min: null, max: null };
+    strokeClientRef.current = null;
+    const waiting = waitingStrokesRef.current.at(-1);
+    if (waiting && !waiting.released) {
+      // It commits as soon as it starts.
+      waiting.released = true;
       return;
     }
+    await commitStroke(strokeTimeRangeRef.current);
+  }, [commitStroke]);
 
-    // The commit reads the stroke before its first await, and the stroke ends
-    // right after that read: a commit takes seconds, and a stroke that starts
-    // meanwhile must not be ended by this one.
-    const commit =
-      finalRange.min !== null && finalRange.max !== null
-        ? state.applyStrokeAtPosition(undefined, { min: finalRange.min, max: finalRange.max })
-        : state.applyStrokeAtPosition();
-    renderer.endStroke();
-    strokeTimeRangeRef.current = { min: null, max: null };
-    await commit;
-  }, [stopRepeatClock, fileId]);
+  startWaitingRef.current = () => {
+    const waiting = waitingStrokesRef.current[0];
+    const renderer = rendererRef.current;
+    if (!waiting) return;
+    if (!renderer) {
+      waitingStrokesRef.current = [];
+      return;
+    }
+    if (!renderer.beginStroke()) {
+      if (!renderer.whenStrokeFree(() => startWaitingRef.current())) waitingStrokesRef.current = [];
+      return;
+    }
+    waitingStrokesRef.current.shift();
+    lockSourceOffsets(waiting.aim, waiting.bpm);
+    renderer.queueStrokeDabs(waiting.points);
+    if (waiting.released) {
+      void commitStroke(waiting.range);
+      return;
+    }
+    renderer.renderStroke(false);
+    startRepeatClock();
+  };
 
   // Window-level event listeners to handle mouse movements and releases outside the file view
   useEffect(() => {

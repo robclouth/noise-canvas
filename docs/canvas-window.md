@@ -125,10 +125,18 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    fail the whole stroke. Cancellation stops waiting and removes held dabs
    before an outstanding read can release them. Each stroke retains a rollback
    snapshot until its commit starts. A failed stroke restores the committed
-   store plus pending commits across its footprint. Painting cannot start
-   during settlement or restoration. If restoration also fails, painting stays
+   store plus pending commits across its footprint. A stroke begun during
+   settlement or restoration waits: the file view keeps every position the
+   pointer crosses, and the engine starts the stroke the moment the last one
+   ends, after its commit has read it. If the pointer is already up by then,
+   the stroke commits straight away. If restoration also fails, painting stays
    blocked and the user must reopen the file; incomplete pixels never become
    a successful commit.
+   A quick pointer crosses several brush widths between two frames. The file
+   view samples the pointer's path at half a brush width, snaps each sample,
+   and queues the positions; the next frame paints each one before the
+   cursor's own dab, so a fast stroke leaves no gaps. A position equal to the
+   last dab is skipped.
    A grid fill is a stroke like any other: each of its dabs goes through
    `paintWhenHeld`, and the fill settles every chunk before it gives the
    next, so the window walks the file behind the anchors and the carry keeps
@@ -224,10 +232,13 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     (`sourceLayout`), a warp's shift is a destination-UV one
     (`destinationLayout`), and a turn mixes the two axes, so it converts to the
     file's own time axis first (`destFileUvSpanX`).
-12. **A reader that needs the whole file takes it a span at a time.** The
-    commit composes the whole painted state from the block store with the
-    stroke's own pixels over it; the image export walks the file in strips,
-    each served by its own window. Neither asks the canvas for a state it
+12. **A reader that needs the whole file takes it a span at a time.** A
+    windowed canvas commits only the stroke's footprint, however much of the
+    file it covers, and history stores that as a delta; a file whose tier is
+    on disk writes no whole checkpoints, because its tier already holds the
+    state. Only a projection over the whole file composes the whole painted
+    state from the block store with the stroke's own pixels over it. The image
+    export walks the file in strips, each served by its own window. Neither asks the canvas for a state it
     cannot hold, and a span that falls short of what it serves stops the
     reader rather than drawing clamped values.
 
@@ -334,7 +345,11 @@ Per open file, windowed, at K blocks:
 
 - canvas pair, sized to the window, not the file
 - block slots on the GPU: two windows plus four spare, because a slide holds
-  the window it enters and the one whose paint it folds back
+  the window it enters and the one whose paint it folds back, plus whatever
+  the window's share of the budget has left once the window is sized
+  (`canvasExtraSlotBlocks`), up to the whole file. A block that keeps its slot
+  composes on the GPU when the window comes back to it, instead of being read
+  and uploaded again. Slot pages are allocated as blocks arrive.
 - the original window, once a step in Original mode asks for it: one window
   plus four spare, plus its composed texture
 - a source window per windowed file a step paints from, and its

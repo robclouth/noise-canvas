@@ -199,11 +199,14 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const currentIdBefore = historyManager.getCurrentId();
       const { texels } = file.spectrogramData;
       const footprintRanges = snapshot.dirtyRanges;
+      // A canvas holding the whole file reads it whole once the footprint is
+      // most of it; a windowed one has no whole picture, so it always reads
+      // the footprint rather than assemble the file from the store.
       const footprintOnly =
         !projectsWholeFile(snapshot) &&
         footprintRanges != null &&
         footprintRanges.length > 0 &&
-        pixelRangeCount(footprintRanges) < texels * 0.5;
+        (renderer.paintsThroughWindow() || pixelRangeCount(footprintRanges) < texels * 0.5);
       const painted = footprintRanges != null && footprintRanges.length > 0 ? footprintRanges : null;
       const footprintRead = footprintOnly && footprintRanges ? renderer.readPixelRanges(footprintRanges) : null;
       const readPromise = footprintRead ?? renderer.getFBOData();

@@ -7,6 +7,7 @@ import { Color, Vector2, type WebGLRenderer } from "three";
 import { aimUvToBrushBlUv } from "./brush-anchor";
 import { prepareVisibleRegion, type FileDisplayResidencyContext } from "./file-display-residency";
 import type { FileEngine } from "./file-engine";
+import { recordDab } from "./drive-probe";
 import { getFileOnsets } from "./file-onsets";
 import { brushUnionAt, type FileStrokeContext } from "./file-stroke-dispatch";
 import {
@@ -205,9 +206,16 @@ export function prepareFileEditor(
         applyStroke.current = false;
       }
     } else {
+      engine.paintStrokeTrail(state, canvas, spectrogramData, bpm, dispatchStroke, dabSpan);
+      engine.lastStrokeDab = cursorPosition;
       const dabState = state;
       const dabPos = cursorPos.clone();
-      canvas.paintWhenHeld(dabStart, dabEnd, needs, () => dispatchStroke(dabState, dabPos, false, undefined, span));
+      const record = recordDab(fileId, brushOriginUv.x, brushOriginUv.y, brushSizeUv.x, brushSizeUv.y);
+      canvas.paintWhenHeld(dabStart, dabEnd, needs, () => {
+        const painted = dispatchStroke(dabState, dabPos, false, undefined, span);
+        if (painted && record) record.paintedAt = Date.now();
+        return painted;
+      });
       displayMode.current = "committed";
       applyStroke.current = false;
     }

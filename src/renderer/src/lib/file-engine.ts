@@ -2,7 +2,7 @@ import { notifications } from "@mantine/notifications";
 import type { Texture, WebGLRenderer, WebGLRenderTarget } from "three";
 import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat, RGFormat, Vector2 } from "three";
 import { effects } from "../effects";
-import type { useTransientStore } from "../store/transient";
+import type { StrokePosition, useTransientStore } from "../store/transient";
 import type { OpenFile, SpectrogramData, State } from "../store/types";
 import { metadataTextureRows } from "./band-layout";
 import { blockGrid } from "./block-grid";
@@ -32,6 +32,8 @@ import { renderExportImage as renderExportImageToCanvas, type ImageExportOptions
 import type { PosterInfo } from "./image-export-poster";
 import { getOnsetTexture, packOnsetState } from "./onset-map";
 import { StrokeRenderer, type SourceFileInfo, type StrokeTextures } from "./stroke-renderer";
+import { brushUnionForAim } from "./brush-anchor";
+import { driveDabLog, recordDab } from "./drive-probe";
 import { unitsToUv } from "./utils";
 import { WindowedCanvas, type UvRegion } from "./windowed-canvas";
 
@@ -59,6 +61,24 @@ export interface FileEngineContext {
   strokeContext: FileStrokeContext;
 }
 
+/** Paints one dab; a preview goes to the partner buffer. */
+type StrokePainter = (
+  state: State,
+  cursorPos: Vector2,
+  preview: boolean,
+  sourceOverride?: SourceFileInfo,
+  preparedSpan?: DabSpan,
+) => boolean;
+/** The frames and reads one dab at `cursorPos` needs. */
+type StrokeSpanner = (
+  state: State,
+  cursorPos: Vector2,
+  canvas: WindowedCanvas,
+  resolvedUnion?: BrushUnionUv,
+) => DabSpan;
+/** Why the brush cannot paint here, or null. */
+type StrokeRefuser = (state: State, aim?: { x: number; y: number }) => string | null;
+
 /** Owns an open file's editable resources and operations. */
 export class FileEngine {
   readonly strokeRendererRef: { current: StrokeRenderer | null } = { current: null };
@@ -72,6 +92,10 @@ export class FileEngine {
   readonly displayMode: { current: "preview" | "committed" } = { current: "committed" };
   readonly applyStroke = { current: false };
   readonly strokePreview = { current: false };
+  /** Positions the pointer crossed between frames during a stroke, painted in order ahead of the cursor's dab. */
+  readonly strokeTrail: StrokePosition[] = [];
+  /** The position of the stroke's latest committed dab, so a queued repeat of it is not painted twice. */
+  lastStrokeDab: StrokePosition | null = null;
   private context!: FileEngineContext;
   private disposed = false;
   private epoch = 0;
@@ -540,9 +564,44 @@ export class FileEngine {
     const { invalidateRef } = this.context;
 
     applyStroke.current = false;
+    this.strokeTrail.length = 0;
     displayMode.current = "committed";
     invalidateRef.current();
     visualChanged();
+  };
+
+  /**
+   * Paints the positions queued since the last frame, each once the canvas
+   * holds its frames, in the order the pointer crossed them.
+   */
+  paintStrokeTrail = (
+    state: State,
+    canvas: WindowedCanvas,
+    spec: SpectrogramData,
+    bpm: number,
+    paint: StrokePainter,
+    span: StrokeSpanner,
+  ): void => {
+    if (this.strokeTrail.length === 0) return;
+    const totalDuration = spec.numFrames / spec.sampleRate;
+    for (const point of this.strokeTrail.splice(0)) {
+      const last = this.lastStrokeDab;
+      if (last && last.beats === point.beats && last.pitch === point.pitch) continue;
+      this.lastStrokeDab = point;
+      const uv = unitsToUv(point.beats, point.pitch, bpm, totalDuration, spec.bandsPerOctave, spec.numBands);
+      if (uv.x < 0) continue;
+      const aim = new Vector2(uv.x, uv.y);
+      const dab = span(state, aim, canvas);
+      const union = driveDabLog()
+        ? brushUnionForAim(state, aim.x, aim.y, bpm, totalDuration, spec.bandsPerOctave, spec.numBands)
+        : null;
+      const record = union ? recordDab(this.fileId, union.blX, union.blY, union.sizeUvX, union.sizeUvY) : null;
+      canvas.paintWhenHeld(dab.startFrame, dab.endFrame, dab.needs, () => {
+        const painted = paint(state, aim, false, undefined, dab);
+        if (painted && record) record.paintedAt = Date.now();
+        return painted;
+      });
+    }
   };
   getFBOData = async (): Promise<Float32Array | null> => {
     const { canvasRef } = this;
@@ -686,14 +745,33 @@ export class FileEngine {
           message: "The stroke could not be restored. Close and reopen the file before painting again.",
         });
       this.restoringStroke = false;
+      if (!this.settlingStroke) this.releaseStrokeWaiters();
     }
   };
   private settlingStroke = false;
   private restoringStroke = false;
   private rollbackFailed = false;
+  private strokeWaiters: (() => void)[] = [];
+
+  /**
+   * Runs `start` once the stroke now settling or restoring has ended, so a
+   * stroke begun meanwhile starts after the last one's commit has read it.
+   * False when no stroke can start again on this canvas.
+   */
+  whenStrokeFree = (start: () => void): boolean => {
+    if (this.rollbackFailed || !this.canvasRef.current) return false;
+    this.strokeWaiters.push(start);
+    return true;
+  };
+
+  private releaseStrokeWaiters(): void {
+    for (const start of this.strokeWaiters.splice(0)) start();
+  }
 
   beginStroke = (): boolean => {
     if (this.settlingStroke || this.restoringStroke || this.rollbackFailed || !this.canvasRef.current) return false;
+    this.strokeTrail.length = 0;
+    this.lastStrokeDab = null;
     this.canvasRef.current.beginStroke();
     return true;
   };
@@ -705,6 +783,7 @@ export class FileEngine {
     canvasRef.current?.endStroke();
     this.notifyContentChanged();
     invalidateRef.current?.();
+    this.releaseStrokeWaiters();
   };
   fileOperations = (): FileEngineOperations => {
     const {
@@ -773,6 +852,10 @@ export class FileEngine {
         this.notifyContentChanged();
         return painted;
       },
+      queueStrokeDabs: (points: readonly StrokePosition[]) => {
+        this.strokeTrail.push(...points);
+      },
+      whenStrokeFree: this.whenStrokeFree,
       beginStrokePreview: beginStroke,
       discardStrokePreview,
       maxStrokeSeconds: () => {
@@ -781,6 +864,7 @@ export class FileEngine {
 
         return canvas.windowSeconds() / 2;
       },
+      paintsThroughWindow: () => canvasRef.current?.wholeFile === false,
       keepStrokePreview: () => strokeRendererRef.current?.releaseRollback(),
       getFBOData,
       readPixelRanges,
@@ -802,27 +886,37 @@ export class FileEngine {
         if (this.settlingStroke) return { status: "cancelled" };
         if (this.rollbackFailed) return { status: "failed", reason: "read-error" };
         const canvas = canvasRef.current;
-        if (applyStroke.current && !strokePreview.current && canvas && strokeRendererRef.current?.getIsInitialized()) {
+        if (
+          (this.strokeTrail.length > 0 || (applyStroke.current && !strokePreview.current)) &&
+          canvas &&
+          strokeRendererRef.current?.getIsInitialized()
+        ) {
+          const paintCursor = applyStroke.current && !strokePreview.current;
           applyStroke.current = false;
           const state = getState();
           const { cursorPosition, hoveredFile } = getTransientState();
           const file = openFiles[fileId];
           const spec = file?.spectrogramData;
-          if (spec && cursorPosition && (state.activeFileId === fileId || hoveredFile === fileId)) {
+          const bpm = (file && state.filepathsBpm[file.filePath]) || 120;
+          if (spec) {
+            this.paintStrokeTrail(state, canvas, spec, bpm, dispatchStroke, dabSpan);
+            displayMode.current = "committed";
+          }
+          if (paintCursor && spec && cursorPosition && (state.activeFileId === fileId || hoveredFile === fileId)) {
             const aim = unitsToUv(
               cursorPosition.beats,
               cursorPosition.pitch,
-              state.filepathsBpm[file.filePath] || 120,
+              bpm,
               spec.numFrames / spec.sampleRate,
               spec.bandsPerOctave,
               spec.numBands,
             );
             if (aim.x >= 0) {
+              this.lastStrokeDab = cursorPosition;
               const span = dabSpan(state, aim, canvas);
               canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () =>
                 dispatchStroke(state, aim, false, undefined, span),
               );
-              displayMode.current = "committed";
             }
           }
         }
@@ -858,7 +952,9 @@ export class FileEngine {
         canvasRef.current?.expandDirtyRegion(startX, endX, startY, endY),
     };
   };
-  strokeDispatch = (strokeContext: FileStrokeContext) => ({
+  strokeDispatch = (
+    strokeContext: FileStrokeContext,
+  ): { paint: StrokePainter; span: StrokeSpanner; refusal: StrokeRefuser } => ({
     paint: (
       state: State,
       cursorPos: Vector2,

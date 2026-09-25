@@ -1541,6 +1541,73 @@ describe("HistoryManager hops", () => {
     delete fakeOpenFiles["f1"];
   });
 
+  it("stores a footprint stroke over most of the file as a delta, since it has no whole state", async () => {
+    installManagerEnv();
+    budget.wholeFile = false;
+    const { canvas } = installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    canvas.set(root);
+
+    const count = Math.ceil(w * h * 0.7);
+    const ranges = new Uint32Array([1, count]);
+    const a = paint(root, 1, count, 1);
+    const { id, isNew } = await mgr.addStroke({
+      label: "wide",
+      dimensions,
+      dirtyRanges: ranges,
+      baseFootprint: (await mgr.currentRanges(ranges))!,
+      afterFootprint: gatherPixelRanges(a, ranges),
+    });
+    expect(isNew).toBe(true);
+    expect(mgr.getNode(id)?.storage).toBe("delta");
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
+    canvas.set(a);
+
+    await mgr.navigateToParent();
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(root));
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it.each([
+    { wholeFile: false, checkpoints: 0 },
+    { wholeFile: true, checkpoints: 1 },
+  ])("writes a checkpoint of footprint strokes only when the tier is in RAM (whole file: $wholeFile)", async (c) => {
+    installManagerEnv();
+    budget.wholeFile = c.wholeFile;
+    installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+
+    const ranges = new Uint32Array([2, 3]);
+    let state = root;
+    const ids: string[] = [];
+    for (let i = 1; i <= 21; i++) {
+      const next = paint(state, 2, 3, i);
+      const baseFootprint = await mgr.currentRanges(ranges);
+      const { id } = await mgr.addStroke({
+        label: `S${i}`,
+        dimensions,
+        dirtyRanges: ranges,
+        baseFootprint: baseFootprint!,
+        afterFootprint: gatherPixelRanges(next, ranges),
+      });
+      ids.push(id);
+      state = next;
+    }
+    expect(ids.filter((id) => mgr.getNode(id)?.storage === "packed")).toHaveLength(c.checkpoints);
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(state));
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
   it("lets a synthesis and an onset pass finish reading the state before a hop writes it", async () => {
     installManagerEnv();
     installPatchRenderer(w, h);
