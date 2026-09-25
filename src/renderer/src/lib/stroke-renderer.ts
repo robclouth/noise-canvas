@@ -1032,10 +1032,11 @@ export class StrokeRenderer {
 
   /**
    * The frames of the source file a step's dab at `cursorPos` reads, before any
-   * effect's own reach. `cursorPos` and `totalDuration` are the canvas's, the
-   * answer is the source file's own frames, so a window over the source can be
-   * placed by what the brush asks for rather than by where that file's canvas
-   * sits.
+   * effect's own reach, and the frames of this file it writes while it reads
+   * them, `dest`. `cursorPos` and `totalDuration` are the canvas's, both
+   * answers are frames of the files themselves, so a window over the source
+   * can be placed by what the brush asks for rather than by where that file's
+   * canvas sits.
    */
   sourceReadFrames(
     state: State,
@@ -1044,15 +1045,18 @@ export class StrokeRenderer {
     totalDuration: number,
     source: Pick<SourceFileInfo, "filePath" | "spectrogramData">,
     stepIndex: number = state.activeStepIndex,
-  ): { start: number; end: number } {
-    const stepState = createStepStateView(state, stepIndex);
+  ): { start: number; end: number; dest: { start: number; end: number } } {
+    const geometry = this.resolveStepGeometries(state, cursorPos, bpm, totalDuration).find(
+      (entry) => entry.index === stepIndex,
+    );
+    const stepState = geometry?.state ?? createStepStateView(state, stepIndex);
     const step = (state.brushes[state.activeBrushIndex]?.steps ?? [])[stepIndex];
     const mode = stepState.sourcePositionMode as string;
     const sourceSpec = source.spectrogramData;
     const beatRatio = bpm / (state.filepathsBpm?.[source.filePath] || bpm);
     const bandScale = sourceBandUvSlope(this.spectrogramData, sourceSpec);
-    const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, cursorPos.x);
-    const anchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
+    const anchor = geometry?.anchor ?? cursorPos;
+    const sizeX = geometry?.sizeUv.x ?? 0;
     const offset = this.sourceFileOffset(
       sourceSpec,
       state.isStroking ? step?.lockedOffset : null,
@@ -1066,9 +1070,9 @@ export class StrokeRenderer {
     const positionUv = mode === "follow" ? 0 : Number(stepState.sourceTimeOffset ?? 0) / 100;
     const shift = (offset.x + positionUv) * sourceSpec.numFrames;
     const scale = (beatRatio * sourceSpec.sampleRate) / this.spectrogramData.sampleRate;
-    const first = (this.view.startFrame + anchor.x * this.viewFrameCount) * scale + shift;
-    const last = first + footprint.sizeUv.x * this.viewFrameCount * scale;
-    return { start: first, end: last };
+    const destStart = this.view.startFrame + anchor.x * this.viewFrameCount;
+    const destEnd = destStart + sizeX * this.viewFrameCount;
+    return { start: destStart * scale + shift, end: destEnd * scale + shift, dest: { start: destStart, end: destEnd } };
   }
 
   /**

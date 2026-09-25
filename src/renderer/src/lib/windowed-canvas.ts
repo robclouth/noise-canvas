@@ -31,7 +31,15 @@ import { CarriedPaint, type PaintBox } from "./carried-paint";
 import type { CoarseStrip } from "./coarse-strip";
 import { diag } from "./diag-log";
 import { yieldIfLong } from "./frame-yield";
-import { blockReadSpan, blocksOfDab, HeldDabs, type DabExtent, type DabPainter, type FrameSpan } from "./held-dabs";
+import {
+  blockReadSpan,
+  blocksOfDab,
+  blockWriteSpan,
+  HeldDabs,
+  type DabExtent,
+  type DabPainter,
+  type FrameSpan,
+} from "./held-dabs";
 import { PackedWindow } from "./packed-window";
 import {
   composePixelRangeValues,
@@ -45,7 +53,14 @@ import {
   tapCount,
   tapSpanRanges,
 } from "./pixel-ranges";
-import { SourceWindowSlot, type SourceFileBlocks, type SourceNeed, type SourceWindowTextures } from "./source-window";
+import {
+  sourceNeedsOver,
+  SourceWindowSlot,
+  type SourceFileBlocks,
+  type SourceNeed,
+  type SourceRead,
+  type SourceWindowTextures,
+} from "./source-window";
 import type { StrokeRenderer } from "./stroke-renderer";
 import { paintOnBlock, StrokeSlots } from "./stroke-slots";
 
@@ -61,7 +76,7 @@ export type { SourceNeed } from "./source-window";
  * What a dab reads beyond the canvas: other files, each through a window
  * this canvas owns, and this file's original state.
  */
-export type DabNeeds = { sources: readonly SourceNeed[]; impulses: readonly SourceNeed[]; original: boolean };
+export type DabNeeds = { sources: readonly SourceRead[]; impulses: readonly SourceNeed[]; original: boolean };
 
 /** A window the canvas is reading towards, and whether the original reads alongside. */
 type WindowRequest = { view: CanvasView; original: boolean };
@@ -779,7 +794,7 @@ export class WindowedCanvas {
    */
   paintWhenHeld(extent: DabExtent, needs: DabNeeds, paint: DabPainter): boolean {
     if (!this.servable(extent)) return false;
-    if (this.held.size === 0 && extent.writes.length === 1 && this.othersHold(needs)) {
+    if (this.held.size === 0 && extent.writes.length === 1 && this.othersHold(needs, null)) {
       const write = extent.writes[0];
       const read = { start: Math.max(0, write.start - extent.before), end: write.end + extent.after };
       if (this.fitsWindow(read.start, read.end) && this.holdsFrames(read.start, read.end, needs.original)) {
@@ -788,7 +803,7 @@ export class WindowedCanvas {
         return painted;
       }
     }
-    this.held.push(extent, needs, paint);
+    this.held.push(extent, needs, paint, needs.sources.length > 0);
     this.releaseHeld();
     return true;
   }
@@ -864,7 +879,7 @@ export class WindowedCanvas {
           next.payloads.some((needs) => needs.original),
         );
         const [oldest] = next.payloads;
-        for (const need of oldest.sources) this.aimSource(need);
+        for (const need of sourceNeedsOver(oldest.sources, next.part)) this.aimSource(need);
         for (const need of oldest.impulses) this.aimImpulse(need);
         const reads = [
           this.fill,
@@ -1209,7 +1224,10 @@ export class WindowedCanvas {
     if (this.held.size === 0) return;
     this.held.release((extent, needs, block) => {
       const read = blockReadSpan(this.grid, extent, block);
-      return this.holdsFrames(read.start, read.end, needs.original) && this.othersHold(needs);
+      return (
+        this.holdsFrames(read.start, read.end, needs.original) &&
+        this.othersHold(needs, blockWriteSpan(this.grid, extent, block))
+      );
     });
     if (this.displaySeed) this.recordDisplayEdit(this.dirtyPixelRanges());
   }
@@ -1226,9 +1244,10 @@ export class WindowedCanvas {
     return this.original;
   }
 
-  /** True while every other-file window holds what the dab asked of it. */
-  private othersHold(needs: DabNeeds): boolean {
-    if (!needs.sources.every((need) => this.sources.get(need.fileId)?.holds(need) ?? false)) return false;
+  /** True while every other-file window holds what the dab reads while it writes `part`, or all of it for null. */
+  private othersHold(needs: DabNeeds, part: FrameSpan | null): boolean {
+    const sources = sourceNeedsOver(needs.sources, part);
+    if (!sources.every((need) => this.sources.get(need.fileId)?.holds(need) ?? false)) return false;
     return needs.impulses.every((need) => this.impulses.get(need.fileId)?.holds(need) ?? false);
   }
 

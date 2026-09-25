@@ -3,8 +3,8 @@ import { Vector2 } from "three";
 import type { State, OpenFile, SpectrogramData } from "../store/types";
 import type { BrushUnionUv, DabSpan, StrokeDispatch, FileRendererHandle } from "./file-renderer-types";
 import { viewCoversFile } from "./canvas-view";
-import { sourceReadSpan, type SourceWindowTextures } from "./source-window";
-import type { WindowedCanvas, SourceNeed } from "./windowed-canvas";
+import { sourceNeedsOver, type SourceRead, type SourceWindowTextures } from "./source-window";
+import type { WindowedCanvas } from "./windowed-canvas";
 import { blockOfFrame } from "./block-grid";
 import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
 import { strokeReach, type ReachContext } from "./effect-reach";
@@ -37,7 +37,7 @@ export interface FileStrokeContext {
   reachByState: WeakMap<State, { refusal: string | null; frames: { before: number; after: number } }>;
 }
 
-function sourceNeedsFor(context: FileStrokeContext, state: State, cursorPos: Vector2): SourceNeed[] {
+function sourceReadsFor(context: FileStrokeContext, state: State, cursorPos: Vector2): SourceRead[] {
   const { fileId, spectrogramData, strokeRendererRef, canvasRef, openFiles, getOpenFileByPath, createStepStateView } =
     context;
   const strokeRenderer = strokeRendererRef.current;
@@ -47,7 +47,7 @@ function sourceNeedsFor(context: FileStrokeContext, state: State, cursorPos: Vec
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
   const bpm = state.filepathsBpm[file.filePath] || 120;
-  const needs = new Map<string, SourceNeed>();
+  const reads: SourceRead[] = [];
   for (let index = 0; index < steps.length; index++) {
     if (steps[index].enabled === false) continue;
     const sourcePath = steps[index].sourceFile?.path;
@@ -66,22 +66,16 @@ function sourceNeedsFor(context: FileStrokeContext, state: State, cursorPos: Vec
       { filePath: source.filePath, spectrogramData: sourceSpectrogram },
       index,
     );
-    const span = sourceReadSpan(read, sourceSpectrogram.numFrames);
-    const wantOriginal = createStepStateView(state, index).sourceDataMode === "original";
-    const held = needs.get(source.id);
-    needs.set(
-      source.id,
-      held
-        ? {
-            fileId: source.id,
-            startFrame: Math.min(held.startFrame, span.startFrame),
-            endFrame: Math.max(held.endFrame, span.endFrame),
-            wantOriginal: held.wantOriginal || wantOriginal,
-          }
-        : { fileId: source.id, ...span, wantOriginal },
-    );
+    reads.push({
+      fileId: source.id,
+      wantOriginal: createStepStateView(state, index).sourceDataMode === "original",
+      read: { start: read.start, end: read.end },
+      dest: read.dest,
+      numFrames: sourceSpectrogram.numFrames,
+      destFrames: spectrogramData.numFrames,
+    });
   }
-  return [...needs.values()];
+  return reads;
 }
 
 function wantsOriginal(context: FileStrokeContext, state: State): boolean {
@@ -210,7 +204,7 @@ export function dispatchStroke(
   if (strokeRefusal(context, state) !== null) return false;
 
   const sourceWindows = new Map<string, SourceWindowTextures>();
-  for (const need of span?.needs.sources ?? sourceNeedsFor(context, state, cursorPos)) {
+  for (const need of sourceNeedsOver(span?.needs.sources ?? sourceReadsFor(context, state, cursorPos), clip ?? null)) {
     const window = canvas?.aimSource(need);
     if (!window) return false;
     sourceWindows.set(need.fileId, window);
@@ -455,7 +449,7 @@ export function dabSpan(
     extent,
     hover,
     needs: {
-      sources: sourceNeedsFor(context, state, cursorPos),
+      sources: sourceReadsFor(context, state, cursorPos),
       impulses: impulseBindings.map((entry) => entry.need).filter((need) => responseIsWindowed(context, need.fileId)),
       original: wantsOriginal(context, state),
     },

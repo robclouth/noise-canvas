@@ -2,7 +2,7 @@
 // does: quick strokes, trackpad scrolls and zooms, with no waits for the
 // picture to catch up. Everything here measures the real app, not the suite.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -67,6 +67,17 @@ export function writeNoise(path, seconds, seed = 1, sampleRate = 44100) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, bytes);
   return path;
+}
+
+/**
+ * Closes the app and removes its profile, which holds every opened file's
+ * block store. The log is kept beside where the profile was, as `<profile>.log`.
+ */
+export async function closeApp(app, profile) {
+  await app.close().catch(() => {});
+  const log = join(profile, "logs", "noise-canvas.log");
+  if (existsSync(log)) copyFileSync(log, `${profile}.log`);
+  rmSync(profile, { recursive: true, force: true });
 }
 
 /** Launches the built app in a fresh profile at the given window size. */

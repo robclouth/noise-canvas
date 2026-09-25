@@ -159,7 +159,9 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    A selection clips the stroke at file frames; the shader gets them less the
    canvas view's start. Reads for a region (copy, the
    wand, auditioning a selection) take the store's committed state over the
-   blocks they cover (`readPackedSpan`), never the canvas.
+   blocks they cover (`readPackedSpan`), never the canvas. The wand reads a
+   chunk at a time, only where its region reaches, so it grows over any
+   length of file.
    A grid fill is a stroke like any other: each of its dabs goes through
    `paintWhenHeld`, and the fill settles every chunk before it gives the
    next, so the window walks the file behind the anchors and the stroke slots
@@ -232,7 +234,15 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    destination places a `SourceWindow` by the frames the dab asks for
    (`sourceReadFrames` names them) and holds the dab until it lands. That
    window serves the other file's **committed** state, so it re-reads when that
-   state moves — a stroke still under the other file's brush is not in it. The
+   state moves — a stroke still under the other file's brush is not in it.
+   A dab asks for what each of its steps reads as a `SourceRead`: the source
+   frames against the frames it writes, one mapped linearly onto the other.
+   `sourceNeedsOver` turns that into the window for one piece of the dab, so
+   a dab wider than a window reads its source a block at a time too, and a
+   dab with such a read paints each block on its own. A window asked for more
+   than it can hold serves what it has and clamps the rest, so a piece that
+   asked for the whole dab's read would paint its far end from the wrong
+   frames. The
    canvas keeps one window for the file a step paints from, and one for each
    file a convolve step filters through. A convolve that names no response file
    filters through the file it paints from, which is the file it paints on when

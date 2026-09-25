@@ -14,7 +14,6 @@ import { getHistoryManager } from "../lib/history-manager";
 import {
   growWandSelection,
   WAND_DEFAULT_TOLERANCE_DB,
-  WAND_REACH_SECONDS,
   WAND_MAX_TOLERANCE_DB,
   WAND_MIN_TOLERANCE_DB,
 } from "../lib/magic-wand";
@@ -679,11 +678,13 @@ export const FileView = memo((props: FileViewProps) => {
       if (!spec || !renderer) return null;
       const history = getHistoryManager(fileId);
       await history.awaitPackedReaders();
-      const reach = WAND_REACH_SECONDS * spec.sampleRate;
-      const seed = timeSec * spec.sampleRate;
-      const span = await readPackedSpan(spec, seed - reach, seed + reach, (ranges) => history.currentRanges(ranges));
-      if (!span) return null;
-      return growWandSelection(span, spec, timeSec, pitchUv, tolDb);
+      return await growWandSelection(
+        (start, end) => readPackedSpan(spec, start, end, (ranges) => history.currentRanges(ranges)),
+        spec,
+        timeSec,
+        pitchUv,
+        tolDb,
+      );
     },
     [fileId, rendererRef],
   );

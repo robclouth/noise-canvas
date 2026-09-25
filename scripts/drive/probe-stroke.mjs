@@ -6,7 +6,7 @@
 import { copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { build, diagLines, launch, openFiles, seedEraseBrush, sleep, viewOf, writeNoise } from "./app.mjs";
+import { build, diagLines, launch, openFiles, seedEraseBrush, sleep, viewOf, writeNoise, closeApp } from "./app.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -29,7 +29,7 @@ const longPath = join(audioDir, `long-${SECONDS}s-${process.pid}.wav`);
 copyFileSync(writeNoise(join(audioDir, `long-${SECONDS}s.wav`), SECONDS, 7), longPath);
 
 const env = build({ skip: args.includes("--no-build") });
-const { app, page, logPath, console: consoleLines } = await launch(env);
+const { app, page, profile, logPath, console: consoleLines } = await launch(env);
 try {
   await openFiles(app, page, [...extras, longPath]);
   await seedEraseBrush(page);
@@ -141,5 +141,5 @@ try {
     if (l.t >= t0 - 1000) console.log(`diag ${l.t - t0} ms: ${l.line.slice(24, 400)}`);
   console.log(`\n${dabs.length} dabs: ${lostDabs} not in the store at all, ${partDabs} partly`);
 } finally {
-  await app.close().catch(() => {});
+  await closeApp(app, profile);
 }

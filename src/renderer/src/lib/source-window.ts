@@ -61,6 +61,66 @@ export function sourceReadSpan(
 }
 
 /**
+ * What one step of a dab reads of another file: the source frames `read`
+ * spans while the dab writes the destination frames `dest`, mapped linearly
+ * one onto the other. `dest` runs past `destFrames` when the dab wraps.
+ */
+export type SourceRead = {
+  fileId: string;
+  wantOriginal: boolean;
+  read: { start: number; end: number };
+  dest: { start: number; end: number };
+  numFrames: number;
+  destFrames: number;
+};
+
+/** The source frames `read` samples while its dab writes `part` of the destination. */
+function readOfPart(read: SourceRead, part: { start: number; end: number }): { start: number; end: number } {
+  const length = read.dest.end - read.dest.start;
+  if (length <= 0) return read.read;
+  let { start, end } = part;
+  if (end <= read.dest.start) {
+    start += read.destFrames;
+    end += read.destFrames;
+  }
+  start = Math.min(read.dest.end, Math.max(read.dest.start, start));
+  end = Math.min(read.dest.end, Math.max(start, end));
+  const scale = (read.read.end - read.read.start) / length;
+  return {
+    start: read.read.start + (start - read.dest.start) * scale,
+    end: read.read.start + (end - read.dest.start) * scale,
+  };
+}
+
+/**
+ * The windows a dab's `reads` ask for while it writes `part` of the
+ * destination, or all of it when `part` is null: one per file, over what
+ * every step reading that file needs.
+ */
+export function sourceNeedsOver(
+  reads: readonly SourceRead[],
+  part: { start: number; end: number } | null,
+): SourceNeed[] {
+  const needs = new Map<string, SourceNeed>();
+  for (const read of reads) {
+    const span = sourceReadSpan(part ? readOfPart(read, part) : read.read, read.numFrames);
+    const held = needs.get(read.fileId);
+    needs.set(
+      read.fileId,
+      held
+        ? {
+            fileId: read.fileId,
+            startFrame: Math.min(held.startFrame, span.startFrame),
+            endFrame: Math.max(held.endFrame, span.endFrame),
+            wantOriginal: held.wantOriginal || read.wantOriginal,
+          }
+        : { fileId: read.fileId, ...span, wantOriginal: read.wantOriginal },
+    );
+  }
+  return [...needs.values()];
+}
+
+/**
  * A window over a file a brush paints FROM.
  *
  * The source file's own canvas holds whatever span its own brush left it on,

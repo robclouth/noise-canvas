@@ -118,6 +118,10 @@ describe("held dabs", () => {
     held.push(extent(2 * B + 10, 2 * B + 20), "second", () => true);
     held.push(extent(5 * B + 10, 5 * B + 20), "far", () => true);
     const target = held.target((start, end) => Math.floor((end - 1) / B) - Math.floor(start / B) + 1 <= 2);
-    expect(target).toEqual({ span: { start: B + 10, end: 2 * B + 20 }, payloads: ["first", "second"] });
+    expect(target).toEqual({
+      span: { start: B + 10, end: 2 * B + 20 },
+      payloads: ["first", "second"],
+      part: { start: B + 10, end: B + 20 },
+    });
   });
 });

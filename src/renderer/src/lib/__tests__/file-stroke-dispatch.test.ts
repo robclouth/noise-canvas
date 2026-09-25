@@ -10,6 +10,7 @@ import {
   toStrokeTextures,
 } from "../../test/render-harness";
 import { dabSpan, dispatchStroke, prepareStrokeBatch, type FileStrokeContext } from "../file-stroke-dispatch";
+import { sourceNeedsOver } from "../source-window";
 import { disposeOnsetTexture } from "../onset-map";
 import { penState } from "../pen-state";
 import { gatherPixelRanges } from "../pixel-ranges";
@@ -133,7 +134,7 @@ describe("file-space stroke dispatch", () => {
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(dispatchStroke(context, state, aim, false, undefined, span)).toBe(false);
     expect(resolve).toHaveBeenCalledTimes(1);
-    expect(aimSource.mock.calls[0][0]).toBe(span.needs.sources[0]);
+    expect(aimSource.mock.calls[0][0]).toEqual(sourceNeedsOver(span.needs.sources, null)[0]);
   });
 
   it("uses the prepared impulse request without calculating it again", async () => {

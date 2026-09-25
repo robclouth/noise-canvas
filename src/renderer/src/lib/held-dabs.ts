@@ -22,7 +22,14 @@ export type DabExtent = {
  */
 export type DabPainter = (clip: FrameSpan | null) => boolean;
 
-type HeldDab<T> = { extent: DabExtent; blocks: number[]; total: number; payload: T; paint: DabPainter };
+type HeldDab<T> = {
+  extent: DabExtent;
+  blocks: number[];
+  total: number;
+  payload: T;
+  paint: DabPainter;
+  byBlock: boolean;
+};
 
 /** The blocks a dab writes, in order and without repeats. */
 export function blocksOfDab(grid: BlockGrid, extent: DabExtent): number[] {
@@ -36,13 +43,8 @@ export function blocksOfDab(grid: BlockGrid, extent: DabExtent): number[] {
   return [...blocks].sort((a, b) => a - b);
 }
 
-/**
- * The file frames a dab reads while it writes its part of one block: its
- * reach either side of that part, and one bin of the coarsest band past each
- * block edge the dab continues across, because a pixel next to a cut
- * interpolates over it.
- */
-export function blockReadSpan(grid: BlockGrid, extent: DabExtent, block: number): FrameSpan {
+/** The file frames a dab writes in one block; empty at the block's start when it writes none there. */
+export function blockWriteSpan(grid: BlockGrid, extent: DabExtent, block: number): FrameSpan {
   const frames = frameRangeOfBlock(grid, block);
   let start = frames.end;
   let end = frames.start;
@@ -51,7 +53,19 @@ export function blockReadSpan(grid: BlockGrid, extent: DabExtent, block: number)
     start = Math.min(start, Math.max(frames.start, span.start));
     end = Math.max(end, Math.min(frames.end, span.end));
   }
-  if (end <= start) return { start: frames.start, end: frames.start };
+  return end <= start ? { start: frames.start, end: frames.start } : { start, end };
+}
+
+/**
+ * The file frames a dab reads while it writes its part of one block: its
+ * reach either side of that part, and one bin of the coarsest band past each
+ * block edge the dab continues across, because a pixel next to a cut
+ * interpolates over it.
+ */
+export function blockReadSpan(grid: BlockGrid, extent: DabExtent, block: number): FrameSpan {
+  const frames = frameRangeOfBlock(grid, block);
+  const { start, end } = blockWriteSpan(grid, extent, block);
+  if (end <= start) return { start, end };
   const margin = grid.blockFrames / Math.min(...grid.binsPerBlock);
   const continues = (edge: number): boolean => extent.writes.some((span) => span.start < edge && span.end > edge);
   return {
@@ -88,9 +102,14 @@ export class HeldDabs<T> {
     return count;
   }
 
-  push(extent: DabExtent, payload: T, paint: DabPainter): void {
+  /**
+   * Holds a dab. With `byBlock` each block paints on its own rather than in a
+   * run with its ready neighbours, so what a piece reads elsewhere stays one
+   * block's worth.
+   */
+  push(extent: DabExtent, payload: T, paint: DabPainter, byBlock = false): void {
     const blocks = blocksOfDab(this.grid, extent);
-    if (blocks.length > 0) this.queue.push({ extent, blocks, total: blocks.length, payload, paint });
+    if (blocks.length > 0) this.queue.push({ extent, blocks, total: blocks.length, payload, paint, byBlock });
   }
 
   clear(): void {
@@ -118,7 +137,7 @@ export class HeldDabs<T> {
       if (runnable.length > 0) {
         const whole = runnable.length === dab.total && extent.writes.length === 1;
         const done = new Set<number>();
-        for (const run of contiguousRuns(runnable)) {
+        for (const run of dab.byBlock ? runnable.map((block) => [block]) : contiguousRuns(runnable)) {
           const clip = whole
             ? null
             : {
@@ -138,24 +157,28 @@ export class HeldDabs<T> {
   /**
    * The frames the canvas should hold next: what the oldest waiting block
    * reads, widened over the blocks after it, in the order they wait, while
-   * `fits` says one window still holds them all; and the payloads of the
-   * dabs they belong to. Null when nothing waits.
+   * `fits` says one window still holds them all; the payloads of the dabs
+   * they belong to; and the frames the oldest waiting block writes. Null when
+   * nothing waits.
    */
-  target(fits: (start: number, end: number) => boolean): { span: FrameSpan; payloads: T[] } | null {
+  target(fits: (start: number, end: number) => boolean): { span: FrameSpan; payloads: T[]; part: FrameSpan } | null {
     let span: FrameSpan | null = null;
     const payloads: T[] = [];
+    const oldest = this.queue[0];
+    if (!oldest) return null;
+    const part = blockWriteSpan(this.grid, oldest.extent, oldest.blocks[0]);
     for (const dab of this.queue) {
       for (const [index, block] of dab.blocks.entries()) {
         const read = blockReadSpan(this.grid, dab.extent, block);
         const next: FrameSpan = span
           ? { start: Math.min(span.start, read.start), end: Math.max(span.end, read.end) }
           : read;
-        if (span && !fits(next.start, next.end)) return { span, payloads };
+        if (span && !fits(next.start, next.end)) return { span, payloads, part };
         span = next;
         if (index === 0) payloads.push(dab.payload);
       }
     }
-    return span ? { span, payloads } : null;
+    return span ? { span, payloads, part } : null;
   }
 }
 

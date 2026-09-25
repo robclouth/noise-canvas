@@ -16,7 +16,7 @@ import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, type BlockGrid } from "../block-grid";
 import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
 import { gatherPixelRanges } from "../pixel-ranges";
-import { SourceWindow, sourceReadSpan } from "../source-window";
+import { SourceWindow, sourceNeedsOver, sourceReadSpan, type SourceRead } from "../source-window";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { packedFold, padToFold } from "../constants";
 import { metadataTextureRows } from "../band-layout";
@@ -82,6 +82,40 @@ describe("sourceReadSpan", () => {
   it("wraps a read past the file into it, the way the shaders wrap a source UV", () => {
     expect(sourceReadSpan({ start: 1400, end: 1500 }, 1000)).toEqual({ startFrame: 300, endFrame: 600 });
     expect(sourceReadSpan({ start: -600, end: -500 }, 1000)).toEqual({ startFrame: 300, endFrame: 600 });
+  });
+});
+
+describe("sourceNeedsOver", () => {
+  const read = (fileId: string, from: number, to: number, destStart: number, destEnd: number): SourceRead => ({
+    fileId,
+    wantOriginal: false,
+    read: { start: from, end: to },
+    dest: { start: destStart, end: destEnd },
+    numFrames: 10000,
+    destFrames: 1000,
+  });
+
+  it("asks for the source frames a part of the dab reads, mapped along the dab", () => {
+    const reads = [read("a", 2000, 4000, 0, 1000)];
+    expect(sourceNeedsOver(reads, { start: 250, end: 500 })).toEqual([
+      { fileId: "a", startFrame: 2000, endFrame: 3500, wantOriginal: false },
+    ]);
+    expect(sourceNeedsOver(reads, null)).toEqual([{ fileId: "a", startFrame: 0, endFrame: 6000, wantOriginal: false }]);
+  });
+
+  it("maps a part at the file's start onto the end of a dab that wraps past it", () => {
+    const reads = [read("a", 5000, 5200, 900, 1100)];
+    expect(sourceNeedsOver(reads, { start: 0, end: 50 })).toEqual([
+      { fileId: "a", startFrame: 5050, endFrame: 5200, wantOriginal: false },
+    ]);
+  });
+
+  it("asks once per file, over every step reading it", () => {
+    const reads = [read("a", 1000, 1100, 0, 100), read("a", 3000, 3100, 0, 100), read("b", 0, 100, 0, 100)];
+    expect(sourceNeedsOver(reads, null)).toEqual([
+      { fileId: "a", startFrame: 900, endFrame: 3200, wantOriginal: false },
+      { fileId: "b", startFrame: 0, endFrame: 200, wantOriginal: false },
+    ]);
   });
 });
 

@@ -10,8 +10,15 @@ export const WAND_DEFAULT_TOLERANCE_DB = 18;
 export const WAND_MIN_TOLERANCE_DB = 3;
 export const WAND_MAX_TOLERANCE_DB = 60;
 
-/** Seconds either side of the click a wand region can reach. */
-export const WAND_REACH_SECONDS = 60;
+/** Seconds of the file the wand reads at a time as its region grows. */
+export const WAND_CHUNK_SECONDS = 60;
+
+/** Reads the committed state over [startFrame, endFrame), or null when the store cannot serve it. */
+export type WandReader = (startFrame: number, endFrame: number) => Promise<PackedSpan | null>;
+
+const UNREAD = 0;
+const BELOW = 1;
+const ABOVE = 2;
 
 // A runaway grow (clicking silence in a long file) stops here rather than
 // walking every bin.
@@ -28,17 +35,19 @@ const binDb = (span: PackedSpan, band: number, bin: number): number => {
 /**
  * Grows a region outward from the clicked bin, over bins whose level reaches
  * within `toleranceDb` below the seed's, walking time neighbours in each band
- * and every bin the span overlaps in the bands above and below. Returns the
- * region as a masked selection, or null when the click lands outside the file.
- * The region stops where `span` ends.
+ * and every bin the span overlaps in the bands above and below. Reads the file
+ * through `read` a chunk of `chunkFrames` at a time, only where the region
+ * reaches, so it grows over any length of file. Returns the region as a masked
+ * selection, or null when the click lands outside the file or a read fails.
  */
-export function growWandSelection(
-  span: PackedSpan,
+export async function growWandSelection(
+  read: WandReader,
   spec: SpectrogramData,
   timeSec: number,
   pitchUv: number,
   toleranceDb: number,
-): Selection | null {
+  chunkFrames = WAND_CHUNK_SECONDS * spec.sampleRate,
+): Promise<Selection | null> {
   const { numBands, sampleRate, numFrames, synthesisMetadata } = spec;
   const { bandStepLog2s, bandLengths } = synthesisMetadata;
 
@@ -47,7 +56,27 @@ export function growWandSelection(
   const seedBin = Math.min(bandLengths[seedBand] - 1, seedFrame >> bandStepLog2s[seedBand]);
   if (seedBin < 0) return null;
 
-  const floorDb = binDb(span, seedBand, seedBin) - toleranceDb;
+  // Each bin's level against the floor, UNREAD until its chunk is read.
+  const levels: (Uint8Array | null)[] = new Array(numBands).fill(null);
+  const readChunks = new Set<number>();
+  let floorDb = Number.NaN;
+  const readChunk = async (chunk: number): Promise<boolean> => {
+    readChunks.add(chunk);
+    const span = await read(chunk * chunkFrames, Math.min(numFrames, (chunk + 1) * chunkFrames));
+    if (!span) return false;
+    if (Number.isNaN(floorDb)) floorDb = binDb(span, seedBand, seedBin) - toleranceDb;
+    const { metadata } = span.view.layout;
+    for (let band = 0; band < numBands; band++) {
+      const level = (levels[band] ??= new Uint8Array(bandLengths[band]));
+      const k0 = span.view.bandK0[band];
+      const count = Math.min(metadata[band * 4 + 1], bandLengths[band] - k0);
+      for (let k = 0; k < count; k++) level[k0 + k] = binDb(span, band, k0 + k) < floorDb ? BELOW : ABOVE;
+    }
+    return true;
+  };
+  const chunkOf = (band: number, bin: number): number => Math.floor((bin << bandStepLog2s[band]) / chunkFrames);
+
+  if (!(await readChunk(chunkOf(seedBand, seedBin)))) return null;
   if (!Number.isFinite(floorDb)) return null;
 
   const visited: (Uint8Array | null)[] = new Array(numBands).fill(null);
@@ -60,15 +89,29 @@ export function growWandSelection(
 
   // Grown bins per band, as bin indices; turned into the mask afterwards.
   const grown: number[][] = new Array(numBands);
-  const stack: number[] = [seedBand, seedBin];
+  let stack: number[] = [seedBand, seedBin];
+  // Bins reached in chunks not read yet, as [band, bin] pairs.
+  let unread: number[] = [];
   visit(seedBand, seedBin);
   let count = 0;
 
-  while (stack.length > 0 && count < MAX_GROWN_BINS) {
+  while (count < MAX_GROWN_BINS) {
+    if (stack.length === 0) {
+      if (unread.length === 0) break;
+      if (!(await readChunk(chunkOf(unread[0], unread[1])))) return null;
+      stack = unread;
+      unread = [];
+      continue;
+    }
     const bin = stack[stack.length - 1];
     const band = stack[stack.length - 2];
     stack.length -= 2;
-    if (binDb(span, band, bin) < floorDb) continue;
+    const level = levels[band]?.[bin] ?? UNREAD;
+    if (level === UNREAD && !readChunks.has(chunkOf(band, bin))) {
+      unread.push(band, bin);
+      continue;
+    }
+    if (level !== ABOVE) continue;
     (grown[band] ??= []).push(bin);
     count++;
 

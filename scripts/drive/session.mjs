@@ -37,6 +37,7 @@ import {
   viewOf,
   viewState,
   writeNoise,
+  closeApp,
 } from "./app.mjs";
 
 const args = process.argv.slice(2);
@@ -67,7 +68,7 @@ const longPath = join(audioDir, `long-${SECONDS}s-${tag_}.wav`);
 await import("node:fs").then(({ copyFileSync }) => copyFileSync(longSource, longPath));
 
 const env = build({ windowBlocks, skip: flag("no-build") });
-const { app, page, logPath, console: consoleLines } = await launch(env);
+const { app, page, profile, logPath, console: consoleLines } = await launch(env);
 let stallProfile = null;
 const report = { seconds: SECONDS, extra: EXTRA, seed: SEED, gestures: [], strokes: [], checks: [] };
 
@@ -528,7 +529,7 @@ try {
     .slice(0, 40);
 } finally {
   writeFileSync(join(OUT, "report.json"), JSON.stringify(report, null, 1));
-  await app.close().catch(() => {});
+  await closeApp(app, profile);
 }
 
 printSummary(report);

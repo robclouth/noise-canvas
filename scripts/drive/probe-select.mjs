@@ -1,11 +1,11 @@
 // Checks the selection features on a long file: silence a region, copy it,
 // paste it elsewhere, and audition it, reading the stored result.
 //
-// Usage: node scripts/drive/probe-select.mjs [--seconds 285] [--length 60] [--no-build]
+// Usage: node scripts/drive/probe-select.mjs [--seconds 285] [--length 60] [--to seconds] [--no-build]
 import { copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { build, launch, openFiles, sleep, viewOf, writeNoise } from "./app.mjs";
+import { build, launch, openFiles, sleep, viewOf, writeNoise, closeApp } from "./app.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -14,13 +14,14 @@ const option = (name, fallback) => {
 };
 const SECONDS = Number(option("seconds", 285));
 const LENGTH = Number(option("length", 60));
+const TO = Number(option("to", SECONDS * 0.6));
 
 const audioDir = join(tmpdir(), "noisecanvas-noise");
 const longPath = join(audioDir, `long-${SECONDS}s-${process.pid}.wav`);
 copyFileSync(writeNoise(join(audioDir, `long-${SECONDS}s.wav`), SECONDS, 7), longPath);
 
 const env = build({ skip: args.includes("--no-build") });
-const { app, page, console: consoleLines } = await launch(env);
+const { app, page, profile, console: consoleLines } = await launch(env);
 const failures = [];
 try {
   await openFiles(app, page, [longPath]);
@@ -81,7 +82,7 @@ try {
   const placing = await page.evaluate(() => Boolean(globalThis.__store.getState().placing));
   console.log(`copy started placing: ${placing}`);
   if (!placing) failures.push("copy did not pick the region up");
-  const to = SECONDS * 0.6;
+  const to = TO;
   await page.evaluate(async (to) => {
     const state = globalThis.__store.getState();
     state.movePlacing(to, 0.4);
@@ -99,7 +100,7 @@ try {
     if (c.type === "error" && !/HRTF|valid audio stream/.test(c.text))
       failures.push(`console: ${c.text.slice(0, 200)}`);
 } finally {
-  await app.close().catch(() => {});
+  await closeApp(app, profile);
 }
 console.log(failures.length ? `FAILED\n  ${failures.join("\n  ")}` : "OK");
 process.exit(failures.length ? 1 : 0);

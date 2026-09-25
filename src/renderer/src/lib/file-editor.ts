@@ -10,6 +10,7 @@ import type { FileEngine } from "./file-engine";
 import { recordDab } from "./drive-probe";
 import { getFileOnsets } from "./file-onsets";
 import { brushUnionAt, type FileStrokeContext } from "./file-stroke-dispatch";
+import { sourceNeedsOver } from "./source-window";
 import {
   destToSourceBandUv,
   resolveBrushAnchor,
@@ -194,9 +195,10 @@ export function prepareFileEditor(
 
   if (applyStroke.current && cursorPos.x >= 0) {
     const preview = strokePreview.current;
-    for (const need of needs.sources) canvas.aimSource(need);
+    const sources = sourceNeedsOver(needs.sources, hover);
+    for (const need of sources) canvas.aimSource(need);
     for (const need of needs.impulses) canvas.aimImpulse(need);
-    canvas.dropSourcesExcept(needs.sources);
+    canvas.dropSourcesExcept(sources);
     canvas.dropImpulsesExcept(needs.impulses);
     if (preview) {
       if (

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SpectrogramData } from "../../store/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockStateWithSteps } from "../../test/mock-state";
-import { blockGrid, blockOfFrame, blockPixelRanges, type BlockGrid } from "../block-grid";
+import { blockGrid, blockOfFrame, blockPixelRanges, frameRangeOfBlock, type BlockGrid } from "../block-grid";
 import { fileRangesToView } from "../canvas-view";
 import {
   composePixelRangeValues,
@@ -34,7 +34,7 @@ import { CoarseStripBuilder } from "../coarse-strip";
 import { displayPyramidLevels } from "../display-pyramid";
 import { packedFold, padToFold } from "../constants";
 import { metadataTextureRows } from "../band-layout";
-import type { SourceNeed } from "../source-window";
+import { sourceNeedsOver, type SourceRead } from "../source-window";
 import type { DabExtent, FrameSpan } from "../held-dabs";
 import { createByteTarget, renderMaterialToBytes } from "../snapshot-capture";
 import passThroughVert from "../../glsl/pass-through.vert";
@@ -1571,12 +1571,15 @@ describe("a canvas that holds a window of the file", () => {
     disposers.push(() => canvas.dispose());
     canvas.initialize(null);
 
-    const need: SourceNeed = {
+    const read: SourceRead = {
       fileId: sourceFileId,
-      startFrame: 0,
-      endFrame: sourceGrid.blockFrames,
       wantOriginal: false,
+      read: { start: 0, end: sourceGrid.blockFrames / 3 },
+      dest: { start: 0, end: 100 },
+      numFrames: sourceData.numFrames,
+      destFrames: data.numFrames,
     };
+    const [need] = sourceNeedsOver([read], null);
 
     expect(canvas.aimSource(need)).toBeNull();
 
@@ -1591,7 +1594,7 @@ describe("a canvas that holds a window of the file", () => {
 
     let painted = false;
     canvas.beginStroke();
-    const canPaint = canvas.paintWhenHeld(dabExtent(0, 100), { sources: [need], impulses: [], original: false }, () => {
+    const canPaint = canvas.paintWhenHeld(dabExtent(0, 100), { sources: [read], impulses: [], original: false }, () => {
       const windowTextures = canvas.aimSource(need);
       expect(windowTextures).not.toBeNull();
       const sourceInfo: SourceFileInfo = {
@@ -1624,7 +1627,7 @@ describe("a canvas that holds a window of the file", () => {
     expect(canvas.aimSource(need)).toBeNull();
 
     let paintedAfterBump = false;
-    canvas.paintWhenHeld(dabExtent(0, 100), { sources: [need], impulses: [], original: false }, () => {
+    canvas.paintWhenHeld(dabExtent(0, 100), { sources: [read], impulses: [], original: false }, () => {
       paintedAfterBump = true;
       return true;
     });
@@ -1633,5 +1636,74 @@ describe("a canvas that holds a window of the file", () => {
     await canvas.settle();
     expect(paintedAfterBump).toBe(true);
     expect(canvas.aimSource(need)).not.toBeNull();
+  });
+
+  it("paints a dab wider than the windows a block at a time, each block reading its own part of another file", async () => {
+    const sourceFileId = "wide-source";
+    const sourceData = createConstantQMockSpectrogramData({
+      durationSeconds: DURATION_SECONDS,
+      sampleRate: SAMPLE_RATE,
+      bandsPerOctave: 4,
+    });
+    let renderer: StrokeRenderer | null = null;
+    const canvas = new WindowedCanvas({
+      gl,
+      spectrogram: data,
+      renderer: () => renderer,
+      readCurrent: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+      readRoot: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+      onChanged: () => {},
+      sourceBlocks: (fileId) =>
+        fileId === sourceFileId
+          ? {
+              spectrogram: sourceData,
+              readCurrent: async (ranges) => gatherPixelRanges(sourceData.packedData, ranges),
+              readRoot: async (ranges) => gatherPixelRanges(sourceData.packedData, ranges),
+              revision: () => 0,
+            }
+          : null,
+      windowBlocks: 3,
+    });
+    const view = canvas.firstView(0, grid.blockFrames);
+    renderer = new StrokeRenderer(gl, data, strokeTextures, "dest", effects, view);
+    disposers.push(() => renderer?.dispose());
+    disposers.push(() => canvas.dispose());
+    canvas.initialize(null);
+
+    const blocks = 5;
+    expect(grid.blockCount).toBeGreaterThan(blocks);
+    const end = blocks * grid.blockFrames;
+    const read: SourceRead = {
+      fileId: sourceFileId,
+      wantOriginal: false,
+      read: { start: 0, end },
+      dest: { start: 0, end },
+      numFrames: sourceData.numFrames,
+      destFrames: data.numFrames,
+    };
+    const painted: (FrameSpan | null)[] = [];
+    let refused = 0;
+    canvas.beginStroke();
+    const taken = canvas.paintWhenHeld(
+      dabExtent(0, end),
+      { sources: [read], impulses: [], original: false },
+      (clip) => {
+        // As a dispatch does: the part's source window must serve it.
+        const [need] = sourceNeedsOver([read], clip);
+        const window = canvas.aimSource(need);
+        if (!window) {
+          refused++;
+          return false;
+        }
+        expect(window.view.startFrame).toBeLessThanOrEqual(clip?.start ?? 0);
+        expect(window.view.endFrame).toBeGreaterThanOrEqual(clip?.end ?? end);
+        painted.push(clip);
+        return true;
+      },
+    );
+    expect(taken).toBe(true);
+    expect((await canvas.settle()).status).toBe("completed");
+    expect(painted).toEqual(Array.from({ length: blocks }, (_, block) => frameRangeOfBlock(grid, block)));
+    expect(refused).toBe(0);
   });
 });
