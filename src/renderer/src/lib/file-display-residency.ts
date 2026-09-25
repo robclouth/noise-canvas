@@ -213,25 +213,29 @@ export function prepareVisibleRegion(
   original: boolean,
 ): void {
   const { aimRest } = context;
-  if (!canvas.wholeFile) {
-    const visible = visibleFrameRange(context);
-    let start = visible.start;
-    let end = visible.end;
-    if (cursorPos.x >= 0) {
-      const bothStart = Math.min(visible.start, dabStart);
-      const bothEnd = Math.max(visible.end, dabEnd);
-      if (canvas.fitsWindow(bothStart, bothEnd)) {
-        start = bothStart;
-        end = bothEnd;
-      } else {
-        start = dabStart;
-        end = dabEnd;
-      }
-    }
-    const wait = canvas.isStroking ? 0 : aimRest.current.wait(start, end, performance.now());
-    if (wait === 0) canvas.aim(start, end, original);
-    else scheduleAimRest(context, wait);
+  // A canvas over the whole file never moves; only the original it reads has
+  // to be brought in.
+  if (canvas.holdsWholeFile) {
+    if (original) canvas.aim(dabStart, dabEnd, true);
+    return;
   }
+  const visible = visibleFrameRange(context);
+  let start = visible.start;
+  let end = visible.end;
+  if (cursorPos.x >= 0) {
+    const bothStart = Math.min(visible.start, dabStart);
+    const bothEnd = Math.max(visible.end, dabEnd);
+    if (canvas.fitsWindow(bothStart, bothEnd)) {
+      start = bothStart;
+      end = bothEnd;
+    } else {
+      start = dabStart;
+      end = dabEnd;
+    }
+  }
+  const wait = canvas.isStroking ? 0 : aimRest.current.wait(start, end, performance.now());
+  if (wait === 0) canvas.aim(start, end, original);
+  else scheduleAimRest(context, wait);
 }
 
 export function disposeDisplayResidency(aimRestTimer: FileDisplayResidencyContext["aimRestTimer"]): void {

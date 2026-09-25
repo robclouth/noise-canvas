@@ -41,10 +41,14 @@ vi.mock("../history-manager", () => ({
     getManifest: () => ({ currentId: "edited" }),
     nearestFullAnchor: () => ({ id: "root" }),
     isCurrentAudioCached: () => true,
-    currentTaps: async (runs: Uint32Array) => gatherTaps(seed, runs),
-    currentRanges: async (ranges: Uint32Array) => gatherPixelRanges(seed, ranges),
+    currentTaps: async (runs: Uint32Array) => gatherTaps(currentSeed ?? seed, runs),
+    currentRanges: async (ranges: Uint32Array) => gatherPixelRanges(currentSeed ?? seed, ranges),
     rootRanges: async (ranges: Uint32Array) => gatherPixelRanges(seed, ranges),
     currentBlock: async (index: number) => {
+      const list = blockPixelRanges(grid, index);
+      return gatherPixelRanges(currentSeed ?? seed, list.ranges.subarray(0, list.count * 2));
+    },
+    rootBlock: async (index: number) => {
       const list = blockPixelRanges(grid, index);
       return gatherPixelRanges(seed, list.ranges.subarray(0, list.count * 2));
     },
@@ -416,7 +420,7 @@ describe("anchored dab residency", () => {
     await rig.unmount();
 
     const whole = await mount(state, Infinity);
-    expect(whole.canvas.wholeFile).toBe(true);
+    expect(whole.canvas.holdsWholeFile).toBe(true);
     whole.ref.current!.beginStroke();
     expect(whole.ref.current!.renderStrokeBatch([{ ...stroke, state: whole.state }])).toBe(1);
     await whole.ref.current!.settleStroke();
@@ -451,7 +455,7 @@ describe("pristine sampling after resume", () => {
       },
     ]);
     const rig = await mount(state, Infinity, 8);
-    expect(rig.canvas.wholeFile).toBe(true);
+    expect(rig.canvas.holdsWholeFile).toBe(true);
     const original = seed.slice();
     currentSeed = seed.slice();
     for (let i = 0; i < currentSeed.length; i += 4) {
@@ -906,40 +910,6 @@ describe("session-owned file engine", () => {
     rig.frame();
     expect(addRootSnapshot).toHaveBeenCalledTimes(1);
   });
-
-  it.each(["context replacement", "resume"])(
-    "cancels %s installation after a close during side-data recovery",
-    async (path) => {
-      const contexts = vi.spyOn(FileEngine.prototype, "updateContext");
-      const rig = await mount(brush(0), Infinity, 8);
-      rig.ref.current!.releaseAnalysisData();
-      const { deriveSideData } = await import("../history-manager");
-      let finishSide!: () => void;
-      vi.mocked(deriveSideData).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            finishSide = () => resolve({ inverseMap: inverseSeed!, metadata: rig.data.metadata });
-          }),
-      );
-      if (path === "resume") {
-        rig.render(true);
-        await vi.waitFor(() => expect(rig.file.parked).toBe(true));
-        rig.render(false);
-      } else rig.render(false, 1, 1);
-      await vi.waitFor(() => expect(finishSide).toBeTypeOf("function"));
-      const engine = contexts.mock.contexts.at(-1);
-      if (!(engine instanceof FileEngine)) throw new Error("no file engine");
-      const install = vi.spyOn(engine, "installTextures");
-      await rig.unmount();
-      finishSide();
-      const { serializeFileTask } = await import("../file-task-queue");
-      await serializeFileTask("residency", async () => {});
-      expect(install).not.toHaveBeenCalled();
-      expect(engine.currentSeedRef.current).toBeNull();
-      expect(engine.packedSeedRef.current).toBeNull();
-      expect(engine.borrowDisplaySource()).toBeNull();
-    },
-  );
 });
 
 async function stackedView(count: number) {
@@ -1040,7 +1010,7 @@ describe("one direct display per view", () => {
     }
   });
 
-  it("draws a background whose history seed arrives after its record mounts", async () => {
+  it("draws a background whose history attaches after its record mounts", async () => {
     const rig = await stackedView(1);
     const { openFiles } = await import("../../store/files");
     const data = createConstantQMockSpectrogramData({ durationSeconds: 8, sampleRate: 800, bandsPerOctave: 1 });
@@ -1068,7 +1038,6 @@ describe("one direct display per view", () => {
       expect(rig.viewRef.current?.display.layers).toHaveLength(2);
     });
     const layer = rig.viewRef.current!.display.layers[0];
-    expect(layer.ready).toBe(false);
     release();
     await vi.waitFor(() => {
       rig.frame();

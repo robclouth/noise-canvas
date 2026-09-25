@@ -171,7 +171,7 @@ describe("file-space stroke dispatch", () => {
     const ahead = [{ state, aimX: 0.95, aimY: 0.5 }];
     const aheadSpan = dabSpan(context, state, new Vector2(ahead[0].aimX, ahead[0].aimY), canvas);
     canvas.beginStroke();
-    expect(canvas.wholeFile).toBe(false);
+    expect(canvas.holdsWholeFile).toBe(false);
     expect(prepareStrokeBatch(context, canvas, strokes, ahead)).toBe(2);
     expect(render).not.toHaveBeenCalled();
     expect(prefetch).toHaveBeenCalledWith(aheadSpan.startFrame, aheadSpan.endFrame);

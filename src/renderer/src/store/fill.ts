@@ -130,7 +130,6 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
       }
 
       // The painted pixels become the commit: one history node, one resynthesis.
-      renderer.keepStrokePreview();
       const region = target.region;
       await get().applyStrokeAtPosition(
         { beats: 0, pitch: 0 },

@@ -20,13 +20,7 @@ import {
   viewUvToFileUv,
   type CanvasView,
 } from "./canvas-view";
-import {
-  CanvasWindow,
-  needsCanvasWindow,
-  type BlockReader,
-  type BlockValueReader,
-  type TapValueReader,
-} from "./canvas-window";
+import { CanvasWindow, type BlockReader, type BlockValueReader, type TapValueReader } from "./canvas-window";
 import { canvasExtraSlotBlocks, canvasWindowBlocks, CANVAS_WINDOW_SPARE_BLOCKS } from "./gpu-budget";
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
 import type { CoarseStrip } from "./coarse-strip";
@@ -74,9 +68,16 @@ export type StrokeSettlement =
   | { status: "cancelled" }
   | { status: "failed"; reason: "unavailable" | "read-error" };
 
-/** Bytes the canvas window's slots may hold: two windows, the spares, and the slots the budget has left. */
+/**
+ * Bytes the canvas window's slots may hold: two windows, the spares, and the
+ * slots the budget has left. A window spanning the whole file never slides,
+ * so it keeps one window of slots.
+ */
 function canvasWindowSlotBytes(grid: BlockGrid, windowBlocks: number): number {
-  const slots = 2 * windowBlocks + CANVAS_WINDOW_SPARE_BLOCKS + canvasExtraSlotBlocks(grid, windowBlocks);
+  const slots =
+    windowBlocks >= grid.blockCount
+      ? windowBlocks
+      : 2 * windowBlocks + CANVAS_WINDOW_SPARE_BLOCKS + canvasExtraSlotBlocks(grid, windowBlocks);
   return slots * blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL;
 }
 
@@ -154,7 +155,7 @@ export class WindowedCanvas {
   private readonly deps: WindowedCanvasDeps;
   private readonly numFrames: number;
   private readonly grid: BlockGrid;
-  private readonly blocks: CanvasWindow | null;
+  private readonly blocks: CanvasWindow;
   private original: PackedWindow | null = null;
   private readonly sources = new Map<string, SourceWindowSlot>();
   private readonly impulses = new Map<string, SourceWindowSlot>();
@@ -169,6 +170,8 @@ export class WindowedCanvas {
   private carried = new CarriedPaint();
   private readonly pending: PendingPaint[] = [];
   private stroking = false;
+  // Set from `beginStroke` until the stroke ends or is discarded.
+  private discardable = false;
   private warming = false;
   private strokeEpoch = 0;
   private cancelSettlement: (() => void) | null = null;
@@ -179,15 +182,13 @@ export class WindowedCanvas {
     const { numBands, metadata, sampleRate, numFrames } = deps.spectrogram;
     const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
     this.grid = grid;
-    const windowBlocks = deps.windowBlocks ?? canvasWindowBlocks(grid);
-    this.blocks = needsCanvasWindow(grid, windowBlocks)
-      ? new CanvasWindow(deps.gl, grid, {
-          windowBlocks,
-          maxBytes: canvasWindowSlotBytes(grid, windowBlocks),
-          read: deps.readCurrent,
-          readBlock: deps.readCurrentBlock,
-        })
-      : null;
+    const windowBlocks = Math.min(deps.windowBlocks ?? canvasWindowBlocks(grid), grid.blockCount);
+    this.blocks = new CanvasWindow(deps.gl, grid, {
+      windowBlocks,
+      maxBytes: canvasWindowSlotBytes(grid, windowBlocks),
+      read: deps.readCurrent,
+      readBlock: deps.readCurrentBlock,
+    });
     this.windowBlocks = windowBlocks;
   }
 
@@ -196,9 +197,14 @@ export class WindowedCanvas {
     return this.strokeEpoch;
   }
 
-  /** True when this file is short enough for the canvas to hold all of it. */
-  get wholeFile(): boolean {
-    return this.blocks === null;
+  /** True when the window spans every block, so the canvas holds the whole file and never slides. */
+  get holdsWholeFile(): boolean {
+    return this.windowBlocks >= this.grid.blockCount;
+  }
+
+  /** True from `beginStroke` until the stroke ends or is discarded, while `discardStroke` can take it back. */
+  get strokeDiscardable(): boolean {
+    return this.discardable;
   }
 
   /** True between `beginStroke` and `endStroke`, while dabs are landing. */
@@ -218,17 +224,18 @@ export class WindowedCanvas {
     return view && !viewCoversFile(view, this.numFrames) ? view : undefined;
   }
 
-  /** The view a renderer for this file should start on, or undefined for the whole file. */
-  firstView(startFrame: number, endFrame: number): CanvasView | undefined {
-    return this.blocks?.plan(null, startFrame, endFrame);
+  /** The view a renderer for this file should start on. */
+  firstView(startFrame: number, endFrame: number): CanvasView {
+    return this.blocks.plan(null, startFrame, endFrame);
   }
 
   /**
-   * Fills the canvas for the first time: the blocks already in slots go on
-   * now, the picture of the rest of the file comes from `seed`, and the window
-   * reads whatever is still missing. Without a seed the picture is drawn out
-   * of the store a block at a time; `strip`, when the analysis kept one,
-   * shows the whole file at a coarser level while that draw runs.
+   * Fills the canvas for the first time. A `seed`, the whole current state an
+   * analysis just returned, fills the canvas and the picture at once. Without
+   * one the blocks already in slots go on now, the window reads whatever is
+   * still missing, and the picture is drawn out of the store a block at a
+   * time; `strip`, when the analysis kept one, shows the whole file at a
+   * coarser level while that draw runs.
    */
   initialize(seed: Float32Array | null, strip: CoarseStrip | null = null): void {
     const renderer = this.deps.renderer();
@@ -237,21 +244,16 @@ export class WindowedCanvas {
     this.drawingStore = null;
     this.displaySeed = null;
     const window = this.blocks;
-    if (!window) {
-      renderer.initialize();
-      return;
-    }
     const view = renderer.committedSource().view;
     window.clearCanvas();
     renderer.initialize((target) => {
       const cold = new Set(window.composeResident(view, target));
       window.markOnCanvas(window.blocksOf(view).filter((block) => !cold.has(block)));
     });
-    // The canvas holds one window, so the picture of the rest of the file
-    // comes from the analysed state rather than from the canvas. A store with
-    // no root to read yet is drawn from once the owner has written one.
+    // A store with no root to read yet is drawn from once the owner has
+    // written one.
     if (seed) {
-      renderer.seedDisplayFromPacked(seed);
+      this.setFBOData(seed);
     } else {
       if (strip) renderer.seedDisplayFromStrip(strip);
       void this.drawDisplayFromStore();
@@ -286,7 +288,7 @@ export class WindowedCanvas {
    */
   private warmSlots(): void {
     const window = this.blocks;
-    if (this.warming || !window || this.disposed) return;
+    if (this.warming || this.disposed || this.holdsWholeFile) return;
     this.warming = true;
     const started = performance.now();
     let warmed = 0;
@@ -329,7 +331,7 @@ export class WindowedCanvas {
    * blocks are read, a few reads in flight ahead of the block being drawn.
    */
   private drawDisplayFromStore(): Promise<void> {
-    if (this.disposed || !this.blocks) return Promise.resolve();
+    if (this.disposed) return Promise.resolve();
     if (this.drawingStore) return this.drawingStore;
     const renderer = this.deps.renderer();
     if (!renderer?.getIsInitialized()) return Promise.resolve();
@@ -415,7 +417,7 @@ export class WindowedCanvas {
   aim(startFrame: number, endFrame: number, wantOriginal = false): void {
     const window = this.blocks;
     const renderer = this.deps.renderer();
-    if (!window || !renderer?.getIsInitialized()) return;
+    if (!renderer?.getIsInitialized()) return;
     if (this.stroking && this.held.length > 0) {
       const span = this.heldSpan();
       startFrame = span.startFrame;
@@ -507,7 +509,7 @@ export class WindowedCanvas {
   prefetch(startFrame: number, endFrame: number): void {
     const window = this.blocks;
     const renderer = this.deps.renderer();
-    if (!window || !renderer?.getIsInitialized()) return;
+    if (!renderer?.getIsInitialized()) return;
     window.prefetch(window.plan(renderer.committedSource().view, startFrame, endFrame));
   }
 
@@ -567,14 +569,12 @@ export class WindowedCanvas {
 
   /** Drops the slots of the blocks over the named file pixels, so the store serves them next. */
   forgetBlocks(ranges: Uint32Array): void {
-    const window = this.blocks;
-    if (window) window.invalidate(blocksForPixelRanges(window.grid, ranges));
+    this.blocks.invalidate(blocksForPixelRanges(this.grid, ranges));
   }
 
   /** True when one window can hold [startFrame, endFrame). */
   fitsWindow(startFrame: number, endFrame: number): boolean {
     const window = this.blocks;
-    if (!window) return true;
     const first = blockOfFrame(window.grid, startFrame);
     const last = blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1));
     return last - first + 1 <= window.windowBlocks;
@@ -582,18 +582,16 @@ export class WindowedCanvas {
 
   /** True while the canvas holds content for every block of its view. */
   isPopulated(): boolean {
-    const window = this.blocks;
-    if (!window) return true;
     const view = this.view();
     if (!view) return false;
-    return window.canvasLacks(view).length === 0;
+    return this.blocks.canvasLacks(view).length === 0;
   }
 
   /** True while an outstanding canvas fill will cover the screen's visible frames. */
   isFillingFrames(startFrame: number, endFrame: number): boolean {
     const window = this.blocks;
     const request = this.request;
-    if (!window || !request || !this.fitsWindow(startFrame, endFrame)) return false;
+    if (!request || !this.fitsWindow(startFrame, endFrame)) return false;
     return (
       blockOfFrame(window.grid, startFrame) >= request.view.firstBlock &&
       blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1)) <= request.view.lastBlock
@@ -603,7 +601,6 @@ export class WindowedCanvas {
   /** True when the canvas holds the entire frame range and its original when requested. */
   holdsFrames(startFrame: number, endFrame: number, wantOriginal = false): boolean {
     const window = this.blocks;
-    if (!window) return true;
     const view = this.view();
     if (!view || !this.fitsWindow(startFrame, endFrame)) return false;
     if (wantOriginal && !(this.original?.holds(view) ?? false)) return false;
@@ -720,7 +717,7 @@ export class WindowedCanvas {
   /** The brush origin in the canvas's own UV. */
   dabCursor(cursorPos: Vector2): Vector2 {
     const view = this.view();
-    if (!view || this.coversFile()) return cursorPos;
+    if (!view) return cursorPos;
     return new Vector2(fileUvToViewUv(view, this.numFrames, cursorPos.x), cursorPos.y);
   }
 
@@ -732,7 +729,6 @@ export class WindowedCanvas {
   windowSeconds(): number {
     const window = this.blocks;
     const { sampleRate } = this.deps.spectrogram;
-    if (!window) return this.numFrames / sampleRate;
     const blocks = Math.min(window.windowBlocks, window.grid.blockCount);
     const full = window.viewFor({ firstBlock: 0, lastBlock: blocks - 1 });
     return (full.endFrame - full.startFrame) / sampleRate;
@@ -741,7 +737,7 @@ export class WindowedCanvas {
   /** The seconds the canvas's own UV spans. */
   dabDuration(totalDuration: number): number {
     const view = this.view();
-    if (!view || this.coversFile()) return totalDuration;
+    if (!view) return totalDuration;
     return (view.endFrame - view.startFrame) / this.deps.spectrogram.sampleRate;
   }
 
@@ -753,38 +749,35 @@ export class WindowedCanvas {
     this.held.length = 0;
     // A fresh carry per stroke, so a commit still reading the last one keeps it.
     this.carried = new CarriedPaint();
-    const renderer = this.deps.renderer();
-    if (renderer && !renderer.hasRollback()) renderer.captureRollback();
-    renderer?.beginStroke();
+    this.discardable = true;
+    this.deps.renderer()?.beginStroke();
   }
 
   endStroke(): void {
     this.stroking = false;
+    this.discardable = false;
     this.deps.renderer()?.endStroke();
-    this.deps.renderer()?.releaseRollback();
     this.warmSlots();
   }
 
   /**
-   * Takes back everything the stroke painted since `captureRollback`: the
-   * dabs still waiting, the paint carried off the canvas, and the paint on
-   * it. A canvas holding the whole file puts its snapshot back; one holding a
-   * window has slid since the snapshot, so the store's values replace the
-   * stroke's footprint instead. Resolves false when nothing was saved.
+   * Takes back everything the stroke painted since `beginStroke`: the dabs
+   * still waiting, the paint carried off the canvas, and the paint on it. The
+   * store's values replace the stroke's footprint, with the paint of commits
+   * still landing laid back on top. Resolves false when no stroke was begun.
    */
   async discardStroke(): Promise<boolean> {
     const renderer = this.deps.renderer();
-    if (!renderer?.hasRollback()) return false;
+    if (!renderer || !this.discardable) return false;
     this.cancelSettlement?.();
     this.strokeEpoch++;
     this.stroking = false;
+    this.discardable = false;
     this.held.length = 0;
     this.request = null;
     const epoch = this.strokeEpoch;
-    if (this.coversFile()) return renderer.restoreRollback();
     const ranges = this.dirtyPixelRanges();
     if (!ranges || ranges.length === 0) {
-      renderer.releaseRollback();
       renderer.clearDirtyRegion();
       return true;
     }
@@ -808,7 +801,6 @@ export class WindowedCanvas {
     }
     this.carried = new CarriedPaint();
     live.clearDirtyRegion();
-    live.releaseRollback();
     return true;
   }
 
@@ -824,7 +816,6 @@ export class WindowedCanvas {
   /** The named file pixels, taken from the canvas and from what it carried off. */
   async readPixelRanges(pixelRanges: Uint32Array): Promise<Float32Array> {
     const renderer = this.expectRenderer();
-    if (this.coversFile()) return await renderer.readPixelRanges(pixelRanges);
     // Taken before the first await: a stroke starting now installs its own.
     const carried = this.carried;
     while (!carried.settledNow) await carried.settled();
@@ -843,7 +834,7 @@ export class WindowedCanvas {
   dirtyPixelRanges(): Uint32Array | null {
     const renderer = this.deps.renderer();
     const ranges = renderer?.getDirtyPixelRanges() ?? null;
-    if (!renderer || this.coversFile()) return ranges;
+    if (!renderer) return ranges;
     const inView = ranges ? viewRangesToFile(renderer.committedSource().view, ranges) : null;
     const carried = this.carried.ranges();
     if (carried.length === 0) return inView;
@@ -854,7 +845,7 @@ export class WindowedCanvas {
   committedFootprintUv(): PaintBox | null {
     const renderer = this.deps.renderer();
     const footprint = renderer?.getCommittedFootprintUv() ?? null;
-    if (!renderer || this.coversFile()) return footprint;
+    if (!renderer) return footprint;
     const inView = footprint && { ...footprint, ...this.boxToFileUv(footprint) };
     const carried = this.carried.paintBox();
     if (!carried) return inView;
@@ -870,7 +861,7 @@ export class WindowedCanvas {
   /** A dirty region the renderer keeps, in the file's UV. */
   regionToFileUv(region: UvRegion | null): UvRegion | null {
     const view = this.view();
-    if (!region || !view || this.coversFile()) return region;
+    if (!region || !view) return region;
     return {
       ...region,
       startX: viewUvToFileUv(view, this.numFrames, region.startX),
@@ -883,7 +874,7 @@ export class WindowedCanvas {
     const renderer = this.deps.renderer();
     if (!renderer) return;
     const view = this.view();
-    if (!view || this.coversFile()) {
+    if (!view) {
       renderer.expandDirtyRegion(startX, endX, startY, endY);
       return;
     }
@@ -906,20 +897,17 @@ export class WindowedCanvas {
     this.held.length = 0;
     this.request = null;
     this.stroking = false;
+    this.discardable = false;
     this.carried = new CarriedPaint();
     if (this.displaySeed) this.recordDisplayEdit(this.fullFilePixelRanges());
-    if (this.coversFile()) {
-      renderer.setFBOData(data);
-      return true;
-    }
     const view = renderer.committedSource().view;
     renderer.setFBOData(composeViewContent(view, data));
     renderer.seedDisplayFromPacked(data);
     renderer.getDisplayTiles()?.dropTiles(this.fullFilePixelRanges());
     const window = this.blocks;
-    window?.invalidate();
+    window.invalidate();
     // The whole view was written, so the canvas lacks none of it.
-    window?.markOnCanvas(window.blocksOf(view));
+    window.markOnCanvas(window.blocksOf(view));
     return true;
   }
 
@@ -928,10 +916,6 @@ export class WindowedCanvas {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
     this.recordDisplayEdit(pixelRanges);
-    if (this.coversFile()) {
-      renderer.patchFBOData(data, pixelRanges);
-      return true;
-    }
     const clipped = clipRangesToView(renderer.committedSource().view, this.layout(), pixelRanges);
     renderer.patchFBODataCompact(gatherPixelRanges(data, clipped.fileRanges), clipped.viewRanges);
     this.patchOutside(renderer, gatherPixelRanges(data, pixelRanges), pixelRanges);
@@ -943,10 +927,6 @@ export class WindowedCanvas {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
     this.recordDisplayEdit(pixelRanges);
-    if (this.coversFile()) {
-      renderer.patchFBODataCompact(values, pixelRanges);
-      return true;
-    }
     const clipped = clipRangesToView(renderer.committedSource().view, this.layout(), pixelRanges, values);
     if (clipped.viewValues) renderer.patchFBODataCompact(clipped.viewValues, clipped.viewRanges);
     this.patchOutside(renderer, values, pixelRanges);
@@ -957,10 +937,6 @@ export class WindowedCanvas {
   applyPhaseTurns(turns: ArrayLike<number>): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
-    if (this.coversFile()) {
-      renderer.applyPhaseTurns(turns);
-      return true;
-    }
     const view = renderer.committedSource().view;
     const layout = this.layout();
     const translated: number[] = [];
@@ -973,12 +949,9 @@ export class WindowedCanvas {
     renderer.applyPhaseTurns(translated);
     // Turns move phase, which the display does not show, but the slots still
     // hold the untorned values for the blocks they carry.
-    const window = this.blocks;
-    if (window) {
-      const turned: number[] = [];
-      for (let i = 0; i + 3 < turns.length; i += 4) turned.push(turns[i], turns[i + 1]);
-      window.invalidate(blocksForPixelRanges(window.grid, Uint32Array.from(turned)));
-    }
+    const turned: number[] = [];
+    for (let i = 0; i + 3 < turns.length; i += 4) turned.push(turns[i], turns[i + 1]);
+    this.blocks.invalidate(blocksForPixelRanges(this.grid, Uint32Array.from(turned)));
     this.carried = new CarriedPaint();
     return true;
   }
@@ -989,7 +962,7 @@ export class WindowedCanvas {
     this.strokeEpoch++;
     this.generation++;
     this.displaySeed = null;
-    this.blocks?.dispose();
+    this.blocks.dispose();
     this.original?.dispose();
     for (const slot of this.sources.values()) slot.dispose();
     this.sources.clear();
@@ -1050,8 +1023,7 @@ export class WindowedCanvas {
   }
 
   /** The window over the file's original, built the first time a dab asks to read it. */
-  private originalWindow(): PackedWindow | null {
-    if (!this.blocks) return null;
+  private originalWindow(): PackedWindow {
     if (!this.original) {
       this.original = new PackedWindow(this.deps.gl, this.grid, {
         windowBlocks: this.windowBlocks,
@@ -1118,8 +1090,7 @@ export class WindowedCanvas {
   private patchOutside(renderer: StrokeRenderer, values: Float32Array, fileRanges: Uint32Array): void {
     renderer.patchDisplayFromCompact(values, fileRanges);
     renderer.getDisplayTiles()?.dropTiles(fileRanges);
-    const window = this.blocks;
-    if (window) window.invalidate(blocksForPixelRanges(window.grid, fileRanges));
+    this.blocks.invalidate(blocksForPixelRanges(this.grid, fileRanges));
     // The state moved, so paint carried off the canvas no longer speaks for
     // it. A commit already reading the old carry keeps the object it took.
     this.carried = new CarriedPaint();
@@ -1138,7 +1109,7 @@ export class WindowedCanvas {
    */
   private applyPendingPaint(renderer: StrokeRenderer, view: CanvasView, entering: number[]): void {
     const window = this.blocks;
-    if (!window || this.pending.length === 0) return;
+    if (this.pending.length === 0) return;
     let target: Uint32Array = new Uint32Array(0);
     for (const block of entering) {
       if (window.holdsPaint(block)) continue;
@@ -1175,7 +1146,6 @@ export class WindowedCanvas {
 
   private carryPaintOff(renderer: StrokeRenderer, next: CanvasView): void {
     const window = this.blocks;
-    if (!window) return;
     const carried = carryPaintOut(renderer, window, this.carried, next, this.numFrames);
     if (!carried) return;
     const revision = this.strokeEpoch;

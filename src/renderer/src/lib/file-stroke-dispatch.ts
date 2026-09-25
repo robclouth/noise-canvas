@@ -325,7 +325,7 @@ function reachContext(context: FileStrokeContext, state: State): ReachContext | 
   const { fileId, canvasRef, openFiles } = context;
   const canvas = canvasRef.current;
   const file = openFiles[fileId];
-  if (!canvas || canvas.wholeFile || !file?.spectrogramData) return null;
+  if (!canvas || canvas.holdsWholeFile || !file?.spectrogramData) return null;
   const spectrogram = file.spectrogramData;
   return {
     bpm: state.filepathsBpm[file.filePath] || 120,
@@ -391,7 +391,7 @@ export function dabSpan(
   const bpm = state.filepathsBpm[file.filePath] || 120;
   const { numFrames, sampleRate } = spectrogramData;
   const totalDuration = numFrames / sampleRate;
-  const reach = canvas.wholeFile ? { before: 0, after: 0 } : reachFrames(context, state);
+  const reach = canvas.holdsWholeFile ? { before: 0, after: 0 } : reachFrames(context, state);
   const union = resolvedUnion ?? brushUnionAt(context, state, cursorPos, bpm, totalDuration);
   const impulseBindings = impulseNeedsFor(context, state);
   return {
@@ -400,7 +400,7 @@ export function dabSpan(
     needs: {
       sources: sourceNeedsFor(context, state, cursorPos),
       impulses: impulseBindings.map((entry) => entry.need).filter((need) => responseIsWindowed(context, need.fileId)),
-      original: !canvas.wholeFile && wantsOriginal(context, state),
+      original: wantsOriginal(context, state),
     },
     impulseBindings,
   };

@@ -1,13 +1,15 @@
 # The canvas window
 
-**The budget decides.** `canvasWindowBlocks` sizes the window against the GPU
-pool. A file whose whole state fits keeps one canvas over all of it, exactly as
-it always did; a longer one paints through a window of K blocks. A build pins K
-with `VITE_CANVAS_WINDOW_BLOCKS`, where 0 keeps the whole file on the canvas.
-The same answer, `canvasHoldsWholeFile`, picks the file's store: a file the
-canvas holds whole keeps its painted state in one array in RAM and writes only
-its seed to disk; a longer one keeps both on disk in blocks. Everything below
-only happens for a file long enough to need a window.
+**Every file paints through a window.** `canvasWindowBlocks` sizes the window
+against the GPU pool, and the canvas clamps it to the file: a file whose whole
+state fits gets a window spanning every block, which never slides; a longer one
+paints through a window of K blocks. There is no separate whole-file canvas.
+A build pins K with `VITE_CANVAS_WINDOW_BLOCKS`, where 0 gives every file a
+window over all of it. `canvasHoldsWholeFile` picks the file's store: a file
+the canvas holds whole keeps its painted state in one array in RAM and writes
+only its seed to disk; a longer one keeps both on disk in blocks. Sliding,
+carrying and slot reuse only happen for a file long enough to need a window,
+but every rule below holds for both.
 
 This page is the model. `block-memory-plan.md` is the work log — read that only
 when you want to know why something was done.
@@ -123,9 +125,9 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    `cancelled` or `failed`; only `completed` can enter history or synthesis.
    Unavailable blocks after eight fills without progress, or a failed read,
    fail the whole stroke. Cancellation stops waiting and removes held dabs
-   before an outstanding read can release them. Each stroke retains a rollback
-   snapshot until its commit starts. A failed stroke restores the committed
-   store plus pending commits across its footprint. A stroke begun during
+   before an outstanding read can release them. A stroke can be taken back
+   until its commit starts, and taking it back needs no snapshot: the
+   committed store plus pending commits go back over its footprint. A stroke begun during
    settlement or restoration waits: the file view keeps every position the
    pointer crosses, and the engine starts the stroke the moment the last one
    ends, after its commit has read it. If the pointer is already up by then,

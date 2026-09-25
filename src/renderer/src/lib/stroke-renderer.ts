@@ -386,9 +386,6 @@ export class StrokeRenderer {
   private modulatorMaterial: RawShaderMaterial;
 
   // State
-  // The spectrogram as it was before a preview run of committed strokes.
-  // Allocated only while a preview is up.
-  private rollbackFbo: WebGLRenderTarget | null = null;
   private pingPong = 0;
   private isInitialized = false;
   // The footprint of the stroke being rendered. Its ranges and bin ranges are
@@ -2179,7 +2176,6 @@ export class StrokeRenderer {
   setFBOData(data: Float32Array): void {
     const { textureWidth, textureHeight, texels } = this.view;
 
-    this.releaseRollback();
     this.pingPong = 0;
 
     const dataTex = new DataTexture(padToFold(data, texels, 4), textureWidth, textureHeight, RGBAFormat, FloatType);
@@ -2424,46 +2420,6 @@ export class StrokeRenderer {
     this.gl.getContext().finish();
   }
 
-  /**
-   * Saves the current spectrogram so a run of committed strokes can be taken
-   * back without touching history — what a grid fill paints onto.
-   * Calling it again while a snapshot is held restores that snapshot instead of
-   * replacing it, so repeated previews always start from the same pixels.
-   */
-  captureRollback(): void {
-    if (this.rollbackFbo) {
-      this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
-    } else {
-      this.rollbackFbo = this.createFBO(this.view.textureWidth, this.view.textureHeight, RGBAFormat);
-      this.blitFBO(this.pingPong === 0 ? this.fbo1 : this.fbo2, this.rollbackFbo);
-    }
-    this.invalidateFboData();
-  }
-
-  /** Whether a rollback snapshot is currently held. */
-  hasRollback(): boolean {
-    return this.rollbackFbo !== null;
-  }
-
-  /**
-   * Puts the saved spectrogram back and drops the snapshot. Returns false when
-   * there was nothing to restore.
-   */
-  restoreRollback(): boolean {
-    if (!this.rollbackFbo) return false;
-    this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
-    this.releaseRollback();
-    this.dirtyRegion = null;
-    this.invalidateFboData();
-    return true;
-  }
-
-  /** Drops the snapshot, keeping whatever is currently painted. */
-  releaseRollback(): void {
-    this.rollbackFbo?.dispose();
-    this.rollbackFbo = null;
-  }
-
   /** Draws (dest texel, count, src texel) patch triples into `target`, leaving other texels alone. */
   private drawPatchTriples(target: WebGLRenderTarget, triples: Uint32Array): void {
     const geometry = new InstancedBufferGeometry();
@@ -2488,8 +2444,7 @@ export class StrokeRenderer {
    * Moves the canvas onto `next`, a view with the same texture fold. Texels
    * the two views share are carried over, and `composeEntering` writes the
    * committed values of the blocks that enter where `next` places them. With
-   * `midStroke` the stroke-start snapshot, the rollback target and the step
-   * masks move too, so the stroke keeps blending against the same base;
+   * `midStroke` the stroke-start snapshot and the step masks move too, so the stroke keeps blending against the same base;
    * otherwise the shared scratch is disowned and rebuilds at the next stroke.
    * The display caches are untouched: the picture does not change in file
    * space. Painted texels of blocks that leave must be read before the call.
@@ -2534,10 +2489,6 @@ export class StrokeRenderer {
       const [bounce] = this.pool.passFbos(1);
       shiftInto(bounce, scratch.strokeStartFbo.texture, true);
       this.blitFBO(bounce, scratch.strokeStartFbo);
-      if (this.rollbackFbo) {
-        shiftInto(bounce, this.rollbackFbo.texture, true);
-        this.blitFBO(bounce, this.rollbackFbo);
-      }
       if (triples.length > 0) {
         // The mask's entering span was never painted, so it clears to zero;
         // the overlap bounces out, the target clears, and the overlap comes
@@ -2562,8 +2513,6 @@ export class StrokeRenderer {
     } else {
       this.pool.disown(this);
       this.maskRows = null;
-      this.rollbackFbo?.dispose();
-      this.rollbackFbo = null;
     }
 
     const currentFrames = current.endFrame - current.startFrame;
@@ -2782,7 +2731,6 @@ export class StrokeRenderer {
   }
 
   dispose(): void {
-    this.releaseRollback();
     this.selectionMaskCache?.texture.dispose();
     this.selectionMaskCache = null;
     this.pool.release(this);

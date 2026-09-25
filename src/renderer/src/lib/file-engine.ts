@@ -5,10 +5,8 @@ import { effects } from "../effects";
 import type { StrokePosition, useTransientStore } from "../store/transient";
 import type { OpenFile, SpectrogramData, State } from "../store/types";
 import { metadataTextureRows } from "./band-layout";
-import { blockGrid } from "./block-grid";
 import type { CanvasView } from "./canvas-view";
-import { needsCanvasWindow } from "./canvas-window";
-import { DEFAULT_ONSET_SENSITIVITY, packedFold, padToFold } from "./constants";
+import { DEFAULT_ONSET_SENSITIVITY } from "./constants";
 import { exportBlockGrid, ExportSourceWindow } from "./export-window";
 import type {
   BrushUnionUv,
@@ -84,9 +82,6 @@ export class FileEngine {
   readonly strokeRendererRef: { current: StrokeRenderer | null } = { current: null };
   readonly canvasRef: { current: WindowedCanvas | null } = { current: null };
   readonly historyHookedRef = { current: false };
-  readonly currentSeedRef: { current: Float32Array | null } = { current: null };
-  readonly packedSeedRef: { current: Float32Array | null } = { current: null };
-  readonly inverseSeedRef: { current: Float32Array | null } = { current: null };
   readonly liveTexturesRef: { current: EngineTextures | null } = { current: null };
   readonly isParkedRef: { current: boolean | undefined } = { current: false };
   readonly displayMode: { current: "preview" | "committed" } = { current: "committed" };
@@ -109,8 +104,6 @@ export class FileEngine {
   }
   updateContext(context: FileEngineContext): void {
     this.context = context;
-    if (context.spectrogramData.packedData) this.packedSeedRef.current = context.spectrogramData.packedData;
-    if (context.spectrogramData.inverseMap) this.inverseSeedRef.current = context.spectrogramData.inverseMap;
   }
   get reachByState(): FileStrokeContext["reachByState"] {
     return this.context.strokeContext.reachByState;
@@ -133,28 +126,13 @@ export class FileEngine {
   };
   private visualChanged = this.notifyContentChanged;
   createTextures = (spectrogramData = this.context.spectrogramData) => {
-    const { packedSeedRef, inverseSeedRef, fileId } = this;
-    const { getHistoryManager } = this.services;
-    const { metadata, texels, numBands } = spectrogramData;
-
-    const grid = blockGrid({ numBands, metadata }, spectrogramData.numFrames, spectrogramData.sampleRate);
-    const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
-    const fold = packedFold(texels);
-    const texWidth = windowed ? 1 : fold.width;
-    const texHeight = windowed ? 1 : fold.height;
-    const packedSeed = packedSeedRef.current;
-    let packedData = windowed ? new Float32Array(4) : packedSeed && padToFold(packedSeed, texels, 4);
-    if (!packedData || packedData.length !== texWidth * texHeight * 4) {
-      console.warn("history: the packed seed was already released; the canvas needs a full restore");
-      getHistoryManager(fileId).markFboOutOfSync();
-      packedData = new Float32Array(texWidth * texHeight * 4);
-    }
-    const inverseSeed = inverseSeedRef.current;
-    let inverseMap = windowed ? new Float32Array(2) : inverseSeed && padToFold(inverseSeed, texels, 2);
-    if (!inverseMap || inverseMap.length !== texWidth * texHeight * 2) {
-      console.warn("history: the inverse-map seed was already released");
-      inverseMap = new Float32Array(texWidth * texHeight * 2);
-    }
+    const { numBands, metadata } = spectrogramData;
+    // The canvas lays out its own view, so the file-wide packed and inverse
+    // textures are placeholders the renderer never samples.
+    const texWidth = 1;
+    const texHeight = 1;
+    const packedData = new Float32Array(4);
+    const inverseMap = new Float32Array(2);
 
     const packed = new DataTexture(packedData, texWidth, texHeight, RGBAFormat, FloatType);
     packed.internalFormat = "RGBA32F";
@@ -199,60 +177,18 @@ export class FileEngine {
     liveTexturesRef.current = next;
     this.context.resourcesChanged();
   };
-  prepareHistorySeeds = async (
-    cancelled: () => boolean,
-    spectrogramData = this.context.spectrogramData,
-  ): Promise<boolean> => {
-    const { currentSeedRef, packedSeedRef, inverseSeedRef, fileId } = this;
-    const { getHistoryManager, deriveSideData } = this.services;
-    const history = getHistoryManager(fileId);
-    await history.initialize();
-    const manifest = history.getManifest();
-    if (!manifest || cancelled()) return false;
-    const current = (await history.currentBlockState()) ?? (await history.reconstruct(manifest.currentId)).packedData;
-    const original = await history.rootRanges(new Uint32Array([0, spectrogramData.texels]));
-    const anchor = history.nearestFullAnchor(manifest.currentId);
-    const side = anchor ? await deriveSideData(anchor) : null;
-    if (cancelled()) return false;
-    currentSeedRef.current = current;
-    packedSeedRef.current = original ?? current;
-    inverseSeedRef.current = side?.inverseMap ?? null;
-    return true;
-  };
   prepare = (parked: boolean | undefined): (() => void) | undefined => {
-    const {
-      strokeRendererRef,
-      packedSeedRef,
-      createTextures,
-      disposeLiveTextures,
-      installTextures,
-      prepareHistorySeeds,
-      disposeCanvas,
-      fileId,
-    } = this;
+    const { strokeRendererRef, createTextures, disposeLiveTextures, installTextures, disposeCanvas } = this;
     const { spectrogramData } = this.context;
-    const { serializeFileTask } = this.services;
     if (parked) return;
-    let cancelled = false;
-    const prepare = async () => {
-      const { numBands, metadata, numFrames, sampleRate } = spectrogramData;
-      const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
-      if (!packedSeedRef.current && !needsCanvasWindow(grid, canvasWindowBlocks(grid))) {
-        const prepared = await serializeFileTask(fileId, () => prepareHistorySeeds(() => cancelled, spectrogramData));
-        if (!prepared) return;
-      }
-      if (!cancelled) installTextures(createTextures(spectrogramData));
-    };
     if (strokeRendererRef.current) {
       strokeRendererRef.current.dispose();
       strokeRendererRef.current = null;
     }
     disposeCanvas();
-    void prepare().catch((error: unknown) => console.error("Preparing renderer textures failed:", error));
+    installTextures(createTextures(spectrogramData));
 
     return () => {
-      cancelled = true;
-
       disposeLiveTextures();
       this.context.resourcesChanged();
     };
@@ -303,9 +239,6 @@ export class FileEngine {
     this.epoch++;
     this.listeners.clear();
     this.disposeLiveTextures();
-    this.currentSeedRef.current = null;
-    this.packedSeedRef.current = null;
-    this.inverseSeedRef.current = null;
     const { strokeRendererRef, disposeCanvas } = this;
     if (strokeRendererRef.current) {
       strokeRendererRef.current.dispose();
@@ -343,17 +276,7 @@ export class FileEngine {
     };
   };
   resume = (): (() => void) | undefined => {
-    const {
-      historyHookedRef,
-      packedSeedRef,
-      inverseSeedRef,
-      isParkedRef,
-      createTextures,
-      installTextures,
-      prepareHistorySeeds,
-      visualChanged,
-      fileId,
-    } = this;
+    const { historyHookedRef, isParkedRef, createTextures, installTextures, visualChanged, fileId } = this;
     const { spectrogramData, invalidateRef } = this.context;
     const { getHistoryManager, serializeFileTask, openFiles } = this.services;
 
@@ -365,19 +288,7 @@ export class FileEngine {
       if (cancelled || !file?.parked) return;
       file.parked = false;
       const historyManager = getHistoryManager(fileId);
-      const specData = file.spectrogramData ?? spectrogramData;
-      if (!specData) return;
-
-      const { metadata, numBands, numFrames, sampleRate } = specData;
-      const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
-      const windowed = needsCanvasWindow(grid, canvasWindowBlocks(grid));
-
-      if (windowed) {
-        packedSeedRef.current = null;
-        inverseSeedRef.current = null;
-      } else {
-        if (!(await prepareHistorySeeds(() => cancelled, spectrogramData))) return;
-      }
+      if (!(file.spectrogramData ?? spectrogramData)) return;
 
       installTextures(createTextures(spectrogramData));
 
@@ -398,16 +309,7 @@ export class FileEngine {
     const inverseMapTex = this.liveTexturesRef.current?.inverse ?? null;
     const metadataTex = this.liveTexturesRef.current?.meta ?? null;
     if (this.disposed || this.isParkedRef.current || !originalPackedDataTex || !inverseMapTex || !metadataTex) return;
-    const {
-      strokeRendererRef,
-      canvasRef,
-      historyHookedRef,
-      currentSeedRef,
-      packedSeedRef,
-      canvasFor,
-      releaseAnalysisData,
-      fileId,
-    } = this;
+    const { strokeRendererRef, canvasRef, historyHookedRef, canvasFor, releaseAnalysisData, fileId } = this;
     const {
       spectrogramData,
       glRef,
@@ -453,11 +355,7 @@ export class FileEngine {
     const strokeRenderer = strokeRendererRef.current;
 
     if (!strokeRenderer.getIsInitialized()) {
-      canvasFor(gl).initialize(packedSeedRef.current, spectrogramData.coarseStrip ?? null);
-      if (currentSeedRef.current) {
-        strokeRenderer.setFBOData(currentSeedRef.current);
-        currentSeedRef.current = null;
-      }
+      canvasFor(gl).initialize(spectrogramData.packedData ?? null, spectrogramData.coarseStrip ?? null);
       if (historyHookedRef.current && releaseSeeds) {
         releaseAnalysisData(spectrogramData);
       }
@@ -530,7 +428,7 @@ export class FileEngine {
     const strokeRenderer = strokeRendererRef.current;
     if (!gl || !strokeRenderer || !strokeRenderer.getIsInitialized()) return null;
     const exportGrid = exportBlockGrid(spectrogramData);
-    const windowed = canvasRef.current && !canvasRef.current.wholeFile;
+    const windowed = canvasRef.current && !canvasRef.current.holdsWholeFile;
     const window = windowed
       ? new ExportSourceWindow(gl, exportGrid, {
           windowBlocks: canvasWindowBlocks(exportGrid),
@@ -678,8 +576,6 @@ export class FileEngine {
     if (spectrogram) {
       this.context.spectrogramData = spectrogram;
       this.context.strokeContext.spectrogramData = spectrogram;
-      this.packedSeedRef.current = spectrogram.packedData ?? null;
-      this.inverseSeedRef.current = spectrogram.inverseMap ?? null;
     }
     const { strokeRendererRef, createTextures, disposeLiveTextures, installTextures, disposeCanvas, visualChanged } =
       this;
@@ -700,7 +596,7 @@ export class FileEngine {
     visualChanged();
   };
   releaseAnalysisData = (spectrogramData = this.context.spectrogramData) => {
-    const { packedSeedRef, inverseSeedRef, liveTexturesRef } = this;
+    const { liveTexturesRef } = this;
     const { glRef } = this.context;
 
     const live = liveTexturesRef.current;
@@ -708,26 +604,25 @@ export class FileEngine {
     if (!live || !gl) return;
     gl.initTexture(live.packed);
     live.packed.image.data = new Float32Array(0);
-    packedSeedRef.current = null;
     spectrogramData.packedData = undefined;
     spectrogramData.coarseStrip = undefined;
     gl.initTexture(live.inverse);
     live.inverse.image.data = new Float32Array(0);
-    inverseSeedRef.current = null;
     spectrogramData.inverseMap = undefined;
   };
   discardStrokePreview = async (): Promise<boolean> => {
-    const { strokeRendererRef, canvasRef, displayMode } = this;
+    const { canvasRef, displayMode } = this;
     const { invalidateRef } = this.context;
     this.restoringStroke = true;
     const canvas = canvasRef.current;
     let revision = canvas?.strokeRevision;
+    const hadStroke = canvas?.strokeDiscardable ?? false;
     try {
-      const restoration = canvas ? canvas.discardStroke() : (strokeRendererRef.current?.restoreRollback() ?? false);
+      const restoration = canvas ? canvas.discardStroke() : Promise.resolve(false);
       revision = canvas?.strokeRevision;
       const restored = await restoration;
       if (canvas !== canvasRef.current || revision !== canvas?.strokeRevision) return false;
-      this.rollbackFailed = !restored && Boolean(strokeRendererRef.current?.hasRollback());
+      this.rollbackFailed = !restored && hadStroke;
       if (restored) {
         displayMode.current = "committed";
         invalidateRef.current?.();
@@ -860,12 +755,10 @@ export class FileEngine {
       discardStrokePreview,
       maxStrokeSeconds: () => {
         const canvas = canvasRef.current;
-        if (!canvas || canvas.wholeFile) return null;
+        if (!canvas || canvas.holdsWholeFile) return null;
 
         return canvas.windowSeconds() / 2;
       },
-      paintsThroughWindow: () => canvasRef.current?.wholeFile === false,
-      keepStrokePreview: () => strokeRendererRef.current?.releaseRollback(),
       getFBOData,
       readPixelRanges,
       applyPhaseTurns,

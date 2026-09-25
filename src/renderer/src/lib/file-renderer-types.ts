@@ -90,10 +90,6 @@ export interface FileRendererHandle {
    * window of the file; null while it holds all of it.
    */
   maxStrokeSeconds: () => number | null;
-  /** True while the canvas holds a window of the file rather than all of it. */
-  paintsThroughWindow: () => boolean;
-  /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
-  keepStrokePreview: () => void;
   /** The whole packed state from the frame buffer, or null when the canvas view does not hold the whole file. */
   getFBOData: () => Promise<Float32Array | null>;
   /**

@@ -626,7 +626,6 @@ describe("a canvas that holds a window of the file", () => {
   it("puts the store's values back over a discarded stroke that walked the file", async () => {
     const rig = harness(1);
     await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
-    rig.renderer().captureRollback();
     rig.canvas.beginStroke();
 
     const touched: number[] = [];
@@ -871,7 +870,8 @@ describe("a canvas that holds a window of the file", () => {
 
   it("paints straight through when the canvas holds the whole file", async () => {
     const rig = harness(grid.blockCount);
-    expect(rig.canvas.wholeFile).toBe(true);
+    expect(rig.canvas.holdsWholeFile).toBe(true);
+    await until(() => rig.canvas.holdsFrames(0, data.numFrames) && rig.quiet(), "the whole file");
     let painted = false;
     const near = dabFrames(0.01);
     expect(

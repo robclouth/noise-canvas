@@ -147,8 +147,10 @@ export class CanvasWindow {
     // claimed before the move, and the one it leaves, whose paint is folded
     // back into its slots. A jump the width of the window makes those sets
     // disjoint, so anything smaller evicts a block the slide is about to
-    // compose. A window nothing copies back into needs one window's worth.
-    const resident = (opts.readOnly ? 1 : 2) * this.windowBlocks;
+    // compose. A window nothing copies back into, or one spanning the whole
+    // file and so never sliding, needs one window's worth.
+    const slides = this.windowBlocks < grid.blockCount;
+    const resident = (opts.readOnly || !slides ? 1 : 2) * this.windowBlocks;
     const budget = opts.maxBytes ?? (resident + CANVAS_WINDOW_SPARE_BLOCKS) * slotBytes;
     this.cache = new BlockSlotCache(gl, grid, Math.max(budget, resident * slotBytes));
   }
