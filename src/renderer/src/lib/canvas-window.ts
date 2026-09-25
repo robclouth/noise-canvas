@@ -113,8 +113,8 @@ export class CanvasWindow {
   private readonly read: BlockValueReader;
   private readonly readBlock: BlockReader | null;
   private readonly loading = new Map<number, Promise<boolean>>();
-  // Blocks whose slots hold paint the canvas gave them, not the store's values.
-  private readonly painted = new Set<number>();
+  // Blocks whose slots were taken off the canvas ahead of the store.
+  private readonly ahead = new Set<number>();
   // Blocks whose content the canvas holds. A fill the next window request
   // abandons leaves its blocks out, so a slide onto them composes them rather
   // than shifting an empty overlap into place.
@@ -132,7 +132,6 @@ export class CanvasWindow {
     opts: {
       windowBlocks: number;
       maxBytes?: number;
-      readOnly?: boolean;
       read: BlockValueReader;
       /** Serves a whole block without the range read's copy, when the store can. */
       readBlock?: BlockReader;
@@ -143,14 +142,7 @@ export class CanvasWindow {
     this.readBlock = opts.readBlock ?? null;
     this.windowBlocks = Math.min(Math.max(1, Math.floor(opts.windowBlocks)), grid.blockCount);
     const slotBytes = blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL;
-    // A slide that carries paint holds two windows at once: the one it enters,
-    // claimed before the move, and the one it leaves, whose paint is folded
-    // back into its slots. A jump the width of the window makes those sets
-    // disjoint, so anything smaller evicts a block the slide is about to
-    // compose. A window nothing copies back into, or one spanning the whole
-    // file and so never sliding, needs one window's worth.
-    const slides = this.windowBlocks < grid.blockCount;
-    const resident = (opts.readOnly || !slides ? 1 : 2) * this.windowBlocks;
+    const resident = this.windowBlocks;
     const budget = opts.maxBytes ?? (resident + CANVAS_WINDOW_SPARE_BLOCKS) * slotBytes;
     this.cache = new BlockSlotCache(gl, grid, Math.max(budget, resident * slotBytes));
   }
@@ -239,18 +231,48 @@ export class CanvasWindow {
     return [...cold];
   }
 
-  /**
-   * Folds the painted texels of the view's blocks back into their slots,
-   * leaving the slots of `keep` alone.
-   */
-  copyBack(view: CanvasView, blocks: number[], source: Texture, keep?: Iterable<number>): void {
-    this.cache.copyBack(view, blocks, source, keep);
-    for (const block of blocks) this.painted.add(block);
+  /** Records that the store changed: a read already on its way holds the old values, so it reads again. */
+  storeMoved(): void {
+    this.epoch++;
   }
 
-  /** True while the block's slot still holds paint the canvas gave it. */
-  holdsPaint(block: number): boolean {
-    return this.painted.has(block);
+  /**
+   * Writes the store's new values for the named file pixels into the slots
+   * that hold them, so the slots keep mirroring the store.
+   */
+  patch(fileRanges: Uint32Array, values: Float32Array): void {
+    this.cache.patch(fileRanges, values);
+  }
+
+  /** True while the block is in a slot. */
+  hasSlot(block: number): boolean {
+    return this.cache.has(block);
+  }
+
+  /**
+   * Takes the blocks as the canvas `source` holds them where `view` places
+   * them, ahead of the store: a stroke whose commit has still to store it.
+   * Blocks the canvas composes are never pushed out for them.
+   */
+  takeAhead(view: CanvasView, blocks: number[], source: Texture): void {
+    if (blocks.length === 0) return;
+    this.cache.take(view, blocks, source, this.requested);
+    for (const block of blocks) this.ahead.add(block);
+  }
+
+  /** Takes the blocks from `from`, ahead of the store, as `takeAhead` does. */
+  copyAhead(from: BlockSlotCache, blocks: number[]): void {
+    if (blocks.length === 0) return;
+    this.cache.copyFrom(from, blocks, this.requested);
+    for (const block of blocks) this.ahead.add(block);
+  }
+
+  /**
+   * True while the block's slot holds values the store may not have yet,
+   * which no older write may land over and no pending paint needs laying on.
+   */
+  isAhead(block: number): boolean {
+    return this.ahead.has(block) && this.cache.has(block);
   }
 
   /** The view's blocks the canvas holds no content for, in order. */
@@ -305,14 +327,13 @@ export class CanvasWindow {
     if (!blocks) this.loading.clear();
     else for (const block of blocks) this.loading.delete(block);
     this.cache.invalidate(blocks);
-    if (!blocks) this.painted.clear();
-    else for (const block of blocks) this.painted.delete(block);
+    if (!blocks) this.ahead.clear();
+    else for (const block of blocks) this.ahead.delete(block);
   }
 
   dispose(): void {
     this.disposed = true;
     this.loading.clear();
-    this.painted.clear();
     this.onCanvas.clear();
     this.cache.dispose();
   }
@@ -326,11 +347,14 @@ export class CanvasWindow {
         if (this.disposed || !values) return false;
         // A read that started before the store moved under the slots holds
         // the old values, so the block is read again.
-        if (epoch !== this.epoch) return this.loadBlock(block);
+        if (epoch !== this.epoch) {
+          if (this.loading.get(block) === load) this.loading.delete(block);
+          return this.loadBlock(block);
+        }
         // Read as the value lands, not as the read started: the window asked
         // for may have moved on, and it is the newest one a slot is owed to.
         this.cache.upload(block, values, this.requested);
-        this.painted.delete(block);
+        this.ahead.delete(block);
         return true;
       })
       .catch(() => false)

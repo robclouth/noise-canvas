@@ -24,7 +24,7 @@ export class PackedWindow {
     opts: { windowBlocks: number; maxBytes?: number; read: BlockValueReader; readBlock?: BlockReader },
   ) {
     this.gl = gl;
-    this.blocks = new CanvasWindow(gl, grid, { ...opts, readOnly: true });
+    this.blocks = new CanvasWindow(gl, grid, opts);
     const fold = this.blocks.viewFor({ firstBlock: 0, lastBlock: this.blocks.windowBlocks - 1 });
     this.target = new WebGLRenderTarget(fold.textureWidth, fold.textureHeight, {
       format: RGBAFormat,

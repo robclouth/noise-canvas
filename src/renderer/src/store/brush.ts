@@ -12,10 +12,9 @@ import {
   mergePixelRanges,
   pixelRangeCount,
   scatterCompactPixelRanges,
-  subtractPixelRanges,
 } from "@renderer/lib/pixel-ranges";
 import { applyCanvasTurns, type CanvasTurn, type PackedGather } from "@renderer/lib/canvas-phase-turns";
-import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
+import { applyPhaseTurns, hasPhaseTurns, phaseTurnRanges } from "../../../main/lib/history-delta";
 import { brushUnionForAim } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
@@ -203,6 +202,8 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       // The store does not hold this stroke until the commit lands, so the
       // canvas keeps the paint on any block it brings in meanwhile.
       const releasePaint = painted && paintedRead ? renderer.holdPaint(painted, paintedRead) : null;
+      let stored = false;
+      let storedOwn: Uint32Array | null = null;
 
       const commitTask = serializeFileTask(activeFileId, async () => {
         const readStart = performance.now();
@@ -238,15 +239,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           footprintOnly: footprintOnly ? 1 : 0,
         });
 
-        // A patch an earlier commit could not upload, because this stroke was
-        // already on the canvas when it landed. Its pixels live in the block
-        // store; the ones this stroke painted are left out, because the older
-        // patch describes the canvas before them.
+        // Phase turns an earlier commit could not put on the canvas, because
+        // this stroke was already on it when that commit landed.
         const stash = takeCanvasPatchStash(activeFileId);
-        const stashRanges =
-          stash && snapshot.dirtyRanges
-            ? subtractPixelRanges(stash.ranges, snapshot.dirtyRanges)
-            : (stash?.ranges ?? null);
 
         try {
           // One pass derives the audio and the coefficients that audio
@@ -314,40 +309,38 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             turns: turns ?? undefined,
           });
           diag.timing("timing", "commit history add", performance.now() - historyStart, { whole: data ? 1 : 0 });
+          stored = true;
 
-          // The turns go on the canvas as an operation; the window pixels and
-          // any stashed ones are uploaded from the state — the whole readback
-          // when there is one, the block store's tier otherwise, which holds
-          // the stroke now that it is stored.
-          let uploadRanges = extent ? extent.pixelRanges : null;
-          if (stashRanges) uploadRanges = uploadRanges ? mergePixelRanges(stashRanges, uploadRanges) : stashRanges;
+          // The turns go on the canvas as an operation; the pixels the commit
+          // changed past the stroke are uploaded from the state — the whole
+          // readback when there is one, the block store's tier otherwise,
+          // which holds the stroke now that it is stored.
+          const uploadRanges = extent ? extent.pixelRanges : null;
+          storedOwn = uploadRanges;
           const canvasTurns: CanvasTurn[] = (stash?.turns ?? []).map((t) => ({ turns: t, invert: false }));
           if (turns) canvasTurns.push({ turns, invert: false });
+          const whole = data;
+          const gather: PackedGather = whole
+            ? (r) => gatherPixelRanges(whole, r)
+            : async (r) => {
+                const values = await historyManager.currentRanges(r);
+                if (!values) throw new Error("the block store cannot serve the committed pixels");
+                return values;
+              };
           if (uploadRanges || canvasTurns.length) {
             if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
               const uploadStart = performance.now();
-              const whole = data;
-              const gather: PackedGather = whole
-                ? (r) => gatherPixelRanges(whole, r)
-                : async (r) => {
-                    const values = await historyManager.currentRanges(r);
-                    if (!values) throw new Error("the block store cannot serve the committed pixels");
-                    return values;
-                  };
               try {
                 if (canvasTurns.length) {
                   await applyCanvasTurns(renderer, gather, canvasTurns, uploadRanges ?? undefined);
                   if (!openFiles[activeFileId]) return;
                 }
                 if (uploadRanges) {
+                  const values = await gather(uploadRanges);
                   if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
-                    if (whole) renderer.patchFBOData(whole, uploadRanges);
-                    else renderer.patchFBODataCompact(await gather(uploadRanges), uploadRanges);
+                    renderer.patchFBODataCompact(values, uploadRanges);
                   } else {
-                    setCanvasPatchStash(activeFileId, { ranges: uploadRanges, turns: [] });
-                    renderer.forgetBlocks(
-                      historyDirtyRanges ? mergePixelRanges(uploadRanges, historyDirtyRanges) : uploadRanges,
-                    );
+                    renderer.landUnderStroke(uploadRanges, values);
                   }
                 }
                 diag.timing("timing", "commit FBO upload", performance.now() - uploadStart);
@@ -358,18 +351,25 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
                 historyManager.markFboOutOfSync();
               }
             } else if (openFiles[activeFileId]) {
-              // A new stroke started while this one was in flight; its dabs
-              // are not in the patch, so uploading would paint over them.
-              // Stash the patch for the next commit, or the next navigation,
-              // to upload with its own.
-              setCanvasPatchStash(activeFileId, {
-                ranges: uploadRanges ?? new Uint32Array(0),
-                turns: canvasTurns.map((t) => t.turns),
-              });
-              // The canvas's cached blocks over the stroke are older than the
-              // store now, so they are read again rather than composed.
-              const stale = uploadRanges ?? new Uint32Array(0);
-              renderer.forgetBlocks(historyDirtyRanges ? mergePixelRanges(stale, historyDirtyRanges) : stale);
+              // A new stroke started while this one was in flight. The pixels
+              // go everywhere its dabs have not reached; turns would move the
+              // phase of pixels it has painted, so they wait for the next
+              // commit, or the next navigation, to put them on the canvas.
+              try {
+                if (uploadRanges) renderer.landUnderStroke(uploadRanges, await gather(uploadRanges));
+              } catch (error) {
+                console.error("the commit patch could not reach the canvas:", error);
+                historyManager.markFboOutOfSync();
+              }
+              if (canvasTurns.length) {
+                setCanvasPatchStash(activeFileId, {
+                  ranges: new Uint32Array(0),
+                  turns: canvasTurns.map((t) => t.turns),
+                });
+                let turned: Uint32Array = new Uint32Array(0);
+                for (const turn of canvasTurns) turned = mergePixelRanges(turned, phaseTurnRanges(turn.turns));
+                renderer.forgetBlocks(turned);
+              }
             }
           }
 
@@ -402,7 +402,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       try {
         await commitTask;
       } finally {
-        releasePaint?.();
+        void releasePaint?.(stored, storedOwn);
       }
     },
 

@@ -25,10 +25,13 @@ import {
   placeCanvasWindow,
   type BlockValueReader,
 } from "../canvas-window";
-import { CarriedPaint, carryPaintOut, dropReturningPaint } from "../carried-paint";
+import { paintOnBlock, StrokeSlots } from "../stroke-slots";
+import { CANVAS_WINDOW_SPARE_BLOCKS } from "../gpu-budget";
 import { PackedWindow } from "../packed-window";
+import { readRenderTargetPixelsAsync } from "../async-readpixels";
 import {
   composePixelRangeValues,
+  float32BitsEqual,
   gatherPixelRanges,
   intersectPixelRanges,
   mergePixelRanges,
@@ -343,10 +346,10 @@ describe("a canvas window that follows the brush", () => {
 
   /**
    * The four-dab walk of the test above, with the paint of leaving blocks
-   * carried off the canvas. Returns everything the commit would read.
+   * kept in stroke slots. Returns everything the commit would read.
    */
   async function walkCarryingPaint(): Promise<{
-    carried: CarriedPaint;
+    slots: StrokeSlots;
     window: CanvasWindow;
     sub: StrokeRenderer;
     view: CanvasView;
@@ -394,14 +397,21 @@ describe("a canvas window that follows the brush", () => {
     disposers.push(() => sub.dispose());
     window.compose(view, window.blocksOf(view), sub.getTextures().packed);
 
-    const carried = new CarriedPaint();
+    const slots = new StrokeSlots(gl, grid, grid.blockCount);
+    disposers.push(() => slots.dispose());
     sub.beginStroke();
     for (const x of dabs) {
       const frames = dabFrames(x);
       const next = window.plan(view, frames.start, frames.end);
       if (next !== view) {
         expect(await window.acquire(next)).toBe(true);
-        carryPaintOut(sub, window, carried, next, data.numFrames);
+        const painted = viewRangesToFile(view, sub.getDirtyPixelRanges()!);
+        const entries = window
+          .blocksOf(view)
+          .filter((block) => block < next.firstBlock || block > next.lastBlock)
+          .map((block) => ({ block, ranges: paintOnBlock(grid, block, painted) }))
+          .filter((entry) => entry.ranges.length > 0);
+        slots.keep(view, entries, sub.committedSource().texture, sub.strokeMaskTextures());
         sub.slideView(next, (target, blocks) => window.compose(next, blocks, target), { midStroke: true });
         view = next;
       }
@@ -409,22 +419,22 @@ describe("a canvas window that follows the brush", () => {
       const cursor = new Vector2((x * data.numFrames - view.startFrame) / viewFrames, pitch);
       sub.renderStroke(strokeParams(cursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, view));
     }
-    await carried.settled();
-    return { carried, window, sub, view, wholeData };
+    return { slots, window, sub, view, wholeData };
   }
 
-  it("carries the paint of blocks leaving mid-stroke into the commit's read", async () => {
-    const { carried, sub, view, wholeData } = await walkCarryingPaint();
-    expect(carried.size).toBeGreaterThan(0);
+  it("keeps the paint of blocks leaving mid-stroke for the commit's read", async () => {
+    const { slots, sub, view, wholeData } = await walkCarryingPaint();
+    expect(slots.size).toBeGreaterThan(0);
 
     // What the commit reads: the footprint the canvas still holds, plus the
-    // pixels carried off it, taken from the canvas and the carry in turn.
+    // pixels kept off it, taken from the canvas and the slots in turn.
     const heldViewRanges = sub.getDirtyPixelRanges()!;
     const heldFileRanges = viewRangesToFile(view, heldViewRanges);
-    const footprint = mergePixelRanges(heldFileRanges, carried.ranges());
+    const kept = slots.ranges();
+    const footprint = mergePixelRanges(heldFileRanges, kept);
     expect(pixelRangeCount(footprint)).toBeGreaterThan(pixelRangeCount(heldFileRanges));
     const read = composePixelRangeValues(footprint, [
-      carried.snapshot(),
+      { ranges: kept, values: await slots.read(kept) },
       { ranges: heldFileRanges, values: await sub.readPixelRanges(heldViewRanges) },
     ]);
 
@@ -442,58 +452,58 @@ describe("a canvas window that follows the brush", () => {
   });
 
   it("brings the paint back when the window returns to a block it left", async () => {
-    const { carried, window, sub, view, wholeData } = await walkCarryingPaint();
+    const { slots, window, sub, view, wholeData } = await walkCarryingPaint();
 
     const back = window.viewFor({ firstBlock: 0, lastBlock: 3 });
-    expect(window.ready(back)).toBe(true);
-    sub.slideView(back, (target, blocks) => window.compose(back, blocks, target), { midStroke: true });
     expect(back.firstBlock).toBeLessThan(view.firstBlock);
-    const returned = await sub.getFBOData();
+    expect(await window.acquire(back)).toBe(true);
+    sub.slideView(back, (target, blocks) => window.compose(back, blocks, target), { midStroke: true });
 
-    // The canvas speaks for those pixels again, so the carry lets them go.
-    const carriedBefore = carried.size;
-    dropReturningPaint(carried, window, back, view);
-    expect(carried.size).toBeLessThan(carriedBefore);
-    const stillCarried = carried.ranges();
-    for (let i = 0; i + 1 < stillCarried.length; i += 2) {
-      expect(
-        fileRangesToView(back, { numBands: data.numBands, metadata: data.metadata }, stillCarried.slice(i, i + 2)),
-      ).toBeNull();
-    }
-
-    // Block 0 left the window with paint on it, so the slots had to keep it.
+    // The block slots mirror the store, so block 0 comes back without the
+    // paint; the stroke slots give it back, and let the block go.
+    const layout = { numBands: data.numBands, metadata: data.metadata };
     const list = blockPixelRanges(grid, 0);
     const fileRanges = list.ranges.slice(0, list.count * 2);
-    const viewRanges = fileRangesToView(back, { numBands: data.numBands, metadata: data.metadata }, fileRanges)!;
-    const read = gatherPixelRanges(returned, viewRanges);
+    const viewRanges = fileRangesToView(back, layout, fileRanges)!;
+    const original = gatherPixelRanges(data.packedData, fileRanges);
+    expect(float32BitsEqual(await sub.readPixelRanges(viewRanges), original)).toBe(true);
+    expect(slots.holds(0)).toBe(true);
+    const restored = slots.restore(
+      back,
+      window.blocksOf(back),
+      (ranges, draw) => sub.drawCanvas(fileRangesToView(back, layout, ranges)!, draw),
+      (step, draw) => sub.drawStrokeMask(step, draw),
+    );
+    expect(restored).toContain(0);
+    expect(slots.holds(0)).toBe(false);
+    expect(pixelRangeCount(intersectPixelRanges(slots.ranges(), fileRanges))).toBe(0);
+
+    const read = await sub.readPixelRanges(viewRanges);
     const expected = gatherPixelRanges(wholeData, fileRanges);
     let maxMagnitude = 0;
     for (let i = 0; i < expected.length; i += 2) maxMagnitude = Math.max(maxMagnitude, Math.abs(read[i] - expected[i]));
     expect(maxMagnitude, `largest magnitude difference ${maxMagnitude}`).toBeLessThan(1e-4);
     let changed = 0;
-    const original = gatherPixelRanges(data.packedData, fileRanges);
     for (let i = 0; i < expected.length; i++) if (expected[i] !== original[i]) changed++;
     expect(changed, "the whole-file stroke must have painted block 0").toBeGreaterThan(0);
   });
 
-  it("keeps carrying a block whose slot lost its paint to the store", async () => {
-    const { carried, window, view } = await walkCarryingPaint();
-    const back = window.viewFor({ firstBlock: 0, lastBlock: 3 });
-    // The slots forget block 0, so it comes back from the store without the
-    // paint and the carry has to keep speaking for it.
-    window.invalidate([0]);
-    expect(await window.acquire(back)).toBe(true);
-
-    const before = carried.ranges();
-    dropReturningPaint(carried, window, back, view);
-    const after = carried.ranges();
-    const list = blockPixelRanges(grid, 0);
-    const blockZero = list.ranges.slice(0, list.count * 2);
-    expect(pixelRangeCount(intersectPixelRanges(after, blockZero))).toBe(
-      pixelRangeCount(intersectPixelRanges(before, blockZero)),
+  it("reads a block it lets go as it held it, with the stroke masks", async () => {
+    const { slots } = await walkCarryingPaint();
+    const [block] = [0, 1, 2, 3].filter((b) => slots.holds(b));
+    expect(block).toBeDefined();
+    const kept = slots.within(slots.ranges());
+    const before = await slots.read(kept);
+    const { ranges, read } = slots.letGo(block);
+    expect(slots.holds(block)).toBe(false);
+    const landed = await read;
+    expect(float32BitsEqual(landed.values, composePixelRangeValues(ranges, [{ ranges: kept, values: before }]))).toBe(
+      true,
     );
-    // Blocks 1 and 2 kept theirs, so those pixels left the carry.
-    expect(pixelRangeCount(after)).toBeLessThan(pixelRangeCount(before));
+    // The walk's brush does not accumulate, so its step has a mask, and the
+    // mask holds weight wherever the brush painted.
+    expect(landed.masks.length).toBeGreaterThan(0);
+    expect(landed.masks[0]!.some((weight) => weight > 0)).toBe(true);
   });
 
   it("fills a window whose blocks take every slot", async () => {
@@ -522,30 +532,63 @@ describe("a canvas window that follows the brush", () => {
     expect(await window.acquire(window.viewFor({ firstBlock: 3, lastBlock: 6 }))).toBe(true);
   });
 
-  it("stops calling a block painted once the store fills its slot again", async () => {
+  it("writes a commit's values into the slots that hold them, and reads a block on its way again", async () => {
+    const store = Float32Array.from(data.packedData);
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
     const window = new CanvasWindow(gl, grid, {
       windowBlocks: 2,
-      maxBytes: 0,
-      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+      read: async (ranges) => {
+        // A read serves what the store held when it was issued.
+        const values = gatherPixelRanges(store, ranges);
+        await gate;
+        return values;
+      },
     });
     disposers.push(() => window.dispose());
     const first = window.viewFor({ firstBlock: 0, lastBlock: 1 });
-    expect(await window.acquire(first)).toBe(true);
-    const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, first);
-    renderer.initialize();
-    disposers.push(() => renderer.dispose());
-    window.compose(first, window.blocksOf(first), renderer.getTextures().packed);
+    const filling = window.acquire(first);
 
-    window.copyBack(first, [0], renderer.committedSource().texture);
-    expect(window.holdsPaint(0)).toBe(true);
+    // A commit changes pixels in both blocks while their reads are on their way.
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    const block0 = blockPixelRanges(grid, 0);
+    const block1 = blockPixelRanges(grid, 1);
+    const changed = mergePixelRanges(Uint32Array.of(block0.ranges[2] + 3, 5), Uint32Array.of(block1.ranges[0] + 1, 2));
+    const commit = (values: Float32Array): void => {
+      for (let i = 0, at = 0; i + 1 < changed.length; i += 2) {
+        store.set(values.subarray(at * 4, (at + changed[i + 1]) * 4), changed[i] * 4);
+        at += changed[i + 1];
+      }
+      window.storeMoved();
+      window.patch(changed, values);
+    };
+    const values = gatherPixelRanges(store, changed).map((v) => v + 7);
+    commit(values);
+    open();
+    expect(await filling).toBe(true);
 
-    // The smallest cache holds two windows, here four slots. Four more blocks
-    // enter, so block 0 is the oldest, loses its slot, and comes back from the
-    // store without what the canvas gave it.
-    expect(await window.acquire(window.viewFor({ firstBlock: 2, lastBlock: 3 }))).toBe(true);
-    expect(await window.acquire(window.viewFor({ firstBlock: 4, lastBlock: 5 }))).toBe(true);
-    expect(await window.acquire(first)).toBe(true);
-    expect(window.holdsPaint(0)).toBe(false);
+    const target = new WebGLRenderTarget(first.textureWidth, first.textureHeight, {
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+    disposers.push(() => target.dispose());
+    const composed = async (): Promise<Float32Array> => {
+      window.compose(first, window.blocksOf(first), target);
+      const texels = await readRenderTargetPixelsAsync(gl, target, 0, 0, first.textureWidth, first.textureHeight);
+      return gatherPixelRanges(texels, fileRangesToView(first, layout, changed)!);
+    };
+    expect(float32BitsEqual(await composed(), values)).toBe(true);
+
+    // A slot already holding the block takes a later commit in place.
+    const later = values.map((v) => v - 3);
+    commit(later);
+    expect(float32BitsEqual(await composed(), later)).toBe(true);
   });
 
   it("keeps naming the blocks an abandoned fill left off the canvas", async () => {
@@ -682,130 +725,30 @@ describe("a canvas window that follows the brush", () => {
     expect(Array.from(filled.subarray(0, view.texels * 4))).toEqual(Array.from(expected.subarray(0, view.texels * 4)));
   });
 
-  it("keeps the slots of both windows when the brush jumps a whole window", async () => {
-    // Finer blocks, so two windows of five sit side by side with no overlap.
-    const fine = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, SAMPLE_RATE, 0.1);
-    const window = new CanvasWindow(gl, fine, {
-      windowBlocks: 5,
-      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
-    });
-    disposers.push(() => window.dispose());
-
-    const first = window.viewFor({ firstBlock: 0, lastBlock: 4 });
-    expect(await window.acquire(first)).toBe(true);
-    const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, first);
-    renderer.initialize();
-    disposers.push(() => renderer.dispose());
-    window.compose(first, window.blocksOf(first), renderer.getTextures().packed);
-
-    const state = createMockStateWithSteps([
-      {
-        name: "Jump",
-        overrides: {
-          transformShiftSemis: 3,
-          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
-        },
-      },
-    ]);
-    renderer.beginStroke();
-    const firstFrames = first.endFrame - first.startFrame;
-    renderer.renderStroke(
-      strokeParams(new Vector2(0.2, 0.35), firstFrames / SAMPLE_RATE),
-      state,
-      sourceFor(renderer, first),
-    );
-
-    // The whole window leaves at once: its paint folds back into its own slots
-    // while the entering blocks hold theirs, so the cache carries both sets.
-    const next = window.viewFor({ firstBlock: 10, lastBlock: 14 });
-    expect(await window.acquire(next)).toBe(true);
-    carryPaintOut(renderer, window, new CarriedPaint(), next, data.numFrames);
-    renderer.slideView(next, (target, blocks) => window.compose(next, blocks, target), { midStroke: true });
-    expect(window.missing(next)).toEqual([]);
-    expect(window.holdsPaint(0)).toBe(true);
-  });
-
-  it("gives a window nothing folds paint back into one window of slots", () => {
-    // Finer blocks, so the file has more of them than either budget asks for.
+  it("gives a window one window of slots and its spares", () => {
+    // Finer blocks, so the file has more of them than the budget asks for.
     const fine = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, SAMPLE_RATE, 0.1);
     const read: BlockValueReader = async (ranges) => gatherPixelRanges(data.packedData, ranges);
     const painted = new CanvasWindow(gl, fine, { windowBlocks: 5, read });
-    const readOnly = new CanvasWindow(gl, fine, { windowBlocks: 5, readOnly: true, read });
     const original = new PackedWindow(gl, fine, { windowBlocks: 5, read });
     disposers.push(() => painted.dispose());
-    disposers.push(() => readOnly.dispose());
     disposers.push(() => original.dispose());
-    expect(painted.slotCount).toBe(readOnly.slotCount + 5);
-    expect(original.slotCount).toBe(readOnly.slotCount);
-  });
-
-  it("keeps the window a carry moves to when the blocks it leaves need slots", async () => {
-    const state = createMockStateWithSteps([
-      {
-        name: "Carry",
-        overrides: {
-          transformShiftSemis: 3,
-          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
-        },
-      },
-    ]);
-    const pitch = 0.35;
-    const window = new CanvasWindow(gl, grid, {
-      windowBlocks: 2,
-      maxBytes: 0,
-      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
-    });
-    disposers.push(() => window.dispose());
-    const first = window.viewFor({ firstBlock: 0, lastBlock: 1 });
-    expect(await window.acquire(first)).toBe(true);
-    const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, first);
-    renderer.initialize();
-    disposers.push(() => renderer.dispose());
-    window.compose(first, window.blocksOf(first), renderer.getTextures().packed);
-    const viewFrames = first.endFrame - first.startFrame;
-    renderer.beginStroke();
-    renderer.renderStroke(
-      strokeParams(new Vector2(0.5, pitch), viewFrames / SAMPLE_RATE),
-      state,
-      sourceFor(renderer, first),
-    );
-
-    // Four slots, six blocks: the two the canvas paints on lose theirs while
-    // the window is away, and composing the middle pair leaves the pair the
-    // carry moves to as the least recently used — the slots a careless claim
-    // for the blocks coming back would take.
-    const middle = window.viewFor({ firstBlock: 2, lastBlock: 3 });
-    const next = window.viewFor({ firstBlock: 4, lastBlock: 5 });
-    expect(await window.acquire(middle)).toBe(true);
-    expect(await window.acquire(next)).toBe(true);
-    const target = new WebGLRenderTarget(middle.textureWidth, middle.textureHeight, {
-      format: RGBAFormat,
-      type: FloatType,
-      minFilter: NearestFilter,
-      magFilter: NearestFilter,
-      depthBuffer: false,
-      stencilBuffer: false,
-    });
-    disposers.push(() => target.dispose());
-    window.compose(middle, window.blocksOf(middle), target);
-    expect(window.missing(first)).toEqual([0, 1]);
-
-    expect(carryPaintOut(renderer, window, new CarriedPaint(), next, data.numFrames)).not.toBeNull();
-    expect(window.missing(next)).toEqual([]);
+    expect(painted.slotCount).toBe(5 + CANVAS_WINDOW_SPARE_BLOCKS);
+    expect(original.slotCount).toBe(painted.slotCount);
   });
 
   it("keeps the newest window blocks when an abandoned read lands", async () => {
     const pending: Array<() => void> = [];
     const window = new CanvasWindow(gl, grid, {
       windowBlocks: 2,
-      maxBytes: 0,
+      maxBytes: 4 * blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL,
       read: (ranges) =>
         new Promise((resolve) => {
           pending.push(() => resolve(gatherPixelRanges(data.packedData, ranges)));
         }),
     });
     disposers.push(() => window.dispose());
-    // Two windows worth of slots, so four blocks landing at once fill them.
+    // Four slots, so four blocks landing at once fill them.
     expect(window.slotCount).toBe(4);
 
     const abandoned = [

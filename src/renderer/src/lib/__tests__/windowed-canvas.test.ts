@@ -17,7 +17,17 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockOfFrame, blockPixelRanges, type BlockGrid } from "../block-grid";
 import { fileRangesToView } from "../canvas-view";
-import { float32BitsEqual, gatherPixelRanges, gatherTaps, scatterCompactPixelRanges } from "../pixel-ranges";
+import {
+  composePixelRangeValues,
+  float32BitsEqual,
+  gatherPixelRanges,
+  gatherTaps,
+  intersectPixelRanges,
+  mergePixelRanges,
+  pixelRangeCount,
+  scatterCompactPixelRanges,
+  subtractPixelRanges,
+} from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { WindowedCanvas } from "../windowed-canvas";
 import { CoarseStripBuilder } from "../coarse-strip";
@@ -158,8 +168,8 @@ describe("a canvas that holds a window of the file", () => {
     canvas: WindowedCanvas;
     /** The renderer behind the canvas. */
     renderer: () => StrokeRenderer;
-    /** Paints one dab at a file-UV time, through the canvas's own translation. */
-    dab: (fileUvX: number) => boolean;
+    /** Paints one dab at a file-UV time, through the canvas's own translation, at `strength` percent. */
+    dab: (fileUvX: number, strength?: number) => boolean;
     /** True once no read is outstanding. */
     quiet: () => boolean;
     /** Lets the reads waiting now, and any that follow, resolve. */
@@ -203,15 +213,18 @@ describe("a canvas that holds a window of the file", () => {
     disposers.push(() => canvas.dispose());
     canvas.initialize(null);
 
-    const state = createMockStateWithSteps([
-      {
-        name: "Dab",
-        overrides: {
-          transformShiftSemis: 3,
-          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
+    const stateAt = (strength?: number) =>
+      createMockStateWithSteps([
+        {
+          name: "Dab",
+          overrides: {
+            ...(strength === undefined ? {} : { brushIntensity: strength }),
+            transformShiftSemis: 3,
+            effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
+          },
         },
-      },
-    ]);
+      ]);
+    const state = stateAt();
     const source = (): SourceFileInfo => ({
       id: "window",
       filePath: "/window.wav",
@@ -227,10 +240,10 @@ describe("a canvas that holds a window of the file", () => {
       },
       canvas,
       renderer: () => renderer!,
-      dab: (fileUvX) => {
+      dab: (fileUvX, strength) => {
         renderer!.renderStroke(
           strokeParams(canvas.dabCursor(new Vector2(fileUvX, 0.35)), canvas.dabDuration(fileDuration())),
-          state,
+          strength === undefined ? state : stateAt(strength),
           source(),
         );
         return true;
@@ -454,10 +467,12 @@ describe("a canvas that holds a window of the file", () => {
     // The canvas shows the paint, not the store's values.
     expect(float32BitsEqual(await canvasBlock0(), firstPass)).toBe(true);
 
-    // A dab over it paints on top of it, and the commit reads that.
+    // The stroke goes on from where it left the block: the same dab again
+    // changes nothing, as it would on a canvas holding the whole file, and the
+    // commit reads the canvas.
     expect(rig.dab(0.02)).toBe(true);
     const secondPass = await canvasBlock0();
-    expect(float32BitsEqual(secondPass, firstPass)).toBe(false);
+    expect(float32BitsEqual(secondPass, firstPass)).toBe(true);
     expect(float32BitsEqual(await rig.canvas.readPixelRanges(block0Ranges), secondPass)).toBe(true);
   });
 
@@ -520,6 +535,38 @@ describe("a canvas that holds a window of the file", () => {
     expect({ missing, wrong, painted: expected.size }).toEqual({ missing: 0, wrong: 0, painted: expected.size });
   });
 
+  it("paints a block the stroke comes back to as a canvas over the whole file does", async () => {
+    // A strong dab, a trip to the far end, and a weaker dab over the first:
+    // the window has to let the block go and bring it back mid-stroke, and
+    // the stronger dab must still win where it painted.
+    const positions = [
+      { at: 0.02, strength: 100 },
+      { at: 0.9, strength: 100 },
+      { at: 0.025, strength: 30 },
+    ];
+    const block0 = blockPixelRanges(grid, 0);
+    const block0Ranges = block0.ranges.slice(0, block0.count * 2);
+    const strokeOver = async (windowBlocks: number): Promise<Float32Array> => {
+      const rig = harness(windowBlocks);
+      await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+      rig.canvas.beginStroke();
+      for (const { at, strength } of positions) {
+        const frames = dabFrames(at);
+        expect(rig.canvas.paintWhenHeld(frames.start, frames.end, NO_OTHER_FILES, () => rig.dab(at, strength))).toBe(
+          true,
+        );
+        await rig.canvas.settle();
+      }
+      return await rig.canvas.readPixelRanges(block0Ranges);
+    };
+    const whole = await strokeOver(grid.blockCount);
+    const windowed = await strokeOver(1);
+    expect(float32BitsEqual(whole, gatherPixelRanges(data.packedData, block0Ranges))).toBe(false);
+    let worst = 0;
+    for (let i = 0; i < whole.length; i++) worst = Math.max(worst, Math.abs(whole[i] - windowed[i]));
+    expect(worst).toBeLessThan(1e-4);
+  });
+
   it("reports unavailable held paint and restores every painted pixel before retry", async () => {
     const rig = harness(1);
     await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
@@ -543,32 +590,19 @@ describe("a canvas that holds a window of the file", () => {
     rig.canvas.endStroke();
   });
 
-  it("keeps a delayed carry read from repainting a restored display", async () => {
+  it("keeps the paint of a block leaving mid-stroke on the graphics device", async () => {
     const rig = harness(1);
     await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
     rig.canvas.beginStroke();
     expect(rig.dab(0.02)).toBe(true);
     const renderer = rig.renderer();
-    const read = renderer.readPixelRanges.bind(renderer);
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let waiting: Promise<Float32Array> | null = null;
-    const spy = vi.spyOn(renderer, "readPixelRanges").mockImplementation((ranges) => {
-      const values = read(ranges);
-      waiting = held.then(() => values);
-      return waiting;
-    });
-    rig.canvas.aim(grid.blockFrames * 4, grid.blockFrames * 4 + 1);
-    await until(() => waiting !== null, "the carried read");
-    rig.canvas.setFBOData(data.packedData);
-    const patch = vi.spyOn(renderer, "patchDisplayFromCompact");
-    release();
-    await waiting;
-    await Promise.resolve();
-    expect(patch).not.toHaveBeenCalled();
-    spy.mockRestore();
+    const values = vi.spyOn(renderer, "readPixelRanges");
+    const away = grid.blockFrames * 4;
+    rig.canvas.aim(away, away + 1);
+    await until(() => rig.canvas.holdsFrames(away, away + 1), "a block away");
+    expect(values).not.toHaveBeenCalled();
+    expect(rig.canvas.dirtyPixelRanges()).not.toBeNull();
+    rig.canvas.endStroke();
   });
 
   it("abandons held paint when a whole-state replacement arrives during a read", async () => {
@@ -658,11 +692,15 @@ describe("a canvas that holds a window of the file", () => {
     }
   });
 
-  it("shows what the canvas last held on a block that leaves after the pen lifts", async () => {
+  it("shows a stored stroke on a block whose slot was filled before it", async () => {
     const rig = harness(1);
     await until(() => rig.canvas.holdsFrames(0, 1), "the first window");
     rig.canvas.beginStroke();
     expect(rig.dab(0.02)).toBe(true);
+    const dirty = rig.canvas.dirtyPixelRanges();
+    expect(dirty).not.toBeNull();
+    const penUp = rig.canvas.readPixelRanges(dirty!);
+    const release = rig.canvas.holdPaint(dirty!, penUp);
     rig.canvas.endStroke();
 
     const block0 = blockPixelRanges(grid, 0);
@@ -677,8 +715,11 @@ describe("a canvas that holds a window of the file", () => {
     const painted = await canvasBlock0();
     expect(float32BitsEqual(painted, gatherPixelRanges(data.packedData, block0Ranges))).toBe(false);
 
-    // The block's slot was filled before the dab. Leaving and coming back
-    // must show the dab, not that older copy.
+    // The block's slot was filled before the dab. Once the commit has stored
+    // the stroke, the slot holds it too, so leaving and coming back shows the
+    // dab rather than that older copy.
+    await penUp;
+    await release(true);
     const away = grid.blockFrames * 2;
     rig.canvas.aim(away, away + 1);
     await until(() => rig.canvas.holdsFrames(away, away + 1), "a block away");
@@ -722,14 +763,182 @@ describe("a canvas that holds a window of the file", () => {
     await until(() => rig.canvas.holdsFrames(0, 1), "the first block again");
     expect(float32BitsEqual(await canvasBlock0(), painted)).toBe(true);
 
-    // Once the commit has stored the stroke, the store speaks for the block.
-    release();
+    // Once the commit lets the paint go, the store speaks for the block.
+    await release(false);
     rig.canvas.aim(away, away + 1);
     await until(() => rig.canvas.holdsFrames(away, away + 1), "a block away again");
     rig.canvas.forgetBlocks(dirty!);
     rig.canvas.aim(0, 1);
     await until(() => rig.canvas.holdsFrames(0, 1), "the first block a third time");
     expect(float32BitsEqual(await canvasBlock0(), original)).toBe(true);
+  });
+
+  it("lands a commit under a later stroke everywhere that stroke has not painted", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    const canvasAt = async (fileRanges: Uint32Array): Promise<Float32Array> => {
+      const viewRanges = fileRangesToView(rig.renderer().committedSource().view, layout, fileRanges);
+      if (!viewRanges) throw new Error("the pixels are not on the canvas");
+      return await rig.renderer().readPixelRanges(viewRanges);
+    };
+
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.05)).toBe(true);
+    const later = rig.canvas.dirtyPixelRanges()!;
+    const paintedLater = await canvasAt(later);
+
+    // The earlier commit reached past its own stroke: over the later stroke's
+    // footprint and over pixels of the block nobody has painted.
+    const block0 = blockPixelRanges(grid, 0);
+    const blockRanges = block0.ranges.slice(0, block0.count * 2);
+    const untouched = subtractPixelRanges(blockRanges, later);
+    const landed = mergePixelRanges(intersectPixelRanges(later, blockRanges), untouched);
+    const values = gatherPixelRanges(data.packedData, landed).map((v) => v + 1);
+    scatterCompactPixelRanges(data.packedData, values, landed);
+    rig.canvas.landUnderStroke(landed, values);
+
+    const cut = (ranges: Uint32Array): Float32Array => composePixelRangeValues(ranges, [{ ranges: landed, values }]);
+    expect(float32BitsEqual(await canvasAt(untouched), cut(untouched))).toBe(true);
+    expect(float32BitsEqual(await canvasAt(later), paintedLater)).toBe(true);
+
+    // The later stroke ends and its commit lets its paint go, and the block
+    // comes back as the store holds it.
+    const penUp = rig.canvas.readPixelRanges(later);
+    const release = rig.canvas.holdPaint(later, penUp);
+    rig.canvas.endStroke();
+    await penUp;
+    await release(false);
+    const away = grid.blockFrames * 3;
+    rig.canvas.aim(away, away + 1);
+    await until(() => rig.canvas.holdsFrames(away, away + 1), "a block away");
+    rig.canvas.aim(0, 1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first block again");
+    expect(float32BitsEqual(await canvasAt(untouched), cut(untouched))).toBe(true);
+  });
+
+  it("keeps the values a commit stored of its own when the slots take its paint", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    const canvasAt = async (fileRanges: Uint32Array): Promise<Float32Array> => {
+      const viewRanges = fileRangesToView(rig.renderer().committedSource().view, layout, fileRanges);
+      if (!viewRanges) throw new Error("the pixels are not on the canvas");
+      return await rig.renderer().readPixelRanges(viewRanges);
+    };
+
+    // Stroke A lifts; stroke B starts before A's commit lands.
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.02)).toBe(true);
+    const first = rig.canvas.dirtyPixelRanges()!;
+    const firstRead = rig.canvas.readPixelRanges(first);
+    const release = rig.canvas.holdPaint(first, firstRead);
+    rig.canvas.endStroke();
+    const painted = await firstRead;
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.09)).toBe(true);
+    const second = rig.canvas.dirtyPixelRanges()!;
+
+    // A's commit stores values of its own over part of A's footprint that B
+    // has not reached, and lets its paint go.
+    const own = subtractPixelRanges(first, second).slice(0, 2);
+    expect(pixelRangeCount(own)).toBeGreaterThan(0);
+    const values = gatherPixelRanges(data.packedData, own).map((v) => v + 2);
+    scatterCompactPixelRanges(data.packedData, painted, first);
+    scatterCompactPixelRanges(data.packedData, values, own);
+    rig.canvas.landUnderStroke(own, values);
+    await release(true, own);
+
+    // B lifts without being stored, and the block comes back from its slot.
+    const secondRead = rig.canvas.readPixelRanges(second);
+    const releaseSecond = rig.canvas.holdPaint(second, secondRead);
+    rig.canvas.endStroke();
+    await secondRead;
+    await releaseSecond(false);
+    const away = grid.blockFrames * 3;
+    rig.canvas.aim(away, away + 1);
+    await until(() => rig.canvas.holdsFrames(away, away + 1), "a block away");
+    rig.canvas.aim(0, 1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first block again");
+    expect(float32BitsEqual(await canvasAt(own), values)).toBe(true);
+    const rest = subtractPixelRanges(subtractPixelRanges(first, own), second);
+    expect(
+      float32BitsEqual(await canvasAt(rest), composePixelRangeValues(rest, [{ ranges: first, values: painted }])),
+    ).toBe(true);
+  });
+
+  it("writes the slots in the order the store took the values", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.02)).toBe(true);
+    const first = rig.canvas.dirtyPixelRanges()!;
+    const firstRead = rig.canvas.readPixelRanges(first);
+    const release = rig.canvas.holdPaint(first, firstRead);
+    rig.canvas.endStroke();
+    await firstRead;
+    rig.canvas.beginStroke();
+
+    // The stroke is stored, and a later commit stores newer values over part
+    // of it before the slots have taken the stroke.
+    const newer = first.slice(0, 2);
+    const values = gatherPixelRanges(data.packedData, newer).map((v) => v + 5);
+    scatterCompactPixelRanges(data.packedData, await firstRead, first);
+    scatterCompactPixelRanges(data.packedData, values, newer);
+    const released = release(true);
+    rig.canvas.landUnderStroke(newer, values);
+    await released;
+    rig.canvas.endStroke();
+
+    const away = grid.blockFrames * 3;
+    rig.canvas.aim(away, away + 1);
+    await until(() => rig.canvas.holdsFrames(away, away + 1), "a block away");
+    await until(() => rig.quiet(), "the slot writes");
+    rig.canvas.aim(0, 1);
+    await until(() => rig.canvas.holdsFrames(0, 1), "the first block again");
+    const viewRanges = fileRangesToView(rig.renderer().committedSource().view, layout, newer)!;
+    expect(float32BitsEqual(await rig.renderer().readPixelRanges(viewRanges), values)).toBe(true);
+  });
+
+  it("takes a stroke into the block slots at its pen-up, and gives them back when it is not stored", async () => {
+    const rig = harness(1);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    const layout = { numBands: data.numBands, metadata: data.metadata };
+    const block0 = blockPixelRanges(grid, 0);
+    const block0Ranges = block0.ranges.slice(0, block0.count * 2);
+    const canvasBlock0 = async (): Promise<Float32Array> =>
+      await rig
+        .renderer()
+        .readPixelRanges(fileRangesToView(rig.renderer().committedSource().view, layout, block0Ranges)!);
+    const trip = async (): Promise<void> => {
+      const away = grid.blockFrames * 3;
+      rig.canvas.aim(away, away + 1);
+      await until(() => rig.canvas.holdsFrames(away, away + 1), "a block away");
+      rig.canvas.aim(0, 1);
+      await until(() => rig.canvas.holdsFrames(0, 1), "the first block again");
+    };
+
+    rig.canvas.beginStroke();
+    expect(rig.dab(0.02)).toBe(true);
+    const dirty = rig.canvas.dirtyPixelRanges()!;
+    const penUp = rig.canvas.readPixelRanges(dirty);
+    const release = rig.canvas.holdPaint(dirty, penUp);
+    rig.canvas.endStroke();
+    const painted = await canvasBlock0();
+    await penUp;
+
+    // While the commit stores it, the block comes back from its slot with the
+    // paint already on it: nothing is laid over it.
+    const patch = vi.spyOn(rig.renderer(), "patchFBODataCompact");
+    await trip();
+    expect(patch).not.toHaveBeenCalled();
+    expect(float32BitsEqual(await canvasBlock0(), painted)).toBe(true);
+
+    // The commit never stores it, so the slot reads the store again.
+    await release(false);
+    await trip();
+    expect(float32BitsEqual(await canvasBlock0(), gatherPixelRanges(data.packedData, block0Ranges))).toBe(true);
   });
 
   it("serves a committing stroke's paint to a reader of the committed taps", async () => {
@@ -764,7 +973,7 @@ describe("a canvas that holds a window of the file", () => {
     rig.canvas.endStroke();
     expect(float32BitsEqual((await rig.canvas.readCommittedTaps(tapRuns))!, withPaint)).toBe(true);
 
-    release();
+    await release(false);
     expect(float32BitsEqual((await rig.canvas.readCommittedTaps(tapRuns))!, original)).toBe(true);
   });
 
@@ -780,7 +989,7 @@ describe("a canvas that holds a window of the file", () => {
     const refresh = vi.spyOn(pyramid!, "refreshFromCanvas");
     const release = rig.canvas.holdPaint(dirty!, rig.canvas.readPixelRanges(dirty!));
     expect(refresh).toHaveBeenCalledTimes(1);
-    release();
+    await release(false);
   });
 
   it("keeps every dab of a stroke that outran the window, live ones and held ones alike", async () => {

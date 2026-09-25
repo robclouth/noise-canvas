@@ -60,7 +60,7 @@ dab is refused.
 | `lib/block-grid.ts`        | where the block edges fall                                                 |
 | `lib/block-store.ts`       | the file's packed state as blocks on disk, current and as seeded           |
 | `lib/whole-state-store.ts` | the same for a file the canvas holds whole: current in RAM, seeded on disk |
-| `lib/block-slot-cache.ts`  | the blocks that are on the GPU, in fixed slots, under a byte budget        |
+| `lib/block-slot-cache.ts`  | blocks on the GPU, in fixed slots, under a byte budget                     |
 | `lib/canvas-window.ts`     | placing the window, filling it, and what the canvas holds                  |
 | `lib/packed-window.ts`     | the same window over the file's original, as one texture                   |
 | `lib/source-window.ts`     | a window over another file, for a brush painting or filtering from it      |
@@ -68,7 +68,8 @@ dab is refused.
 | `lib/effect-reach.ts`      | how far past the brush each effect reads                                   |
 | `lib/export-window.ts`     | spans of the committed state for an image export                           |
 | `lib/whole-file-gate.ts`   | what a brush asks for that a window cannot serve                           |
-| `lib/carried-paint.ts`     | paint on blocks that left the window mid-stroke                            |
+| `lib/stroke-slots.ts`      | a stroke's paint and masks on blocks that left the window, on the GPU      |
+| `lib/carried-paint.ts`     | the same in RAM, for blocks the stroke slots had no room for               |
 | `lib/windowed-canvas.ts`   | **the boundary.** File coordinates in, view coordinates out                |
 | `lib/stroke-renderer.ts`   | painting, in view coordinates only                                         |
 
@@ -146,11 +147,11 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    blocks they cover (`readPackedSpan`), never the canvas.
    A grid fill is a stroke like any other: each of its dabs goes through
    `paintWhenHeld`, and the fill settles every chunk before it gives the
-   next, so the window walks the file behind the anchors and the carry keeps
-   what it leaves. A fill that painted straight into the canvas covered only
+   next, so the window walks the file behind the anchors and the stroke slots
+   keep what it leaves. A fill that painted straight into the canvas covered only
    the window it happened to be on. Cancelling such a fill cannot put a
    snapshot back either, because the window has slid since it was taken:
-   `discardStroke` drops the held dabs and the carry and patches the store's
+   `discardStroke` drops the held dabs, the stroke slots and the carry, and patches the store's
    values over the stroke's footprint, with the paint of any commit still
    landing laid back on top.
 2. **The original is read only for a dab that samples it.** The window over
@@ -161,19 +162,29 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
 3. **A slide keeps the overlap and composes what enters — so the overlap has
    to be real.** If a fill was abandoned, those blocks are still empty; the
    window tracks what the canvas holds and composes whatever it lacks.
-4. **A block that leaves goes back to its slot as the canvas last held it,
-   and paint on a block that leaves mid-stroke is carried.** The slot copy
-   means a returning block shows the canvas's latest values, not the store's
-   values from when the slot was filled; the display takes the paint so it
-   stays on screen, and the carry holds it so the commit stores it. A block whose slot went while it
-   was away comes back with the store's values, so the canvas takes its paint
-   out of the carry as it lands: the stroke sees what it painted there, paints
-   over it, and the commit reads the canvas rather than a stale carry.
-   A stroke's paint stays on the canvas after the pen lifts, too: the commit
-   holds the pixels it read until the store has them, and a block the window
-   brings in before then, from a slot or a store that predates the stroke,
-   takes those pixels back on top. Without that, a quick next stroke reads
-   the old state where the window moved and commits it over the last one.
+4. **The block slots mirror the store; a stroke's paint lives on the canvas
+   and in the stroke slots until its commit stores it.** A block that leaves
+   mid-stroke with paint on it goes to the stroke slots as the canvas holds
+   it, with each brush step's mask over it; nothing is read back. A block that
+   comes back is composed from its block slot into the canvas and into the
+   stroke-start snapshot, and the stroke slots then draw the stroke's paint
+   and masks back over the canvas alone. So the stroke keeps blending from
+   what the file held before it, and a weaker dab never pulls back what a
+   stronger one painted: a canvas holding the whole file would paint the same.
+   When the stroke slots are full, the blocks held longest go to RAM
+   (`CarriedPaint`) with their masks, and come back the same way.
+   A stroke's paint stays on the canvas after the pen lifts, too. At pen-up
+   its blocks go into the block slots on the GPU, from the canvas or from the
+   stroke slots, marked ahead of the store; a block the stroke left in RAM
+   loses its slot instead. The commit holds the pixels it read until the
+   store has them, and a block the window brings in from a slot that mirrors
+   the store takes those pixels back on top. Without that, a quick next
+   stroke reads the old state where the window moved and commits it over the
+   last one. Once the store has them, the slots that mirror it take them a
+   block at a time, in the order the store took them, and a slot ahead of the
+   store is left alone. A commit that stores values of its own past the
+   stroke drops the slots over them, and one that is not stored drops the
+   slots it put ahead.
    The stroke ends the moment the commit has read it, not when the commit
    lands: a commit takes seconds, and a stroke begun meanwhile would
    otherwise be ended mid-way, its slides carrying nothing.
@@ -181,8 +192,8 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    the same reason (`readCommittedTaps`): a tile cut while a commit is
    landing takes the held paint over the store's values, so a zoom across a
    level never shows the state before the stroke; and holding the paint
-   re-encodes the stroke's footprint from the canvas, so a tile cut while
-   the stroke was painted shows its dabs. A tile reads only the taps its bins
+   re-encodes the stroke's footprint from the canvas and drops the tiles over
+   the rest of it, so a tile cut while the stroke was painted shows its dabs. A tile reads only the taps its bins
    keep (`readTaps`, two floats each), not every pixel of the span they
    stride over, because a level's decimation is what the cut would have
    thrown away. And the ring serves only a view the canvas neither holds nor
@@ -190,9 +201,10 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    go and the pyramid's finest level stands in until the canvas lands. At
    fine levels a tile is floored to the coarsest band's step, four viewports
    wide, and reading four of those per level was the pause a zoom paid.
-5. **Any whole-state move installs a fresh carry.** After a history hop, a
-   restore or phase turns, the old carry no longer speaks for the file. A
-   commit already reading the old one keeps the object it took.
+5. **Any whole-state move drops what the stroke left off the canvas.** After
+   a history hop, a restore or phase turns, the old carry and stroke slots no
+   longer speak for the file. A commit issues its reads of both at pen-up,
+   so a stroke starting after it can reuse them.
 6. **The source read is a position in the source file, not in its canvas.** A
    brush reads the source beat for beat against the two files' clocks.
    `sourceOffsetForViews` puts the brush anchor on the destination file's clock
@@ -351,17 +363,19 @@ build. It also prints resident memory.
 Per open file, windowed, at K blocks:
 
 - canvas pair, sized to the window, not the file
-- block slots on the GPU: two windows plus four spare, because a slide holds
-  the window it enters and the one whose paint it folds back, plus whatever
-  the window's share of the budget has left once the window is sized
+- block slots on the GPU: a window plus four spare, plus whatever the
+  window's share of the budget has left once the window is sized
   (`canvasExtraSlotBlocks`), up to the whole file. A block that keeps its slot
   composes on the GPU when the window comes back to it, instead of being read
   and uploaded again. Once the store can answer, idle time fills the free
   slots nearest the canvas first (`warmSlots`), pausing while a stroke paints
   or a commit lands and leaving two slots free for a slide; a zoomed-out stroke
   across the file then slides without reading a block. A read that was on its
-  way when the slots were dropped reads again rather than land stale values.
+  way when the store moved reads again rather than land stale values.
   Slot pages are allocated as blocks arrive.
+- stroke slots: a window plus four spare, plus what the budget has left after
+  the block slots (`canvasPaintExtraSlotBlocks`), each block with a two-byte
+  mask per step beside it. Pages are allocated as a stroke leaves blocks.
 - the original window, once a step in Original mode asks for it: one window
   plus four spare, plus its composed texture
 - a source window per windowed file a step paints from, and its

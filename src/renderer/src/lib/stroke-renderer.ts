@@ -2040,6 +2040,53 @@ export class StrokeRenderer {
    * only that is read back, so the cost follows the footprint, not the file.
    */
   async readPixelRanges(pixelRanges: Uint32Array): Promise<Float32Array> {
+    const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    return await this.gatherRanges(committed.texture, pixelRanges);
+  }
+
+  /**
+   * Writes mask weights over `pixelRanges`, one array per brush step, one
+   * weight a pixel in range order. A step with no weights keeps its mask.
+   */
+  patchStrokeMasks(pixelRanges: Uint32Array, masks: readonly (Float32Array | null)[]): void {
+    if (!this.pool.ownedBy(this) || !this.scratch) return;
+    for (let step = 0; step < masks.length; step++) {
+      const weights = masks[step];
+      if (!weights) continue;
+      const { fbo, created } = this.pool.maskFbo(step);
+      if (created) this.clearTargets([fbo]);
+      const rgba = new Float32Array(weights.length * 4);
+      for (let i = 0; i < weights.length; i++) rgba[i * 4] = weights[i];
+      this.patchTargets(rgba, pixelRanges, [fbo]);
+    }
+  }
+
+  /** Each brush step's stroke mask, null for a step with none, while this renderer holds the stroke's scratch. */
+  strokeMaskTextures(): (Texture | null)[] {
+    if (!this.pool.ownedBy(this) || !this.scratch) return [];
+    return this.scratch.strokeMaskFbos.map((mask) => mask?.texture ?? null);
+  }
+
+  /**
+   * Draws into the committed canvas through `draw`, which changes only the
+   * canvas pixels of `changed`, leaving the stroke-start snapshot as it is,
+   * so the stroke goes on blending from what the file held before it.
+   */
+  drawCanvas(changed: Uint32Array, draw: (target: WebGLRenderTarget) => void): void {
+    draw(this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    this.invalidateFboData({ ranges: changed, count: changed.length >> 1 });
+  }
+
+  /** Draws into a step's stroke mask through `draw`, making the mask first when the step has none. */
+  drawStrokeMask(step: number, draw: (target: WebGLRenderTarget) => void): void {
+    if (!this.pool.ownedBy(this) || !this.scratch) return;
+    const { fbo, created } = this.pool.maskFbo(step);
+    if (created) this.clearTargets([fbo]);
+    draw(fbo);
+  }
+
+  /** The pixels of `pixelRanges` in `texture`, gathered on the GPU and read back in range order. */
+  private async gatherRanges(texture: Texture, pixelRanges: Uint32Array): Promise<Float32Array> {
     const width = this.view.textureWidth;
 
     let patchPixels = 0;
@@ -2081,8 +2128,7 @@ export class StrokeRenderer {
     geometry.setAttribute("aRange", new InstancedBufferAttribute(instances, 3));
     geometry.instanceCount = numRanges;
 
-    const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
-    gatherMaterial.uniforms.sourceTex.value = committed.texture;
+    gatherMaterial.uniforms.sourceTex.value = texture;
     gatherMaterial.uniforms.sourceWidth.value = width;
     gatherMaterial.uniforms.destWidth.value = blockWidth;
     gatherMaterial.uniforms.destHeight.value = blockHeight;
@@ -2227,9 +2273,39 @@ export class StrokeRenderer {
 
   /**
    * Update only the texture rows covered by `pixelRanges` from `values`,
-   * which hold exactly those pixels laid end to end in range order.
+   * which hold exactly those pixels laid end to end in range order. The
+   * stroke-start snapshot takes them too, so they become what the next dab
+   * blends from.
    */
   patchFBODataCompact(values: Float32Array, pixelRanges: Uint32Array): void {
+    const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    const targets = [committed];
+    // The stroke-start snapshot must receive the same rows, but only while
+    // this renderer holds it; otherwise the next acquireScratch rebuilds it
+    // from the patched committed buffer.
+    if (this.pool.ownedBy(this) && this.scratch) targets.push(this.scratch.strokeStartFbo);
+    if (!this.patchTargets(values, pixelRanges, targets)) return;
+    this.invalidateFboData({ ranges: pixelRanges, count: pixelRanges.length >> 1 });
+  }
+
+  /** Puts `values` on the committed canvas only: the stroke-start snapshot keeps what the stroke blends from. */
+  patchCanvasCompact(values: Float32Array, pixelRanges: Uint32Array): void {
+    const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    if (!this.patchTargets(values, pixelRanges, [committed])) return;
+    this.invalidateFboData({ ranges: pixelRanges, count: pixelRanges.length >> 1 });
+  }
+
+  /** Puts `values` on the stroke-start snapshot only, while this renderer holds it. */
+  patchStrokeStartCompact(values: Float32Array, pixelRanges: Uint32Array): void {
+    if (!this.pool.ownedBy(this) || !this.scratch) return;
+    this.patchTargets(values, pixelRanges, [this.scratch.strokeStartFbo]);
+  }
+
+  /**
+   * Scatters `values`, compact in the order of `pixelRanges`, into each
+   * target. False when the ranges name no pixel.
+   */
+  private patchTargets(values: Float32Array, pixelRanges: Uint32Array, targets: WebGLRenderTarget[]): boolean {
     const { textureWidth: width, textureHeight: height } = this.view;
 
     let patchPixels = 0;
@@ -2239,12 +2315,11 @@ export class StrokeRenderer {
       patchPixels += pixelRanges[i + 1];
       numRanges++;
     }
-    if (patchPixels === 0) return;
+    if (patchPixels === 0) return false;
     if (values.length !== patchPixels * 4) throw new Error("the patch values do not match the ranges");
 
     // Record where each range sits in the compact block so the shader can
     // scatter it back.
-    const patch = values;
     const instances = new Uint32Array(numRanges * 3);
     let srcPixel = 0;
     let inst = 0;
@@ -2261,14 +2336,11 @@ export class StrokeRenderer {
 
     const patchWidth = Math.min(width, patchPixels);
     const patchHeight = Math.ceil(patchPixels / patchWidth);
-    const padded =
-      patch.length === patchWidth * patchHeight * 4
-        ? patch
-        : (() => {
-            const p = new Float32Array(patchWidth * patchHeight * 4);
-            p.set(patch);
-            return p;
-          })();
+    let padded = values;
+    if (values.length !== patchWidth * patchHeight * 4) {
+      padded = new Float32Array(patchWidth * patchHeight * 4);
+      padded.set(values);
+    }
     const patchTex = new DataTexture(padded, patchWidth, patchHeight, RGBAFormat, FloatType);
     patchTex.needsUpdate = true;
     this.gl.initTexture(patchTex);
@@ -2293,14 +2365,6 @@ export class StrokeRenderer {
     // the render — no clear.
     const prevAutoClear = this.gl.autoClear;
     this.gl.autoClear = false;
-    const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
-    const targets = [committed];
-    // The stroke-start snapshot must receive the same rows, but only while
-    // this renderer holds it; otherwise the next acquireScratch rebuilds it
-    // from the patched committed buffer.
-    if (this.pool.ownedBy(this) && this.scratch) {
-      targets.push(this.scratch.strokeStartFbo);
-    }
     for (const target of targets) {
       this.gl.setRenderTarget(target);
       this.gl.render(scene, this.camera);
@@ -2308,9 +2372,10 @@ export class StrokeRenderer {
     this.gl.setRenderTarget(null);
     this.gl.autoClear = prevAutoClear;
 
+    patchMaterial.uniforms.patchTex.value = null;
     geometry.dispose();
     patchTex.dispose();
-    this.invalidateFboData({ ranges: pixelRanges, count: pixelRanges.length >> 1 });
+    return true;
   }
 
   /**
@@ -2388,12 +2453,14 @@ export class StrokeRenderer {
   }
 
   /**
-   * Writes committed content into the canvas through `fill`, which draws over
+   * Writes committed content into the canvas, and into the stroke-start
+   * snapshot while this renderer holds it, through `fill`, which draws over
    * the view's own packed layout. It is for the parts of the view the canvas
    * does not hold yet, so it must not reach pixels a stroke has painted.
    */
   fillCanvas(fill: (target: WebGLRenderTarget) => void): void {
     fill(this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    if (this.pool.ownedBy(this) && this.scratch) fill(this.scratch.strokeStartFbo);
     this.invalidateFboData();
   }
 

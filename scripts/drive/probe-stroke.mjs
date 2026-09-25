@@ -2,11 +2,11 @@
 // every dab: which dabs reached the store, and which parts of each.
 //
 // Usage: node scripts/drive/probe-stroke.mjs [--seconds 285] [--extra 8] [--no-build]
-//        [--power 0] [--strokes 1] [--settle 15000] [--before 1500] [--duration 500]
+//        [--power 0] [--strokes 1] [--settle 60000] [--before 1500] [--duration 500]
 import { copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { build, launch, openFiles, seedEraseBrush, sleep, viewOf, writeNoise } from "./app.mjs";
+import { build, diagLines, launch, openFiles, seedEraseBrush, sleep, viewOf, writeNoise } from "./app.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -17,7 +17,7 @@ const SECONDS = Number(option("seconds", 285));
 const EXTRA = Number(option("extra", 8));
 const POWER = Number(option("power", 0));
 const STROKES = Number(option("strokes", 1));
-const SETTLE = Number(option("settle", 15000));
+const SETTLE = Number(option("settle", 60000));
 const DURATION = Number(option("duration", 500));
 const BEFORE = Number(option("before", 1500));
 
@@ -86,7 +86,16 @@ try {
     await sleep(200);
   }
   await page.mouse.move(b.x + b.width * 0.99, b.y + b.height * 0.99);
-  await sleep(SETTLE);
+  // Every stroke's commit has to land before the store can be checked, however
+  // long the commits take; the settle is the most it waits for them.
+  const firstStroke = strokeLog[0] - DURATION;
+  const waitFrom = Date.now();
+  while (Date.now() - waitFrom < SETTLE) {
+    const added = diagLines(logPath, /commit history add/).filter((l) => l.t >= firstStroke).length;
+    if (added >= STROKES) break;
+    await sleep(250);
+  }
+  await sleep(500);
 
   const dabs = await page.evaluate((id) => globalThis.__dabLog.filter((d) => d.fileId === id), id);
   const grid = [0.1, 0.3, 0.5, 0.7, 0.9];
@@ -122,7 +131,6 @@ try {
   console.log(lines.join("\n"));
   const t0 = dabs[0]?.requestedAt ?? 0;
   console.log(`stroke ends at ${strokeLog.map((t) => t - t0).join(", ")} ms`);
-  const { diagLines } = await import("./app.mjs");
   for (const l of diagLines(logPath, /commit state read|commitStroke|commit history add|held paint/))
     if (l.t >= t0 - 1000) console.log(`${l.t - t0} ms  ${l.line.slice(24, 200)}`);
   console.log(dabs.map((d) => `${d.requestedAt - t0}:${d.paintedAt - d.requestedAt}`).join(" "));

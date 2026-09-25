@@ -153,7 +153,7 @@ function openWindowedFile(renderer: Record<string, unknown> = {}) {
       current: {
         getFBOData: async () => null,
         readPixelRanges: async () => Float32Array.from(PAINTED_VALUES),
-        holdPaint: () => () => {},
+        holdPaint: () => async () => {},
         forgetBlocks: () => {},
         ...renderer,
       },

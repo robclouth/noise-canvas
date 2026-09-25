@@ -497,7 +497,13 @@ try {
   const processes = await readProcessSamples(app);
   report.mainThread = mainThread;
   report.frameGaps = summariseGaps(probes);
-  if (stallProfile) report.stalls = summariseStalls(stallProfile, report.profilePerfStart, probes.gaps);
+  if (stallProfile)
+    report.stalls = summariseStalls(
+      stallProfile,
+      report.profilePerfStart,
+      probes.gaps,
+      diagLines(logPath, /\[timing\]/),
+    );
   report.processes = summariseProcesses(processes);
   const busiest = Object.entries(report.processes)
     .sort((a, b) => b[1].peakMB - a[1].peakMB)[0]?.[0]
@@ -648,8 +654,11 @@ function summariseHeap(profile) {
     .map(([k, bytes]) => `${Math.round(bytes / 1048576)} MB  ${k}`);
 }
 
-/** Self time by function inside every frame gap over 50 ms, and the gaps themselves. */
-function summariseStalls(profile, perfStart, gaps) {
+/**
+ * Self time by function inside every frame gap over 50 ms, and the gaps
+ * themselves with the timing events the app logged while each lasted.
+ */
+function summariseStalls(profile, perfStart, gaps, timings = []) {
   const byId = new Map(profile.nodes.map((n) => [n.id, n]));
   const times = [];
   let t = profile.startTime;
@@ -676,7 +685,10 @@ function summariseStalls(profile, perfStart, gaps) {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 4)
       .map(([k, ms]) => `${Math.round(ms)} ${k}`);
-    list.push({ ms: Math.round(gap.ms), gesture: gap.gesture, top });
+    const during = timings
+      .filter((l) => l.t >= gap.t - gap.ms - 20 && l.t <= gap.t + 20)
+      .map((l) => l.line.slice(24).replace(/\s+/g, " ").slice(0, 90));
+    list.push({ ms: Math.round(gap.ms), gesture: gap.gesture, top, during });
   }
   return {
     top: [...self.entries()]
@@ -735,7 +747,10 @@ function printSummary(r) {
     console.log("\nwhat runs inside frame gaps over 50 ms (self time):");
     for (const line of r.stalls.top.slice(0, 20)) console.log(`  ${line}`);
     console.log("\nworst gaps:");
-    for (const g of r.stalls.list.slice(0, 15)) console.log(`  ${g.ms} ms in ${g.gesture}: ${g.top.join(" | ")}`);
+    for (const g of r.stalls.list.slice(0, 15)) {
+      console.log(`  ${g.ms} ms in ${g.gesture}: ${g.top.join(" | ")}`);
+      for (const line of g.during ?? []) console.log(`      during: ${line}`);
+    }
   }
   if (r.heapTop) {
     console.log("\nallocations over the session (sampled):");

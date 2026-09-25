@@ -20,6 +20,7 @@ import {
 import { blockGrid, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "../block-grid";
 import { CanvasWindow } from "../canvas-window";
 import { PackedWindow } from "../packed-window";
+import { StrokeSlots } from "../stroke-slots";
 import {
   DISPLAY_PYRAMID_BYTES_PER_TEXEL,
   DISPLAY_PYRAMID_MAX_TEXELS,
@@ -235,9 +236,10 @@ describe("history cache overhead", () => {
     const block = 100_000;
     const canvas = 8 * block;
     const windowed = spectrogramBytes([{ file: canvas, canvas, block }], true);
-    // Three windows of slots plus the spare each window keeps, at 16 bytes a
-    // texel, in place of the packed and inverse-map arrays.
-    const slots = 16 * (3 * canvas + 8 * block);
+    // Three windows of slots, the canvas's, the stroke's paint and the
+    // original's, plus the spare each keeps, at 16 bytes a texel, in place of
+    // the packed and inverse-map arrays.
+    const slots = 16 * (3 * canvas + 12 * block);
     expect(windowed - spectrogramBytes([whole(canvas)], true)).toBe(slots - CPU_BYTES_PER_TEXEL_FILE * canvas);
   });
 
@@ -335,7 +337,7 @@ describe("the window the budget sets", () => {
     // A window pinned small leaves most of the share to slots, more than the file needs.
     const grid = gridOf(60);
     const extra = canvasExtraSlotBlocks(grid, 4);
-    expect(extra).toBe(grid.blockCount - 2 * 4 - CANVAS_WINDOW_SPARE_BLOCKS);
+    expect(extra).toBe(grid.blockCount - 4 - CANVAS_WINDOW_SPARE_BLOCKS);
     expect(canvasExtraSlotBlocks(grid, Infinity)).toBe(0);
   });
 
@@ -343,7 +345,7 @@ describe("the window the budget sets", () => {
     expect(canvasWindowBlocks(gridOf(1200))).toBe(canvasWindowBlocks(gridOf(600)));
   });
 
-  it("charges a window for the slots the two block windows really claim", () => {
+  it("charges a window for the slots its three block windows really claim", () => {
     const gl = new WebGLRenderer();
     // Many more blocks than the two windows claim slots for, so nothing clamps.
     const grid = gridOf(20, 0.25);
@@ -352,15 +354,19 @@ describe("the window the budget sets", () => {
     const read = async (): Promise<Float32Array | null> => null;
     const canvas = new CanvasWindow(gl, grid, { windowBlocks: blocks, read });
     const original = new PackedWindow(gl, grid, { windowBlocks: blocks, read });
+    const paint = new StrokeSlots(gl, grid, blocks + CANVAS_WINDOW_SPARE_BLOCKS);
     try {
       // Everything the charge holds that is not a slot: the canvas pair, the
       // view's inverse map, the original's composed texture and the scratch.
       const perTexel = 2 * 16 + 8 + 16 + GPU_BYTES_PER_TEXEL_SCRATCH;
       const slotBytes = canvasWindowBytes(blocks, texels) - perTexel * blocks * texels;
-      expect(slotBytes / (PACKED_BYTES_PER_TEXEL * texels)).toBe(canvas.slotCount + original.slotCount);
+      expect(slotBytes / (PACKED_BYTES_PER_TEXEL * texels)).toBe(
+        canvas.slotCount + original.slotCount + paint.slotCount,
+      );
     } finally {
       canvas.dispose();
       original.dispose();
+      paint.dispose();
       gl.dispose();
     }
   });

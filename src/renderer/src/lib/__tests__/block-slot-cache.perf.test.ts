@@ -23,7 +23,7 @@ function countedObjects() {
   };
 }
 
-/** Counts resources submitted by real slot uploads, compositions and copy-backs. */
+/** Counts resources submitted by real slot uploads, compositions and patches. */
 it("profiles repeated slot copies after warm-up", () => {
   const data = createConstantQMockSpectrogramData({ durationSeconds: 2, sampleRate: 8000, bandsPerOctave: 4 });
   const grid = blockGrid(data, data.numFrames, data.sampleRate, 0.25);
@@ -45,10 +45,11 @@ it("profiles repeated slot copies after warm-up", () => {
         depthBuffer: false,
         stencilBuffer: false,
       });
+      const patched = gatherPixelRanges(data.packedData, view.ranges);
       const cycle = () => {
         blocks.forEach((block, i) => cache.upload(block, values[i]));
         cache.compose(view, blocks, target);
-        cache.copyBack(view, blocks, target.texture);
+        cache.patch(view.ranges, patched);
         cache.compose(view, blocks, target);
       };
       for (let warm = 0; warm < 10; warm++) cycle();

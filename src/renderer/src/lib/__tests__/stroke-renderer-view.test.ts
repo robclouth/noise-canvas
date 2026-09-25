@@ -854,7 +854,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     expect(phase, `largest phase difference ${phase}`).toBeLessThan(1e-3);
   });
 
-  it("paints over a canvas composed from block slots and folds the blocks back", async () => {
+  it("paints over a canvas composed from block slots and patches the blocks with the result", async () => {
     const state = createMockState();
     const cache = new BlockSlotCache(gl, grid, grid.blockCount * blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL);
     disposers.push(() => cache.dispose());
@@ -875,7 +875,9 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     const painted = await sub.getFBOData();
     expect(firstDifference(painted, seeded, view.texels * 4)).not.toBe(-1);
 
-    cache.copyBack(view, viewBlocks, sub.getTextures().packed.texture);
+    // A view lays its bands end to end in file band order, so its texels are
+    // already the compact values of its file ranges.
+    cache.patch(view.ranges, painted.slice(0, view.texels * 4));
     const target = new WebGLRenderTarget(view.textureWidth, view.textureHeight, {
       format: RGBAFormat,
       type: FloatType,

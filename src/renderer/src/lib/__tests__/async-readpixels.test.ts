@@ -1,6 +1,6 @@
-import { WebGLRenderer } from "three";
+import { Color, FloatType, NearestFilter, RGBAFormat, WebGLRenderer, WebGLRenderTarget } from "three";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readRenderTargetBytesAsync } from "../async-readpixels";
+import { readRenderTargetBytesAsync, readRenderTargetPixelsAsync } from "../async-readpixels";
 import { createByteTarget } from "../snapshot-capture";
 
 describe("asynchronous readback cleanup", () => {
@@ -95,4 +95,33 @@ describe("asynchronous readback cleanup", () => {
       }
     },
   );
+
+  it("reads a target larger than one chunk as it stood at the call", async () => {
+    // 1024 × 1100 float texels is past the 16 MB a single read copies.
+    const target = new WebGLRenderTarget(1024, 1100, {
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+    const clear = (value: number): void => {
+      renderer.setClearColor(new Color(value, value, value), value);
+      renderer.setRenderTarget(target);
+      renderer.clear(true, false, false);
+      renderer.setRenderTarget(null);
+    };
+    try {
+      // Zero and one pass the clear colour's conversion unchanged.
+      clear(1);
+      const pending = readRenderTargetPixelsAsync(renderer, target, 0, 0, 1024, 1100);
+      clear(0);
+      const pixels = await pending;
+      expect(pixels.length).toBe(1024 * 1100 * 4);
+      expect(pixels.every((v) => v === 1)).toBe(true);
+    } finally {
+      target.dispose();
+    }
+  });
 });

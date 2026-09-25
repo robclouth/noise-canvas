@@ -41,10 +41,15 @@ const GPU_BUDGET_SHARE = 0.5;
 
 /** Slots a block window keeps beyond the window itself, so a window the brush comes back to is still resident. */
 export const CANVAS_WINDOW_SPARE_BLOCKS = 4;
-/** Block windows a windowed canvas keeps slots for: two for the canvas, one for the original. */
+/**
+ * Block windows a windowed canvas keeps slots for: one for the canvas, one
+ * for a stroke's paint on blocks that left it, and one for the original.
+ */
 const CANVAS_WINDOW_SLOT_WINDOWS = 3;
-/** Spare slots the canvas window and the original window keep between them. */
-const CANVAS_WINDOW_SPARE_SLOTS = 2 * CANVAS_WINDOW_SPARE_BLOCKS;
+/** Spare slots the three windows keep between them. */
+const CANVAS_WINDOW_SPARE_SLOTS = 3 * CANVAS_WINDOW_SPARE_BLOCKS;
+/** Bytes a stroke's paint slot holds a texel in: its packed values and one mask weight. */
+const PAINT_SLOT_BYTES_PER_TEXEL = PACKED_BYTES_PER_TEXEL + 2;
 /** Share of the spectrogram budget one file's painting canvas may hold. */
 const CANVAS_WINDOW_SHARE = 0.35;
 // Blocks a window holds at least. Under this the brush outruns the canvas on
@@ -70,7 +75,7 @@ export function canvasWindowBytes(blocks: number, texelsPerBlock: number): numbe
   return perTexel * window + windowSlotSpareBytes(texelsPerBlock);
 }
 
-/** Bytes the slots the two windows keep beyond the windows themselves hold. */
+/** Bytes the slots the three windows keep beyond the windows themselves hold. */
 function windowSlotSpareBytes(texelsPerBlock: number): number {
   return PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SPARE_SLOTS * texelsPerBlock;
 }
@@ -121,7 +126,7 @@ export function canvasWindowBlocks(grid: BlockGrid): number {
 }
 
 /**
- * Block slots the canvas window keeps beyond two windows and its spares, out
+ * Block slots the canvas window keeps beyond its window and its spares, out
  * of what the window's share of the budget has left once the window is sized:
  * a block that keeps its slot composes on the graphics device when the window
  * comes back to it, rather than being read and uploaded again. Never more than
@@ -132,8 +137,26 @@ export function canvasExtraSlotBlocks(grid: BlockGrid, windowBlocks: number): nu
   if (!Number.isFinite(windowBlocks) || texelsPerBlock <= 0) return 0;
   const left = canvasWindowBudgetBytes() - canvasWindowBytes(windowBlocks, texelsPerBlock);
   const extra = Math.floor(left / (PACKED_BYTES_PER_TEXEL * texelsPerBlock));
-  const unclaimed = grid.blockCount - 2 * windowBlocks - CANVAS_WINDOW_SPARE_BLOCKS;
+  const unclaimed = grid.blockCount - windowBlocks - CANVAS_WINDOW_SPARE_BLOCKS;
   return Math.max(0, Math.min(extra, unclaimed));
+}
+
+/**
+ * Slots a stroke's paint on blocks that left the window may take beyond a
+ * window and its spares: what the window's share has left once the block
+ * slots have theirs, up to the rest of the file. A stroke that paints more
+ * blocks than these hold keeps the oldest in RAM instead. Zero for a file the
+ * canvas holds whole.
+ */
+export function canvasPaintExtraSlotBlocks(grid: BlockGrid, windowBlocks: number): number {
+  const texelsPerBlock = blockTexels(grid, 0);
+  if (!Number.isFinite(windowBlocks) || texelsPerBlock <= 0) return 0;
+  const left =
+    canvasWindowBudgetBytes() -
+    canvasWindowBytes(windowBlocks, texelsPerBlock) -
+    canvasExtraSlotBlocks(grid, windowBlocks) * PACKED_BYTES_PER_TEXEL * texelsPerBlock;
+  const extra = Math.floor(left / (PAINT_SLOT_BYTES_PER_TEXEL * texelsPerBlock));
+  return Math.max(0, Math.min(extra, grid.blockCount - windowBlocks - CANVAS_WINDOW_SPARE_BLOCKS));
 }
 
 /** True when the painting canvas holds every block of a file cut on `grid`, so none of it is paged. */
@@ -180,7 +203,7 @@ export interface OpenFileTexels {
   canvas: number;
   /** Texels one block holds, or zero while the canvas holds the whole file. */
   block: number;
-  /** Slots the canvas window keeps beyond its windows and spares, from `canvasExtraSlotBlocks`. */
+  /** Slots the block and paint slots keep beyond their windows and spares, from `canvasExtraSlotBlocks` and `canvasPaintExtraSlotBlocks`. */
   extraSlots?: number;
 }
 
