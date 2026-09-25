@@ -3,6 +3,8 @@ import type { WebGLRenderTarget } from "three";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   analysisPeakTexels,
+  CANVAS_WINDOW_SPARE_BLOCKS,
+  canvasExtraSlotBlocks,
   canvasWindowBlocks,
   canvasWindowBudgetBytes,
   canvasWindowBytes,
@@ -316,6 +318,25 @@ describe("the window the budget sets", () => {
     expect(blocks).toBeLessThan(grid.blockCount);
     expect(canvasWindowBytes(blocks, texels)).toBeLessThanOrEqual(canvasWindowBudgetBytes());
     expect(canvasWindowBytes(blocks + 1, texels)).toBeGreaterThan(canvasWindowBudgetBytes());
+  });
+
+  it("keeps extra block slots out of what the window's share has left", () => {
+    const grid = gridOf(600);
+    const blocks = canvasWindowBlocks(grid);
+    const texels = blockTexels(grid, 0);
+    const extra = canvasExtraSlotBlocks(grid, blocks);
+    const slotBytes = PACKED_BYTES_PER_TEXEL * texels;
+    expect(extra).toBeGreaterThan(0);
+    expect(canvasWindowBytes(blocks, texels) + extra * slotBytes).toBeLessThanOrEqual(canvasWindowBudgetBytes());
+    expect(canvasWindowBytes(blocks, texels) + (extra + 1) * slotBytes).toBeGreaterThan(canvasWindowBudgetBytes());
+  });
+
+  it("keeps no more extra slots than the file has blocks for", () => {
+    // A window pinned small leaves most of the share to slots, more than the file needs.
+    const grid = gridOf(60);
+    const extra = canvasExtraSlotBlocks(grid, 4);
+    expect(extra).toBe(grid.blockCount - 2 * 4 - CANVAS_WINDOW_SPARE_BLOCKS);
+    expect(canvasExtraSlotBlocks(grid, Infinity)).toBe(0);
   });
 
   it("gives a longer file the same window", () => {

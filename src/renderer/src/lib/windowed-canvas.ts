@@ -1,7 +1,15 @@
 import { Vector2, type WebGLRenderer } from "three";
 import type { SpectrogramData } from "../store/types";
 import type { BandLayout } from "./band-layout";
-import { blockGrid, blockOfFrame, blockPixelRanges, blocksForPixelRanges, type BlockGrid } from "./block-grid";
+import {
+  blockGrid,
+  blockOfFrame,
+  blockPixelRanges,
+  blocksForPixelRanges,
+  blockTexels,
+  PACKED_BYTES_PER_TEXEL,
+  type BlockGrid,
+} from "./block-grid";
 import {
   clipRangesToView,
   composeViewContent,
@@ -19,7 +27,7 @@ import {
   type BlockValueReader,
   type TapValueReader,
 } from "./canvas-window";
-import { canvasWindowBlocks } from "./gpu-budget";
+import { canvasExtraSlotBlocks, canvasWindowBlocks, CANVAS_WINDOW_SPARE_BLOCKS } from "./gpu-budget";
 import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "./carried-paint";
 import type { CoarseStrip } from "./coarse-strip";
 import { diag } from "./diag-log";
@@ -65,6 +73,12 @@ export type StrokeSettlement =
   | { status: "completed" }
   | { status: "cancelled" }
   | { status: "failed"; reason: "unavailable" | "read-error" };
+
+/** Bytes the canvas window's slots may hold: two windows, the spares, and the slots the budget has left. */
+function canvasWindowSlotBytes(grid: BlockGrid, windowBlocks: number): number {
+  const slots = 2 * windowBlocks + CANVAS_WINDOW_SPARE_BLOCKS + canvasExtraSlotBlocks(grid, windowBlocks);
+  return slots * blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL;
+}
 
 /** Fills `settle` waits through before it gives up on the paint still held. */
 const HELD_PAINT_FILLS = 8;
@@ -161,7 +175,12 @@ export class WindowedCanvas {
     this.grid = grid;
     const windowBlocks = deps.windowBlocks ?? canvasWindowBlocks(grid);
     this.blocks = needsCanvasWindow(grid, windowBlocks)
-      ? new CanvasWindow(deps.gl, grid, { windowBlocks, read: deps.readCurrent, readBlock: deps.readCurrentBlock })
+      ? new CanvasWindow(deps.gl, grid, {
+          windowBlocks,
+          maxBytes: canvasWindowSlotBytes(grid, windowBlocks),
+          read: deps.readCurrent,
+          readBlock: deps.readCurrentBlock,
+        })
       : null;
     this.windowBlocks = windowBlocks;
   }

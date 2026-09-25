@@ -178,6 +178,9 @@ export async function decodeAudioFile(
   });
 }
 
+// Frames interleaved and written to the encoder per step.
+const ENCODE_CHUNK_FRAMES = 1 << 16;
+
 /**
  * Export audioChannels (per-channel Float32Array) to an encoded file on disk
  *
@@ -195,22 +198,7 @@ export async function encodeBufferToAudioFile(
   const numChannels = audioChannels.length;
   const numFrames = audioChannels[0].length;
 
-  // 1. Interleave Float32 samples into a single Buffer (little-endian)
-  const interleavedBuffer = Buffer.allocUnsafe(numChannels * numFrames * 4); // 4 bytes per float32
-  const interleavedView = new Float32Array(
-    interleavedBuffer.buffer,
-    interleavedBuffer.byteOffset,
-    numChannels * numFrames,
-  );
-
-  // interleave: [L0,R0,L1,R1,...] (or more channels if >2)
-  for (let frame = 0; frame < numFrames; frame++) {
-    for (let ch = 0; ch < numChannels; ch++) {
-      interleavedView[frame * numChannels + ch] = audioChannels[ch][frame];
-    }
-  }
-
-  // 2. Choose codec / container settings for ffmpeg
+  // 1. Choose codec / container settings for ffmpeg
   // we tell ffmpeg:
   //   -f f32le   : raw 32-bit float little-endian PCM
   //   -ar <sr>   : sample rate
@@ -239,47 +227,61 @@ export async function encodeBufferToAudioFile(
   const ext = extname(outputPath);
   const tmpPath = join(dirname(outputPath), `.ncsave-${process.pid}-${encodeTempCounter++}${ext}`);
 
-  // 3. Spawn ffmpeg, feed stdin, capture errors
-  await new Promise<void>((resolve, reject) => {
-    const args = [
-      "-y",
-      "-hide_banner",
-      "-f",
-      "f32le",
-      "-ar",
-      String(sampleRate),
-      "-ac",
-      String(numChannels),
-      "-i",
-      "pipe:0",
-      ...codecArgs,
-      tmpPath,
-    ];
-
-    const child = spawn(resolveFfmpegPath(), args, { windowsHide: true });
-
-    // Swallow stdin errors (e.g. EPIPE if ffmpeg exits early); the close handler
-    // reports the real failure. Without this, an EPIPE would crash the process.
-    child.stdin.on("error", () => {});
-
-    // write interleaved PCM directly into ffmpeg stdin
-    child.stdin.write(interleavedBuffer);
-    child.stdin.end();
-
+  // 2. Spawn ffmpeg and feed it interleaved PCM a chunk at a time, waiting
+  // for the pipe to drain between chunks, so no one step holds the thread for
+  // the length of the file.
+  const args = [
+    "-y",
+    "-hide_banner",
+    "-f",
+    "f32le",
+    "-ar",
+    String(sampleRate),
+    "-ac",
+    String(numChannels),
+    "-i",
+    "pipe:0",
+    ...codecArgs,
+    tmpPath,
+  ];
+  const child = spawn(resolveFfmpegPath(), args, { windowsHide: true });
+  // Swallow stdin errors (e.g. EPIPE if ffmpeg exits early); the close handler
+  // reports the real failure. Without this, an EPIPE would crash the process.
+  child.stdin.on("error", () => {});
+  const closed = new Promise<void>((resolve, reject) => {
     child.on("error", () => {
       reject(new Error("Failed to start audio encoder. The application may be corrupted."));
     });
-
     child.on("close", (code) => {
       if (code !== 0) {
         return reject(new Error("The audio file could not be saved. Please check if the destination is writable."));
       }
       resolve();
     });
-  }).catch(async (err) => {
+  });
+  // Handled here so an early exit is not reported before the loop awaits it.
+  closed.catch(() => {});
+  try {
+    for (let start = 0; start < numFrames; start += ENCODE_CHUNK_FRAMES) {
+      const frames = Math.min(ENCODE_CHUNK_FRAMES, numFrames - start);
+      // Unpooled, so the view below starts on a float boundary.
+      const chunk = Buffer.allocUnsafeSlow(frames * numChannels * 4);
+      const view = new Float32Array(chunk.buffer, chunk.byteOffset, frames * numChannels);
+      for (let ch = 0; ch < numChannels; ch++) {
+        const channel = audioChannels[ch];
+        for (let frame = 0; frame < frames; frame++) view[frame * numChannels + ch] = channel[start + frame];
+      }
+      if (!child.stdin.write(chunk)) {
+        await Promise.race([new Promise<void>((resolve) => child.stdin.once("drain", () => resolve())), closed]);
+      }
+    }
+    child.stdin.end();
+    await closed;
+  } catch (err) {
+    child.stdin.destroy();
     await unlink(tmpPath).catch(() => {});
     throw err;
-  });
+  }
 
   // Atomically replace the destination (fs.rename overwrites on both POSIX and
   // Windows). If the rename fails, drop the temp file so nothing is left behind.

@@ -120,6 +120,22 @@ export function canvasWindowBlocks(grid: BlockGrid): number {
   return Math.min(CANVAS_WINDOW_MAX_BLOCKS, grid.blockCount, Math.max(CANVAS_WINDOW_MIN_BLOCKS, blocks));
 }
 
+/**
+ * Block slots the canvas window keeps beyond two windows and its spares, out
+ * of what the window's share of the budget has left once the window is sized:
+ * a block that keeps its slot composes on the graphics device when the window
+ * comes back to it, rather than being read and uploaded again. Never more than
+ * the file has blocks. Zero for a file the canvas holds whole.
+ */
+export function canvasExtraSlotBlocks(grid: BlockGrid, windowBlocks: number): number {
+  const texelsPerBlock = blockTexels(grid, 0);
+  if (!Number.isFinite(windowBlocks) || texelsPerBlock <= 0) return 0;
+  const left = canvasWindowBudgetBytes() - canvasWindowBytes(windowBlocks, texelsPerBlock);
+  const extra = Math.floor(left / (PACKED_BYTES_PER_TEXEL * texelsPerBlock));
+  const unclaimed = grid.blockCount - 2 * windowBlocks - CANVAS_WINDOW_SPARE_BLOCKS;
+  return Math.max(0, Math.min(extra, unclaimed));
+}
+
 /** True when the painting canvas holds every block of a file cut on `grid`, so none of it is paged. */
 export function canvasHoldsWholeFile(grid: BlockGrid): boolean {
   return grid.blockCount <= canvasWindowBlocks(grid);
@@ -164,6 +180,8 @@ export interface OpenFileTexels {
   canvas: number;
   /** Texels one block holds, or zero while the canvas holds the whole file. */
   block: number;
+  /** Slots the canvas window keeps beyond its windows and spares, from `canvasExtraSlotBlocks`. */
+  extraSlots?: number;
 }
 
 /** Display textures one open file holds. Both are bounded, whatever its length. */
@@ -179,7 +197,8 @@ function displayBytes(fileTexels: number): number {
 function fileResidentBytes(file: OpenFileTexels, unified: boolean): number {
   const bytes = GPU_BYTES_PER_TEXEL_FILE * file.canvas;
   if (file.block <= 0) return bytes + (unified ? CPU_BYTES_PER_TEXEL_FILE * file.file : 0);
-  return bytes + PACKED_BYTES_PER_TEXEL * CANVAS_WINDOW_SLOT_WINDOWS * file.canvas + windowSlotSpareBytes(file.block);
+  const slots = CANVAS_WINDOW_SLOT_WINDOWS * file.canvas + (file.extraSlots ?? 0) * file.block;
+  return bytes + PACKED_BYTES_PER_TEXEL * slots + windowSlotSpareBytes(file.block);
 }
 
 /** Bytes the open files hold, by the same rates the budget is spent at. */

@@ -18,6 +18,7 @@ import * as Tone from "tone";
 import { host } from "../lib/host";
 import { diag } from "../lib/diag-log";
 import {
+  canvasExtraSlotBlocks,
   canvasWindowBlocks,
   remainingCoefficientBudget,
   usedBudgetFraction,
@@ -460,7 +461,7 @@ export function openFileTexelCounts(excludeFileId?: string): OpenFileTexels[] {
     const blocks = canvasWindowBlocks(grid);
     if (needsCanvasWindow(grid, blocks)) {
       const block = blockTexels(grid, 0);
-      counts.push({ file: texels, canvas: blocks * block, block });
+      counts.push({ file: texels, canvas: blocks * block, block, extraSlots: canvasExtraSlotBlocks(grid, blocks) });
     } else {
       counts.push({ file: texels, canvas: texels, block: 0 });
     }

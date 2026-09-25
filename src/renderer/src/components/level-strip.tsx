@@ -20,28 +20,32 @@ const FULL_COLOR = [236, 236, 242];
 const HOT_COLOR = [250, 205, 60];
 const CLIP_COLOR = [255, 58, 44];
 
-function mixColor(from: number[], to: number[], t: number): number[] {
-  return from.map((value, channel) => Math.round(value + (to[channel] - value) * t));
-}
-
 /**
- * Colour for one slice: dark to white with level, warming to yellow near full
- * scale, then reddening with how far the slice ran out of headroom.
+ * Colour for one slice, written as RGB at `at`: dark to white with level,
+ * warming to yellow near full scale, then reddening with how far the slice ran
+ * out of headroom.
  */
-function levelColor(peak: number, overDb: number): string {
+function writeLevelColor(peak: number, overDb: number, out: Uint8ClampedArray, at: number): void {
   const db = 20 * Math.log10(Math.max(peak, 1e-7));
 
-  let rgb: number[];
-  if (db <= FLOOR_DB) {
-    rgb = FLOOR_COLOR;
-  } else if (db < HOT_DB) {
-    rgb = mixColor(FLOOR_COLOR, FULL_COLOR, (db - FLOOR_DB) / (HOT_DB - FLOOR_DB));
-  } else {
-    rgb = mixColor(FULL_COLOR, HOT_COLOR, Math.min(1, (db - HOT_DB) / -HOT_DB));
+  let from = FLOOR_COLOR;
+  let to = FLOOR_COLOR;
+  let t = 0;
+  if (db > FLOOR_DB && db < HOT_DB) {
+    from = FLOOR_COLOR;
+    to = FULL_COLOR;
+    t = (db - FLOOR_DB) / (HOT_DB - FLOOR_DB);
+  } else if (db >= HOT_DB) {
+    from = FULL_COLOR;
+    to = HOT_COLOR;
+    t = Math.min(1, (db - HOT_DB) / -HOT_DB);
   }
-
-  if (overDb > 0) rgb = mixColor(rgb, CLIP_COLOR, Math.min(1, overDb / OVER_FULL_RED_DB));
-  return `rgb(${rgb.join(",")})`;
+  const red = overDb > 0 ? Math.min(1, overDb / OVER_FULL_RED_DB) : 0;
+  for (let channel = 0; channel < 3; channel++) {
+    const level = Math.round(from[channel] + (to[channel] - from[channel]) * t);
+    out[at + channel] = red > 0 ? Math.round(level + (CLIP_COLOR[channel] - level) * red) : level;
+  }
+  out[at + 3] = 255;
 }
 
 interface LevelStripProps {
@@ -55,6 +59,7 @@ interface LevelStripProps {
 export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imageRef = useRef<ImageData | null>(null);
 
   useEffect(() => {
     const draw = () => {
@@ -74,8 +79,7 @@ export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const levels = openFiles[fileId]?.outputLevels;
       if (!levels || levels.peaks.length === 0) return;
@@ -91,19 +95,27 @@ export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
       const peakPyramid = getMaxPyramid(levels.peaks);
       const overDbPyramid = getMaxPyramid(levels.overDb);
 
-      // One column per pixel, carrying the loudest slice it covers so a single
-      // overloaded hop survives being zoomed out.
-      for (let x = 0; x < width; x++) {
-        const uvStart = windowStart + (x / width) * windowSpan;
-        const uvEnd = windowStart + ((x + 1) / width) * windowSpan;
+      const columns = canvas.width;
+      let image = imageRef.current;
+      if (!image || image.width !== columns || image.height !== canvas.height) {
+        image = ctx.createImageData(columns, canvas.height);
+        imageRef.current = image;
+      }
+      const pixels = image.data;
+      pixels.fill(0, 0, columns * 4);
+      // One column per device pixel, carrying the loudest slice it covers so a
+      // single overloaded hop survives being zoomed out.
+      for (let x = 0; x < columns; x++) {
+        const uvStart = windowStart + (x / columns) * windowSpan;
+        const uvEnd = windowStart + ((x + 1) / columns) * windowSpan;
         if (uvEnd < 0 || uvStart > 1) continue;
 
         const first = Math.max(0, Math.floor(uvStart * points));
         const last = Math.min(points - 1, Math.max(first, Math.ceil(uvEnd * points) - 1));
-
-        ctx.fillStyle = levelColor(queryMax(peakPyramid, first, last), queryMax(overDbPyramid, first, last));
-        ctx.fillRect(x, 0, 1, height);
+        writeLevelColor(queryMax(peakPyramid, first, last), queryMax(overDbPyramid, first, last), pixels, x * 4);
       }
+      for (let row = 1; row < canvas.height; row++) pixels.copyWithin(row * columns * 4, 0, columns * 4);
+      ctx.putImageData(image, 0, 0);
     };
 
     const unsubscribe = useStore.subscribe(
