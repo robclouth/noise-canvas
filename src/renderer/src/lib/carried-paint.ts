@@ -121,6 +121,42 @@ export class CarriedPaint {
     return { ranges: within, values };
   }
 
+  /**
+   * Writes every carried pixel inside `ranges` into `out`, which holds the
+   * pixels of `ranges` in range order; pixels the carry does not hold are left
+   * as they are.
+   */
+  copyInto(out: Float32Array, ranges: Uint32Array): void {
+    const targets: { start: number; end: number; offset: number }[] = [];
+    let at = 0;
+    for (let i = 0; i + 1 < ranges.length; i += 2) {
+      targets.push({ start: ranges[i], end: ranges[i] + ranges[i + 1], offset: at });
+      at += ranges[i + 1] * 4;
+    }
+    targets.sort((x, y) => x.start - y.start);
+    for (const carry of this.carries) {
+      const booked = bookedRuns(carry.ranges);
+      const live = carry.live;
+      let l = 0;
+      let k = 0;
+      for (const target of targets) {
+        while (l + 1 < live.length && live[l] + live[l + 1] <= target.start) l += 2;
+        while (k < booked.length && booked[k].end <= target.start) k++;
+        for (let li = l; li + 1 < live.length && live[li] < target.end; li += 2) {
+          const from = Math.max(target.start, live[li]);
+          const to = Math.min(target.end, live[li] + live[li + 1]);
+          for (let bk = k; bk < booked.length && booked[bk].start < to; bk++) {
+            const lo = Math.max(from, booked[bk].start);
+            const hi = Math.min(to, booked[bk].end);
+            if (hi <= lo) continue;
+            const src = booked[bk].offset + (lo - booked[bk].start) * 4;
+            out.set(carry.values.subarray(src, src + (hi - lo) * 4), target.offset + (lo - target.start) * 4);
+          }
+        }
+      }
+    }
+  }
+
   /** The carried pixels of `ranges`, an ascending list every carry covers, in range order. */
   private valuesOf(ranges: Uint32Array): Float32Array {
     const values = new Float32Array(pixelRangeCount(ranges) * 4);

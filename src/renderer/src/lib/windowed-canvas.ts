@@ -28,6 +28,7 @@ import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
 import {
   composePixelRangeValues,
+  copyCompactOverlap,
   copyTapsFromCompact,
   gatherPixelRanges,
   intersectPixelRanges,
@@ -813,21 +814,25 @@ export class WindowedCanvas {
     return await renderer.getFBOData();
   }
 
-  /** The named file pixels, taken from the canvas and from what it carried off. */
+  /**
+   * The named file pixels, taken from the canvas and from what it carried
+   * off. Read once a stroke has ended: the carry is copied when the canvas
+   * read lands, and only an ended stroke's carry no longer moves.
+   */
   async readPixelRanges(pixelRanges: Uint32Array): Promise<Float32Array> {
     const renderer = this.expectRenderer();
     // Taken before the first await: a stroke starting now installs its own.
     const carried = this.carried;
     while (!carried.settledNow) await carried.settled();
-    // The canvas read and the carry's snapshot are taken in one go, so no
-    // slide can move pixels between the two while the read is on its way.
     const clipped = clipRangesToView(renderer.committedSource().view, this.layout(), pixelRanges);
-    const reading = renderer.readPixelRanges(clipped.viewRanges);
-    const carriedNow = clipped.covered ? null : carried.snapshot();
-    const inView = await reading;
-    if (!carriedNow) return inView;
-    // What the canvas no longer holds was carried off it as the window slid.
-    return composePixelRangeValues(pixelRanges, [carriedNow, { ranges: clipped.fileRanges, values: inView }]);
+    const inView = await renderer.readPixelRanges(clipped.viewRanges);
+    if (clipped.covered) return inView;
+    // What the canvas no longer holds was carried off it as the window slid;
+    // the carry wins where both hold a pixel.
+    const out = new Float32Array(pixelRangeCount(pixelRanges) * 4);
+    copyCompactOverlap(out, pixelRanges, inView, clipped.fileRanges);
+    carried.copyInto(out, pixelRanges);
+    return out;
   }
 
   /** The stroke's committed footprint as file pixel ranges, carry included. */

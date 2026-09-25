@@ -12,6 +12,29 @@ function pixels(from: number, count: number, generation: number): Float32Array {
 }
 
 describe("CarriedPaint", () => {
+  it("writes what it carries into any range list, leaving the rest alone", async () => {
+    const carried = new CarriedPaint();
+    carried.carry(Uint32Array.from([10, 6]), Promise.resolve(pixels(10, 6, 1)));
+    carried.carry(
+      Uint32Array.from([12, 2, 20, 3]),
+      Promise.resolve(Float32Array.from([...pixels(12, 2, 2), ...pixels(20, 3, 2)])),
+    );
+    await carried.settled();
+
+    // Out of order, starting inside carried runs, and cutting across both carries.
+    const ranges = Uint32Array.from([21, 2, 11, 4, 30, 2]);
+    const out = new Float32Array(8 * 4).fill(-1);
+    carried.copyInto(out, ranges);
+    const expected = [
+      ...pixels(21, 2, 2),
+      ...pixels(11, 1, 1),
+      ...pixels(12, 2, 2),
+      ...pixels(14, 1, 1),
+      ...new Array(8).fill(-1),
+    ];
+    expect([...out]).toEqual(expected);
+  });
+
   it("gives back the pixels it took, as one ascending range list", async () => {
     const carried = new CarriedPaint();
     carried.carry(Uint32Array.from([40, 3]), Promise.resolve(pixels(40, 3, 0)));

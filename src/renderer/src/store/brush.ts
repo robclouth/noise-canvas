@@ -288,10 +288,14 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             }
           }
 
-          // A footprint commit's painted values over the merged ranges, cut
-          // from the view the commit worked on.
+          // A footprint commit's painted values over the merged ranges. The
+          // commit changes the view only where its patch and turns say, so
+          // with neither they are the pixels read at pen-up; otherwise they
+          // are cut from the view the commit worked on.
           let afterFootprint: Float32Array | undefined;
-          if (!data && outcome.view && outcome.viewBuffer && historyDirtyRanges) {
+          if (!data && footprint && !extent && !turns) {
+            afterFootprint = footprint.values;
+          } else if (!data && outcome.view && outcome.viewBuffer && historyDirtyRanges) {
             afterFootprint = new Float32Array(pixelRangeCount(historyDirtyRanges) * 4);
             copyCompactOverlap(afterFootprint, historyDirtyRanges, outcome.viewBuffer, outcome.view.ranges);
           }
