@@ -3,6 +3,7 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { growWandSelection } from "../magic-wand";
 import { selectionBandRange, selectionFrameRange, selectionMaskTest } from "../selection";
 import { bandIndexToPitchUv } from "../utils";
+import { PackedSpan } from "../packed-span";
 
 // 16 bands over 4 octaves at 1024 Hz: bands 0-3 step 1 frame, 4-7 step 2,
 // 8-11 step 4, 12-15 step 8 — the wand has to walk the dyadic grid.
@@ -38,7 +39,7 @@ describe("growWandSelection", () => {
     const spec = makeSpec();
     paintLoudRegion(spec);
     const seedPitch = bandIndexToPitchUv(4.5, spec.numBands);
-    const selection = growWandSelection(spec.packedData, spec, 0.2, seedPitch, 20);
+    const selection = growWandSelection(PackedSpan.whole(spec, spec.packedData), spec, 0.2, seedPitch, 20);
     expect(selection).not.toBeNull();
     if (!selection) return;
 
@@ -60,7 +61,7 @@ describe("growWandSelection", () => {
     const spec = makeSpec();
     paintLoudRegion(spec);
     const seedPitch = bandIndexToPitchUv(4.5, spec.numBands);
-    const selection = growWandSelection(spec.packedData, spec, 0.2, seedPitch, 60);
+    const selection = growWandSelection(PackedSpan.whole(spec, spec.packedData), spec, 0.2, seedPitch, 60);
     expect(selection).not.toBeNull();
     if (!selection) return;
     const { startFrame, endFrame } = selectionFrameRange(selection, spec.sampleRate);
@@ -78,7 +79,7 @@ describe("growWandSelection", () => {
     // seed, so they join; the wand selects everything connected at or above
     // seed level minus the tolerance — which here is the whole file.
     const seedPitch = bandIndexToPitchUv(10.5, spec.numBands);
-    const selection = growWandSelection(spec.packedData, spec, 0.9, seedPitch, 6);
+    const selection = growWandSelection(PackedSpan.whole(spec, spec.packedData), spec, 0.9, seedPitch, 6);
     expect(selection).not.toBeNull();
     if (!selection) return;
     const { startFrame, endFrame } = selectionFrameRange(selection, spec.sampleRate);

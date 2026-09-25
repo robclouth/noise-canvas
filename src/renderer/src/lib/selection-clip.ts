@@ -1,5 +1,6 @@
 import type { SpectrogramData } from "../store/types";
 import { packedTextureSizeOf } from "./canvas-view";
+import type { PackedSpan } from "./packed-span";
 import { selectionBandRange, selectionFrameRange, selectionMaskTest, type Selection } from "./selection";
 import { sourceBandUvSlope } from "./utils";
 
@@ -39,7 +40,7 @@ function coarsestCell(selection: Selection, spec: SpectrogramData): number {
 }
 
 /**
- * Copies `selection` out of `data` into a file of its own.
+ * Copies `selection` out of `span`, which must cover its frames, into a file of its own.
  *
  * The crop starts on a whole number of the coarsest bin step among the copied
  * bands, so every band's bin 0 lands on a bin of the source. Bins the selection
@@ -47,7 +48,7 @@ function coarsestCell(selection: Selection, spec: SpectrogramData): number {
  * layout — and so the frequencies — identical to the source file's.
  */
 export function buildClipboardRegion(
-  data: Float32Array,
+  span: PackedSpan,
   selection: Selection,
   spec: SpectrogramData,
   sourceName: string,
@@ -93,7 +94,6 @@ export function buildClipboardRegion(
   for (let band = 0; band < numBands; band++) {
     const step = 1 << bandStepLog2s[band];
     const length = bandLengths[band];
-    const sourceOffset = spec.synthesisMetadata.bandOffsets[band];
     const sourceLength = spec.synthesisMetadata.bandLengths[band];
     const copied = band >= lowBand && band <= highBand;
     // Bins are claimed by their left edge, the rule the shader's selection clip
@@ -109,8 +109,9 @@ export function buildClipboardRegion(
       const sourceBin = (originFrame >> bandStepLog2s[band]) + k;
       if (sourceBin < firstBin || sourceBin >= lastBin || sourceBin >= sourceLength) continue;
       if (maskTest && !maskTest(band, sourceBin * step)) continue;
-      const from = (sourceOffset + sourceBin) * 4;
-      packedData.set(data.subarray(from, from + 4), target * 4);
+      const pixel = span.pixel(band, sourceBin);
+      if (pixel < 0) continue;
+      packedData.set(span.values.subarray(pixel * 4, pixel * 4 + 4), target * 4);
     }
   }
 

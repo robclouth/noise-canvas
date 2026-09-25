@@ -1379,8 +1379,6 @@ async function rebuildFileWithChannels(
 // FBO from, the block store's current tier serves it, and a transient rebuild
 // from the on-disk history is the last resort.
 export async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
-  const fboData = await file.rendererRef?.current?.getFBOData();
-  if (fboData) return fboData;
   const manager = getHistoryManager(file.id);
   const blocks = await manager.currentBlockState();
   if (blocks) return blocks;
@@ -2943,20 +2941,16 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       const commitStart = performance.now();
       let data = source.data;
-      // The whole painted state, read from the canvas only when a pass needs
-      // all of it and the caller did not hand it over.
+      // The whole painted state, read only when a pass needs all of it and
+      // the caller did not hand it over: the store's committed pixels with
+      // the stroke's footprint over them.
       const readWhole = async (): Promise<Float32Array> => {
         if (data) return data;
-        let whole = await file.rendererRef?.current?.getFBOData();
-        if (!whole) {
-          // A canvas holding a window cannot serve the whole state, so the
-          // store's committed pixels take the stroke's footprint over them.
-          whole = await getHistoryManager(fileId).currentBlockState();
-          if (whole && source.footprint) {
-            scatterCompactPixelRanges(whole, source.footprint.values, source.footprint.ranges);
-          }
+        const whole = await getHistoryManager(fileId).currentBlockState();
+        if (whole && source.footprint) {
+          scatterCompactPixelRanges(whole, source.footprint.values, source.footprint.ranges);
         }
-        if (!whole) throw new Error("the commit could not read the canvas");
+        if (!whole) throw new Error("the commit could not read the committed state");
         data = whole;
         return whole;
       };
@@ -3110,10 +3104,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       // Without stored onsets the coefficients are walked in full, from
       // whichever whole copy is cheapest to come by.
-      const packed =
-        packedData ??
-        (await getHistoryManager(fileId).currentBlockState()) ??
-        (await file.rendererRef?.current?.getFBOData());
+      const packed = packedData ?? (await getHistoryManager(fileId).currentBlockState());
       if (!packed) return;
       const result = await host.analysis.detectOnsets(
         packed,

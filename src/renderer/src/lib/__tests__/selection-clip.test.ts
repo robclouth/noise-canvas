@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { SpectrogramData } from "../../store/types";
 import type { Selection } from "../selection";
 import { buildClipboardRegion, clipboardSourceOffset, dropRect } from "../selection-clip";
+import { PackedSpan, readPackedSpan } from "../packed-span";
+import { gatherPixelRanges } from "../pixel-ranges";
 
 /**
  * A 4-band spec with dyadic time steps (band 0 is the highest frequency, as
@@ -66,9 +68,22 @@ function makeSpec(): { spec: SpectrogramData; data: Float32Array } {
 const midBands: Selection = { start: 5, end: 13, pitchLo: 0.25, pitchHi: 0.75 };
 
 describe("buildClipboardRegion", () => {
+  it("copies the same region from a span over the selection as from the whole file", async () => {
+    const { spec, data } = makeSpec();
+    const span = await readPackedSpan(spec, midBands.start, midBands.end, async (ranges) =>
+      gatherPixelRanges(data, ranges),
+    );
+    expect(span).not.toBeNull();
+    expect(span!.view.texels).toBeLessThan(spec.texels);
+    const fromSpan = buildClipboardRegion(span!, midBands, spec, "src");
+    const fromWhole = buildClipboardRegion(PackedSpan.whole(spec, data), midBands, spec, "src");
+    expect(fromSpan).not.toBeNull();
+    expect(Array.from(fromSpan!.spec.packedData!)).toEqual(Array.from(fromWhole!.spec.packedData!));
+  });
+
   it("aligns the crop origin to the coarsest copied band's bin step", () => {
     const { spec, data } = makeSpec();
-    const clip = buildClipboardRegion(data, midBands, spec, "src");
+    const clip = buildClipboardRegion(PackedSpan.whole(spec, data), midBands, spec, "src");
     expect(clip).not.toBeNull();
     // Coarsest copied band is band 2 with 4-frame bins: 5 rounds down to 4,
     // and 13 - 4 = 9 frames round up to 12.
@@ -79,7 +94,7 @@ describe("buildClipboardRegion", () => {
 
   it("copies exactly the bins whose left edge falls inside the selection", () => {
     const { spec, data } = makeSpec();
-    const clip = buildClipboardRegion(data, midBands, spec, "src");
+    const clip = buildClipboardRegion(PackedSpan.whole(spec, data), midBands, spec, "src");
     expect(clip).not.toBeNull();
     if (!clip) return;
 
@@ -98,7 +113,7 @@ describe("buildClipboardRegion", () => {
 
   it("keeps unselected bands silent but in place, with their frequencies unchanged", () => {
     const { spec, data } = makeSpec();
-    const clip = buildClipboardRegion(data, midBands, spec, "src");
+    const clip = buildClipboardRegion(PackedSpan.whole(spec, data), midBands, spec, "src");
     expect(clip).not.toBeNull();
     if (!clip) return;
 
@@ -115,7 +130,9 @@ describe("buildClipboardRegion", () => {
 
   it("returns null for an empty selection", () => {
     const { spec, data } = makeSpec();
-    expect(buildClipboardRegion(data, { ...midBands, end: midBands.start }, spec, "src")).toBeNull();
+    expect(
+      buildClipboardRegion(PackedSpan.whole(spec, data), { ...midBands, end: midBands.start }, spec, "src"),
+    ).toBeNull();
   });
 });
 
@@ -124,7 +141,7 @@ describe("buildClipboardRegion onsets", () => {
     const { spec, data } = makeSpec();
     // Pairs of [timeSec, salience]; the crop origin is frame 4 at 1 Hz.
     const sourceOnsets = new Float32Array([2, 0.9, 5, 0.8, 12, 0.7, 13, 0.6]);
-    const clip = buildClipboardRegion(data, midBands, spec, "src", sourceOnsets, 65);
+    const clip = buildClipboardRegion(PackedSpan.whole(spec, data), midBands, spec, "src", sourceOnsets, 65);
     expect(clip).not.toBeNull();
     if (!clip) return;
     // 2 sits before the selection and 13 at its exclusive end; 5 and 12 stay,
@@ -138,7 +155,7 @@ describe("buildClipboardRegion onsets", () => {
 describe("dropRect", () => {
   it("keeps the clipboard's size and moves only the corner in its own layout", () => {
     const { spec, data } = makeSpec();
-    const clip = buildClipboardRegion(data, midBands, spec, "src");
+    const clip = buildClipboardRegion(PackedSpan.whole(spec, data), midBands, spec, "src");
     expect(clip).not.toBeNull();
     if (!clip) return;
 
@@ -151,7 +168,7 @@ describe("dropRect", () => {
 
   it("converts the height so another layout gets the same octaves", () => {
     const { spec, data } = makeSpec();
-    const clip = buildClipboardRegion(data, midBands, spec, "src");
+    const clip = buildClipboardRegion(PackedSpan.whole(spec, data), midBands, spec, "src");
     expect(clip).not.toBeNull();
     if (!clip) return;
 
@@ -167,7 +184,7 @@ describe("dropRect", () => {
 describe("clipboardSourceOffset", () => {
   it("points at the copied corner inside the clipboard's own file", () => {
     const { spec, data } = makeSpec();
-    const clip = buildClipboardRegion(data, midBands, spec, "src");
+    const clip = buildClipboardRegion(PackedSpan.whole(spec, data), midBands, spec, "src");
     expect(clip).not.toBeNull();
     if (!clip) return;
 

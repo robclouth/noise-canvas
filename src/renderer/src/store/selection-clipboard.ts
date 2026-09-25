@@ -1,7 +1,9 @@
+import { notifications } from "@mantine/notifications";
 import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { serializeEditCommand, serializeFileTask } from "@renderer/lib/file-task-queue";
 import { getHistoryManager } from "@renderer/lib/history-manager";
-import type { Selection } from "@renderer/lib/selection";
+import { readPackedSpan } from "@renderer/lib/packed-span";
+import { selectionFrameRange, type Selection } from "@renderer/lib/selection";
 import {
   buildClipboardRegion,
   clipboardSourceOffset,
@@ -106,10 +108,13 @@ async function copyRegion(edit: EditTarget, selection: Selection): Promise<boole
 
   return serializeFileTask(edit.fileId, async () => {
     await getHistoryManager(edit.fileId).awaitPackedReaders();
-    const data = await renderer.getFBOData();
-    if (!data) return false;
+    const { startFrame, endFrame } = selectionFrameRange(selection, edit.geometry.spec.sampleRate);
+    const span = await readPackedSpan(edit.geometry.spec, startFrame, endFrame, (ranges) =>
+      getHistoryManager(edit.fileId).currentRanges(ranges),
+    );
+    if (!span) return false;
     const region = buildClipboardRegion(
-      data,
+      span,
       selection,
       edit.geometry.spec,
       edit.file.displayName,
@@ -181,7 +186,20 @@ async function commitRegionStrokes(
       const aim = regionAim(stroke.rect, edit.geometry);
       if (renderer.renderRegionStroke({ ...aim, state: stroke.state, source: source ?? undefined }, false)) painted++;
     }
-    if (painted === 0) return;
+    if (painted === 0) {
+      notifications.show({
+        id: "region-too-wide",
+        color: "yellow",
+        title: "Nothing changed",
+        message: "This selection is too long for this file. Select a shorter one to edit it.",
+      });
+      return;
+    }
+    const settled = await renderer.settleStroke();
+    if (settled.status !== "completed") {
+      if (settled.status === "failed") await renderer.discardStrokePreview();
+      return;
+    }
 
     const start = Math.min(...strokes.map((s) => s.rect.start));
     const end = Math.max(...strokes.map((s) => s.rect.end));

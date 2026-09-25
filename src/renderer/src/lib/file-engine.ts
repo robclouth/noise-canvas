@@ -710,7 +710,19 @@ export class FileEngine {
     return {
       renderExportImage: this.renderExportImage,
       renderRegionStroke: (stroke: RegionStroke, preview: boolean) => {
-        const painted = dispatchStroke(stroke.state, new Vector2(stroke.aimX, stroke.aimY), preview, stroke.source);
+        const aim = new Vector2(stroke.aimX, stroke.aimY);
+        const canvas = canvasRef.current;
+        let painted: boolean;
+        if (preview || !canvas) {
+          painted = dispatchStroke(stroke.state, aim, preview, stroke.source);
+        } else {
+          // Like a brush dab, a region lands once the canvas holds its frames;
+          // `settleStroke` waits for it.
+          const span = dabSpan(stroke.state, aim, canvas);
+          painted = canvas.paintWhenHeld(span.startFrame, span.endFrame, span.needs, () =>
+            dispatchStroke(stroke.state, aim, false, stroke.source, span),
+          );
+        }
         if (!painted) return false;
         displayMode.current = preview ? "preview" : "committed";
         invalidateRef.current?.();

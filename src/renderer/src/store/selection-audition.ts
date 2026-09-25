@@ -3,7 +3,8 @@ import { getHistoryManager } from "@renderer/lib/history-manager";
 import * as Tone from "tone";
 import type { AnalysisParams } from "../../../main/lib/types";
 import { host } from "../lib/host";
-import { isFullHeight, type Selection } from "../lib/selection";
+import { readPackedSpan } from "../lib/packed-span";
+import { isFullHeight, selectionFrameRange, type Selection } from "../lib/selection";
 import { buildClipboardRegion } from "../lib/selection-clip";
 import { getFileSynthesisGeneration, openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
@@ -111,8 +112,7 @@ export const createSelectionAuditionSlice = (set: ZustandSet, get: ZustandGet): 
     if (isFullHeight(selection)) return null;
     const file = openFiles[fileId];
     const spec = file?.spectrogramData;
-    const renderer = file?.rendererRef?.current;
-    if (!file || !spec || !renderer) return null;
+    if (!file || !spec) return null;
     const hit = cached(fileId, selection);
     if (hit) return hit;
 
@@ -122,9 +122,12 @@ export const createSelectionAuditionSlice = (set: ZustandSet, get: ZustandGet): 
       const settled = cached(fileId, selection);
       if (settled) return settled;
 
-      const data = await renderer.getFBOData();
-      if (!data) return null;
-      const clip = buildClipboardRegion(data, selection, spec, file.displayName);
+      const { startFrame, endFrame } = selectionFrameRange(selection, spec.sampleRate);
+      const span = await readPackedSpan(spec, startFrame, endFrame, (ranges) =>
+        getHistoryManager(fileId).currentRanges(ranges),
+      );
+      if (!span) return null;
+      const clip = buildClipboardRegion(span, selection, spec, file.displayName);
       if (!clip?.spec.packedData) return null;
 
       const analysisParams: AnalysisParams = {

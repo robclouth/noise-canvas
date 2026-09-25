@@ -15,6 +15,7 @@ import attractEffectFrag from "../glsl/attract-effect.frag";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
+import { viewCoversFile } from "../lib/canvas-view";
 
 const defaultUniformValue = defaultParameterUniform(0, -100, 100);
 
@@ -105,9 +106,14 @@ class AttractEffect extends BaseEffect {
     if (!fieldOpenFile && fieldFile) {
       fieldOpenFile = Object.values(openFiles).find((f) => f.filePath === fieldFile.path);
     }
-    const fieldTextures = fieldOpenFile?.rendererRef?.current?.getTextures();
+    const fieldRenderer = fieldOpenFile?.rendererRef?.current;
+    const fieldTextures = fieldRenderer?.getTextures();
     const fieldData = fieldOpenFile?.spectrogramData;
-    if (fieldFile && fieldTextures && fieldData) {
+    // The field is read in the file's own layout, which only a canvas over
+    // the whole field file lays out.
+    const fieldView = fieldRenderer?.getCanvasView();
+    const fieldWhole = Boolean(fieldView && fieldData && viewCoversFile(fieldView, fieldData.numFrames));
+    if (fieldFile && fieldTextures && fieldData && fieldWhole) {
       material.uniforms.attractFieldMode.value = 1;
       material.uniforms.attractFieldTex.value = fieldTextures.packed.texture;
       material.uniforms.attractFieldMetaTex.value = fieldTextures.metadata;

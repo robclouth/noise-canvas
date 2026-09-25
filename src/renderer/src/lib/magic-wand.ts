@@ -1,5 +1,6 @@
 import type { SpectrogramData } from "../store/types";
 import { FULL_SCALE_DB_OFFSET } from "./constants";
+import type { PackedSpan } from "./packed-span";
 import { maskColsFor } from "./selection-mask";
 import { bandIndexToPitchUv, pitchUvToBandIndex } from "./utils";
 import type { Selection } from "./selection";
@@ -9,12 +10,18 @@ export const WAND_DEFAULT_TOLERANCE_DB = 18;
 export const WAND_MIN_TOLERANCE_DB = 3;
 export const WAND_MAX_TOLERANCE_DB = 60;
 
+/** Seconds either side of the click a wand region can reach. */
+export const WAND_REACH_SECONDS = 60;
+
 // A runaway grow (clicking silence in a long file) stops here rather than
 // walking every bin.
 const MAX_GROWN_BINS = 2_000_000;
 
-const binDb = (packed: Float32Array, pixel: number): number => {
-  const mag = Math.max(packed[pixel * 4], packed[pixel * 4 + 2]);
+/** The louder channel's level at `band`'s bin `bin`, or -Infinity where the span holds no such bin. */
+const binDb = (span: PackedSpan, band: number, bin: number): number => {
+  const pixel = span.pixel(band, bin);
+  if (pixel < 0) return Number.NEGATIVE_INFINITY;
+  const mag = Math.max(span.values[pixel * 4], span.values[pixel * 4 + 2]);
   return 20 * Math.log10(mag + 1e-7) + FULL_SCALE_DB_OFFSET;
 };
 
@@ -23,23 +30,25 @@ const binDb = (packed: Float32Array, pixel: number): number => {
  * within `toleranceDb` below the seed's, walking time neighbours in each band
  * and every bin the span overlaps in the bands above and below. Returns the
  * region as a masked selection, or null when the click lands outside the file.
+ * The region stops where `span` ends.
  */
 export function growWandSelection(
-  packed: Float32Array,
+  span: PackedSpan,
   spec: SpectrogramData,
   timeSec: number,
   pitchUv: number,
   toleranceDb: number,
 ): Selection | null {
   const { numBands, sampleRate, numFrames, synthesisMetadata } = spec;
-  const { bandOffsets, bandStepLog2s, bandLengths } = synthesisMetadata;
+  const { bandStepLog2s, bandLengths } = synthesisMetadata;
 
   const seedBand = Math.max(0, Math.min(numBands - 1, Math.floor(pitchUvToBandIndex(pitchUv, numBands))));
   const seedFrame = Math.max(0, Math.min(numFrames - 1, Math.floor(timeSec * sampleRate)));
   const seedBin = Math.min(bandLengths[seedBand] - 1, seedFrame >> bandStepLog2s[seedBand]);
   if (seedBin < 0) return null;
 
-  const floorDb = binDb(packed, bandOffsets[seedBand] + seedBin) - toleranceDb;
+  const floorDb = binDb(span, seedBand, seedBin) - toleranceDb;
+  if (!Number.isFinite(floorDb)) return null;
 
   const visited: (Uint8Array | null)[] = new Array(numBands).fill(null);
   const visit = (band: number, bin: number): boolean => {
@@ -59,7 +68,7 @@ export function growWandSelection(
     const bin = stack[stack.length - 1];
     const band = stack[stack.length - 2];
     stack.length -= 2;
-    if (binDb(packed, bandOffsets[band] + bin) < floorDb) continue;
+    if (binDb(span, band, bin) < floorDb) continue;
     (grown[band] ??= []).push(bin);
     count++;
 

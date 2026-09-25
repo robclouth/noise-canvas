@@ -262,7 +262,7 @@ describe("a commit whose canvas holds a window", () => {
     openWindowedFile();
 
     await expect(files.commitStroke(FILE_ID, wholeFileSnapshot(), { data: null, footprint: null })).rejects.toThrow(
-      /could not read the canvas/,
+      /could not read the committed state/,
     );
   });
 

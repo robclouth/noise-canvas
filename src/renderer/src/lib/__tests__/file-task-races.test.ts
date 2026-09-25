@@ -64,6 +64,7 @@ vi.mock("../modals", () => ({
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
   getHistoryManager: vi.fn(() => ({
+    currentBlockState: vi.fn(async () => new Float32Array(64)),
     currentNodeId: vi.fn(async () => gate.nodeId),
     markSaved: vi.fn(async (nodeId?: string) => {
       gate.markedSaved.push(nodeId);
@@ -195,7 +196,6 @@ function openTestFile(filePath = "/audio/a.wav") {
     },
     rendererRef: {
       current: {
-        getFBOData: async () => new Float32Array(64),
         getCanvasView: () => null,
         getDirtyRegion: () => null,
         clearDirtyRegion: vi.fn(),

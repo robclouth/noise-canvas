@@ -14,12 +14,14 @@ import { getHistoryManager } from "../lib/history-manager";
 import {
   growWandSelection,
   WAND_DEFAULT_TOLERANCE_DB,
+  WAND_REACH_SECONDS,
   WAND_MAX_TOLERANCE_DB,
   WAND_MIN_TOLERANCE_DB,
 } from "../lib/magic-wand";
 import { normaliseSelection, type Selection, type SelectionCorner } from "../lib/selection";
 import { lassoSelection, unionSelections, type LassoPoint } from "../lib/selection-mask";
 import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
+import { readPackedSpan } from "../lib/packed-span";
 import { strokeTrail, type ClientPoint } from "../lib/stroke-trail";
 import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
 import FileHeader from "./file-header";
@@ -675,10 +677,13 @@ export const FileView = memo((props: FileViewProps) => {
       const spec = openFiles[fileId]?.spectrogramData;
       const renderer = rendererRef?.current;
       if (!spec || !renderer) return null;
-      await getHistoryManager(fileId).awaitPackedReaders();
-      const packed = await renderer.getFBOData();
-      if (!packed) return null;
-      return growWandSelection(packed, spec, timeSec, pitchUv, tolDb);
+      const history = getHistoryManager(fileId);
+      await history.awaitPackedReaders();
+      const reach = WAND_REACH_SECONDS * spec.sampleRate;
+      const seed = timeSec * spec.sampleRate;
+      const span = await readPackedSpan(spec, seed - reach, seed + reach, (ranges) => history.currentRanges(ranges));
+      if (!span) return null;
+      return growWandSelection(span, spec, timeSec, pitchUv, tolDb);
     },
     [fileId, rendererRef],
   );

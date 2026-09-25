@@ -15,7 +15,7 @@ import {
   subtractPixelRanges,
 } from "@renderer/lib/pixel-ranges";
 import { applyCanvasTurns, type CanvasTurn, type PackedGather } from "@renderer/lib/canvas-phase-turns";
-import { applyPhaseTurns, hasPhaseTurns, phaseTurnRanges } from "../../../main/lib/history-delta";
+import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
 import { brushUnionForAim } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
@@ -177,10 +177,10 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
       }
 
-      // Take everything the commit reads from the renderer, and issue the FBO
-      // readback, before queueing. getFBOData() issues the GPU read
-      // synchronously, so the snapshot reflects this stroke's end even though
-      // the commit body runs serialized behind any earlier stroke.
+      // Take everything the commit reads from the renderer, and issue the
+      // footprint readback, before queueing: the read is issued synchronously,
+      // so it reflects this stroke's end even though the commit body runs
+      // serialized behind any earlier stroke.
       const renderer = file.rendererRef.current;
       const snapshot = buildStrokeCommitSnapshot({
         renderer,
@@ -193,41 +193,47 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       // A stroke changes the packed state inside its footprint, and a
       // projection inside its window and as whole phase turns past it — so
       // only the footprint is read back, and the rest of the state stays in
-      // the block store. A commit that rebuilds the whole file reads the
-      // whole canvas, or the store when the canvas holds a window of it.
+      // the block store. A commit that rebuilds the whole file takes the
+      // store's whole state with the stroke's pixels over it.
       const historyManager = getHistoryManager(activeFileId);
       const currentIdBefore = historyManager.getCurrentId();
-      const footprintRanges = snapshot.dirtyRanges;
-      const footprintOnly = !projectsWholeFile(snapshot) && footprintRanges != null && footprintRanges.length > 0;
-      const painted = footprintRanges != null && footprintRanges.length > 0 ? footprintRanges : null;
-      const footprintRead = footprintOnly && footprintRanges ? renderer.readPixelRanges(footprintRanges) : null;
-      const readPromise = footprintRead ?? renderer.getFBOData();
-      // Both reads are issued before the queue so they see this stroke's end.
-      // A whole-state commit needs the stroke's own pixels separately, because
-      // a canvas holding a window cannot hand over the whole state.
-      const paintedPromise = !footprintOnly && painted ? renderer.readPixelRanges(painted) : null;
+      const painted = snapshot.dirtyRanges != null && snapshot.dirtyRanges.length > 0 ? snapshot.dirtyRanges : null;
+      const footprintOnly = !projectsWholeFile(snapshot) && painted != null;
+      const paintedRead = painted ? renderer.readPixelRanges(painted) : null;
       // The store does not hold this stroke until the commit lands, so the
       // canvas keeps the paint on any block it brings in meanwhile.
-      const paintedRead = footprintRead ?? paintedPromise;
       const releasePaint = painted && paintedRead ? renderer.holdPaint(painted, paintedRead) : null;
 
       const commitTask = serializeFileTask(activeFileId, async () => {
         const readStart = performance.now();
-        let read = await readPromise;
-        const paintedValues = paintedPromise ? await paintedPromise : null;
+        const paintedValues = paintedRead ? await paintedRead : null;
         // A navigation's synthesis may still be landing — the commit measures
         // against the audio it installs — and may still be reading the packed
         // state this commit writes into.
         await historyManager.awaitPackedReaders();
         if (!openFiles[activeFileId]) return;
-        if (!read && !footprintOnly && historyManager.movedOnlyByStrokes(currentIdBefore)) {
-          // The store holds the committed state the canvas cannot show, and
-          // the canvas holds what this stroke painted over it.
-          const stored = await historyManager.currentBlockState();
-          if (stored && paintedValues && painted) scatterCompactPixelRanges(stored, paintedValues, painted);
-          read = stored;
+        if (!historyManager.movedOnlyByStrokes(currentIdBefore)) {
+          // A reanalysis or a history move replaced the state the stroke was
+          // painted on, so its pixels no longer describe any part of it.
+          console.warn("history: the state moved under the stroke; it was not committed");
+          return;
         }
-        if (!read) return;
+
+        let data: Float32Array | null = null;
+        let baseFootprint: Float32Array | undefined;
+        let footprint: { ranges: Uint32Array; values: Float32Array } | null = null;
+        if (footprintOnly && painted && paintedValues) {
+          // The store holds the pre-stroke state, stashed pixels included.
+          baseFootprint = (await historyManager.currentRanges(painted)) ?? undefined;
+          if (baseFootprint) footprint = { ranges: painted, values: paintedValues };
+        } else if (!footprintOnly) {
+          data = await historyManager.currentBlockState();
+          if (data && painted && paintedValues) scatterCompactPixelRanges(data, paintedValues, painted);
+        }
+        if (!footprint && !data) {
+          console.warn("history: the store could not serve the stroke's commit");
+          return;
+        }
         diag.timing("timing", "commit state read", performance.now() - readStart, {
           footprintOnly: footprintOnly ? 1 : 0,
         });
@@ -241,38 +247,6 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           stash && snapshot.dirtyRanges
             ? subtractPixelRanges(stash.ranges, snapshot.dirtyRanges)
             : (stash?.ranges ?? null);
-
-        let data: Float32Array | null = null;
-        let baseFootprint: Float32Array | undefined;
-        let footprint: { ranges: Uint32Array; values: Float32Array } | null = null;
-        if (footprintOnly && footprintRanges && historyManager.movedOnlyByStrokes(currentIdBefore)) {
-          // The store holds the pre-stroke state, stashed pixels included.
-          baseFootprint = (await historyManager.currentRanges(footprintRanges)) ?? undefined;
-          if (baseFootprint) footprint = { ranges: footprintRanges, values: read };
-        }
-        if (!footprint) {
-          // The state moved under the read (a reanalysis between mouse-up and
-          // here), or the store cannot serve it; the canvas as it stands now
-          // is the only whole picture left.
-          baseFootprint = undefined;
-          data = footprintOnly ? ((await renderer.getFBOData()) ?? null) : read;
-          if (!data) {
-            console.warn("history: the stroke has no whole picture to commit; the canvas holds a window");
-            return;
-          }
-          // The canvas never took the stashed patch or its turns, so those
-          // pixels are put back from the store.
-          if (stash) {
-            let fix = stashRanges ?? new Uint32Array(0);
-            for (const t of stash.turns) fix = mergePixelRanges(fix, phaseTurnRanges(t));
-            if (snapshot.dirtyRanges) fix = subtractPixelRanges(fix, snapshot.dirtyRanges);
-            if (fix.length) {
-              const values = await historyManager.currentRanges(fix);
-              if (values) scatterCompactPixelRanges(data, values, fix);
-              else console.warn("history: a stashed patch could not be recovered from the block store");
-            }
-          }
-        }
 
         try {
           // One pass derives the audio and the coefficients that audio

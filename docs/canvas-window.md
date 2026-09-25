@@ -139,6 +139,11 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    and queues the positions; the next frame paints each one before the
    cursor's own dab, so a fast stroke leaves no gaps. A position equal to the
    last dab is skipped.
+   A region edit (silence, cut, paste, duplicate) is one dab the size of the
+   region, held the same way and settled before its commit; a region wider
+   than one window is refused with a notice. Reads for a region (copy, the
+   wand, auditioning a selection) take the store's committed state over the
+   blocks they cover (`readPackedSpan`), never the canvas.
    A grid fill is a stroke like any other: each of its dabs goes through
    `paintWhenHeld`, and the fill settles every chunk before it gives the
    next, so the window walks the file behind the anchors and the carry keeps
