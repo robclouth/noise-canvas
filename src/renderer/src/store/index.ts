@@ -18,6 +18,7 @@ import { persist, subscribeWithSelector } from "zustand/middleware";
 import type { PersistStorage, StorageValue } from "zustand/middleware";
 import { host } from "@renderer/lib/host";
 import { gatherFileGroups } from "@renderer/lib/file-reorder";
+import { readTruth } from "@renderer/lib/drive-truth";
 import { APP_PERSISTED_KEYS, createAppSlice } from "./app";
 import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
@@ -456,10 +457,11 @@ useStore.subscribe(
   },
 );
 
-// Dev-only: expose the store on window so a CDP-attached driver can read state
-// and toggle parameters for controlled, reproducible performance measurements.
-if (import.meta.env.DEV) {
+// Dev builds and debug-globals builds expose the store on window so a
+// CDP-attached driver can read state and seed a brush.
+if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_GLOBALS === "1") {
   (globalThis as unknown as { __store?: typeof useStore }).__store = useStore;
+  (globalThis as unknown as { __readTruth?: typeof readTruth }).__readTruth = readTruth;
 }
 
 export function getModulator(index: number) {

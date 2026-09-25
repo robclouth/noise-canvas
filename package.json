@@ -12,6 +12,8 @@
     "test:host": "vitest run --config vitest.host.config.ts",
     "test:addon": "vitest run --config vitest.addon.config.ts",
     "window:check": "node scripts/window-check.mjs",
+    "drive:session": "node scripts/drive/session.mjs",
+    "drive:stroke": "node scripts/drive/probe-stroke.mjs",
     "window:display:check": "node scripts/window-display-check.mjs",
     "window:original:check": "node scripts/window-original-check.mjs",
     "window:stack:check": "node scripts/window-stack-check.mjs",
