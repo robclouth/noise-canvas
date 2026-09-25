@@ -2,7 +2,7 @@
 // every dab: which dabs reached the store, and which parts of each.
 //
 // Usage: node scripts/drive/probe-stroke.mjs [--seconds 285] [--extra 8] [--no-build]
-//        [--power 0] [--strokes 1] [--settle 15000]
+//        [--power 0] [--strokes 1] [--settle 15000] [--before 1500] [--duration 500]
 import { copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ const POWER = Number(option("power", 0));
 const STROKES = Number(option("strokes", 1));
 const SETTLE = Number(option("settle", 15000));
 const DURATION = Number(option("duration", 500));
+const BEFORE = Number(option("before", 1500));
 
 const audioDir = join(tmpdir(), "noisecanvas-noise");
 const extras = [2.8, 7.1, 10.9, 13.7, 13.7, 13.7, 21.5, 13.7]
@@ -43,7 +44,7 @@ try {
   for (let i = 0; i < 8; i++) await page.mouse.wheel(0, 100);
   if (POWER > 0) for (let i = 0; i < Math.round(POWER * 5); i++) await page.mouse.wheel(0, -20);
   await page.keyboard.up("Meta");
-  await sleep(1500);
+  await sleep(BEFORE);
 
   const strokeLog = [];
   for (let s = 0; s < STROKES; s++) {

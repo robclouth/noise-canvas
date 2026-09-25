@@ -76,6 +76,11 @@ export class BlockSlotCache {
     return this.capacity;
   }
 
+  /** Slots no block holds yet. */
+  get freeSlots(): number {
+    return this.capacity - this.slotOf.size;
+  }
+
   /** Bytes the allocated page textures hold. */
   get allocatedBytes(): number {
     let pages = 0;

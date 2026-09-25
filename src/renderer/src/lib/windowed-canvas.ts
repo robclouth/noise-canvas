@@ -80,6 +80,11 @@ function canvasWindowSlotBytes(grid: BlockGrid, windowBlocks: number): number {
   return slots * blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL;
 }
 
+/** Longest idle wait between two blocks the slot warm-up reads. */
+const SLOT_WARM_STEP_MS = 50;
+/** How long the warm-up waits while a stroke paints or a commit lands. */
+const SLOT_WARM_RETRY_MS = 500;
+
 /** Fills `settle` waits through before it gives up on the paint still held. */
 const HELD_PAINT_FILLS = 8;
 
@@ -164,6 +169,7 @@ export class WindowedCanvas {
   private carried = new CarriedPaint();
   private readonly pending: PendingPaint[] = [];
   private stroking = false;
+  private warming = false;
   private strokeEpoch = 0;
   private cancelSettlement: (() => void) | null = null;
 
@@ -269,6 +275,52 @@ export class WindowedCanvas {
     if (!renderer.getIsInitialized()) return;
     const view = renderer.committedSource().view;
     this.aim(view.startFrame, view.endFrame);
+    this.warmSlots();
+  }
+
+  /**
+   * Fills free block slots from the store in idle time, nearest the canvas
+   * first, so a window that later moves there composes on the GPU. It waits
+   * while a stroke paints or a commit lands, and stops once every block has a
+   * slot or no slot is free.
+   */
+  private warmSlots(): void {
+    const window = this.blocks;
+    if (this.warming || !window || this.disposed) return;
+    this.warming = true;
+    const started = performance.now();
+    let warmed = 0;
+    const later = (step: () => void, ms: number): void => {
+      if (typeof requestIdleCallback === "function") requestIdleCallback(step, { timeout: ms });
+      else setTimeout(step, ms);
+    };
+    const step = (): void => {
+      const renderer = this.deps.renderer();
+      if (this.disposed || !renderer?.getIsInitialized()) {
+        this.warming = false;
+        return;
+      }
+      if (this.stroking || this.pending.length > 0 || this.fill || this.request) {
+        later(step, SLOT_WARM_RETRY_MS);
+        return;
+      }
+      const view = renderer.committedSource().view;
+      window.warmOne(Math.round((view.firstBlock + view.lastBlock) / 2)).then(
+        (took) => {
+          if (took) {
+            warmed++;
+            later(step, SLOT_WARM_STEP_MS);
+            return;
+          }
+          this.warming = false;
+          if (warmed > 0) diag.timing("timing", "block slots warmed", performance.now() - started, { blocks: warmed });
+        },
+        () => {
+          this.warming = false;
+        },
+      );
+    };
+    later(step, SLOT_WARM_STEP_MS);
   }
 
   /**
@@ -710,6 +762,7 @@ export class WindowedCanvas {
     this.stroking = false;
     this.deps.renderer()?.endStroke();
     this.deps.renderer()?.releaseRollback();
+    this.warmSlots();
   }
 
   /**

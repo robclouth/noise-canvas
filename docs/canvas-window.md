@@ -349,7 +349,12 @@ Per open file, windowed, at K blocks:
   the window's share of the budget has left once the window is sized
   (`canvasExtraSlotBlocks`), up to the whole file. A block that keeps its slot
   composes on the GPU when the window comes back to it, instead of being read
-  and uploaded again. Slot pages are allocated as blocks arrive.
+  and uploaded again. Once the store can answer, idle time fills the free
+  slots nearest the canvas first (`warmSlots`), pausing while a stroke paints
+  or a commit lands and leaving two slots free for a slide; a zoomed-out stroke
+  across the file then slides without reading a block. A read that was on its
+  way when the slots were dropped reads again rather than land stale values.
+  Slot pages are allocated as blocks arrive.
 - the original window, once a step in Original mode asks for it: one window
   plus four spare, plus its composed texture
 - a source window per windowed file a step paints from, and its

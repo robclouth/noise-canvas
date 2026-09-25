@@ -9,6 +9,8 @@ export const CANVAS_WINDOW_MARGIN_BLOCKS = 1;
 
 /** Milliseconds an aim holds still before the window follows it. */
 export const CANVAS_WINDOW_REST_MS = 90;
+/** Free slots `warmOne` leaves, so a slide in flight still finds room without pushing a block out. */
+const WARM_FREE_SLOTS = 2;
 
 /**
  * How long the frames the canvas is aimed at have held still. A pointer
@@ -122,6 +124,7 @@ export class CanvasWindow {
   // from these: the canvas composes them, and a block with no slot is a hole.
   private requested: ReadonlySet<number> = new Set<number>();
   private disposed = false;
+  private epoch = 0;
 
   constructor(
     gl: WebGLRenderer,
@@ -277,8 +280,28 @@ export class CanvasWindow {
     this.onCanvas.clear();
   }
 
+  /**
+   * Reads the block nearest `near` that has no slot into a free one. Resolves
+   * false, reading nothing, once every block has a slot or too few slots are
+   * free to take one without pushing a block out.
+   */
+  async warmOne(near: number): Promise<boolean> {
+    if (this.disposed || this.cache.freeSlots - this.loading.size <= WARM_FREE_SLOTS) return false;
+    const count = this.grid.blockCount;
+    for (let distance = 0; distance < count; distance++) {
+      for (const block of [near - distance, near + distance]) {
+        if (block < 0 || block >= count || this.cache.has(block) || this.loading.has(block)) continue;
+        return await this.loadBlock(block);
+      }
+    }
+    return false;
+  }
+
   /** Drops the given blocks (or every block) from their slots. */
   invalidate(blocks?: number[]): void {
+    this.epoch++;
+    if (!blocks) this.loading.clear();
+    else for (const block of blocks) this.loading.delete(block);
     this.cache.invalidate(blocks);
     if (!blocks) this.painted.clear();
     else for (const block of blocks) this.painted.delete(block);
@@ -295,9 +318,13 @@ export class CanvasWindow {
   private loadBlock(block: number): Promise<boolean> {
     const pending = this.loading.get(block);
     if (pending) return pending;
-    const load = this.readValues(block)
+    const epoch = this.epoch;
+    const load: Promise<boolean> = this.readValues(block)
       .then((values) => {
         if (this.disposed || !values) return false;
+        // A read that started before the store moved under the slots holds
+        // the old values, so the block is read again.
+        if (epoch !== this.epoch) return this.loadBlock(block);
         // Read as the value lands, not as the read started: the window asked
         // for may have moved on, and it is the newest one a slot is owed to.
         this.cache.upload(block, values, this.requested);
@@ -306,7 +333,7 @@ export class CanvasWindow {
       })
       .catch(() => false)
       .finally(() => {
-        this.loading.delete(block);
+        if (this.loading.get(block) === load) this.loading.delete(block);
       });
     this.loading.set(block, load);
     return load;

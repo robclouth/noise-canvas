@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SpectrogramData } from "../../store/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockStateWithSteps } from "../../test/mock-state";
-import { blockGrid, blockPixelRanges, type BlockGrid } from "../block-grid";
+import { blockGrid, blockPixelRanges, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "../block-grid";
 import { canvasViewOf, composeViewContent, fileRangesToView, viewRangesToFile, type CanvasView } from "../canvas-view";
 import {
   AimRest,
@@ -629,6 +629,57 @@ describe("a canvas window that follows the brush", () => {
     expect(window.ready(second)).toBe(true);
     expect(await window.acquire(second)).toBe(true);
     expect(reads).toBe(6);
+  });
+
+  it("warms free slots nearest the canvas first and stops before pushing a block out", async () => {
+    const order: number[] = [];
+    const firstPixels = Array.from({ length: grid.blockCount }, (_, block) => blockPixelRanges(grid, block).ranges[0]);
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 1,
+      maxBytes: 6 * blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL,
+      read: async (ranges) => {
+        order.push(firstPixels.indexOf(ranges[0]));
+        return gatherPixelRanges(data.packedData, ranges);
+      },
+    });
+    disposers.push(() => window.dispose());
+    expect(grid.blockCount).toBeGreaterThan(6);
+    expect(window.slotCount).toBe(6);
+    const taken: boolean[] = [];
+    for (let i = 0; i < 6; i++) taken.push(await window.warmOne(3));
+    // Two slots stay free for a slide, so four of the six are warmed.
+    expect(taken).toEqual([true, true, true, true, false, false]);
+    expect(order).toEqual([3, 2, 4, 1]);
+  });
+
+  it("reads a block again when its slots are dropped while the read is on its way", async () => {
+    let release: () => void = () => {};
+    let reads = 0;
+    const stale = new Float32Array(data.packedData.length).fill(7);
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 4,
+      read: async (ranges) => {
+        reads++;
+        if (reads > 1) return gatherPixelRanges(data.packedData, ranges);
+        await new Promise<void>((resolve) => (release = resolve));
+        return gatherPixelRanges(stale, ranges);
+      },
+    });
+    disposers.push(() => window.dispose());
+    const view = window.viewFor({ firstBlock: 0, lastBlock: 0 });
+    const filling = window.acquire(view);
+    await Promise.resolve();
+    window.invalidate();
+    release();
+    expect(await filling).toBe(true);
+    expect(reads).toBe(2);
+
+    const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, view);
+    disposers.push(() => renderer.dispose());
+    renderer.initialize((target) => window.compose(view, [0], target));
+    const filled = await renderer.getFBOData();
+    const expected = composeViewContent(view, data.packedData);
+    expect(Array.from(filled.subarray(0, view.texels * 4))).toEqual(Array.from(expected.subarray(0, view.texels * 4)));
   });
 
   it("keeps the slots of both windows when the brush jumps a whole window", async () => {
