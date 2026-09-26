@@ -4,11 +4,16 @@
  *
  * The patch is a NCA_GRID × NCA_GRID grid laid over the brush: columns run
  * along time, rows up in pitch. Each cell holds NCA_CHANNELS numbers. The first
- * three are what is heard: the level on a 90 dB scale, and that level carried
- * on the phase as a pair (level·cos, level·sin). The rest are hidden state only
- * the cells read. A step perceives each channel through identity and two Sobel
- * kernels, adds the cell's place in the brush, runs a two-layer network per cell, adds the result to a random half
- * of the cells, and clears every cell with no audible neighbour.
+ * three are what is heard: the level on a 90 dB scale, then the phase as a
+ * path, since the packed format stores phase unwrapped along time within each
+ * band: how far it has moved since the row's first cell, and how far it moved
+ * over the last cell. The rest are hidden state only the cells read.
+ *
+ * A step perceives each channel through identity and two Sobel kernels, adds
+ * the cell's place in the brush, runs a two-layer network per cell, and adds
+ * the result to a random half of the cells. Unlike the paper there is no
+ * "alive" mask: silence is soil the sound can grow into anywhere, as in the
+ * authors' follow-up on self-organising textures.
  *
  * The trainer (nca-train.ts) and the shader (nca-step.frag) both follow this
  * file's layout, so a model trained in one runs unchanged in the other.
@@ -27,6 +32,16 @@ export const NCA_HIDDEN = 64;
 export const NCA_PERCEPTION = NCA_CHANNELS * 3 + 2;
 /** Chance a cell applies its update on a given step. */
 export const NCA_FIRE_RATE = 0.5;
+/** Radians of phase path per unit in the path channel. */
+export const NCA_PATH_SCALE = 32;
+/** Radians of phase movement over one cell per unit in the rate channel. */
+export const NCA_RATE_SCALE = 8;
+/**
+ * Mean change in phase rate from cell to cell, in radians, at which a row's
+ * phase counts as fully random. Chosen by ear-proxy: at 2, the grown break's
+ * spectral flatness matched the original's in every range.
+ */
+export const NCA_ROUGHNESS_FULL = 2;
 /** The level scale: 0 is this many dB below full scale, 1 is full scale. */
 export const NCA_DB_RANGE = 90;
 
@@ -48,11 +63,17 @@ export type NcaModel = {
   loss: number;
   iterations: number;
   /**
-   * The learnt sound's phase at each grid cell, row-major, quantised to a byte
-   * over −π to π. The network learns level only, so this is where a regrown
-   * sound gets its own phase back.
+   * Where each row's phase path starts in the learnt sound, one byte per row
+   * over −π to π. The network grows the path; this anchors it.
    */
   phase: Uint8Array | null;
+  /**
+   * How rough each row's phase is in the learnt sound, one byte per row from
+   * smooth (0) to random (255). A smooth grown path is right for steady low
+   * bands, but where the real phase jitters, a smooth one turns noise into a
+   * comb of tones, so rough rows get their jitter back.
+   */
+  roughness: Uint8Array | null;
 };
 
 const SIZES = {
@@ -120,6 +141,7 @@ export function serializeModel(model: NcaModel): string {
     iterations: model.iterations,
     weights: toBase64(new Uint8Array(packed.buffer)),
     phase: model.phase ? toBase64(model.phase) : null,
+    roughness: model.roughness ? toBase64(model.roughness) : null,
   });
 }
 
@@ -141,9 +163,11 @@ export function parseModel(text: unknown): NcaModel | null {
     const weights = { w1: take(SIZES.w1), b1: take(SIZES.b1), w2: take(SIZES.w2), b2: take(SIZES.b2) };
     if (![weights.w1, weights.b1, weights.w2, weights.b2].every((a) => a.every(Number.isFinite))) return null;
     const phase = typeof raw.phase === "string" ? fromBase64(raw.phase) : null;
+    const roughness = typeof raw.roughness === "string" ? fromBase64(raw.roughness) : null;
     return {
       weights,
-      phase: phase && phase.length === NCA_GRID * NCA_GRID ? phase : null,
+      phase: phase && phase.length === NCA_GRID ? phase : null,
+      roughness: roughness && roughness.length === NCA_GRID ? roughness : null,
       label: typeof raw.label === "string" ? raw.label : "",
       loss: typeof raw.loss === "number" ? raw.loss : NaN,
       iterations: typeof raw.iterations === "number" ? raw.iterations : 0,

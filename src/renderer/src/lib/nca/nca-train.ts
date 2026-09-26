@@ -134,6 +134,38 @@ function damage(state: Float32Array, random: () => number): void {
   }
 }
 
+/**
+ * Loss weights per row and channel, [row][channel]. Each row's phase path and
+ * rate are scaled by how much they vary in the target, relative to how much
+ * the level varies: a smooth low path counts in full, and a high band's path,
+ * close to a random walk, counts far less, so it cannot crowd out the level.
+ */
+function channelWeights(target: Float32Array, pathWeight: number, rateWeight: number): Float32Array {
+  const variance = (channel: number, row: number | null): number => {
+    let sum = 0;
+    let sumSq = 0;
+    let n = 0;
+    for (let r = 0; r < NCA_GRID; r++) {
+      if (row !== null && r !== row) continue;
+      for (let c = 0; c < NCA_GRID; c++) {
+        const value = target[(r * NCA_GRID + c) * NCA_VISIBLE + channel];
+        sum += value;
+        sumSq += value * value;
+        n++;
+      }
+    }
+    return Math.max(sumSq / n - (sum / n) ** 2, 1e-6);
+  };
+  const levelVariance = variance(0, null);
+  const weights = new Float32Array(NCA_GRID * NCA_VISIBLE);
+  for (let row = 0; row < NCA_GRID; row++) {
+    weights[row * NCA_VISIBLE] = 1;
+    weights[row * NCA_VISIBLE + 1] = (pathWeight * levelVariance) / variance(1, row);
+    weights[row * NCA_VISIBLE + 2] = (rateWeight * levelVariance) / variance(2, row);
+  }
+  return weights;
+}
+
 export type NcaTrainOptions = {
   iterations: number;
   batchSize?: number;
@@ -145,12 +177,11 @@ export type NcaTrainOptions = {
   damageFrom?: number;
   random?: () => number;
   /**
-   * How much the phase pair counts against the level in the loss. Noisy sound
-   * has close to random phase, and weighing it at all pulls the model towards a
-   * grey average of everything, so by default only the level is learnt and the
-   * phase pair is left to the model as more hidden state.
+   * How much the phase path and its rate count against the level in the loss,
+   * after each row is scaled by how much it varies (see channelWeights).
    */
-  phaseWeight?: number;
+  pathWeight?: number;
+  rateWeight?: number;
   /** Starting weights, to carry on training a model instead of starting afresh. */
   initial?: NcaWeights;
 };
@@ -176,7 +207,7 @@ export async function trainNca(
   options: NcaTrainOptions,
   onProgress?: (progress: NcaTrainProgress) => void,
   signal?: AbortSignal,
-): Promise<Omit<NcaModel, "label" | "phase">> {
+): Promise<Omit<NcaModel, "label" | "phase" | "roughness">> {
   const random = options.random ?? Math.random;
   const batchSize = options.batchSize ?? 4;
   const poolSize = options.poolSize ?? 64;
@@ -184,13 +215,14 @@ export async function trainNca(
   const stepsMax = options.stepsMax ?? 32;
   const damageFrom = options.damageFrom ?? 0.25;
   const learningRate = options.learningRate ?? 2e-3;
-  const phaseWeight = options.phaseWeight ?? 0;
+  const pathWeight = options.pathWeight ?? 0.1;
+  const rateWeight = options.rateWeight ?? 0.1;
 
   const vars = createVariables(options.initial ?? initialWeights(random));
   const kernel = perceptionKernel();
   const position = positionField();
   const targetTensor = tf.tensor4d(target, [1, NCA_GRID, NCA_GRID, NCA_VISIBLE]);
-  const lossWeights = tf.tensor4d([1, phaseWeight, phaseWeight], [1, 1, 1, NCA_VISIBLE]);
+  const lossWeights = tf.tensor4d(channelWeights(target, pathWeight, rateWeight), [1, NCA_GRID, 1, NCA_VISIBLE]);
   const optimizer = tf.train.adam(learningRate);
   const pool = Array.from({ length: poolSize }, () => seedState());
   const fresh = (): Float32Array => {

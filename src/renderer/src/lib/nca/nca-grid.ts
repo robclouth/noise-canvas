@@ -1,4 +1,12 @@
-import { levelOf, NCA_GRID, NCA_VISIBLE, quantisePhase } from "./nca-model";
+import {
+  levelOf,
+  NCA_GRID,
+  NCA_PATH_SCALE,
+  NCA_RATE_SCALE,
+  NCA_ROUGHNESS_FULL,
+  NCA_VISIBLE,
+  quantisePhase,
+} from "./nca-model";
 
 /** What the grid reader needs from a spectrogram: its packed data and layout. */
 export type PackedSpectrogram = {
@@ -30,8 +38,10 @@ function readPacked(spec: PackedSpectrogram, u: number, v: number, out: Float32A
 /**
  * The audible channels of an NCA grid over `rect`: row-major, row 0 lowest in
  * pitch, NCA_VISIBLE values per cell. Outside the file's pitch range reads as
- * silence. Both channels fold into one: their mean level, on the phase of
- * their sum.
+ * silence. The level is the mean of the two channels. The phase is the left
+ * channel's, which the packed format stores unwrapped along time within each
+ * band, so it reads as a path: how far the phase has moved since the row's
+ * first cell, and how far it moved over the last cell.
  */
 export function readGrid(spec: PackedSpectrogram, rect: UvRect, size = NCA_GRID): Float32Array {
   const grid = new Float32Array(size * size * NCA_VISIBLE);
@@ -39,28 +49,53 @@ export function readGrid(spec: PackedSpectrogram, rect: UvRect, size = NCA_GRID)
   for (let row = 0; row < size; row++) {
     const v = rect.y0 + ((row + 0.5) / size) * (rect.y1 - rect.y0);
     if (v < 0 || v >= 1) continue;
+    let first = 0;
+    let previous = 0;
     for (let col = 0; col < size; col++) {
       const u = rect.x0 + ((col + 0.5) / size) * (rect.x1 - rect.x0);
       readPacked(spec, u, v, texel);
-      const [magL, phaseL, magR, phaseR] = texel;
-      const re = magL * Math.cos(phaseL) + magR * Math.cos(phaseR);
-      const im = magL * Math.sin(phaseL) + magR * Math.sin(phaseR);
-      const level = levelOf(0.5 * (magL + magR));
-      const phase = Math.atan2(im, re);
+      const phase = texel[1];
+      if (col === 0) first = previous = phase;
       const i = (row * size + col) * NCA_VISIBLE;
-      grid[i] = level;
-      grid[i + 1] = level * Math.cos(phase);
-      grid[i + 2] = level * Math.sin(phase);
+      grid[i] = levelOf(0.5 * (texel[0] + texel[2]));
+      grid[i + 1] = (phase - first) / NCA_PATH_SCALE;
+      grid[i + 2] = (phase - previous) / NCA_RATE_SCALE;
+      previous = phase;
     }
   }
   return grid;
 }
 
-/** The phase of each cell of a grid readGrid returned, quantised for NcaModel.phase. */
-export function gridPhase(grid: Float32Array, size = NCA_GRID): Uint8Array {
-  const phase = new Uint8Array(size * size);
-  for (let cell = 0; cell < size * size; cell++) {
-    phase[cell] = quantisePhase(Math.atan2(grid[cell * NCA_VISIBLE + 2], grid[cell * NCA_VISIBLE + 1]));
+/**
+ * Where each row's phase path starts: the left channel's phase at the row's
+ * first cell, quantised for NcaModel.phase.
+ */
+export function readAnchors(spec: PackedSpectrogram, rect: UvRect, size = NCA_GRID): Uint8Array {
+  const anchors = new Uint8Array(size);
+  const texel = new Float32Array(4);
+  for (let row = 0; row < size; row++) {
+    const v = rect.y0 + ((row + 0.5) / size) * (rect.y1 - rect.y0);
+    if (v < 0 || v >= 1) continue;
+    readPacked(spec, rect.x0 + (0.5 / size) * (rect.x1 - rect.x0), v, texel);
+    anchors[row] = quantisePhase(texel[1]);
   }
-  return phase;
+  return anchors;
+}
+
+/**
+ * How rough each row's phase is in a grid readGrid returned: the mean change
+ * in phase rate from cell to cell, as a byte from smooth (0) to random (255).
+ */
+export function gridRoughness(grid: Float32Array, size = NCA_GRID): Uint8Array {
+  const roughness = new Uint8Array(size);
+  for (let row = 0; row < size; row++) {
+    let sum = 0;
+    for (let col = 1; col < size; col++) {
+      const rate = grid[(row * size + col) * NCA_VISIBLE + 2];
+      const previous = grid[(row * size + col - 1) * NCA_VISIBLE + 2];
+      sum += Math.abs(rate - previous) * NCA_RATE_SCALE;
+    }
+    roughness[row] = Math.round(Math.min(1, sum / (size - 1) / NCA_ROUGHNESS_FULL) * 255);
+  }
+  return roughness;
 }

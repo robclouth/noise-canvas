@@ -3,7 +3,7 @@ import "@tensorflow/tfjs-backend-cpu";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { NcaGpu } from "../nca/nca-gpu";
-import { readGrid } from "../nca/nca-grid";
+import { readAnchors, readGrid } from "../nca/nca-grid";
 import {
   dequantisePhase,
   initialWeights,
@@ -11,6 +11,8 @@ import {
   magnitudeOf,
   NCA_CHANNELS,
   NCA_GRID,
+  NCA_PATH_SCALE,
+  NCA_RATE_SCALE,
   NCA_VISIBLE,
   NcaWeights,
   parseModel,
@@ -57,8 +59,10 @@ beforeAll(async () => {
 describe("NCA model format", () => {
   it("round-trips a model through its parameter string", () => {
     const weights = liveWeights(lcg(1));
-    const phase = new Uint8Array(NCA_GRID * NCA_GRID).map((_, i) => i % 256);
-    const parsed = parseModel(serializeModel({ weights, label: "a bell", loss: 0.01, iterations: 5, phase }));
+    const phase = new Uint8Array(NCA_GRID).map((_, i) => i % 256);
+    const parsed = parseModel(
+      serializeModel({ weights, label: "a bell", loss: 0.01, iterations: 5, phase, roughness: null }),
+    );
     expect(parsed?.label).toBe("a bell");
     expect(Array.from(parsed!.weights.w2)).toEqual(Array.from(weights.w2));
     expect(Array.from(parsed!.phase!)).toEqual(Array.from(phase));
@@ -69,7 +73,14 @@ describe("NCA model format", () => {
     expect(parseModel("{")).toBeNull();
     expect(parseModel(JSON.stringify({ version: 1, weights: "AAAA" }))).toBeNull();
     // A model grown on a grid of another size does not fit this one.
-    const text = serializeModel({ weights: liveWeights(lcg(2)), label: "", loss: 0, iterations: 1, phase: null });
+    const text = serializeModel({
+      weights: liveWeights(lcg(2)),
+      label: "",
+      loss: 0,
+      iterations: 1,
+      phase: null,
+      roughness: null,
+    });
     expect(parseModel(text.replace(`"grid":${NCA_GRID}`, `"grid":${NCA_GRID / 2}`))).toBeNull();
   });
 
@@ -99,9 +110,32 @@ describe("NCA grid", () => {
     const grid = readGrid(spec, { x0: 0, x1: 1, y0: 0, y1: 1 });
     expect(grid.length).toBe(NCA_GRID * NCA_GRID * NCA_VISIBLE);
     expect(grid[0]).toBeCloseTo(levelOf(0.1), 5);
-    // Phase 0 on both channels: all of the level sits on the real axis.
-    expect(grid[1]).toBeCloseTo(levelOf(0.1), 5);
-    expect(grid[2]).toBeCloseTo(0, 5);
+    // A phase that never moves has no path and no rate.
+    expect(grid[1]).toBe(0);
+    expect(grid[2]).toBe(0);
+  });
+
+  it("reads an unwrapped phase as a path along each row", () => {
+    // The mock's phase climbs steadily along time, unwrapped, to 2π at the end.
+    const spec = createMockSpectrogramData({ numFrames: 128, numBands: 16, pattern: "sine" });
+    const grid = readGrid(spec, { x0: 0, x1: 1, y0: 0, y1: 1 });
+    const row = 5;
+    const at = (col: number, channel: number) => grid[(row * NCA_GRID + col) * NCA_VISIBLE + channel];
+    expect(at(0, 1)).toBe(0);
+    expect(at(NCA_GRID - 1, 1) * NCA_PATH_SCALE).toBeCloseTo(2 * Math.PI * (1 - 1 / NCA_GRID), 1);
+    // Its rate over the row adds back up to the path.
+    let sum = 0;
+    for (let col = 1; col < NCA_GRID; col++) sum += at(col, 2) * NCA_RATE_SCALE;
+    expect(sum).toBeCloseTo(at(NCA_GRID - 1, 1) * NCA_PATH_SCALE, 4);
+  });
+
+  it("anchors each row at its phase in the first cell", () => {
+    const spec = createMockSpectrogramData({ numFrames: 128, numBands: 16, pattern: "sine" });
+    const anchors = readAnchors(spec, { x0: 0.25, x1: 0.5, y0: 0, y1: 1 });
+    expect(anchors.length).toBe(NCA_GRID);
+    // The mock's phase at a quarter of the way in is π/2.
+    const phase = dequantisePhase(anchors[3]);
+    expect(Math.abs(Math.atan2(Math.sin(phase - Math.PI / 2), Math.cos(phase - Math.PI / 2)))).toBeLessThan(0.05);
   });
 
   it("reads silence past the top of the file", () => {

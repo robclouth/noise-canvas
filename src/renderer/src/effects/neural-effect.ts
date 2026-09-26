@@ -1,4 +1,4 @@
-import { DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RedFormat, WebGLRenderer } from "three";
+import { DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RGFormat, WebGLRenderer } from "three";
 import ncaInitFrag from "../glsl/nca-init.frag";
 import neuralEffectFrag from "../glsl/neural-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -105,15 +105,19 @@ class NeuralEffect extends BaseEffect {
     uniforms.ncaHasPhase.value = uniforms.ncaPhase.value !== null;
   }
 
-  /** The model's learnt phase as a texture of turns, made once per model. */
+  /** Per row, where the learnt phase path starts (as a turn) and how rough it is, made once per model. */
   private learntPhase(model: NcaModel): DataTexture | null {
     if (model !== this.phaseModel) {
       this.phaseTexture?.dispose();
       this.phaseTexture = null;
       this.phaseModel = model;
       if (model.phase) {
-        const turns = Float32Array.from(model.phase, (byte) => byte / 256);
-        this.phaseTexture = new DataTexture(turns, NCA_GRID, NCA_GRID, RedFormat, FloatType);
+        const rows = new Float32Array(NCA_GRID * 2);
+        for (let row = 0; row < NCA_GRID; row++) {
+          rows[row * 2] = model.phase[row] / 256;
+          rows[row * 2 + 1] = (model.roughness?.[row] ?? 0) / 255;
+        }
+        this.phaseTexture = new DataTexture(rows, NCA_GRID, 1, RGFormat, FloatType);
         this.phaseTexture.minFilter = NearestFilter;
         this.phaseTexture.magFilter = NearestFilter;
         this.phaseTexture.needsUpdate = true;

@@ -15,6 +15,7 @@ import {
   NcaWeights,
   serializeModel,
 } from "../nca/nca-model";
+import { readAnchors } from "../nca/nca-grid";
 import { SpectrogramData, State } from "../../store/types";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import {
@@ -42,7 +43,7 @@ function risingWeights(rise: number): NcaWeights {
 }
 
 function modelText(weights: NcaWeights, phase: Uint8Array | null = null): string {
-  return serializeModel({ weights, label: "test", loss: 0, iterations: 1, phase });
+  return serializeModel({ weights, label: "test", loss: 0, iterations: 1, phase, roughness: null });
 }
 
 /** A step running one Neural effect with these params over the whole file. */
@@ -153,14 +154,35 @@ describe("Neural effect", () => {
     return worst;
   }
 
-  it("gives the grown sound the phase it learnt, or keeps the one there", async () => {
+  it("starts the grown phase from the learnt anchor, or keeps the one there", async () => {
     const byte = 64;
-    const learnt = modelText(stillWeights(), new Uint8Array(NCA_GRID * NCA_GRID).fill(byte));
+    const learnt = modelText(stillWeights(), new Uint8Array(NCA_GRID).fill(byte));
     const withLearnt = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 0 });
     expect(worstPhaseError(withLearnt.after, dequantisePhase(byte))).toBeLessThan(1e-3);
     const kept = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 2 });
     expect(worstPhaseError(kept.after, 0)).toBeLessThan(1e-3);
     const noise = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 1 });
     expect(worstPhaseError(noise.after, 0)).toBeGreaterThan(1);
+  });
+
+  it("follows the phase path it read when the model changes nothing", async () => {
+    // A phase that climbs along time: the path the grid reads, from the anchor
+    // readAnchors takes, should land back on it.
+    spectrogramData = createMockSpectrogramData({ numFrames: 96, numBands: 96, sampleRate: 1000, pattern: "sine" });
+    disposeHarnessTextures(textures);
+    textures = createHarnessTextures(spectrogramData);
+    const anchors = readAnchors(spectrogramData, { x0: 0, y0: 0, x1: 1, y1: 1 });
+    const { before, after } = await paint({
+      neuralModel: modelText(stillWeights(), anchors),
+      neuralSteps: 2,
+      neuralPhase: 0,
+    });
+    let worst = 0;
+    for (let i = 0; i < before.length; i += 4) {
+      if (before[i] < 0.1) continue;
+      const d = after[i + 1] - before[i + 1];
+      worst = Math.max(worst, Math.abs(Math.atan2(Math.sin(d), Math.cos(d))));
+    }
+    expect(worst).toBeLessThan(0.1);
   });
 });

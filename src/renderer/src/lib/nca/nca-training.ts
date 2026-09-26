@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { gridPhase, PackedSpectrogram, readGrid, UvRect } from "./nca-grid";
+import { gridRoughness, PackedSpectrogram, readAnchors, readGrid, UvRect } from "./nca-grid";
 import { serializeModel } from "./nca-model";
 
 /** Iterations a learn runs unless stopped sooner. */
@@ -97,7 +97,14 @@ export async function startNcaTraining(request: {
       own.signal,
     );
     if (result.iterations > 0) {
-      request.apply(serializeModel({ ...result, label: request.label, phase: gridPhase(target) }));
+      request.apply(
+        serializeModel({
+          ...result,
+          label: request.label,
+          phase: readAnchors(spectrogram, request.rect),
+          roughness: gridRoughness(target),
+        }),
+      );
     }
     if (controller === own) update({ status: "finished" });
   } catch (error) {

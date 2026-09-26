@@ -591,11 +591,11 @@ Pulls energy across time and pitch toward a map: a landscape of valleys that sou
 
 ### Neural
 
-Learns a sound, then grows it wherever you paint. A small network looks at each band and its neighbours, over and over, and learns to rebuild the sound it was shown: from silence, from other sound, and back over holes torn in it. Painting grows that sound out of whatever is under the brush.
+Learns a sound, then grows it wherever you paint. A small network looks at each band and its neighbours, over and over, and learns to rebuild the level and phase of the sound it was shown: from silence, from other sound, and back over holes torn in it. Painting grows that sound out of whatever is under the brush.
 
 - **Learn** – press it, then click a spectrogram. The brush-sized patch under the click is what the network learns, and the brush outline shows where that is. Learning takes a few minutes. The card shows the patch and what the network grows from it so far, and **Stop** keeps what it has learnt.
 - **Steps** – how long the sound grows each time the brush paints. Few steps leave a trace of what was there, many let the learnt sound take over.
-- **Phase** – the network learns levels, not phase. **Learnt** gives the grown sound the phase of the patch it learnt, place by place, so regrown hits stay sharp and loud. **Noise** gives it fresh random phase, softer and quieter. **Keep** uses the phase of the sound already there, so the sound underneath takes on the learnt shape, like a vocoder.
+- **Phase** – **Learnt** grows the phase too: the network learns how each band's phase moves across the patch, and the grown sound follows that path from where the learnt sound's phase started, which keeps regrown hits sharp and loud. **Noise** gives it fresh random phase, softer and quieter. **Keep** uses the phase of the sound already there, so the sound underneath takes on the learnt shape, like a vocoder.
 
 The learnt sound is stretched to the brush, so a bigger brush paints a bigger copy. It is saved with the brush, so a brush can carry it into another file.
 
