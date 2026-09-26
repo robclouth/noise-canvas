@@ -13,7 +13,7 @@ import type { EffectType } from "../effects/types";
 import type { SpectrogramData, State } from "../store/types";
 import { createMockState } from "./mock-state";
 import type { SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
-import { metadataTextureRows } from "../lib/band-layout";
+import { bandMetadataTexture } from "../lib/band-metadata-texture";
 
 /**
  * Shared rendering harness for tests that need a real WebGL StrokeRenderer
@@ -72,13 +72,7 @@ export function createSpectrogramTextures(spectrogramData: SpectrogramData): {
   inverseMapTex.wrapT = ClampToEdgeWrapping;
   inverseMapTex.needsUpdate = true;
 
-  const metadataTex = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
-  metadataTex.internalFormat = "RGBA32F";
-  metadataTex.minFilter = NearestFilter;
-  metadataTex.magFilter = NearestFilter;
-  metadataTex.wrapS = ClampToEdgeWrapping;
-  metadataTex.wrapT = ClampToEdgeWrapping;
-  metadataTex.needsUpdate = true;
+  const metadataTex = bandMetadataTexture({ numBands, metadata }, spectrogramData.sampleRate);
 
   return { packedDataTex, originalPackedDataTex, inverseMapTex, metadataTex };
 }

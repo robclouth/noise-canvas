@@ -1,20 +1,11 @@
-import {
-  ClampToEdgeWrapping,
-  DataTexture,
-  FloatType,
-  NearestFilter,
-  RGBAFormat,
-  type Texture,
-  type WebGLRenderer,
-  type WebGLRenderTarget,
-} from "three";
+import { type DataTexture, type Texture, type WebGLRenderer, type WebGLRenderTarget } from "three";
 import type { SpectrogramData } from "../store/types";
 import { blockGrid, blockOfFrame, type BlockGrid } from "./block-grid";
 import type { CanvasView } from "./canvas-view";
 import { needsCanvasWindow, type BlockReader, type BlockValueReader } from "./canvas-window";
 import { canvasWindowBlocks } from "./gpu-budget";
 import { PackedWindow } from "./packed-window";
-import { metadataTextureRows } from "./band-layout";
+import { bandMetadataTexture } from "./band-metadata-texture";
 import type { SelfState } from "./self-window";
 
 /** What a source window needs to read another file's blocks. */
@@ -294,15 +285,7 @@ export class SourceWindow {
   private takeView(view: CanvasView): void {
     this.held = view;
     this.metadataTex?.dispose();
-    const metadata = new DataTexture(metadataTextureRows(view.layout), view.layout.numBands, 1, RGBAFormat, FloatType);
-    metadata.internalFormat = "RGBA32F";
-    metadata.minFilter = NearestFilter;
-    metadata.magFilter = NearestFilter;
-    metadata.wrapS = ClampToEdgeWrapping;
-    metadata.wrapT = ClampToEdgeWrapping;
-    metadata.generateMipmaps = false;
-    metadata.needsUpdate = true;
-    this.metadataTex = metadata;
+    this.metadataTex = bandMetadataTexture(view.layout, this.grid.sampleRate);
   }
 }
 

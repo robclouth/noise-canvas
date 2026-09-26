@@ -28,9 +28,24 @@ export function bandLayoutOf(
   return { numBands, metadata };
 }
 
-/** A layout's rows as the RGBA32F texture the shaders sample. */
-export function metadataTextureRows(layout: BandLayout): Float32Array {
-  return Float32Array.from(layout.metadata);
+/**
+ * A layout as the two-row RGBA32F texture the shaders sample. Row 0 is the
+ * metadata as floats. Row 1 holds each band's centre in cycles per frame as a
+ * float and the float remainder, so their sum carries the double: a phase
+ * that multiplies the centre by a time ten minutes into a file needs more bits
+ * than one float holds.
+ */
+export function metadataTextureRows(layout: BandLayout, sampleRate: number): Float32Array {
+  const { numBands, metadata } = layout;
+  const rows = new Float32Array(numBands * 8);
+  rows.set(metadata);
+  for (let band = 0; band < numBands; band++) {
+    const rate = metadata[band * 4 + 3] / sampleRate;
+    const high = Math.fround(rate);
+    rows[(numBands + band) * 4] = high;
+    rows[(numBands + band) * 4 + 1] = rate - high;
+  }
+  return rows;
 }
 
 /** The coarsest time step any band uses, as a log2 of frames. */

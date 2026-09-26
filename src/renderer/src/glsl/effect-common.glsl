@@ -32,11 +32,12 @@ uniform float     destBandsPerOctave;
 
 // A canvas can hold one span of its file. Frame counts above lay out the span
 // and every packed read goes through them; these say where the span sits, for
-// the positions that are the file's rather than the canvas's.
-uniform float     sourceViewStartFrame;
-uniform float     sourceFileFrameCount;
-uniform float     destViewStartFrame;
-uniform float     destFileFrameCount;
+// the positions that are the file's rather than the canvas's. They are ints
+// because a float counts frames exactly only to 2^24, about six minutes.
+uniform int       sourceViewStartFrame;
+uniform int       sourceFileFrameCount;
+uniform int       destViewStartFrame;
+uniform int       destFileFrameCount;
 
 uniform sampler2D originalSpectrogramTex;
 
@@ -165,67 +166,56 @@ vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount
 // The file frame a canvas UV names. Onset lookups, carrier phase anchors, the
 // modulator patterns and the noise seed all take file positions: a canvas
 // holding one span of the file must place them where the whole file would.
-float destFileFrame(float uvX) { return destViewStartFrame + uvX * destFrameCount; }
+float destFileFrame(float uvX) { return float(destViewStartFrame) + uvX * destFrameCount; }
 // The bin a position `bins` bins along a band falls in. Reads land on bin
 // edges; a hundredth of a bin keeps rounding on one side of them.
 float binAt(float bins) { return floor(bins + 0.01); }
-float sourceFileFrame(float uvX) { return sourceViewStartFrame + uvX * sourceFrameCount; }
+float sourceFileFrame(float uvX) { return float(sourceViewStartFrame) + uvX * sourceFrameCount; }
 float destFileSec(float uvX) { return destFileFrame(uvX) / max(destSampleRate, 1e-6); }
 float sourceFileSec(float uvX) { return sourceFileFrame(uvX) / max(sourceSampleRate, 1e-6); }
 // A canvas over the whole file returns its own UV untouched, so the reads it
 // feeds are bit-identical to the ones before views existed.
 float destFileUvX(float uvX) {
-  if (destViewStartFrame == 0.0 && destFileFrameCount == destFrameCount) return uvX;
-  return destFileFrame(uvX) / max(destFileFrameCount, 1.0);
+  if (destViewStartFrame == 0 && float(destFileFrameCount) == destFrameCount) return uvX;
+  return destFileFrame(uvX) / max(float(destFileFrameCount), 1.0);
 }
 float sourceFileUvX(float uvX) {
-  if (sourceViewStartFrame == 0.0 && sourceFileFrameCount == sourceFrameCount) return uvX;
-  return sourceFileFrame(uvX) / max(sourceFileFrameCount, 1.0);
+  if (sourceViewStartFrame == 0 && float(sourceFileFrameCount) == sourceFrameCount) return uvX;
+  return sourceFileFrame(uvX) / max(float(sourceFileFrameCount), 1.0);
 }
 // A distance along a canvas UV axis, in the file's UV scale.
 float destFileUvDx(float dx) {
-  if (destViewStartFrame == 0.0 && destFileFrameCount == destFrameCount) return dx;
-  return dx * destFrameCount / max(destFileFrameCount, 1.0);
+  if (destViewStartFrame == 0 && float(destFileFrameCount) == destFrameCount) return dx;
+  return dx * destFrameCount / max(float(destFileFrameCount), 1.0);
 }
 // Seconds from the file's start on the axis convention the phase terms use,
 // where the FILE's UV 1.0 is its last frame rather than one frame past it.
 float destAxisSec(float uvX) {
-  if (destViewStartFrame == 0.0 && destFileFrameCount == destFrameCount) {
+  if (destViewStartFrame == 0 && float(destFileFrameCount) == destFrameCount) {
     return uvX * max(destFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6);
   }
-  return (destFileFrame(uvX) * (max(destFileFrameCount - 1.0, 1.0) / max(destFileFrameCount, 1.0)))
+  return (destFileFrame(uvX) * (max(float(destFileFrameCount) - 1.0, 1.0) / max(float(destFileFrameCount), 1.0)))
        / max(destSampleRate, 1e-6);
 }
-float sourceAxisSec(float uvX) {
-  if (sourceViewStartFrame == 0.0 && sourceFileFrameCount == sourceFrameCount) {
-    return uvX * max(sourceFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6);
-  }
-  return (sourceFileFrame(uvX) * (max(sourceFileFrameCount - 1.0, 1.0) / max(sourceFileFrameCount, 1.0)))
-       / max(sourceSampleRate, 1e-6);
-}
-// The whole file's duration, on the same axis convention. The reversal phase
-// turn below is defined against the file, not against the span a canvas holds.
-float destFileAxisSec()   { return max(destFileFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6); }
-float sourceFileAxisSec() { return max(sourceFileFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6); }
 // A time-axis distance, converted between the canvas's UV and the file's. An
 // axis mix trades a distance in time for a distance in pitch, so it has to be
 // taken on the file's axis: a shorter canvas would otherwise turn the sound by
 // a different amount. A canvas over the whole file returns the distance
 // untouched.
 float destFileUvSpanX(float canvasSpanX) {
-  if (destFileFrameCount == destFrameCount) return canvasSpanX;
-  return canvasSpanX * destFrameCount / max(destFileFrameCount, 1.0);
+  if (float(destFileFrameCount) == destFrameCount) return canvasSpanX;
+  return canvasSpanX * destFrameCount / max(float(destFileFrameCount), 1.0);
 }
 float destCanvasUvSpanX(float fileSpanX) {
-  if (destFileFrameCount == destFrameCount) return fileSpanX;
-  return fileSpanX * destFileFrameCount / max(destFrameCount, 1.0);
+  if (float(destFileFrameCount) == destFrameCount) return fileSpanX;
+  return fileSpanX * float(destFileFrameCount) / max(destFrameCount, 1.0);
 }
 // The file texel a canvas UV names, as a UV of the file. Random draws are
 // seeded on it so one coefficient draws one value whatever span the canvas
 // holds; whole frames, because the UV a fragment arrives with lands a hair
 // either side of its frame.
 vec2 destTexelUv(vec2 destUv) {
-  return vec2(floor(destFileFrame(destUv.x) + 0.5) / max(destFileFrameCount, 1.0), destUv.y);
+  return vec2(floor(destFileFrame(destUv.x) + 0.5) / max(float(destFileFrameCount), 1.0), destUv.y);
 }
 
 // ============================================================================
@@ -494,7 +484,7 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
   // The time offset is a fraction of the source FILE's length, so a source
   // texture holding one span of it covers that fraction in fewer of its own
   // UV. The whole-file case divides a value by itself and scales by 1.0.
-  float sourceOffsetScale = sourceFileFrameCount / max(sourceFrameCount, 1.0);
+  float sourceOffsetScale = float(sourceFileFrameCount) / max(sourceFrameCount, 1.0);
   uvs.sourceL = baseUv + vec2(modTimeOff.x * sourceOffsetScale, modPitchOff.x);
   uvs.sourceR = baseUv + vec2(modTimeOff.y * sourceOffsetScale, modPitchOff.y);
   uvs.source  = uvs.sourceL;
@@ -534,6 +524,145 @@ float carrierRebase(float fcFromHz, float fcToHz, float tSec) {
 float contentAdvance(float fHz, float fcHz, float dtSec) {
   return TWO_PI * (fHz - fcHz) * dtSec;
 }
+
+// ============================================================================
+// EXACT TURNS
+//
+// A phase term that multiplies a band's centre by a position in the file runs
+// to millions of turns ten minutes in, and a float then holds only the whole
+// turns: the fraction, which is all a phase is, rounds away. These keep the
+// fraction to about 1e-7 of a turn at any position. The products run in
+// integers: a rate's fraction of a turn per frame as 64-bit fixed point, times
+// a whole number of frames. Float tricks that split a product into exact
+// halves do not survive a compiler free to regroup float sums.
+// ============================================================================
+
+// A position in a file in frames, as an exact whole count and an offset.
+struct Frames { int whole; float offset; };
+
+Frames destFrames(float uvX) { return Frames(destViewStartFrame, uvX * destFrameCount); }
+Frames sourceFrames(float uvX) { return Frames(sourceViewStartFrame, uvX * sourceFrameCount); }
+Frames framesAtSec(float sec, float sampleRate) {
+  float frames = sec * sampleRate;
+  float whole = floor(frames);
+  return Frames(int(whole), frames - whole);
+}
+Frames plusFrames(Frames t, float frames) { return Frames(t.whole, t.offset + frames); }
+float framesValue(Frames t) { return float(t.whole) + t.offset; }
+// Frames from b to a, exact while the distance fits a float.
+float framesBetween(Frames a, Frames b) { return float(a.whole - b.whole) + (a.offset - b.offset); }
+
+// A float's magnitude as an integer significand times 2^exponent.
+uint significandOf(float x, out int exponent) {
+  uint bits = floatBitsToUint(x);
+  int biased = int((bits >> 23) & 0xFFu);
+  uint significand = bits & 0x7FFFFFu;
+  if (biased == 0) {
+    exponent = -149;
+    return significand;
+  }
+  exponent = biased - 150;
+  return significand | 0x800000u;
+}
+
+// a × b in full, as (high word, low word).
+uvec2 wideProduct(uint a, uint b) {
+  uint a0 = a & 0xFFFFu;
+  uint a1 = a >> 16;
+  uint b0 = b & 0xFFFFu;
+  uint b1 = b >> 16;
+  uint low = a0 * b0;
+  uint cross1 = a1 * b0;
+  uint cross2 = a0 * b1;
+  uint middle = (low >> 16) + (cross1 & 0xFFFFu) + (cross2 & 0xFFFFu);
+  uint high = a1 * b1 + (cross1 >> 16) + (cross2 >> 16) + (middle >> 16);
+  return uvec2(high, (middle << 16) | (low & 0xFFFFu));
+}
+
+uvec2 addWide(uvec2 a, uvec2 b) {
+  uint low = a.y + b.y;
+  return uvec2(a.x + b.x + (low < a.y ? 1u : 0u), low);
+}
+
+uvec2 negateWide(uvec2 a) { return addWide(~a, uvec2(0u, 1u)); }
+
+// The 64 bits of p × 2^exponent just below the binary point: its fraction in units of 2^-64.
+uvec2 fraction64(uvec2 p, int exponent) {
+  int shift = exponent + 64;
+  if (shift >= 64) return uvec2(0u);
+  if (shift >= 32) return uvec2(shift == 32 ? p.y : p.y << (shift - 32), 0u);
+  if (shift > 0) return uvec2((p.x << shift) | (p.y >> (32 - shift)), p.y << shift);
+  if (shift == 0) return p;
+  int drop = -shift;
+  if (drop >= 64) return uvec2(0u);
+  if (drop >= 32) return uvec2(0u, drop == 32 ? p.x : p.x >> (drop - 32));
+  return uvec2(p.x >> drop, (p.y >> drop) | (p.x << (32 - drop)));
+}
+
+// The fraction of a turn in k × a, in units of 2^-64.
+uvec2 productFraction(float k, float a) {
+  int kExponent;
+  int aExponent;
+  uint kSignificand = significandOf(k, kExponent);
+  uint aSignificand = significandOf(a, aExponent);
+  uvec2 fraction = fraction64(wideProduct(kSignificand, aSignificand), kExponent + aExponent);
+  return (k < 0.0) != (a < 0.0) ? negateWide(fraction) : fraction;
+}
+
+// The fraction of a turn in rate × n, for a rate held as its fraction in units
+// of 2^-64 and a whole number of frames, in units of 2^-32.
+uint fractionOver(uvec2 rate, int n) {
+  uint count = uint(abs(n));
+  uint turns = rate.x * count + wideProduct(rate.y, count).x;
+  return n < 0 ? ~turns + 1u : turns;
+}
+
+// A number of turns as its exact fraction and a float estimate of the whole.
+struct Turns { float fraction; float approx; };
+
+Turns plusTurns(Turns a, Turns b) { return Turns(fract(a.fraction + b.fraction), a.approx + b.approx); }
+Turns minusTurns(Turns a, Turns b) { return Turns(fract(a.fraction - b.fraction), a.approx - b.approx); }
+
+// k × rate × t, for a rate in cycles per frame carried as a float and its
+// remainder (fetchBandRate). Whole turns of k × rate drop out of the product
+// with a whole number of frames, so only its fraction is carried there.
+Turns turnsOver(float k, vec2 rate, Frames t) {
+  float wholeOffset = floor(t.offset);
+  float part = t.offset - wholeOffset;
+  uvec2 rateFraction = addWide(productFraction(k, rate.x), productFraction(k, rate.y));
+  uint wholeTurns = fractionOver(rateFraction, t.whole + int(wholeOffset));
+  float fraction = fract(float(wholeTurns) / 4294967296.0 + k * (rate.x + rate.y) * part);
+  return Turns(fraction, k * (rate.x + rate.y) * framesValue(t));
+}
+
+// The same over a time on the axis convention of destAxisSec, where a file of
+// fileFrames frames puts (fileFrames − 1) / fileFrames of a frame in each.
+Turns axisTurnsOver(float k, vec2 rate, Frames t, int fileFrames) {
+  Turns turns = turnsOver(k, rate, t);
+  float shortfall = k * rate.x * (framesValue(t) / max(float(fileFrames), 1.0));
+  return Turns(fract(turns.fraction - shortfall), turns.approx - shortfall);
+}
+
+// Whole turns a phase keeps. Below this a float holds the phase to within
+// 0.01 rad, and a later move that scales stored phase (a pitch shift over a
+// reversed stroke) needs the whole turns to keep the bands in step. Above it
+// the float can no longer hold the fraction, so the phase keeps only that.
+const float KEPT_TURNS = 16384.0;
+
+float phaseOfTurns(Turns turns) {
+  float fraction = turns.fraction - floor(turns.fraction + 0.5);
+  if (abs(turns.approx) >= KEPT_TURNS) return TWO_PI * fraction;
+  return TWO_PI * floor(turns.approx - fraction + 0.5) + TWO_PI * fraction;
+}
+
+// A band's centre in cycles per frame, as a float and its remainder.
+vec2 fetchBandRate(sampler2D metaTex, float bandIndexFloat) {
+  int bandIndex = int(clamp(floor(bandIndexFloat), 0.0, 1e9));
+  ivec2 metaSize = textureSize(metaTex, 0);
+  return texelFetch(metaTex, ivec2(clamp(bandIndex, 0, max(metaSize.x - 1, 0)), min(1, metaSize.y - 1)), 0).rg;
+}
+vec2 sourceBandRate(vec2 uv) { return fetchBandRate(sourceMetadataTex, (1.0 - uv.y) * sourceBandCount); }
+vec2 destBandRate(vec2 uv) { return fetchBandRate(destMetadataTex, (1.0 - uv.y) * destBandCount); }
 
 // How far a measured instantaneous frequency may sit from its band centre, as
 // a fraction of the centre, before the estimate reads as numerical junk.
@@ -596,8 +725,7 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
   // Time reversal: dest_phase = -src_phase - 2π·f·T
   // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
   if (scaleX < 0.0) {
-    float destFreqHz = getDestMetadata(destUv).a;
-    float phaseShift = contentAdvance(0.0, destFreqHz, destFileAxisSec());
+    float phaseShift = -phaseOfTurns(turnsOver(1.0, destBandRate(destUv), Frames(max(destFileFrameCount - 1, 1), 0.0)));
     correctedL.y = -correctedL.y + phaseShift;
     correctedR.y = -correctedR.y + phaseShift;
   }
@@ -650,8 +778,7 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
   // Time reversal: dest_phase = -src_phase - 2π·f·T
   // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
   if (scaleX < 0.0) {
-    float destFreqHz = getDestMetadata(destUv).a;
-    float phaseShift = contentAdvance(0.0, destFreqHz, destFileAxisSec());
+    float phaseShift = -phaseOfTurns(turnsOver(1.0, destBandRate(destUv), Frames(max(destFileFrameCount - 1, 1), 0.0)));
     correctedL.y = -correctedL.y + phaseShift;
     correctedR.y = -correctedR.y + phaseShift;
   }
@@ -698,22 +825,27 @@ vec4 getTransformedSampleNeutralish(vec2 sourceUv, vec2 destUv, float scaleX, fl
 
   float phaseCorrection = TWO_PI * sourceBandFreqHz * timeDiffSeconds * scaleX * freqRatio;
 
-  if (scaleX < 0.0) {
-    float totalDuration = sourceFileAxisSec();
-    phaseCorrection += -TWO_PI * sourceBandFreqHz * totalDuration;
-  }
-
   magPhase.y += phaseCorrection;
   magPhase.w += phaseCorrection;
 
+  // The share of the moved phase the result keeps, which the reversal turn
+  // below scales with it.
+  float movedWeight = 1.0;
   if (complexMix > 1e-5) {
     vec4 originalDest = getOriginalDestSample(destUv);
     float destStride = exp2(destTimeScaleExp);
     float originalPhaseWeight = clamp(destStride / (destStride + 1.0), 0.0, 0.95);
     originalPhaseWeight *= complexMix;
-    float newPhaseWeight = 1.0 - originalPhaseWeight;
-    magPhase.y = newPhaseWeight * magPhase.y + originalPhaseWeight * originalDest.g;
-    magPhase.w = newPhaseWeight * magPhase.w + originalPhaseWeight * originalDest.a;
+    movedWeight = 1.0 - originalPhaseWeight;
+    magPhase.y = movedWeight * magPhase.y + originalPhaseWeight * originalDest.g;
+    magPhase.w = movedWeight * magPhase.w + originalPhaseWeight * originalDest.a;
+  }
+
+  if (scaleX < 0.0) {
+    Frames duration = Frames(max(sourceFileFrameCount - 1, 1), 0.0);
+    float reversal = phaseOfTurns(turnsOver(-movedWeight, sourceBandRate(sampleUv), duration));
+    magPhase.y += reversal;
+    magPhase.w += reversal;
   }
 
   return magPhase;
@@ -799,15 +931,10 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   if (abs(bandFrac) < BAND_FRAC_DEADZONE) bandFrac = 0.0;
   float idealFreqHz = srcFreqHz * exp2(bandFrac / max(sourceBandsPerOctave, 1e-6));
   float freqRatio = (idealFreqHz > 1e-3) ? destFreqHz / idealFreqHz : 1.0;
-  // Carrier re-anchor rate for the grid residual: content stored against the
-  // sampled band's centre must advance against the dest band's centre instead.
-  // Zero exactly when bandFrac snapped to zero.
-  float mismatchHz = (idealFreqHz > 1e-3) ? destFreqHz * (srcFreqHz - idealFreqHz) / idealFreqHz : 0.0;
-
-  // The carrier re-anchor below multiplies an absolute time, so both are the
-  // file's: a canvas holding one span of it must re-anchor by the same amount.
-  float tSrcSec  = sourceAxisSec(sourceUv.x);
-  float tDestSec = destAxisSec(destUv.x);
+  // The sampled band's centre over the ideal frequency, exactly 1 when bandFrac
+  // snapped to zero. The source centre times freqRatio is the dest centre times
+  // this, so the carrier terms below run on the dest band's exact rate.
+  float centreRatio = (idealFreqHz > 1e-3) ? srcFreqHz / idealFreqHz : 1.0;
 
   // Two approaches, blended by how far |scaleXPhys| is from 1:
   //
@@ -816,28 +943,37 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   //
   // Scale-by-S (proven for |scaleXPhys|≠1): no error accumulation, every
   // pixel independent, but loses inter-band phase alignment at |scaleXPhys|=1.
-
-  // Additive phase: signX × signY × φ + carrier correction
-  float addL = signX * signY * magPhase.y;
-  float addR = signX * signY * magPhase.w;
-  if (scaleXPhys < 0.0) {
-    float corr = contentAdvance(0.0, srcFreqHz, tSrcSec + tDestSec);
-    addL += corr;
-    addR += corr;
-  } else {
-    float corr = contentAdvance(0.0, srcFreqHz, tDestSec / max(scaleXPhys, 1e-5) - tSrcSec);
-    addL += corr;
-    addR += corr;
-  }
-
-  // Scale-by-S phase: scaleXPhys × signY × φ (handles stretch + reversal)
-  float sclL = scaleXPhys * signY * magPhase.y;
-  float sclR = scaleXPhys * signY * magPhase.w;
-
-  // Blend: use additive near |scaleXPhys|=1, scale-by-S when stretching
+  //
+  // Additive phase: signX × signY × φ + carrier correction.
+  // Scale-by-S phase: scaleXPhys × signY × φ (handles stretch + reversal).
+  // Blend: additive near |scaleXPhys|=1, scale-by-S when stretching; then the
+  // pitch ratio scales both.
   float stretchAmount = clamp(abs(absScaleX - 1.0) * 4.0, 0.0, 1.0);
-  float phaseL = mix(addL, sclL, stretchAmount);
-  float phaseR = mix(addR, sclR, stretchAmount);
+  vec2 stored = vec2(magPhase.y, magPhase.w);
+  vec2 phase = mix(signX * signY * stored, scaleXPhys * signY * stored, stretchAmount) * freqRatio;
+
+  // The additive branch's carrier correction, at its blend weight and the
+  // pitch ratio, and the grid residual's re-anchor: content stored against the
+  // sampled band's centre must advance against the dest band's centre instead.
+  // Both multiply a rate by an absolute time, so a canvas holding one span of
+  // the file takes the file's times, in exact turns.
+  vec2 rate = destBandRate(destUv);
+  Frames tSrc = sourceFrames(sourceUv.x);
+  Frames tDest = destFrames(destUv.x);
+  Turns turns = Turns(0.0, 0.0);
+  float carrierK = (1.0 - stretchAmount) * centreRatio;
+  if (carrierK != 0.0) {
+    float perSourceFrame = destSampleRate / max(sourceSampleRate, 1e-6);
+    Turns atSrc = axisTurnsOver(carrierK * perSourceFrame, rate, tSrc, sourceFileFrameCount);
+    if (scaleXPhys < 0.0) {
+      turns = minusTurns(turns, plusTurns(atSrc, axisTurnsOver(carrierK, rate, tDest, destFileFrameCount)));
+    } else {
+      turns = minusTurns(atSrc, axisTurnsOver(carrierK / max(scaleXPhys, 1e-5), rate, tDest, destFileFrameCount));
+    }
+  }
+  if (centreRatio != 1.0) {
+    turns = plusTurns(turns, axisTurnsOver(centreRatio - 1.0, rate, tDest, destFileFrameCount));
+  }
 
   // Both branches carry the same signX·signY factor, so what is left of the
   // stored phase is its magnitude times the intended pitch ratio. The grid
@@ -845,8 +981,7 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   // untouched, so it must not trigger the noise replacement.
   phaseGain = mix(1.0, absScaleX, stretchAmount) * freqRatio;
 
-  // Pitch ratio scaling, then the residual carrier re-anchor.
-  return vec2(phaseL, phaseR) * freqRatio + vec2(TWO_PI * mismatchHz * tDestSec);
+  return phase + vec2(phaseOfTurns(turns));
 }
 
 vec4 getTransformedSampleNeutralPlain(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
@@ -985,10 +1120,10 @@ void xresAnalyzeSource(vec2 sourceUv, float srcFreqHz, out float tonality, out f
 // content in time use this to decide where a re-anchor is worth applying.
 float onsetWeight(vec2 sourceUv) {
   float fSrc = max(getSourceMetadata(sourceUv).a, 1e-6);
-  float tSrcSec = sourceFileSec(sourceUv.x);
   vec2 onset = texture(sourceOnsetTex, vec2(sourceFileUvX(sourceUv.x), 0.5)).rg;
   float sigma = max(ONSET_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, ONSET_SIGMA_FLOOR);
-  float dt = (tSrcSec - onset.x) / sigma;
+  float fromOnset = framesBetween(sourceFrames(sourceUv.x), framesAtSec(onset.x, sourceSampleRate));
+  float dt = fromOnset / max(sourceSampleRate, 1e-6) / sigma;
   return onset.y * exp(-dt * dt);
 }
 
@@ -1006,26 +1141,34 @@ float reanchorTimeShift(vec2 sourceUv, float phase, float freqHz, float dtSec) {
 void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity,
                     out float w, out float anchor, out float warpDeltaUvX) {
   float fSrc  = max(getSourceMetadata(sourceUv).a, 1e-6);
-  float fDest = max(getDestMetadata(destUv).a, 1e-6);
+  float sampleRate = max(sourceSampleRate, 1e-6);
 
-  float tSrcSec = sourceFileSec(sourceUv.x);
+  // Every time below is taken from the read position, as a frame count off an
+  // exact whole, so ten minutes into a file it still resolves a frame.
+  Frames tSrc = sourceFrames(sourceUv.x);
   vec4 onset = texture(sourceOnsetTex, vec2(sourceFileUvX(sourceUv.x), 0.5));
+  Frames tOnset = framesAtSec(onset.x, sourceSampleRate);
+  float toOnsetSec = framesBetween(tOnset, tSrc) / sampleRate;
 
   // Lock window matched to the SOURCE band's Gabor support — the width of the
   // attack ridge in the transported data. A dest-support window would cohere
   // tail energy into a false click.
   float sigma = max(ONSET_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, ONSET_SIGMA_FLOOR);
-  float dt = (tSrcSec - onset.x) / sigma;
+  float dt = -toOnsetSec / sigma;
   w = onset.y * exp(-dt * dt);
 
   // Onset time mapped into dest seconds through the transform's x-affine
   // (destUvToSourceUv slope is sourceTimeScale, the geometric transform's is
   // 1/scaleX), so the lock lands where the transient lands after the move.
-  float deltaSrcUv  = (onset.x - tSrcSec) * sourceSampleRate / max(sourceFrameCount, 1.0);
+  float deltaSrcUv  = toOnsetSec * sourceSampleRate / max(sourceFrameCount, 1.0);
   float deltaDestUv = deltaSrcUv * scaleX / max(sourceTimeScale, 1e-6);
-  float tOnsetDestSec = destFileSec(destUv.x + deltaDestUv);
+  Frames tOnsetDest = plusFrames(destFrames(destUv.x), deltaDestUv * destFrameCount);
 
-  anchor = -TWO_PI * fDest * tOnsetDestSec + parity * TWO_PI * fSrc * onset.x;
+  // −2π·fDest·tOnsetDest + parity·2π·fSrc·tOnset, mod 2π: the anchor is only
+  // ever read through unwrapPhase.
+  float destTurns = turnsOver(1.0, destBandRate(destUv), tOnsetDest).fraction;
+  float srcTurns = turnsOver(1.0, sourceBandRate(sourceUv), tOnset).fraction;
+  anchor = TWO_PI * fract(parity * srcTurns - destTurns);
 
   // Rigid transient re-read: between two onsets the read map is piecewise —
   // slope ±1 in physical seconds inside a support-sized window around each
@@ -1036,33 +1179,33 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity,
   warpDeltaUvX = 0.0;
   float scaleXPhys = physicalTimeScale(scaleX);
   if (onset.y > 0.0 && abs(abs(scaleXPhys) - 1.0) > ONSET_RIGID_DEADZONE) {
-    float durSec = sourceFileFrameCount / max(sourceSampleRate, 1e-6);
-    float prevT = onset.z < 0.0 ? 0.0 : onset.z;
-    float nextT = onset.w < 0.0 ? durSec : onset.w;
-    // Dest times of the segment boundaries, through the same x-affine as the
-    // anchor above.
+    float toPrev = (onset.z < 0.0 ? -framesValue(tSrc) : framesBetween(framesAtSec(onset.z, sourceSampleRate), tSrc)) / sampleRate;
+    float toNext = (onset.w < 0.0 ? framesBetween(Frames(sourceFileFrameCount, 0.0), tSrc)
+                                  : framesBetween(framesAtSec(onset.w, sourceSampleRate), tSrc)) / sampleRate;
+    // The segment boundaries in dest seconds from this texel's dest time,
+    // through the same x-affine as the anchor above.
     float destPerSrc = (sourceSampleRate / max(sourceFrameCount, 1.0)) * (scaleX / max(sourceTimeScale, 1e-6))
                      * (destFrameCount / max(destSampleRate, 1e-6));
-    float tDestSec = destFileSec(destUv.x);
-    float destPrev = tDestSec + (prevT - tSrcSec) * destPerSrc;
-    float destNext = tDestSec + (nextT - tSrcSec) * destPerSrc;
-    float segLen = max(nextT - prevT, 1e-6);
+    float destPrev = toPrev * destPerSrc;
+    float destNext = toNext * destPerSrc;
+    float segLen = max(toNext - toPrev, 1e-6);
     float destSpan = max(abs(destNext - destPrev), 1e-6);
     float rigidCap = 0.25 * min(segLen, destSpan);
     float rPrev = onset.z < 0.0 ? 0.0 : min(ONSET_RIGID_SUPPORT * sigma, rigidCap);
     float rNext = onset.w < 0.0 ? 0.0 : min(ONSET_RIGID_SUPPORT * sigma, rigidCap);
     float dir = destNext >= destPrev ? 1.0 : -1.0;
-    float xi = clamp((tDestSec - destPrev) * dir, 0.0, destSpan);
-    float readSec;
+    float xi = clamp(-destPrev * dir, 0.0, destSpan);
+    // Where to read, in seconds from the read position.
+    float readFromSrc;
     if (xi <= rPrev) {
-      readSec = prevT + xi;
+      readFromSrc = toPrev + xi;
     } else if (xi >= destSpan - rNext) {
-      readSec = nextT - (destSpan - xi);
+      readFromSrc = toNext - (destSpan - xi);
     } else {
       float mid = (segLen - rPrev - rNext) / max(destSpan - rPrev - rNext, 1e-6);
-      readSec = prevT + rPrev + mid * (xi - rPrev);
+      readFromSrc = toPrev + rPrev + mid * (xi - rPrev);
     }
-    warpDeltaUvX = (readSec - tSrcSec) * sourceSampleRate / max(sourceFrameCount, 1.0);
+    warpDeltaUvX = readFromSrc * sourceSampleRate / max(sourceFrameCount, 1.0);
   }
 }
 
@@ -1132,7 +1275,6 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
     if (abs(bandFrac) < BAND_FRAC_DEADZONE) bandFrac = 0.0;
     float idealFreqHz = max(srcFreqHz * exp2(bandFrac / max(sourceBandsPerOctave, 1e-6)), 1e-6);
     float freqRatio = destFreqHz / idealFreqHz;
-    float tDestSec = destAxisSec(destUv.x);
 
     if (bpoRatio > 1.0) {
       // Upsampling: ~bpoRatio dest bands read each source band. The tonal part
@@ -1162,7 +1304,7 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
       magPhase.z *= magScale;
 
       float blockDur = XRES_BLOCK_SUPPORT * destBandsPerOctave / destFreqHz;
-      float tBlocks = tDestSec / blockDur;
+      float tBlocks = destAxisSec(destUv.x) / blockDur;
       float b0 = floor(tBlocks);
       float fb = tBlocks - b0;
       float bandSeed = floor((1.0 - destUv.y) * destBandCount);
@@ -1205,10 +1347,12 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
       magPhase.z = newMag.y;
       // Swap the centre tap's stored phase for the loudest tap's, carried
       // through the same intended-ratio and carrier-rebase terms.
+      vec2 rate = destBandRate(destUv);
+      Frames tDest = destFrames(destUv.x);
       baseL += parity * freqRatio * (maxPhase.x - magPhase.y)
-             + TWO_PI * destFreqHz * (maxFreq.x - srcFreqHz) / idealFreqHz * tDestSec;
+             + phaseOfTurns(axisTurnsOver((maxFreq.x - srcFreqHz) / idealFreqHz, rate, tDest, destFileFrameCount));
       baseR += parity * freqRatio * (maxPhase.y - magPhase.w)
-             + TWO_PI * destFreqHz * (maxFreq.y - srcFreqHz) / idealFreqHz * tDestSec;
+             + phaseOfTurns(axisTurnsOver((maxFreq.y - srcFreqHz) / idealFreqHz, rate, tDest, destFileFrameCount));
     }
   }
 
@@ -1324,7 +1468,7 @@ float getBrushTimeCoverage(vec2 unpackedUv, vec4 meta, out float localX) {
   float offFrames = edgeFrame - blFrame;
   // On a wrapping axis the span continues from the far edge of the file, so
   // fold the offset there — in frames, where it stays exact.
-  if (wrapsTimeAxis()) offFrames = mod(offFrames + destFileFrameCount, destFileFrameCount);
+  if (wrapsTimeAxis()) offFrames = mod(offFrames + float(destFileFrameCount), float(destFileFrameCount));
   float edgeOff = offFrames / destFrameCount;
   // The envelope samples at the center of the bin's overlap with the span, not
   // at the bin's own center: either endpoint of the envelope is a hard zero, so

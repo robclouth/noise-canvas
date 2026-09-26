@@ -14,7 +14,7 @@ import type { EffectType } from "../../effects/types";
 import type { SpectrogramData, State } from "../../store/types";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
-import { metadataTextureRows } from "../band-layout";
+import { bandMetadataTexture } from "../band-metadata-texture";
 import { packedFold, padToFold } from "../constants";
 import { strokeReach, type ReachContext } from "../effect-reach";
 import { gatherPixelRanges } from "../pixel-ranges";
@@ -77,13 +77,7 @@ function createTextures(data: SpectrogramData): {
   inverseMapTex.wrapT = ClampToEdgeWrapping;
   inverseMapTex.needsUpdate = true;
 
-  const metadataTex = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
-  metadataTex.internalFormat = "RGBA32F";
-  metadataTex.minFilter = NearestFilter;
-  metadataTex.magFilter = NearestFilter;
-  metadataTex.wrapS = ClampToEdgeWrapping;
-  metadataTex.wrapT = ClampToEdgeWrapping;
-  metadataTex.needsUpdate = true;
+  const metadataTex = bandMetadataTexture({ numBands, metadata }, data.sampleRate);
 
   return { packedDataTex, originalPackedDataTex, inverseMapTex, metadataTex };
 }

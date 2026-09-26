@@ -95,9 +95,19 @@ describe("bandLayoutOf", () => {
   });
 
   it("hands the texture the same rows as floats", () => {
-    const rows = metadataTextureRows(layout);
+    const rows = metadataTextureRows(layout, 48000);
     expect(rows).toBeInstanceOf(Float32Array);
-    expect(rows.length).toBe(numBands * 4);
+    expect(rows.length).toBe(numBands * 8);
     expect(rows[3]).toBeCloseTo(freqs[0], 3);
+  });
+
+  it("carries each band's centre per frame past a float's precision in the second row", () => {
+    const rows = metadataTextureRows(layout, 48000);
+    for (let band = 0; band < numBands; band++) {
+      const rate = freqs[band] / 48000;
+      const carried = rows[(numBands + band) * 4] + rows[(numBands + band) * 4 + 1];
+      expect(Math.abs(carried - rate), `band ${band}`).toBeLessThan(rate * 2 ** -45);
+      expect(Math.abs(Math.fround(rate) - rate), `band ${band}`).toBeGreaterThan(rate * 2 ** -45);
+    }
   });
 });

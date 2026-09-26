@@ -19,7 +19,6 @@ import {
   sourceBinRanges,
 } from "../display-pyramid";
 import { packedFold } from "../constants";
-import { metadataTextureRows } from "../band-layout";
 
 /** A constant-Q layout of any length, without the coefficient arrays. */
 function layoutOf(durationSeconds: number, bandsPerOctave = 24): BandLayout {
@@ -33,7 +32,7 @@ describe("display pyramid layout", () => {
     const level = displayPyramidLevel({ numBands: data.numBands, metadata: data.metadata }, 0);
     // The level's rows are the floats a texture carries, so the centre
     // frequencies round where the layout's doubles do not.
-    expect(Array.from(level.metadata)).toEqual(Array.from(metadataTextureRows(data)));
+    expect(Array.from(level.metadata)).toEqual(Array.from(Float32Array.from(data.metadata)));
     const fold = packedFold(data.texels);
     expect(level.textureWidth).toBe(fold.width);
     expect(level.textureHeight).toBe(fold.height);

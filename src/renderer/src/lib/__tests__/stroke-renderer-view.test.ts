@@ -48,7 +48,7 @@ import {
   StrokeTextures,
   wholeFilesPast,
 } from "../stroke-renderer";
-import { metadataTextureRows } from "../band-layout";
+import { bandMetadataTexture } from "../band-metadata-texture";
 
 async function loadEffects(): Promise<EffectsRegistry> {
   const [
@@ -160,7 +160,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       RGFormat,
       "RG32F",
     );
-    const metadataTex = dataTexture(metadataTextureRows(data), data.numBands, 1, RGBAFormat, "RGBA32F");
+    const metadataTex = bandMetadataTexture(data, data.sampleRate);
     const placeholderTexture = dataTexture(new Float32Array(4), 1, 1, RGBAFormat, "RGBA32F");
     disposers.push(() => {
       originalPackedDataTex.dispose();
@@ -530,7 +530,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
         RGFormat,
         "RG32F",
       ),
-      metadataTex: dataTexture(metadataTextureRows(sourceData), sourceData.numBands, 1, RGBAFormat, "RGBA32F"),
+      metadataTex: bandMetadataTexture(sourceData, sourceData.sampleRate),
     };
     disposers.push(() => {
       sourceTextures.originalPackedDataTex.dispose();

@@ -33,7 +33,7 @@ import { WindowedCanvas } from "../windowed-canvas";
 import { CoarseStripBuilder } from "../coarse-strip";
 import { displayPyramidLevels } from "../display-pyramid";
 import { packedFold, padToFold } from "../constants";
-import { metadataTextureRows } from "../band-layout";
+import { bandMetadataTexture } from "../band-metadata-texture";
 import { sourceNeedsOver, type SourceRead } from "../source-window";
 import type { DabExtent, FrameSpan } from "../held-dabs";
 import { createByteTarget, renderMaterialToBytes } from "../snapshot-capture";
@@ -127,7 +127,7 @@ describe("a canvas that holds a window of the file", () => {
     const fold = packedFold(data.texels);
     const originalPackedDataTex = packedTexture(padToFold(packed, data.texels, 4), fold.width, fold.height, "RGBA32F");
     const inverseMapTex = packedTexture(padToFold(data.inverseMap!, data.texels, 2), fold.width, fold.height, "RG32F");
-    const metadataTex = packedTexture(metadataTextureRows(data), data.numBands, 1, "RGBA32F");
+    const metadataTex = bandMetadataTexture(data, data.sampleRate);
     const placeholderTexture = packedTexture(new Float32Array(4), 1, 1, "RGBA32F");
     disposers.push(() => {
       originalPackedDataTex.dispose();

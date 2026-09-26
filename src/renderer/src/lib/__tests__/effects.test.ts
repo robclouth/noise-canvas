@@ -22,7 +22,7 @@ import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTe
 import type { Selection } from "../selection";
 import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL } from "../utils";
 import { packedFold, padToFold } from "../constants";
-import { metadataTextureRows } from "../band-layout";
+import { bandMetadataTexture } from "../band-metadata-texture";
 
 /**
  * Creates WebGL textures from SpectrogramData for testing.
@@ -67,13 +67,7 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData): {
   inverseMapTex.wrapT = ClampToEdgeWrapping;
   inverseMapTex.needsUpdate = true;
 
-  const metadataTex = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
-  metadataTex.internalFormat = "RGBA32F";
-  metadataTex.minFilter = NearestFilter;
-  metadataTex.magFilter = NearestFilter;
-  metadataTex.wrapS = ClampToEdgeWrapping;
-  metadataTex.wrapT = ClampToEdgeWrapping;
-  metadataTex.needsUpdate = true;
+  const metadataTex = bandMetadataTexture({ numBands, metadata }, spectrogramData.sampleRate);
 
   return { packedDataTex, originalPackedDataTex, inverseMapTex, metadataTex };
 }

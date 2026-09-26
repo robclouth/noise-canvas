@@ -27,7 +27,8 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
-import { metadataTextureRows, type BandLayout } from "./band-layout";
+import type { BandLayout } from "./band-layout";
+import { bandMetadataTexture } from "./band-metadata-texture";
 import { copyMaterial } from "../components/copy-material";
 import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
@@ -510,13 +511,7 @@ export class StrokeRenderer {
     // A given view carries its own packed layout, so it gets its own metadata
     // and inverse-map textures; the whole-file default shares the file's.
     if (view) {
-      this.viewMetadataTex = viewDataTexture(
-        metadataTextureRows(view.layout),
-        view.layout.numBands,
-        1,
-        RGBAFormat,
-        "RGBA32F",
-      );
+      this.viewMetadataTex = bandMetadataTexture(view.layout, spectrogramData.sampleRate);
       this.viewInverseMapTex = viewDataTexture(
         canvasViewInverseMap(view),
         textureWidth,
@@ -2493,11 +2488,7 @@ export class StrokeRenderer {
     inverse.magFilter = NearestFilter;
     inverse.needsUpdate = true;
 
-    const metadata = new DataTexture(new Float32Array(spec.metadata), spec.numBands, 1, RGBAFormat, FloatType);
-    metadata.internalFormat = "RGBA32F";
-    metadata.minFilter = NearestFilter;
-    metadata.magFilter = NearestFilter;
-    metadata.needsUpdate = true;
+    const metadata = bandMetadataTexture(spec, spec.sampleRate);
 
     // The sampler wants a render target, so the data goes through one draw.
     const packed = this.createFBO(textureWidth, textureHeight, RGBAFormat);
@@ -2695,13 +2686,7 @@ export class StrokeRenderer {
         this.viewMetadataTex.dispose();
         this.viewInverseMapTex.dispose();
       }
-      this.viewMetadataTex = viewDataTexture(
-        metadataTextureRows(next.layout),
-        next.layout.numBands,
-        1,
-        RGBAFormat,
-        "RGBA32F",
-      );
+      this.viewMetadataTex = bandMetadataTexture(next.layout, this.spectrogramData.sampleRate);
       this.viewInverseMapTex = viewDataTexture(
         canvasViewInverseMap(next),
         next.textureWidth,

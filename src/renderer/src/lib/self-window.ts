@@ -1,5 +1,4 @@
 import {
-  ClampToEdgeWrapping,
   Color,
   DataTexture,
   FloatType,
@@ -13,7 +12,7 @@ import {
   type WebGLRenderer,
 } from "three";
 import { copyMaterial } from "../components/copy-material";
-import { metadataTextureRows } from "./band-layout";
+import { bandMetadataTexture } from "./band-metadata-texture";
 import { blockOfFrame, blockPixelRanges, type BlockGrid } from "./block-grid";
 import { fileRangesToView, type CanvasView } from "./canvas-view";
 import { CanvasWindow, type BlockReader, type BlockValueReader } from "./canvas-window";
@@ -223,15 +222,7 @@ export class SelfWindow {
     this.startKey = "";
     this.liveKey = "";
     this.metadataTex?.dispose();
-    const metadata = new DataTexture(metadataTextureRows(view.layout), view.layout.numBands, 1, RGBAFormat, FloatType);
-    metadata.internalFormat = "RGBA32F";
-    metadata.minFilter = NearestFilter;
-    metadata.magFilter = NearestFilter;
-    metadata.wrapS = ClampToEdgeWrapping;
-    metadata.wrapT = ClampToEdgeWrapping;
-    metadata.generateMipmaps = false;
-    metadata.needsUpdate = true;
-    this.metadataTex = metadata;
+    this.metadataTex = bandMetadataTexture(view.layout, this.deps.grid.sampleRate);
   }
 
   private originalWindow(): PackedWindow {

@@ -4,7 +4,7 @@ import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat,
 import { effects } from "../effects";
 import type { StrokePosition, useTransientStore } from "../store/transient";
 import type { OpenFile, SpectrogramData, State } from "../store/types";
-import { metadataTextureRows } from "./band-layout";
+import { bandMetadataTexture } from "./band-metadata-texture";
 import type { CanvasView } from "./canvas-view";
 import { DEFAULT_ONSET_SENSITIVITY } from "./constants";
 import { exportBlockGrid, ExportSourceWindow } from "./export-window";
@@ -167,14 +167,7 @@ export class FileEngine {
     inverse.generateMipmaps = false;
     inverse.needsUpdate = true;
 
-    const meta = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
-    meta.internalFormat = "RGBA32F";
-    meta.minFilter = NearestFilter;
-    meta.magFilter = NearestFilter;
-    meta.wrapS = ClampToEdgeWrapping;
-    meta.wrapT = ClampToEdgeWrapping;
-    meta.generateMipmaps = false;
-    meta.needsUpdate = true;
+    const meta = bandMetadataTexture({ numBands, metadata }, spectrogramData.sampleRate);
 
     return { packed, inverse, meta };
   };

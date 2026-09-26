@@ -16,6 +16,7 @@ export const PACKED_BYTES_PER_TEXEL = 16;
 export type BlockGrid = {
   layout: BandLayout;
   numFrames: number;
+  sampleRate: number;
   blockFrames: number;
   blockCount: number;
   /** Bins one block holds, per band. */
@@ -38,6 +39,7 @@ export function blockGrid(
   return {
     layout,
     numFrames,
+    sampleRate,
     blockFrames,
     blockCount: Math.max(1, Math.ceil(numFrames / blockFrames)),
     binsPerBlock,

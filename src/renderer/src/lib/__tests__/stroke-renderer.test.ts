@@ -31,7 +31,7 @@ import { wholeFileCanvasView } from "../canvas-view";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 import { packedFold, padToFold } from "../constants";
-import { metadataTextureRows } from "../band-layout";
+import { bandMetadataTexture } from "../band-metadata-texture";
 
 // Mock shaders check brush bounds in packed UV space, which doesn't align with
 // the unpacked band-index rows and footprint the real brush occupies. Draw the
@@ -387,13 +387,7 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData): {
   inverseMapTex.wrapT = ClampToEdgeWrapping;
   inverseMapTex.needsUpdate = true;
 
-  const metadataTex = new DataTexture(metadataTextureRows({ numBands, metadata }), numBands, 1, RGBAFormat, FloatType);
-  metadataTex.internalFormat = "RGBA32F";
-  metadataTex.minFilter = NearestFilter;
-  metadataTex.magFilter = NearestFilter;
-  metadataTex.wrapS = ClampToEdgeWrapping;
-  metadataTex.wrapT = ClampToEdgeWrapping;
-  metadataTex.needsUpdate = true;
+  const metadataTex = bandMetadataTexture({ numBands, metadata }, spectrogramData.sampleRate);
 
   return { originalPackedDataTex, inverseMapTex, metadataTex };
 }

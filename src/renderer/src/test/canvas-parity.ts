@@ -89,6 +89,7 @@ export function parityCanvas(
   windowBlocks: number,
   gl: WebGLRenderer,
   registry: EffectsRegistry = effects,
+  onsets?: Float32Array,
 ): ParityCanvas {
   const textures = createHarnessTextures(data);
   const strokeRendererRef: FileStrokeContext["strokeRendererRef"] = { current: null };
@@ -114,6 +115,7 @@ export function parityCanvas(
     filePath: PARITY_FILE_PATH,
     displayName: "parity.wav",
     spectrogramData: data,
+    onsets,
     rendererRef: {
       current: { getTextures: () => renderer.getTextures(), getCanvasView: () => renderer.committedSource().view },
     },

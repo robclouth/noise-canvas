@@ -1,11 +1,11 @@
-import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat, type WebGLRenderer } from "three";
+import type { DataTexture, WebGLRenderer } from "three";
 import { blockGrid, type BlockGrid } from "./block-grid";
 import type { CanvasView } from "./canvas-view";
 import type { BlockReader, BlockValueReader } from "./canvas-window";
 import type { ExportSpan, ExportWindow } from "./image-export";
 import { PackedWindow } from "./packed-window";
 import type { SpectrogramData } from "@renderer/store/types";
-import { metadataTextureRows } from "./band-layout";
+import { bandMetadataTexture } from "./band-metadata-texture";
 
 /**
  * Serves an image export spans of a file's committed state, for a canvas that
@@ -17,6 +17,7 @@ export class ExportSourceWindow implements ExportWindow {
   readonly spanFrames: number;
   private readonly window: PackedWindow;
   private metadata: DataTexture | null = null;
+  private readonly sampleRate: number;
   private laidOut: CanvasView | null = null;
 
   constructor(
@@ -25,6 +26,7 @@ export class ExportSourceWindow implements ExportWindow {
     opts: { windowBlocks: number; read: BlockValueReader; readBlock?: BlockReader },
   ) {
     this.window = new PackedWindow(gl, grid, opts);
+    this.sampleRate = grid.sampleRate;
     const blocks = Math.min(Math.max(1, opts.windowBlocks), grid.blockCount);
     // A span this long falls inside `blocks` blocks wherever it starts. A whole
     // window is one block longer, but only a span that starts on a block edge
@@ -37,7 +39,7 @@ export class ExportSourceWindow implements ExportWindow {
     if (!(await this.window.hold(view))) return null;
     if (this.laidOut !== view) {
       this.metadata?.dispose();
-      this.metadata = metadataTexture(view);
+      this.metadata = bandMetadataTexture(view.layout, this.sampleRate);
       this.laidOut = view;
     }
     if (!this.metadata) return null;
@@ -61,17 +63,4 @@ export class ExportSourceWindow implements ExportWindow {
 export function exportBlockGrid(spectrogram: SpectrogramData): BlockGrid {
   const { numBands, metadata, numFrames, sampleRate } = spectrogram;
   return blockGrid({ numBands, metadata }, numFrames, sampleRate);
-}
-
-function metadataTexture(view: CanvasView): DataTexture {
-  const { numBands } = view.layout;
-  const texture = new DataTexture(metadataTextureRows(view.layout), numBands, 1, RGBAFormat, FloatType);
-  texture.internalFormat = "RGBA32F";
-  texture.minFilter = NearestFilter;
-  texture.magFilter = NearestFilter;
-  texture.wrapS = ClampToEdgeWrapping;
-  texture.wrapT = ClampToEdgeWrapping;
-  texture.generateMipmaps = false;
-  texture.needsUpdate = true;
-  return texture;
 }

@@ -12,7 +12,8 @@ import {
   type BandSpan,
   type CanvasView,
 } from "./canvas-view";
-import { bandAtPixel, metadataTextureRows } from "./band-layout";
+import { bandAtPixel } from "./band-layout";
+import { bandMetadataTexture } from "./band-metadata-texture";
 import { composePixelRangeValues, intersectPixelRanges, pixelRangeCount } from "./pixel-ranges";
 import { sourceNeedsOver, type SourceRead, type SourceWindowTextures } from "./source-window";
 import type { DabNeeds, PaintBeside, StrokePaint, WindowedCanvas } from "./windowed-canvas";
@@ -961,11 +962,8 @@ async function inputSource(
       ? composePixelRangeValues(ranges, [paint, { ranges, values: start }])
       : start;
   const packed = viewTexture(view, values);
-  const metadata = new DataTexture(metadataTextureRows(view.layout), view.layout.numBands, 1, RGBAFormat, FloatType);
-  metadata.minFilter = NearestFilter;
-  metadata.magFilter = NearestFilter;
-  metadata.needsUpdate = true;
   const { spectrogramData } = context;
+  const metadata = bandMetadataTexture(view.layout, spectrogramData.sampleRate);
   const source: SourceFileInfo = {
     id: `${context.fileId}:input`,
     filePath: file.filePath,
