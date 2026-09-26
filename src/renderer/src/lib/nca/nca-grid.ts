@@ -1,4 +1,4 @@
-import { levelOf, NCA_GRID, NCA_VISIBLE } from "./nca-model";
+import { levelOf, NCA_GRID, NCA_VISIBLE, quantisePhase } from "./nca-model";
 
 /** What the grid reader needs from a spectrogram: its packed data and layout. */
 export type PackedSpectrogram = {
@@ -54,4 +54,13 @@ export function readGrid(spec: PackedSpectrogram, rect: UvRect, size = NCA_GRID)
     }
   }
   return grid;
+}
+
+/** The phase of each cell of a grid readGrid returned, quantised for NcaModel.phase. */
+export function gridPhase(grid: Float32Array, size = NCA_GRID): Uint8Array {
+  const phase = new Uint8Array(size * size);
+  for (let cell = 0; cell < size * size; cell++) {
+    phase[cell] = quantisePhase(Math.atan2(grid[cell * NCA_VISIBLE + 2], grid[cell * NCA_VISIBLE + 1]));
+  }
+  return phase;
 }

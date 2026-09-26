@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { NcaGpu } from "../nca/nca-gpu";
 import { readGrid } from "../nca/nca-grid";
 import {
+  dequantisePhase,
   initialWeights,
   levelOf,
   magnitudeOf,
@@ -13,6 +14,7 @@ import {
   NCA_VISIBLE,
   NcaWeights,
   parseModel,
+  quantisePhase,
   serializeModel,
 } from "../nca/nca-model";
 import { runNca, soundState, trainNca } from "../nca/nca-train";
@@ -55,15 +57,27 @@ beforeAll(async () => {
 describe("NCA model format", () => {
   it("round-trips a model through its parameter string", () => {
     const weights = liveWeights(lcg(1));
-    const parsed = parseModel(serializeModel({ weights, label: "a bell", loss: 0.01, iterations: 5 }));
+    const phase = new Uint8Array(NCA_GRID * NCA_GRID).map((_, i) => i % 256);
+    const parsed = parseModel(serializeModel({ weights, label: "a bell", loss: 0.01, iterations: 5, phase }));
     expect(parsed?.label).toBe("a bell");
     expect(Array.from(parsed!.weights.w2)).toEqual(Array.from(weights.w2));
+    expect(Array.from(parsed!.phase!)).toEqual(Array.from(phase));
   });
 
   it("reads nothing from an empty or damaged parameter", () => {
     expect(parseModel("")).toBeNull();
     expect(parseModel("{")).toBeNull();
     expect(parseModel(JSON.stringify({ version: 1, weights: "AAAA" }))).toBeNull();
+    // A model grown on a grid of another size does not fit this one.
+    const text = serializeModel({ weights: liveWeights(lcg(2)), label: "", loss: 0, iterations: 1, phase: null });
+    expect(parseModel(text.replace(`"grid":${NCA_GRID}`, `"grid":${NCA_GRID / 2}`))).toBeNull();
+  });
+
+  it("keeps a phase to within a byte's step", () => {
+    for (const phase of [-3.1, -1, 0, 0.5, 3.1]) {
+      const back = dequantisePhase(quantisePhase(phase));
+      expect(Math.abs(Math.atan2(Math.sin(back - phase), Math.cos(back - phase)))).toBeLessThan(Math.PI / 256 + 1e-6);
+    }
   });
 
   it("puts levels on a 90 dB scale that inverts", () => {

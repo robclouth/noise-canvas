@@ -2,11 +2,14 @@
 
 // Writes what the automaton grew back into the spectrogram. Each band reads
 // the grid at its place in the brush, and the level channel sets its
-// magnitude. Models learn level, not phase, so the phase is either fresh noise
-// (mode 0) or the phase already there (mode 1). Where the sound was already
-// stereo, each channel keeps its share of the level.
+// magnitude. Models learn level, not phase, so the phase comes from the learnt
+// sound's own phase at that place (mode 0), fresh noise (mode 1), or the phase
+// already there (mode 2). Where the sound was already stereo, each channel
+// keeps its share of the level.
 
 uniform sampler2D ncaState0;
+uniform sampler2D ncaPhase; // the learnt phase per cell, as a turn from 0 to 1
+uniform bool ncaHasPhase;
 uniform int ncaGrid;
 uniform int neuralPhaseMode;
 
@@ -30,6 +33,23 @@ vec3 sampleGrid(vec2 local) {
   vec3 c = texelFetch(ncaState0, ivec2(c00.x, c11.y), 0).xyz;
   vec3 d = texelFetch(ncaState0, c11, 0).xyz;
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// The learnt phase between cell centres, blended as unit vectors so it never
+// wraps the long way round.
+float sampleLearntPhase(vec2 local) {
+  vec2 position = clamp(local, 0.0, 1.0) * float(ncaGrid) - 0.5;
+  vec2 base = floor(position);
+  vec2 f = position - base;
+  ivec2 last = ivec2(ncaGrid - 1);
+  ivec2 c00 = clamp(ivec2(base), ivec2(0), last);
+  ivec2 c11 = clamp(ivec2(base) + 1, ivec2(0), last);
+  float a = texelFetch(ncaPhase, c00, 0).r * TWO_PI;
+  float b = texelFetch(ncaPhase, ivec2(c11.x, c00.y), 0).r * TWO_PI;
+  float c = texelFetch(ncaPhase, ivec2(c00.x, c11.y), 0).r * TWO_PI;
+  float d = texelFetch(ncaPhase, c11, 0).r * TWO_PI;
+  vec2 blended = mix(mix(vec2(cos(a), sin(a)), vec2(cos(b), sin(b)), f.x), mix(vec2(cos(c), sin(c)), vec2(cos(d), sin(d)), f.x), f.y);
+  return atan(blended.y, blended.x) - PI;
 }
 
 // `target` on the branch nearest `reference`, so a stored phase stays unwrapped.
@@ -60,14 +80,19 @@ void main() {
     return;
   }
 
-  vec3 grown = sampleGrid(getEffectiveBrushOffset(coords.dest) / max(brushSizeUv, vec2(1e-9)));
+  vec2 local = getEffectiveBrushOffset(coords.dest) / max(brushSizeUv, vec2(1e-9));
+  vec3 grown = sampleGrid(local);
   float magnitude = ncaMagnitudeOf(grown.x);
 
   float meanMagnitude = 0.5 * (originalTexel.r + originalTexel.b);
   vec2 share = meanMagnitude > 1e-6 ? clamp(vec2(originalTexel.r, originalTexel.b) / meanMagnitude, 0.0, 2.0) : vec2(1.0);
   float phaseL = originalTexel.g;
   float phaseR = originalTexel.a;
-  if (neuralPhaseMode == 0) {
+  if (neuralPhaseMode == 0 && ncaHasPhase) {
+    float learnt = sampleLearntPhase(local);
+    phaseL = nearestBranch(learnt, originalTexel.g);
+    phaseR = nearestBranch(learnt, originalTexel.a);
+  } else if (neuralPhaseMode != 2) {
     phaseL = nearestBranch(noisePhase(vUv, 0.0), originalTexel.g);
     phaseR = nearestBranch(noisePhase(vUv, 1.0), originalTexel.a);
   }

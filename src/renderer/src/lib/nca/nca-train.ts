@@ -176,7 +176,7 @@ export async function trainNca(
   options: NcaTrainOptions,
   onProgress?: (progress: NcaTrainProgress) => void,
   signal?: AbortSignal,
-): Promise<Omit<NcaModel, "label">> {
+): Promise<Omit<NcaModel, "label" | "phase">> {
   const random = options.random ?? Math.random;
   const batchSize = options.batchSize ?? 4;
   const poolSize = options.poolSize ?? 64;

@@ -6,7 +6,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { StrokeRenderer } from "../stroke-renderer";
 import { neuralEffect, neuralModelOf, neuralStepCount } from "../../effects/neural-effect";
 import { passThroughEffect } from "../../effects/passthrough-effect";
-import { initialWeights, levelOf, NCA_CHANNELS, NcaWeights, serializeModel } from "../nca/nca-model";
+import {
+  dequantisePhase,
+  initialWeights,
+  levelOf,
+  NCA_CHANNELS,
+  NCA_GRID,
+  NcaWeights,
+  serializeModel,
+} from "../nca/nca-model";
 import { SpectrogramData, State } from "../../store/types";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import {
@@ -33,8 +41,8 @@ function risingWeights(rise: number): NcaWeights {
   return weights;
 }
 
-function modelText(weights: NcaWeights): string {
-  return serializeModel({ weights, label: "test", loss: 0, iterations: 1 });
+function modelText(weights: NcaWeights, phase: Uint8Array | null = null): string {
+  return serializeModel({ weights, label: "test", loss: 0, iterations: 1, phase });
 }
 
 /** A step running one Neural effect with these params over the whole file. */
@@ -132,5 +140,27 @@ describe("Neural effect", () => {
     expect(fewChange).toBeLessThan(rise * 4 * 0.75);
     expect(manyChange).toBeGreaterThan(fewChange * 2.5);
     expect(many.after.every(Number.isFinite)).toBe(true);
+  });
+
+  /** How far each audible coefficient's phase sits from `phase`, at worst, mod 2π. */
+  function worstPhaseError(data: Float32Array, phase: number): number {
+    let worst = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] <= 0) continue;
+      const d = data[i + 1] - phase;
+      worst = Math.max(worst, Math.abs(Math.atan2(Math.sin(d), Math.cos(d))));
+    }
+    return worst;
+  }
+
+  it("gives the grown sound the phase it learnt, or keeps the one there", async () => {
+    const byte = 64;
+    const learnt = modelText(stillWeights(), new Uint8Array(NCA_GRID * NCA_GRID).fill(byte));
+    const withLearnt = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 0 });
+    expect(worstPhaseError(withLearnt.after, dequantisePhase(byte))).toBeLessThan(1e-3);
+    const kept = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 2 });
+    expect(worstPhaseError(kept.after, 0)).toBeLessThan(1e-3);
+    const noise = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 1 });
+    expect(worstPhaseError(noise.after, 0)).toBeGreaterThan(1);
   });
 });

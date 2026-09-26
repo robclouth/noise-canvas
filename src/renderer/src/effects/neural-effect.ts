@@ -1,4 +1,4 @@
-import { GLSL3, RawShaderMaterial, WebGLRenderer } from "three";
+import { DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RedFormat, WebGLRenderer } from "three";
 import ncaInitFrag from "../glsl/nca-init.frag";
 import neuralEffectFrag from "../glsl/neural-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -47,6 +47,8 @@ class NeuralEffect extends BaseEffect {
   private initMaterial: RawShaderMaterial;
   // Render targets belong to one renderer, so each gets its own grid.
   private grids = new WeakMap<WebGLRenderer, NcaGpu>();
+  private phaseTexture: DataTexture | null = null;
+  private phaseModel: NcaModel | null = null;
 
   constructor() {
     super();
@@ -57,6 +59,8 @@ class NeuralEffect extends BaseEffect {
           ncaState0: { value: null },
           ncaGrid: { value: NCA_GRID },
           neuralPhaseMode: { value: 0 },
+          ncaPhase: { value: null },
+          ncaHasPhase: { value: false },
         },
         vertexShader: rangeQuadVert,
         fragmentShader: neuralEffectFrag,
@@ -95,7 +99,27 @@ class NeuralEffect extends BaseEffect {
     copyUniforms(this.initMaterial, props.commonUniforms);
     grid.render(gl, this.initMaterial);
     grid.step(gl, neuralStepCount(state));
-    this.materials[props.passIndex].uniforms.ncaState0.value = grid.current.textures[0];
+    const uniforms = this.materials[props.passIndex].uniforms;
+    uniforms.ncaState0.value = grid.current.textures[0];
+    uniforms.ncaPhase.value = this.learntPhase(model);
+    uniforms.ncaHasPhase.value = uniforms.ncaPhase.value !== null;
+  }
+
+  /** The model's learnt phase as a texture of turns, made once per model. */
+  private learntPhase(model: NcaModel): DataTexture | null {
+    if (model !== this.phaseModel) {
+      this.phaseTexture?.dispose();
+      this.phaseTexture = null;
+      this.phaseModel = model;
+      if (model.phase) {
+        const turns = Float32Array.from(model.phase, (byte) => byte / 256);
+        this.phaseTexture = new DataTexture(turns, NCA_GRID, NCA_GRID, RedFormat, FloatType);
+        this.phaseTexture.minFilter = NearestFilter;
+        this.phaseTexture.magFilter = NearestFilter;
+        this.phaseTexture.needsUpdate = true;
+      }
+    }
+    return this.phaseTexture;
   }
 }
 

@@ -1282,11 +1282,13 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "options",
     name: "Phase",
     label: "Phase",
-    description: "Takes the grown sound's phase from fresh noise, or from the sound already there.",
+    description:
+      "Takes the grown sound's phase from what was learnt, from fresh noise, or from the sound already there.",
     default: 0,
     options: [
-      { value: 0, label: "Noise" },
-      { value: 1, label: "Keep" },
+      { value: 0, label: "Learnt" },
+      { value: 1, label: "Noise" },
+      { value: 2, label: "Keep" },
     ],
     includeInStep: true,
     effectType: "neural",

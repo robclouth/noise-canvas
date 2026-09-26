@@ -14,7 +14,7 @@
  * file's layout, so a model trained in one runs unchanged in the other.
  */
 
-export const NCA_GRID = 48;
+export const NCA_GRID = 128;
 export const NCA_CHANNELS = 12;
 export const NCA_VISIBLE = 3;
 export const NCA_HIDDEN = 64;
@@ -47,6 +47,12 @@ export type NcaModel = {
   /** Mean squared error on the target when training stopped. */
   loss: number;
   iterations: number;
+  /**
+   * The learnt sound's phase at each grid cell, row-major, quantised to a byte
+   * over −π to π. The network learns level only, so this is where a regrown
+   * sound gets its own phase back.
+   */
+  phase: Uint8Array | null;
 };
 
 const SIZES = {
@@ -56,7 +62,18 @@ const SIZES = {
   b2: NCA_CHANNELS,
 };
 const TOTAL_WEIGHTS = SIZES.w1 + SIZES.b1 + SIZES.w2 + SIZES.b2;
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
+
+/** A phase in radians as the byte NcaModel.phase stores. */
+export function quantisePhase(phase: number): number {
+  const turn = (phase / (2 * Math.PI) + 0.5) % 1;
+  return Math.round((turn < 0 ? turn + 1 : turn) * 256) % 256;
+}
+
+/** The phase a byte of NcaModel.phase stands for, in radians. */
+export function dequantisePhase(byte: number): number {
+  return (byte / 256 - 0.5) * 2 * Math.PI;
+}
 
 export function levelOf(magnitude: number): number {
   const db = 20 * Math.log10(Math.max(magnitude, 1e-12));
@@ -97,10 +114,12 @@ export function serializeModel(model: NcaModel): string {
   }
   return JSON.stringify({
     version: FORMAT_VERSION,
+    grid: NCA_GRID,
     label: model.label,
     loss: model.loss,
     iterations: model.iterations,
     weights: toBase64(new Uint8Array(packed.buffer)),
+    phase: model.phase ? toBase64(model.phase) : null,
   });
 }
 
@@ -109,7 +128,7 @@ export function parseModel(text: unknown): NcaModel | null {
   if (typeof text !== "string" || text.length === 0) return null;
   try {
     const raw = JSON.parse(text) as Record<string, unknown>;
-    if (raw.version !== FORMAT_VERSION || typeof raw.weights !== "string") return null;
+    if (raw.version !== FORMAT_VERSION || raw.grid !== NCA_GRID || typeof raw.weights !== "string") return null;
     const bytes = fromBase64(raw.weights);
     if (bytes.byteLength !== TOTAL_WEIGHTS * 4) return null;
     const packed = new Float32Array(bytes.buffer, bytes.byteOffset, TOTAL_WEIGHTS);
@@ -121,8 +140,10 @@ export function parseModel(text: unknown): NcaModel | null {
     };
     const weights = { w1: take(SIZES.w1), b1: take(SIZES.b1), w2: take(SIZES.w2), b2: take(SIZES.b2) };
     if (![weights.w1, weights.b1, weights.w2, weights.b2].every((a) => a.every(Number.isFinite))) return null;
+    const phase = typeof raw.phase === "string" ? fromBase64(raw.phase) : null;
     return {
       weights,
+      phase: phase && phase.length === NCA_GRID * NCA_GRID ? phase : null,
       label: typeof raw.label === "string" ? raw.label : "",
       loss: typeof raw.loss === "number" ? raw.loss : NaN,
       iterations: typeof raw.iterations === "number" ? raw.iterations : 0,

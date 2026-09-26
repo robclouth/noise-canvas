@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PackedSpectrogram, readGrid, UvRect } from "./nca-grid";
+import { gridPhase, PackedSpectrogram, readGrid, UvRect } from "./nca-grid";
 import { serializeModel } from "./nca-model";
 
 /** Iterations a learn runs unless stopped sooner. */
@@ -97,7 +97,7 @@ export async function startNcaTraining(request: {
       own.signal,
     );
     if (result.iterations > 0) {
-      request.apply(serializeModel({ ...result, label: request.label }));
+      request.apply(serializeModel({ ...result, label: request.label, phase: gridPhase(target) }));
     }
     if (controller === own) update({ status: "finished" });
   } catch (error) {
