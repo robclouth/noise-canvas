@@ -865,16 +865,28 @@ function besideFor(
   }
   const compute = async (tileDone: () => boolean): Promise<StrokePaint | null> => {
     const parts: StrokePaint[] = [];
+    const timing: BesideTiming = { readMs: 0, setupMs: 0, paintMs: 0, readbackMs: 0 };
+    const started = performance.now();
     for (const tile of tiles) {
-      const part = await paintTileBeside(context, state, cursorPos, span, canvas, renderer, tile, options);
+      const part = await paintTileBeside(context, state, cursorPos, span, canvas, renderer, tile, options, timing);
       if (!part || !tileDone()) return null;
       parts.push(part);
     }
-    return joinPaint(parts);
+    const joined = joinPaint(parts);
+    diag.info("canvas", "beside dab", {
+      tiles: tiles.length,
+      texels: tiles.reduce((sum, tile) => sum + tile.view.texels, 0),
+      ...timing,
+      totalMs: performance.now() - started,
+    });
+    return joined;
   };
   const pitch = whole ? { min: 0, max: 1 } : { min: Math.max(0, union.min.y), max: Math.min(1, union.max.y) };
   return { compute, tiles: tiles.length, pitch };
 }
+
+/** Milliseconds a dab painted beside the canvas spent in each phase, over all its tiles. */
+type BesideTiming = { readMs: number; setupMs: number; paintMs: number; readbackMs: number };
 
 /**
  * Paints the dab on a renderer beside the canvas over the tile's view,
@@ -890,8 +902,15 @@ async function paintTileBeside(
   renderer: StrokeRenderer,
   tile: BesideTile,
   options: DispatchOptions,
+  timing: BesideTiming,
 ): Promise<StrokePaint | null> {
   const { view, bands, frames } = tile;
+  let at = performance.now();
+  const lap = (phase: keyof BesideTiming): void => {
+    const now = performance.now();
+    timing[phase] += now - at;
+    at = now;
+  };
   const fileRanges = heldRanges(view.ranges);
   const [start, paint, original] = await Promise.all([
     canvas.readStart(fileRanges),
@@ -902,6 +921,7 @@ async function paintTileBeside(
   if (!(await canvas.holdOthers(span.needs, tile.reads))) return null;
   const input = tile.input ? await inputSource(context, state, canvas, tile.input) : null;
   if (tile.input && !input) return null;
+  lap("readMs");
   const layout = { numBands: context.spectrogramData.numBands, metadata: context.spectrogramData.metadata };
   const beside = renderer.beside(view);
   const originalTexture = original ? viewTexture(view, original) : null;
@@ -916,6 +936,7 @@ async function paintTileBeside(
     }
     if (originalTexture) beside.setOriginalTexture(originalTexture);
     beside.beginStroke();
+    lap("setupMs");
     const painting = {
       ...options,
       span,
@@ -923,12 +944,14 @@ async function paintTileBeside(
       beside: { renderer: beside, view, input: input?.source, reads: tile.reads },
     };
     if (!dispatchStroke(context, state, cursorPos, false, painting)) return null;
+    lap("paintMs");
     const dirty = beside.getDirtyPixelRanges();
     const onBands = dirty ? viewRangesToFile(view, rangesOnBands(view, dirty, bands)) : new Uint32Array(0);
     const keptFile = intersectPixelRanges(onBands, frameSpanPixels(canvas, frames));
     const kept = pixelRangeCount(keptFile) > 0 ? fileRangesToView(view, layout, keptFile) : null;
     if (!kept) return { ranges: new Uint32Array(0), values: new Float32Array(0), masks: [] };
     const [values, masks] = await Promise.all([beside.readPixelRanges(kept), beside.readStrokeMaskRanges(kept)]);
+    lap("readbackMs");
     return { ranges: keptFile, values, masks };
   } finally {
     beside.dispose();

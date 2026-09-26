@@ -14,8 +14,8 @@ import {
 } from "./pixel-ranges";
 import { yieldIfLong } from "./frame-yield";
 
-// Blocks a whole-state read or write keeps in flight at once.
-const READ_ALL_AHEAD = 4;
+// Blocks a read or write over many blocks keeps in flight at once.
+const READ_ALL_AHEAD = 8;
 
 /** Where a store keeps its encoded blocks between reads. */
 export interface BlockBackend {
@@ -130,6 +130,7 @@ export class BlockStore implements PackedStateStore {
   private readonly texelCount: number;
   private readonly maxResidentBytes: number;
   private flushing: Promise<void> = Promise.resolve();
+  private flushQueued = false;
   private disposed = false;
   private seeded = false;
 
@@ -272,26 +273,44 @@ export class BlockStore implements PackedStateStore {
     return out;
   }
 
-  /**
-   * Hands every block's current values to `take`, in index order, with a few
-   * decodes in flight ahead of the block being taken.
-   */
+  /** Hands every block's current values to `take`, in index order. */
   private async eachBlock(take: (index: number, values: Float32Array) => void): Promise<void> {
-    const count = this.grid.blockCount;
+    await this.walk(
+      Array.from({ length: this.grid.blockCount }, (_, index) => index),
+      this.current,
+      take,
+    );
+  }
+
+  /**
+   * Hands each of `indices` — no index twice — to `take` in order, with a few
+   * loads in flight ahead of the block being taken. A walk over more than the
+   * resident budget caches only what fits without evicting. A current block a
+   * patch reached while its load was in flight is taken as patched.
+   */
+  private async walk(
+    indices: readonly number[],
+    load: (index: number, sweep: boolean) => Promise<Float32Array>,
+    take: (index: number, values: Float32Array) => void | Promise<void>,
+  ): Promise<void> {
+    let bytes = 0;
+    for (const index of indices) bytes += this.decodedBytes(index);
+    const sweep = bytes > this.maxResidentBytes;
     const pending: Promise<Float32Array>[] = [];
     // A read ahead of the walk is dropped where the walk stops early — a store
     // disposed under it — so each carries its own handler and the one that is
     // waited on still throws.
-    const readAhead = (index: number): Promise<Float32Array> => {
-      const values = this.block(index);
+    const readAhead = (at: number): void => {
+      if (at >= indices.length) return;
+      const values = load(indices[at], sweep);
       void values.catch(() => {});
-      return values;
+      pending.push(values);
     };
-    for (let index = 0; index < Math.min(READ_ALL_AHEAD, count); index++) pending.push(readAhead(index));
-    for (let index = 0; index < count; index++) {
-      const values = await pending.shift()!;
-      if (index + READ_ALL_AHEAD < count) pending.push(readAhead(index + READ_ALL_AHEAD));
-      take(index, values);
+    for (let at = 0; at < READ_ALL_AHEAD; at++) readAhead(at);
+    for (let at = 0; at < indices.length; at++) {
+      const loaded = await pending.shift()!;
+      readAhead(at + READ_ALL_AHEAD);
+      await take(indices[at], (load === this.current ? this.dirty.get(indices[at]) : undefined) ?? loaded);
     }
   }
 
@@ -299,9 +318,11 @@ export class BlockStore implements PackedStateStore {
   async readAllRoot(): Promise<Float32Array> {
     if (this.disposed) throw new Error("block store is disposed");
     const out = new Float32Array(this.texelCount * 4);
-    for (let index = 0; index < this.grid.blockCount; index++) {
-      scatterCompactPixelRanges(out, await this.rootBlock(index), this.blockRanges(index));
-    }
+    await this.walk(
+      Array.from({ length: this.grid.blockCount }, (_, index) => index),
+      (index, sweep) => this.rootBlock(index, sweep),
+      (index, values) => scatterCompactPixelRanges(out, values, this.blockRanges(index)),
+    );
     return out;
   }
 
@@ -310,10 +331,14 @@ export class BlockStore implements PackedStateStore {
     if (this.disposed) throw new Error("block store is disposed");
     const out = new Float32Array(pixelRangeCount(ranges) * 4);
     let since = performance.now();
-    for (const index of blocksForPixelRanges(this.grid, ranges)) {
-      copyCompactOverlap(out, ranges, await this.rootBlock(index), this.blockRanges(index));
-      since = await yieldIfLong(since);
-    }
+    await this.walk(
+      blocksForPixelRanges(this.grid, ranges),
+      (index, sweep) => this.rootBlock(index, sweep),
+      async (index, values) => {
+        copyCompactOverlap(out, ranges, values, this.blockRanges(index));
+        since = await yieldIfLong(since);
+      },
+    );
     return out;
   }
 
@@ -323,38 +348,35 @@ export class BlockStore implements PackedStateStore {
    */
   async readRanges(ranges: Uint32Array): Promise<Float32Array> {
     const out = new Float32Array(pixelRangeCount(ranges) * 4);
-    const blocks = blocksForPixelRanges(this.grid, ranges);
     let since = performance.now();
-    for (const index of blocks) {
-      copyCompactOverlap(out, ranges, await this.block(index), this.blockRanges(index));
+    await this.walk(blocksForPixelRanges(this.grid, ranges), this.current, async (index, values) => {
+      copyCompactOverlap(out, ranges, values, this.blockRanges(index));
       since = await yieldIfLong(since);
-    }
+    });
     return out;
   }
 
   /** The magnitudes at the taps `runs` names, two floats per tap in run order. */
   async readTaps(runs: Uint32Array): Promise<Float32Array> {
     const out = new Float32Array(tapCount(runs) * 2);
-    for (const index of blocksForPixelRanges(this.grid, tapSpanRanges(runs))) {
-      copyTapsFromCompact(out, runs, await this.block(index), this.blockRanges(index));
-    }
+    await this.walk(blocksForPixelRanges(this.grid, tapSpanRanges(runs)), this.current, (index, values) =>
+      copyTapsFromCompact(out, runs, values, this.blockRanges(index)),
+    );
     return out;
   }
 
   /**
    * Writes values laid out in `ranges` order back into the blocks they fall
-   * in, which stay in RAM until the next flush. When the dirty blocks grow
-   * past the resident budget, the patch flushes them itself, so unflushed
-   * paint cannot hold a whole file decoded.
+   * in, which stay in RAM until the next flush. Past the resident budget the
+   * patch starts a flush, and past twice it waits for one, so unflushed paint
+   * cannot hold a whole file decoded.
    */
   async patch(ranges: Uint32Array, values: Float32Array): Promise<void> {
-    const blocks = blocksForPixelRanges(this.grid, ranges);
-    for (const index of blocks) {
-      const block = await this.block(index);
+    await this.walk(blocksForPixelRanges(this.grid, ranges), this.current, async (index, block) => {
       copyCompactOverlap(block, this.blockRanges(index), values, ranges);
       this.markDirty(index, block);
-    }
-    if (this.currentResidentBytes > this.maxResidentBytes) await this.flush();
+      await this.flushIfOver();
+    });
   }
 
   /**
@@ -363,7 +385,7 @@ export class BlockStore implements PackedStateStore {
    * residuals an inverted apply needs: for each float the shift cannot
    * subtract back exactly, its file-absolute index and its original bits, in
    * the order the whole-array walk finds them. Changed blocks stay dirty
-   * until the next flush; past the resident budget they flush themselves.
+   * until the next flush, and flush as a patch's do.
    */
   async applyTurnsCollecting(turns: PhaseTurns): Promise<Uint32Array> {
     const residuals: number[] = [];
@@ -374,8 +396,7 @@ export class BlockStore implements PackedStateStore {
       for (let ch = 0; ch < 2; ch++) {
         const c = turns.offsets[i * 2 + ch];
         if (c === 0) continue;
-        for (const index of blocksForPixelRanges(this.grid, span)) {
-          const block = await this.block(index);
+        await this.walk(blocksForPixelRanges(this.grid, span), this.current, async (index, block) => {
           const bits = new Uint32Array(block.buffer, block.byteOffset, block.length);
           const ranges = this.blockRanges(index);
           let at = 0;
@@ -394,11 +415,29 @@ export class BlockStore implements PackedStateStore {
             at += count;
           }
           this.markDirty(index, block);
-          if (this.currentResidentBytes > this.maxResidentBytes) await this.flush();
-        }
+          await this.flushIfOver();
+        });
       }
     }
     return Uint32Array.from(residuals);
+  }
+
+  /**
+   * Starts a flush once the changed blocks pass the resident budget, and waits
+   * for one only past twice it. A block leaves the clean cache as it turns
+   * dirty, so between the two the store holds little more than the budget.
+   */
+  private async flushIfOver(): Promise<void> {
+    const bytes = this.currentResidentBytes;
+    if (bytes > 2 * this.maxResidentBytes) await this.flush();
+    else if (bytes > this.maxResidentBytes && !this.flushQueued) {
+      this.flushQueued = true;
+      void this.flush()
+        .catch((error: unknown) => console.error("block store: background flush failed", error))
+        .finally(() => {
+          this.flushQueued = false;
+        });
+    }
   }
 
   private markDirty(index: number, block: Float32Array): void {
@@ -422,14 +461,21 @@ export class BlockStore implements PackedStateStore {
   }
 
   private async flushNow(): Promise<void> {
-    for (const [index, block] of [...this.dirty]) {
+    const flushOne = async (index: number, block: Float32Array): Promise<void> => {
       if (this.disposed) return;
       const version = this.dirtyVersion.get(index);
-      await (this.overlay ?? this.backend).write(index, await this.codec.encode(block.slice()));
-      if (this.dirtyVersion.get(index) !== version) continue;
+      const bytes = await this.codec.encode(block.slice());
+      if (this.disposed) return;
+      await (this.overlay ?? this.backend).write(index, bytes);
+      if (this.dirtyVersion.get(index) !== version) return;
       this.dirty.delete(index);
       this.dirtyVersion.delete(index);
       this.clean.set(String(index), block);
+    };
+    // A few blocks encode and write at once; each is its own record.
+    const dirty = [...this.dirty];
+    for (let start = 0; start < dirty.length; start += READ_ALL_AHEAD) {
+      await Promise.all(dirty.slice(start, start + READ_ALL_AHEAD).map(([index, block]) => flushOne(index, block)));
     }
   }
 
@@ -454,21 +500,23 @@ export class BlockStore implements PackedStateStore {
    * reached is decoded from the seeded bytes. Either copy is kept for the
    * next read.
    */
-  private async rootBlock(index: number): Promise<Float32Array> {
+  private async rootBlock(index: number, sweep = false): Promise<Float32Array> {
     const kept = this.root.get(String(index));
     if (kept) return kept;
+    const keep = (block: Float32Array): void =>
+      sweep ? this.root.setIfRoom(String(index), block) : this.root.set(String(index), block);
     if (!this.everPatched.has(index) && !(await this.overlayHeld(index))) {
-      const block = await this.block(index);
+      const block = await this.block(index, sweep);
       if (!this.everPatched.has(index)) {
         const copy = block.slice();
-        this.root.set(String(index), copy);
+        keep(copy);
         return copy;
       }
     }
     const bytes = await this.backend.read(index);
     if (!bytes) throw new Error(`block ${index} was never written`);
     const block = this.checked(index, await this.codec.decode(bytes, this.decodedBytes(index)));
-    this.root.set(String(index), block);
+    keep(block);
     return block;
   }
 
@@ -492,7 +540,10 @@ export class BlockStore implements PackedStateStore {
    * resident. A dirty block is the only truth for its pixels — the backend
    * still holds the state before the patch — so it is answered from RAM.
    */
-  private async block(index: number): Promise<Float32Array> {
+  /** One block of the current tier, loaded for a walk. */
+  private readonly current = (index: number, sweep: boolean): Promise<Float32Array> => this.block(index, sweep);
+
+  private async block(index: number, sweep = false): Promise<Float32Array> {
     if (this.disposed) throw new Error("block store is disposed");
     const dirty = this.dirty.get(index);
     if (dirty) return dirty;
@@ -502,7 +553,7 @@ export class BlockStore implements PackedStateStore {
     const running = this.inflight.get(index);
     if (running) return await running;
 
-    const load = this.load(index);
+    const load = this.load(index, sweep);
     this.inflight.set(index, load);
     try {
       return await load;
@@ -511,11 +562,12 @@ export class BlockStore implements PackedStateStore {
     }
   }
 
-  private async load(index: number): Promise<Float32Array> {
+  private async load(index: number, sweep: boolean): Promise<Float32Array> {
     const bytes = (await this.overlay?.read(index)) ?? (await this.backend.read(index));
     if (!bytes) throw new Error(`block ${index} was never written`);
     const block = this.checked(index, await this.codec.decode(bytes, this.decodedBytes(index)));
-    this.clean.set(String(index), block);
+    if (sweep) this.clean.setIfRoom(String(index), block);
+    else this.clean.set(String(index), block);
     return block;
   }
 

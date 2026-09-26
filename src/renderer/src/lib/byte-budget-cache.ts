@@ -33,6 +33,21 @@ export class ByteBudgetCache<T> {
     }
   }
 
+  /**
+   * Stores the value only if it fits without evicting anything: a sweep over
+   * more than the budget then keeps what it found cached, where evicting as it
+   * went would leave none of it for the next sweep.
+   */
+  setIfRoom(id: string, value: T): void {
+    const size = this.sizeOf(value);
+    const existing = this.map.get(id);
+    const freed = existing === undefined ? 0 : this.sizeOf(existing);
+    if (this.bytes - freed + size > this.maxBytes) return;
+    this.delete(id);
+    this.map.set(id, value);
+    this.bytes += size;
+  }
+
   delete(id: string): void {
     const existing = this.map.get(id);
     if (existing === undefined) return;

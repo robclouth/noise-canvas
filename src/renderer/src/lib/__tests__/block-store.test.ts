@@ -480,6 +480,23 @@ describe("BlockStore", () => {
     expect(Array.from(await reopened.readRanges(ranges))).toEqual(Array.from(first));
   });
 
+  it("keeps what it has cached through a read over more than it can hold", async () => {
+    // Many more blocks than the read keeps in flight, so evictions land between loads.
+    const grid = makeGrid(0.02);
+    expect(grid.blockCount).toBeGreaterThanOrEqual(32);
+    const backend = memoryBackend();
+    await new BlockStore(grid, backend, { codec: rawCodec }).seed(packed);
+    const total = layoutTexels(layout) * 16;
+    const reader = new BlockStore(grid, backend, { codec: rawCodec, maxResidentBytes: Math.floor(total / 2) });
+    const all = Uint32Array.of(0, layoutTexels(layout));
+    await reader.readRanges(all);
+    const first = backend.reads;
+    const again = await reader.readRanges(all);
+    // Evicting as the read went would leave the second read nothing cached.
+    expect(backend.reads - first).toBeLessThan(grid.blockCount * 0.75);
+    expect(Array.from(again)).toEqual(Array.from(gatherPixelRanges(packed, all)));
+  });
+
   it("stops an in-flight flush when it is disposed, leaving nothing behind", async () => {
     const grid = makeGrid();
     const backend = memoryBackend();
