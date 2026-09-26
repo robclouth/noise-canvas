@@ -478,6 +478,11 @@ describe("BlockStore", () => {
     // The bytes on disk hold the state the flush saw, whole, not the patch.
     const reopened = new BlockStore(grid, backend, { codec: rawCodec });
     expect(Array.from(await reopened.readRanges(ranges))).toEqual(Array.from(first));
+    // The patch itself is kept, and the next flush writes it.
+    expect(Array.from(await store.readRanges(ranges))).toEqual(Array.from(second));
+    await store.flush();
+    const again = new BlockStore(grid, backend, { codec: rawCodec });
+    expect(Array.from(await again.readRanges(ranges))).toEqual(Array.from(second));
   });
 
   it("keeps what it has cached through a read over more than it can hold", async () => {

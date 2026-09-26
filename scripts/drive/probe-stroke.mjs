@@ -2,8 +2,8 @@
 // every dab: which dabs reached the store, and which parts of each.
 //
 // Usage: node scripts/drive/probe-stroke.mjs [--seconds 285] [--extra 8] [--no-build]
-//        [--power 0] [--strokes 1] [--settle 60000] [--before 1500] [--duration 500] [--log keep.log]
-import { copyFileSync, existsSync } from "node:fs";
+//        [--power 0] [--strokes 1] [--settle 60000] [--before 1500] [--duration 500] [--log keep.log] [--profile out.cpuprofile]
+import { copyFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build, diagLines, launch, openFiles, seedEraseBrush, sleep, viewOf, writeNoise, closeApp } from "./app.mjs";
@@ -46,6 +46,13 @@ try {
   await page.keyboard.up("Meta");
   await sleep(BEFORE);
 
+  const profileTo = option("profile", null);
+  const cdp = profileTo ? await page.context().newCDPSession(page) : null;
+  if (cdp) {
+    await cdp.send("Profiler.enable");
+    await cdp.send("Profiler.setSamplingInterval", { interval: 200 });
+    await cdp.send("Profiler.start");
+  }
   const strokeLog = [];
   for (let s = 0; s < STROKES; s++) {
     const y = b.y + b.height * (0.35 + 0.1 * s);
@@ -96,6 +103,10 @@ try {
     await sleep(250);
   }
   await sleep(500);
+  if (cdp) {
+    const { profile: cpu } = await cdp.send("Profiler.stop");
+    writeFileSync(profileTo, JSON.stringify(cpu));
+  }
 
   const dabs = await page.evaluate((id) => globalThis.__dabLog.filter((d) => d.fileId === id), id);
   const grid = [0.1, 0.3, 0.5, 0.7, 0.9];

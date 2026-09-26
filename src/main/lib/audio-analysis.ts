@@ -285,7 +285,9 @@ async function compressDelta(input: Buffer): Promise<Buffer> {
   const raws = Array.from({ length: count }, (_unused, index) =>
     input.subarray(index * per, Math.min(input.byteLength, (index + 1) * per)),
   );
-  const frames = await Promise.all(raws.map((raw) => zstdCompressAsync(raw)));
+  const frames = await Promise.all(
+    raws.map((raw) => zstdCompressAsync(raw, { chunkSize: zstdChunkSize(raw.byteLength) })),
+  );
   const header = Buffer.alloc(8 + count * 8);
   header.writeUInt32BE(DELTA_FRAMED_MAGIC, 0);
   header.writeUInt32LE(count, 4);

@@ -134,6 +134,8 @@ export class BlockStore implements PackedStateStore {
   private readonly overlayOnDisk = new Map<number, boolean>();
   private readonly dirty = new Map<number, Float32Array>();
   private readonly dirtyVersion = new Map<number, number>();
+  // Arrays a flush is encoding. A patch copies such a block before writing.
+  private readonly encoding = new Set<Float32Array>();
   private readonly inflight = new Map<number, Promise<Float32Array>>();
   private readonly ranges: Array<Uint32Array | undefined>;
   private readonly texelCount: number;
@@ -383,7 +385,8 @@ export class BlockStore implements PackedStateStore {
    * cannot hold a whole file decoded.
    */
   async patch(ranges: Uint32Array, values: Float32Array): Promise<void> {
-    await this.walk(blocksForPixelRanges(this.grid, ranges), this.current, async (index, block) => {
+    await this.walk(blocksForPixelRanges(this.grid, ranges), this.current, async (index, held) => {
+      const block = this.writable(held);
       copyCompactOverlap(block, this.blockRanges(index), values, ranges);
       this.markDirty(index, block);
       await this.flushIfOver();
@@ -407,7 +410,8 @@ export class BlockStore implements PackedStateStore {
       for (let ch = 0; ch < 2; ch++) {
         const c = turns.offsets[i * 2 + ch];
         if (c === 0) continue;
-        await this.walk(blocksForPixelRanges(this.grid, span), this.current, async (index, block) => {
+        await this.walk(blocksForPixelRanges(this.grid, span), this.current, async (index, held) => {
+          const block = this.writable(held);
           const bits = new Uint32Array(block.buffer, block.byteOffset, block.length);
           const ranges = this.blockRanges(index);
           let at = 0;
@@ -451,6 +455,11 @@ export class BlockStore implements PackedStateStore {
     }
   }
 
+  /** The block itself, or a copy of it while a flush is encoding it. */
+  private writable(block: Float32Array): Float32Array {
+    return this.encoding.has(block) ? block.slice() : block;
+  }
+
   private markDirty(index: number, block: Float32Array): void {
     this.everPatched.add(index);
     this.clean.delete(String(index));
@@ -459,10 +468,10 @@ export class BlockStore implements PackedStateStore {
   }
 
   /**
-   * Encodes and writes every block changed since the last call, one at a
-   * time. Each block is encoded from a copy, so a patch landing mid-encode
-   * cannot reach the bytes in flight; the version check keeps such a block
-   * dirty for the next flush. Calls run one after another, and `dispose`
+   * Encodes and writes every block changed since the last call, a few at a
+   * time. A patch landing mid-encode writes to a copy of the block, so it
+   * cannot reach the bytes in flight; the version check keeps the copy dirty
+   * for the next flush. Calls run one after another, and `dispose`
    * waits for the one in flight.
    */
   async flush(pausable = true): Promise<void> {
@@ -486,7 +495,13 @@ export class BlockStore implements PackedStateStore {
     const flushOne = async (index: number, block: Float32Array): Promise<void> => {
       if (this.disposed) return;
       const version = this.dirtyVersion.get(index);
-      const bytes = await this.codec.encode(block.slice());
+      this.encoding.add(block);
+      let bytes: Uint8Array;
+      try {
+        bytes = await this.codec.encode(block);
+      } finally {
+        this.encoding.delete(block);
+      }
       if (this.disposed) return;
       await (this.overlay ?? this.backend).write(index, bytes);
       if (this.dirtyVersion.get(index) !== version) return;

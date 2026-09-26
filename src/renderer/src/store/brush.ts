@@ -208,6 +208,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const commitTask = serializeFileTask(activeFileId, async () => {
         const readStart = performance.now();
         const paintedValues = paintedRead ? await paintedRead : null;
+        const paintedMs = performance.now() - readStart;
         // A navigation's synthesis may still be landing — the commit measures
         // against the audio it installs — and may still be reading the packed
         // state this commit writes into.
@@ -223,6 +224,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         let data: Float32Array | null = null;
         let baseFootprint: Float32Array | undefined;
         let footprint: { ranges: Uint32Array; values: Float32Array } | null = null;
+        const baseStart = performance.now();
         if (footprintOnly && painted && paintedValues) {
           // The store holds the pre-stroke state, stashed pixels included.
           baseFootprint = (await historyManager.currentRanges(painted)) ?? undefined;
@@ -237,6 +239,8 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         }
         diag.timing("timing", "commit state read", performance.now() - readStart, {
           footprintOnly: footprintOnly ? 1 : 0,
+          paintedMs: Math.round(paintedMs),
+          baseMs: Math.round(performance.now() - baseStart),
         });
 
         // Phase turns an earlier commit could not put on the canvas, because
