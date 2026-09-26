@@ -35,7 +35,7 @@ import { patchMaterial } from "../components/patch-material";
 import { scatterIntoTargets } from "./target-scatter";
 import { phaseTurnMaterial } from "../components/phase-turn-material";
 import { rangeCopyMaterial } from "../components/range-copy-material";
-import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
+import { BaseEffect, CommonUniforms, createDefaultUniforms, splitRatio } from "../effects/base-effect";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
@@ -949,6 +949,7 @@ export class StrokeRenderer {
     uniforms.sourceBandCount = uniforms.destBandCount;
     uniforms.sourceChannelCount = uniforms.destChannelCount;
     uniforms.sourceSampleRate = uniforms.destSampleRate;
+    uniforms.destPerSourceFrame = { value: new Vector2(1, 0) };
     uniforms.sourceSpectrogramTextureSize = uniforms.destSpectrogramTextureSize;
     uniforms.sourceOnsetTex = { value: destOnsetTexture ?? this.textures.placeholderTexture };
     uniforms.sourceViewStartFrame = uniforms.destViewStartFrame;
@@ -1154,6 +1155,7 @@ export class StrokeRenderer {
       sourceBandCount: { value: sourceFile.spectrogramData.numBands },
       sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
       sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
+      destPerSourceFrame: { value: splitRatio(this.spectrogramData.sampleRate, sourceFile.spectrogramData.sampleRate) },
       sourceOnsetTex: { value: sourceFile.onsetTexture ?? placeholderTexture },
       sourceViewStartFrame: { value: sourceFile.view?.startFrame ?? 0 },
       sourceFileFrameCount: { value: sourceFile.spectrogramData.numFrames },
@@ -1648,6 +1650,7 @@ export class StrokeRenderer {
         sourceBandCount: commonUniforms.destBandCount,
         sourceChannelCount: commonUniforms.destChannelCount,
         sourceSampleRate: commonUniforms.destSampleRate,
+        destPerSourceFrame: { value: new Vector2(1, 0) },
         sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
         sourceOnsetTex: { value: params.destOnsetTexture ?? this.textures.placeholderTexture },
         sourceViewStartFrame: commonUniforms.destViewStartFrame,

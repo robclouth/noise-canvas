@@ -15,6 +15,8 @@ uniform int       sourceChannelCount;
 uniform float     sourceMinFreq;
 uniform float     sourceBandsPerOctave;
 uniform float     sourceSampleRate;
+// destSampleRate / sourceSampleRate as a float and its remainder: dest frames per source frame.
+uniform vec2      destPerSourceFrame;
 // Nearest-onset lookup for the source file: R = onset time (sec), G = strength
 // 0..1, sampled by unpacked FILE UV.x. See lib/onset-map.ts.
 uniform sampler2D sourceOnsetTex;
@@ -542,11 +544,6 @@ struct Frames { int whole; float offset; };
 
 Frames destFrames(float uvX) { return Frames(destViewStartFrame, uvX * destFrameCount); }
 Frames sourceFrames(float uvX) { return Frames(sourceViewStartFrame, uvX * sourceFrameCount); }
-Frames framesAtSec(float sec, float sampleRate) {
-  float frames = sec * sampleRate;
-  float whole = floor(frames);
-  return Frames(int(whole), frames - whole);
-}
 Frames plusFrames(Frames t, float frames) { return Frames(t.whole, t.offset + frames); }
 float framesValue(Frames t) { return float(t.whole) + t.offset; }
 // Frames from b to a, exact while the distance fits a float.
@@ -599,6 +596,30 @@ uvec2 fraction64(uvec2 p, int exponent) {
   return uvec2(p.x >> drop, (p.y >> drop) | (p.x << (32 - drop)));
 }
 
+// floor(p × 2^exponent), to 32 bits.
+uint wholeOf(uvec2 p, int exponent) {
+  if (exponent >= 32) return 0u;
+  if (exponent >= 0) return p.y << exponent;
+  int drop = -exponent;
+  if (drop >= 64) return 0u;
+  if (drop >= 32) return drop == 32 ? p.x : p.x >> (drop - 32);
+  return (p.y >> drop) | (p.x << (32 - drop));
+}
+
+// sec × sampleRate for a whole-number sample rate, split exactly into whole
+// frames and the rest.
+Frames framesAtSec(float sec, float sampleRate) {
+  int exponent;
+  uint significand = significandOf(sec, exponent);
+  uvec2 product = wideProduct(significand, uint(sampleRate));
+  uvec2 fraction = fraction64(product, exponent);
+  float part = float(fraction.x) / 4294967296.0 + float(fraction.y) / 18446744073709551616.0;
+  int whole = int(wholeOf(product, exponent));
+  if (sec >= 0.0) return Frames(whole, part);
+  if (part > 0.0) return Frames(-whole - 1, 1.0 - part);
+  return Frames(-whole, 0.0);
+}
+
 // The fraction of a turn in k × a, in units of 2^-64.
 uvec2 productFraction(float k, float a) {
   int kExponent;
@@ -623,31 +644,42 @@ struct Turns { float fraction; float approx; };
 Turns plusTurns(Turns a, Turns b) { return Turns(fract(a.fraction + b.fraction), a.approx + b.approx); }
 Turns minusTurns(Turns a, Turns b) { return Turns(fract(a.fraction - b.fraction), a.approx - b.approx); }
 
-// k × rate × t, for a rate in cycles per frame carried as a float and its
-// remainder (fetchBandRate). Whole turns of k × rate drop out of the product
-// with a whole number of frames, so only its fraction is carried there.
-Turns turnsOver(float k, vec2 rate, Frames t) {
+// k × rate × t, for k and a rate in cycles per frame each carried as a float
+// and its remainder (fetchBandRate). Whole turns of k × rate drop out of the
+// product with a whole number of frames, so only its fraction is carried there.
+Turns turnsOver(vec2 k, vec2 rate, Frames t) {
   float wholeOffset = floor(t.offset);
   float part = t.offset - wholeOffset;
-  uvec2 rateFraction = addWide(productFraction(k, rate.x), productFraction(k, rate.y));
+  uvec2 rateFraction = addWide(
+    addWide(productFraction(k.x, rate.x), productFraction(k.x, rate.y)),
+    addWide(productFraction(k.y, rate.x), productFraction(k.y, rate.y))
+  );
   uint wholeTurns = fractionOver(rateFraction, t.whole + int(wholeOffset));
-  float fraction = fract(float(wholeTurns) / 4294967296.0 + k * (rate.x + rate.y) * part);
-  return Turns(fraction, k * (rate.x + rate.y) * framesValue(t));
+  float scale = (k.x + k.y) * (rate.x + rate.y);
+  float fraction = fract(float(wholeTurns) / 4294967296.0 + scale * part);
+  return Turns(fraction, scale * framesValue(t));
 }
+
+Turns turnsOver(float k, vec2 rate, Frames t) { return turnsOver(vec2(k, 0.0), rate, t); }
 
 // The same over a time on the axis convention of destAxisSec, where a file of
 // fileFrames frames puts (fileFrames − 1) / fileFrames of a frame in each.
-Turns axisTurnsOver(float k, vec2 rate, Frames t, int fileFrames) {
+Turns axisTurnsOver(vec2 k, vec2 rate, Frames t, int fileFrames) {
   Turns turns = turnsOver(k, rate, t);
-  float shortfall = k * rate.x * (framesValue(t) / max(float(fileFrames), 1.0));
+  float shortfall = (k.x + k.y) * rate.x * (framesValue(t) / max(float(fileFrames), 1.0));
   return Turns(fract(turns.fraction - shortfall), turns.approx - shortfall);
 }
 
-// Whole turns a phase keeps. Below this a float holds the phase to within
-// 0.01 rad, and a later move that scales stored phase (a pitch shift over a
-// reversed stroke) needs the whole turns to keep the bands in step. Above it
-// the float can no longer hold the fraction, so the phase keeps only that.
-const float KEPT_TURNS = 16384.0;
+Turns axisTurnsOver(float k, vec2 rate, Frames t, int fileFrames) {
+  return axisTurnsOver(vec2(k, 0.0), rate, t, fileFrames);
+}
+
+// Whole turns a phase keeps. A later move that scales stored phase (a pitch
+// shift over a reversed stroke) needs them to keep the bands in step. Below
+// this a float holds the phase to within 0.06 rad, as the stored phase always
+// has there; above it the float cannot hold the fraction at all, so the phase
+// keeps only that.
+const float KEPT_TURNS = 131072.0;
 
 float phaseOfTurns(Turns turns) {
   float fraction = turns.fraction - floor(turns.fraction + 0.5);
@@ -963,8 +995,7 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   Turns turns = Turns(0.0, 0.0);
   float carrierK = (1.0 - stretchAmount) * centreRatio;
   if (carrierK != 0.0) {
-    float perSourceFrame = destSampleRate / max(sourceSampleRate, 1e-6);
-    Turns atSrc = axisTurnsOver(carrierK * perSourceFrame, rate, tSrc, sourceFileFrameCount);
+    Turns atSrc = axisTurnsOver(carrierK * destPerSourceFrame, rate, tSrc, sourceFileFrameCount);
     if (scaleXPhys < 0.0) {
       turns = minusTurns(turns, plusTurns(atSrc, axisTurnsOver(carrierK, rate, tDest, destFileFrameCount)));
     } else {

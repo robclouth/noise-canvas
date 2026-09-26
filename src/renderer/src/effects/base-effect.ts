@@ -38,6 +38,7 @@ export type CommonUniforms = {
   sourceSpectrogramTextureSize: { value: Vector2 };
   sourceChannelCount: { value: number };
   sourceSampleRate: { value: number };
+  destPerSourceFrame: { value: Vector2 };
   sourceMinFreq: { value: number };
   sourceBandsPerOctave: { value: number };
   sourceOnsetTex: { value: Texture | null };
@@ -131,6 +132,13 @@ export type CommonUniforms = {
  * `uniforms.useLinearBlend.value` in place, and a shared wrapper would carry
  * that write into every other effect's material.
  */
+/** numerator / denominator as a float and the float remainder, so their sum carries the double. */
+export function splitRatio(numerator: number, denominator: number): Vector2 {
+  const ratio = numerator / denominator;
+  const high = Math.fround(ratio);
+  return new Vector2(high, ratio - high);
+}
+
 export function createDefaultUniforms(): CommonUniforms {
   return {
     sourceSpectrogramTex: { value: null },
@@ -141,6 +149,7 @@ export function createDefaultUniforms(): CommonUniforms {
     sourceSpectrogramTextureSize: { value: new Vector2(0, 0) },
     sourceChannelCount: { value: 1 },
     sourceSampleRate: { value: 44100.0 },
+    destPerSourceFrame: { value: new Vector2(1, 0) },
     sourceMinFreq: { value: 20.0 },
     sourceOnsetTex: { value: null },
     sourceBandsPerOctave: { value: 24.0 },
