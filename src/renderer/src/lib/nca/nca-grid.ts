@@ -99,3 +99,14 @@ export function gridRoughness(grid: Float32Array, size = NCA_GRID): Uint8Array {
   }
   return roughness;
 }
+
+/** The loudest level on each row of a grid readGrid returned, as a byte over 0–1. */
+export function gridCeiling(grid: Float32Array, size = NCA_GRID): Uint8Array {
+  const ceiling = new Uint8Array(size);
+  for (let row = 0; row < size; row++) {
+    let loudest = 0;
+    for (let col = 0; col < size; col++) loudest = Math.max(loudest, grid[(row * size + col) * NCA_VISIBLE]);
+    ceiling[row] = Math.min(255, Math.ceil(loudest * 255));
+  }
+  return ceiling;
+}

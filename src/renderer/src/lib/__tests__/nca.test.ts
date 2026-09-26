@@ -61,7 +61,7 @@ describe("NCA model format", () => {
     const weights = liveWeights(lcg(1));
     const phase = new Uint8Array(NCA_GRID).map((_, i) => i % 256);
     const parsed = parseModel(
-      serializeModel({ weights, label: "a bell", loss: 0.01, iterations: 5, phase, roughness: null }),
+      serializeModel({ weights, label: "a bell", loss: 0.01, iterations: 5, phase, roughness: null, ceiling: null }),
     );
     expect(parsed?.label).toBe("a bell");
     expect(Array.from(parsed!.weights.w2)).toEqual(Array.from(weights.w2));
@@ -80,6 +80,7 @@ describe("NCA model format", () => {
       iterations: 1,
       phase: null,
       roughness: null,
+      ceiling: null,
     });
     expect(parseModel(text.replace(`"grid":${NCA_GRID}`, `"grid":${NCA_GRID / 2}`))).toBeNull();
   });

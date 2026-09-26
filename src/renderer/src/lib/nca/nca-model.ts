@@ -74,6 +74,12 @@ export type NcaModel = {
    * comb of tones, so rough rows get their jitter back.
    */
   roughness: Uint8Array | null;
+  /**
+   * The loudest level each row reaches in the learnt sound, as a byte over the
+   * level scale. Painting never grows a band past its row's, so repeated dabs
+   * cannot pile level up without end.
+   */
+  ceiling: Uint8Array | null;
 };
 
 const SIZES = {
@@ -142,6 +148,7 @@ export function serializeModel(model: NcaModel): string {
     weights: toBase64(new Uint8Array(packed.buffer)),
     phase: model.phase ? toBase64(model.phase) : null,
     roughness: model.roughness ? toBase64(model.roughness) : null,
+    ceiling: model.ceiling ? toBase64(model.ceiling) : null,
   });
 }
 
@@ -164,10 +171,12 @@ export function parseModel(text: unknown): NcaModel | null {
     if (![weights.w1, weights.b1, weights.w2, weights.b2].every((a) => a.every(Number.isFinite))) return null;
     const phase = typeof raw.phase === "string" ? fromBase64(raw.phase) : null;
     const roughness = typeof raw.roughness === "string" ? fromBase64(raw.roughness) : null;
+    const ceiling = typeof raw.ceiling === "string" ? fromBase64(raw.ceiling) : null;
     return {
       weights,
       phase: phase && phase.length === NCA_GRID ? phase : null,
       roughness: roughness && roughness.length === NCA_GRID ? roughness : null,
+      ceiling: ceiling && ceiling.length === NCA_GRID ? ceiling : null,
       label: typeof raw.label === "string" ? raw.label : "",
       loss: typeof raw.loss === "number" ? raw.loss : NaN,
       iterations: typeof raw.iterations === "number" ? raw.iterations : 0,

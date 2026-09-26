@@ -1,4 +1,4 @@
-import { DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RGFormat, WebGLRenderer } from "three";
+import { DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RGBAFormat, WebGLRenderer } from "three";
 import ncaInitFrag from "../glsl/nca-init.frag";
 import neuralEffectFrag from "../glsl/neural-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -47,8 +47,8 @@ class NeuralEffect extends BaseEffect {
   private initMaterial: RawShaderMaterial;
   // Render targets belong to one renderer, so each gets its own grid.
   private grids = new WeakMap<WebGLRenderer, NcaGpu>();
-  private phaseTexture: DataTexture | null = null;
-  private phaseModel: NcaModel | null = null;
+  private rowsTexture: DataTexture | null = null;
+  private rowsModel: NcaModel | null = null;
 
   constructor() {
     super();
@@ -59,7 +59,7 @@ class NeuralEffect extends BaseEffect {
           ncaState0: { value: null },
           ncaGrid: { value: NCA_GRID },
           neuralPhaseMode: { value: 0 },
-          ncaPhase: { value: null },
+          ncaRows: { value: null },
           ncaHasPhase: { value: false },
         },
         vertexShader: rangeQuadVert,
@@ -101,29 +101,31 @@ class NeuralEffect extends BaseEffect {
     grid.step(gl, neuralStepCount(state));
     const uniforms = this.materials[props.passIndex].uniforms;
     uniforms.ncaState0.value = grid.current.textures[0];
-    uniforms.ncaPhase.value = this.learntPhase(model);
-    uniforms.ncaHasPhase.value = uniforms.ncaPhase.value !== null;
+    uniforms.ncaRows.value = this.rowsOf(model);
+    uniforms.ncaHasPhase.value = model.phase !== null;
   }
 
-  /** Per row, where the learnt phase path starts (as a turn) and how rough it is, made once per model. */
-  private learntPhase(model: NcaModel): DataTexture | null {
-    if (model !== this.phaseModel) {
-      this.phaseTexture?.dispose();
-      this.phaseTexture = null;
-      this.phaseModel = model;
-      if (model.phase) {
-        const rows = new Float32Array(NCA_GRID * 2);
-        for (let row = 0; row < NCA_GRID; row++) {
-          rows[row * 2] = model.phase[row] / 256;
-          rows[row * 2 + 1] = (model.roughness?.[row] ?? 0) / 255;
-        }
-        this.phaseTexture = new DataTexture(rows, NCA_GRID, 1, RGFormat, FloatType);
-        this.phaseTexture.minFilter = NearestFilter;
-        this.phaseTexture.magFilter = NearestFilter;
-        this.phaseTexture.needsUpdate = true;
+  /**
+   * Per row: where the learnt phase path starts (as a turn), how rough it is,
+   * and the loudest level it reaches. Made once per model.
+   */
+  private rowsOf(model: NcaModel): DataTexture {
+    if (model !== this.rowsModel || !this.rowsTexture) {
+      this.rowsTexture?.dispose();
+      const rows = new Float32Array(NCA_GRID * 4);
+      for (let row = 0; row < NCA_GRID; row++) {
+        rows[row * 4] = (model.phase?.[row] ?? 0) / 256;
+        rows[row * 4 + 1] = (model.roughness?.[row] ?? 0) / 255;
+        // Without a stored ceiling nothing is held back.
+        rows[row * 4 + 2] = model.ceiling ? model.ceiling[row] / 255 : 1e6;
       }
+      this.rowsTexture = new DataTexture(rows, NCA_GRID, 1, RGBAFormat, FloatType);
+      this.rowsTexture.minFilter = NearestFilter;
+      this.rowsTexture.magFilter = NearestFilter;
+      this.rowsTexture.needsUpdate = true;
+      this.rowsModel = model;
     }
-    return this.phaseTexture;
+    return this.rowsTexture;
   }
 }
 

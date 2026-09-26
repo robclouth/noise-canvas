@@ -42,8 +42,8 @@ function risingWeights(rise: number): NcaWeights {
   return weights;
 }
 
-function modelText(weights: NcaWeights, phase: Uint8Array | null = null): string {
-  return serializeModel({ weights, label: "test", loss: 0, iterations: 1, phase, roughness: null });
+function modelText(weights: NcaWeights, phase: Uint8Array | null = null, ceiling: Uint8Array | null = null): string {
+  return serializeModel({ weights, label: "test", loss: 0, iterations: 1, phase, roughness: null, ceiling });
 }
 
 /** A step running one Neural effect with these params over the whole file. */
@@ -196,5 +196,15 @@ describe("Neural effect", () => {
       worst = Math.max(worst, Math.abs(Math.atan2(Math.sin(d), Math.cos(d))));
     }
     expect(worst).toBeLessThan(0.1);
+  });
+
+  it("never grows a band past the loudest level its row reached in the learnt sound", async () => {
+    const ceiling = 0.62;
+    const bytes = new Uint8Array(NCA_GRID).fill(Math.round(ceiling * 255));
+    const { after } = await paint({ neuralModel: modelText(risingWeights(0.05), null, bytes), neuralSteps: 32 });
+    let loudest = 0;
+    for (let i = 0; i < after.length; i += 4) loudest = Math.max(loudest, levelOf(after[i]));
+    expect(loudest).toBeGreaterThan(levelOf(0.01));
+    expect(loudest).toBeLessThan(ceiling + 1 / 255);
   });
 });

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { gridRoughness, PackedSpectrogram, readAnchors, readGrid, UvRect } from "./nca-grid";
+import { gridCeiling, gridRoughness, PackedSpectrogram, readAnchors, readGrid, UvRect } from "./nca-grid";
 import { serializeModel } from "./nca-model";
 
 /** Iterations a learn runs unless stopped sooner. */
@@ -103,6 +103,7 @@ export async function startNcaTraining(request: {
           label: request.label,
           phase: readAnchors(spectrogram, request.rect),
           roughness: gridRoughness(target),
+          ceiling: gridCeiling(target),
         }),
       );
     }

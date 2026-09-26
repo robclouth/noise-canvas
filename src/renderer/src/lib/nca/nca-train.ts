@@ -207,7 +207,7 @@ export async function trainNca(
   options: NcaTrainOptions,
   onProgress?: (progress: NcaTrainProgress) => void,
   signal?: AbortSignal,
-): Promise<Omit<NcaModel, "label" | "phase" | "roughness">> {
+): Promise<Omit<NcaModel, "label" | "phase" | "roughness" | "ceiling">> {
   const random = options.random ?? Math.random;
   const batchSize = options.batchSize ?? 4;
   const poolSize = options.poolSize ?? 64;
@@ -221,6 +221,13 @@ export async function trainNca(
   const vars = createVariables(options.initial ?? initialWeights(random));
   const kernel = perceptionKernel();
   const position = positionField();
+  // What each dab of painting does to the state before it runs: hidden
+  // channels cleared, the seed planted again.
+  const keepAudible = tf.tensor4d(
+    Array.from({ length: NCA_CHANNELS }, (_, c) => (c < NCA_VISIBLE ? 1 : 0)),
+    [1, 1, 1, NCA_CHANNELS],
+  );
+  const seedHidden = tf.tensor4d(seedState(), [1, NCA_GRID, NCA_GRID, NCA_CHANNELS]);
   const targetTensor = tf.tensor4d(target, [1, NCA_GRID, NCA_GRID, NCA_VISIBLE]);
   const lossWeights = tf.tensor4d(channelWeights(target, pathWeight, rateWeight), [1, NCA_GRID, 1, NCA_VISIBLE]);
   const optimizer = tf.train.adam(learningRate);
@@ -254,11 +261,19 @@ export async function trainNca(
       picks.forEach((p, i) => batch.set(pool[p], i * STATE_SIZE));
       const x0 = tf.tensor4d(batch, [batchSize, NCA_GRID, NCA_GRID, NCA_CHANNELS]);
       const steps = stepsMin + Math.floor(random() * (stepsMax - stepsMin + 1));
+      // Half the runs restart the way painting does, every few steps, so the
+      // model learns to settle under repeated dabs instead of piling on level.
+      const restartEvery = random() < 0.5 ? 2 + Math.floor(random() * 7) : 0;
 
       let finalState: tf.Tensor4D | null = null;
       const { value, grads } = tf.variableGrads(() => {
         let x = x0;
-        for (let s = 0; s < steps; s++) x = ncaStep(x, vars, kernel, position);
+        for (let s = 0; s < steps; s++) {
+          if (restartEvery > 0 && s > 0 && s % restartEvery === 0) {
+            x = tf.add(tf.mul(x, keepAudible), seedHidden) as tf.Tensor4D;
+          }
+          x = ncaStep(x, vars, kernel, position);
+        }
         finalState = tf.keep(x);
         const visible = tf.slice(x, [0, 0, 0, 0], [batchSize, NCA_GRID, NCA_GRID, NCA_VISIBLE]);
         return tf.mean(tf.mul(tf.squaredDifference(visible, targetTensor), lossWeights)) as tf.Scalar;
@@ -292,7 +307,18 @@ export async function trainNca(
     }
     return { weights: await readVariables(vars), loss, iterations: iteration };
   } finally {
-    tf.dispose([kernel, position, targetTensor, lossWeights, vars.w1, vars.b1, vars.w2, vars.b2]);
+    tf.dispose([
+      kernel,
+      position,
+      keepAudible,
+      seedHidden,
+      targetTensor,
+      lossWeights,
+      vars.w1,
+      vars.b1,
+      vars.w2,
+      vars.b2,
+    ]);
     optimizer.dispose();
   }
 }

@@ -8,7 +8,9 @@
 // each channel keeps its share of the level.
 
 uniform sampler2D ncaState0;
-uniform sampler2D ncaPhase; // per row: where the learnt path starts, as a turn (r), and how rough it is, 0–1 (g)
+// Per row: where the learnt phase path starts, as a turn (r); how rough it is,
+// 0–1 (g); the loudest level it reaches in the learnt sound (b).
+uniform sampler2D ncaRows;
 uniform bool ncaHasPhase;
 uniform int ncaGrid;
 uniform int neuralPhaseMode;
@@ -46,7 +48,7 @@ float grownPhase(vec2 local) {
   float f = position - float(col);
   float a = texelFetch(ncaState0, ivec2(clamp(col, 0, ncaGrid - 1), row), 0).y;
   float b = texelFetch(ncaState0, ivec2(clamp(col + 1, 0, ncaGrid - 1), row), 0).y;
-  float anchor = texelFetch(ncaPhase, ivec2(row, 0), 0).r * TWO_PI - PI;
+  float anchor = texelFetch(ncaRows, ivec2(row, 0), 0).r * TWO_PI - PI;
   return anchor + mix(a, b, f) * NCA_PATH_SCALE;
 }
 
@@ -54,7 +56,7 @@ float grownPhase(vec2 local) {
 // to 1 (random).
 float rowRoughness(vec2 local) {
   int row = clamp(int(floor(clamp(local.y, 0.0, 1.0) * float(ncaGrid))), 0, ncaGrid - 1);
-  return texelFetch(ncaPhase, ivec2(row, 0), 0).g;
+  return texelFetch(ncaRows, ivec2(row, 0), 0).g;
 }
 
 // `target` on the branch nearest `reference`, so a stored phase stays unwrapped.
@@ -97,7 +99,9 @@ void main() {
 
   vec2 local = getEffectiveBrushOffset(coords.dest) / max(brushSizeUv, vec2(1e-9));
   vec3 grown = sampleGrid(local);
-  float magnitude = ncaMagnitudeOf(grown.x);
+  // Never louder than the learnt sound got on this row, however often it is painted.
+  int row = clamp(int(floor(clamp(local.y, 0.0, 1.0) * float(ncaGrid))), 0, ncaGrid - 1);
+  float magnitude = ncaMagnitudeOf(min(grown.x, texelFetch(ncaRows, ivec2(row, 0), 0).b));
 
   float meanMagnitude = 0.5 * (originalTexel.r + originalTexel.b);
   vec2 share = meanMagnitude > 1e-6 ? clamp(vec2(originalTexel.r, originalTexel.b) / meanMagnitude, 0.0, 2.0) : vec2(1.0);
