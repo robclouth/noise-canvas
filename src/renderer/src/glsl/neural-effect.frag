@@ -1,12 +1,14 @@
 #include "effect-common.glsl"
 
 // Writes what the automaton grew back into the spectrogram. Each band reads
-// the grid at its place in the brush: the level channel sets its magnitude,
-// the phase pair its phase. Where the sound was already stereo, each channel
-// keeps its share of the level.
+// the grid at its place in the brush, and the level channel sets its
+// magnitude. Models learn level, not phase, so the phase is either fresh noise
+// (mode 0) or the phase already there (mode 1). Where the sound was already
+// stereo, each channel keeps its share of the level.
 
 uniform sampler2D ncaState0;
 uniform int ncaGrid;
+uniform int neuralPhaseMode;
 
 const float NCA_DB_RANGE = 90.0;
 
@@ -36,6 +38,13 @@ float nearestBranch(float target, float reference) {
   return reference + diff - TWO_PI * floor(diff / TWO_PI + 0.5);
 }
 
+// A phase per coefficient that stays put from dab to dab.
+float noisePhase(vec2 packedUv, float channel) {
+  vec3 p3 = fract(vec3(packedUv.xyx * vec2(1.0, 1.0 + channel).xyx) * vec3(443.897, 441.423, 437.195));
+  p3 += dot(p3, p3.yzx + 19.19);
+  return (fract((p3.x + p3.y) * p3.z) * 2.0 - 1.0) * PI;
+}
+
 void main() {
   vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
   if (brushWeightIsZero(destUv)) {
@@ -53,13 +62,15 @@ void main() {
 
   vec3 grown = sampleGrid(getEffectiveBrushOffset(coords.dest) / max(brushSizeUv, vec2(1e-9)));
   float magnitude = ncaMagnitudeOf(grown.x);
-  bool hasPhase = length(grown.yz) > 1e-6;
-  float phase = atan(grown.z, grown.y);
 
   float meanMagnitude = 0.5 * (originalTexel.r + originalTexel.b);
   vec2 share = meanMagnitude > 1e-6 ? clamp(vec2(originalTexel.r, originalTexel.b) / meanMagnitude, 0.0, 2.0) : vec2(1.0);
-  float phaseL = hasPhase ? nearestBranch(phase, originalTexel.g) : originalTexel.g;
-  float phaseR = hasPhase ? nearestBranch(phase, originalTexel.a) : originalTexel.a;
+  float phaseL = originalTexel.g;
+  float phaseR = originalTexel.a;
+  if (neuralPhaseMode == 0) {
+    phaseL = nearestBranch(noisePhase(vUv, 0.0), originalTexel.g);
+    phaseR = nearestBranch(noisePhase(vUv, 1.0), originalTexel.a);
+  }
 
   vec4 resultTexel = vec4(magnitude * share.x, phaseL, magnitude * share.y, phaseR);
   outColor = applyBrush(originalTexel, resultTexel, weight, coords.dest, vUv);

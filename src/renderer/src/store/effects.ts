@@ -50,6 +50,7 @@ export interface EffectsState {
   evolveEdgeMode: number;
   neuralModel: string;
   neuralSteps: number;
+  neuralPhase: number;
   binauralAzimuth: number;
   binauralDistance: number;
   binauralStereoAngle: number;
@@ -141,6 +142,7 @@ export const createEffectsSlice = (): EffectsState => {
     // ---------------- Neural ----------------
     neuralModel: getParameterDef("neuralModel").default,
     neuralSteps: getParameterDef("neuralSteps").default,
+    neuralPhase: getParameterDef("neuralPhase").default,
 
     // ---------------- Binaural ----------------
     binauralAzimuth: getParameterDef("binauralAzimuth").default,

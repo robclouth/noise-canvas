@@ -144,6 +144,13 @@ export type NcaTrainOptions = {
   /** Fraction of the run after which the best sample of each batch is damaged. */
   damageFrom?: number;
   random?: () => number;
+  /**
+   * How much the phase pair counts against the level in the loss. Noisy sound
+   * has close to random phase, and weighing it at all pulls the model towards a
+   * grey average of everything, so by default only the level is learnt and the
+   * phase pair is left to the model as more hidden state.
+   */
+  phaseWeight?: number;
   /** Starting weights, to carry on training a model instead of starting afresh. */
   initial?: NcaWeights;
 };
@@ -177,11 +184,13 @@ export async function trainNca(
   const stepsMax = options.stepsMax ?? 32;
   const damageFrom = options.damageFrom ?? 0.25;
   const learningRate = options.learningRate ?? 2e-3;
+  const phaseWeight = options.phaseWeight ?? 0;
 
   const vars = createVariables(options.initial ?? initialWeights(random));
   const kernel = perceptionKernel();
   const position = positionField();
   const targetTensor = tf.tensor4d(target, [1, NCA_GRID, NCA_GRID, NCA_VISIBLE]);
+  const lossWeights = tf.tensor4d([1, phaseWeight, phaseWeight], [1, 1, 1, NCA_VISIBLE]);
   const optimizer = tf.train.adam(learningRate);
   const pool = Array.from({ length: poolSize }, () => seedState());
   const fresh = (): Float32Array => {
@@ -220,7 +229,7 @@ export async function trainNca(
         for (let s = 0; s < steps; s++) x = ncaStep(x, vars, kernel, position);
         finalState = tf.keep(x);
         const visible = tf.slice(x, [0, 0, 0, 0], [batchSize, NCA_GRID, NCA_GRID, NCA_VISIBLE]);
-        return tf.mean(tf.squaredDifference(visible, targetTensor)) as tf.Scalar;
+        return tf.mean(tf.mul(tf.squaredDifference(visible, targetTensor), lossWeights)) as tf.Scalar;
       });
       // Normalising each gradient keeps the long unrolled chain from exploding.
       const normalised = Object.entries(grads).map(([name, grad]) => ({
@@ -251,7 +260,7 @@ export async function trainNca(
     }
     return { weights: await readVariables(vars), loss, iterations: iteration };
   } finally {
-    tf.dispose([kernel, position, targetTensor, vars.w1, vars.b1, vars.w2, vars.b2]);
+    tf.dispose([kernel, position, targetTensor, lossWeights, vars.w1, vars.b1, vars.w2, vars.b2]);
     optimizer.dispose();
   }
 }

@@ -52,7 +52,12 @@ class NeuralEffect extends BaseEffect {
     super();
     this.materials = [
       new RawShaderMaterial({
-        uniforms: { ...createDefaultUniforms(), ncaState0: { value: null }, ncaGrid: { value: NCA_GRID } },
+        uniforms: {
+          ...createDefaultUniforms(),
+          ncaState0: { value: null },
+          ncaGrid: { value: NCA_GRID },
+          neuralPhaseMode: { value: 0 },
+        },
         vertexShader: rangeQuadVert,
         fragmentShader: neuralEffectFrag,
         glslVersion: GLSL3,
@@ -73,6 +78,8 @@ class NeuralEffect extends BaseEffect {
 
   updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
+    const state = props.state ?? useStore.getState();
+    this.materials[props.passIndex].uniforms.neuralPhaseMode.value = state.neuralPhase;
   }
 
   prepare(gl: WebGLRenderer, props: UpdateEffectUniformsProps): void {

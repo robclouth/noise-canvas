@@ -93,6 +93,7 @@ export const NeuralEffect = memo(function NeuralEffect() {
         </>
       )}
       <ParameterControl paramKey="neuralSteps" color={COLOR} />
+      <ParameterControl paramKey="neuralPhase" color={COLOR} />
     </Stack>
   );
 });

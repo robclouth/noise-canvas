@@ -3,7 +3,7 @@ import { PackedSpectrogram, readGrid, UvRect } from "./nca-grid";
 import { serializeModel } from "./nca-model";
 
 /** Iterations a learn runs unless stopped sooner. */
-export const NCA_TRAINING_ITERATIONS = 1000;
+export const NCA_TRAINING_ITERATIONS = 2000;
 /** Other stretches of the same file the model also learns to grow from. */
 const CONTEXT_REGIONS = 8;
 
