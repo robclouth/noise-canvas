@@ -275,6 +275,34 @@ describe("compact base", () => {
     expect(Array.from(bits(restored))).toEqual(Array.from(bits(base)));
   });
 
+  it("encodes and compares a footprint of many ranges as large as a long stroke's", async () => {
+    const pixels = 1_200_000;
+    const base = packedState(pixels, 12);
+    const after = new Float32Array(base);
+    const pairs: Array<[number, number]> = [];
+    for (let start = 7, r = 0; start < pixels - 9000; start += 9000, r++) pairs.push([start, 1 + ((r * 2917) % 8000)]);
+    const rs = ranges(...pairs);
+    const compactBase = gather(base, rs);
+    expect(await historyFootprintChanged(compactBase, after, rs, true)).toBe(false);
+    const [lastStart, lastCount] = pairs[pairs.length - 1];
+    after[(lastStart + lastCount) * 4 + 1] += 1;
+    expect(await historyFootprintChanged(compactBase, after, rs, true)).toBe(false);
+    after[(lastStart + lastCount - 1) * 4 + 1] += 1;
+    expect(await historyFootprintChanged(compactBase, after, rs, true)).toBe(true);
+    for (const [start, count] of pairs) for (let c = 0; c < 4; c++) after[(start + (count >> 1)) * 4 + c] *= -3;
+
+    const whole = await encodeHistoryDelta(base, after, rs);
+    const compact = await encodeHistoryDelta(compactBase, gather(after, rs), rs, true, true);
+    expect(compact.equals(whole)).toBe(true);
+    const restored = await applyHistoryDelta(base, compact);
+    const want = new Float32Array(after);
+    want[(lastStart + lastCount) * 4 + 1] = base[(lastStart + lastCount) * 4 + 1];
+    const got = bits(restored);
+    let differing = 0;
+    for (let i = 0; i < got.length; i++) if (got[i] !== bits(want)[i]) differing++;
+    expect(differing).toBe(0);
+  }, 60_000);
+
   it("compares the footprint against its saved values", async () => {
     const base = packedState(PIXELS, 9);
     const after = new Float32Array(base);

@@ -6239,42 +6239,49 @@ static const size_t HISTORY_CHANNELS = 4;
 static const size_t HISTORY_VALUE_BYTES = 4;
 
 // Interleaved 32-bit values -> byte-position-major, then channel-major planes.
+// Pixels one thread of a plane reorder takes at least.
+static const size_t HISTORY_PLANE_BLOCK = 1 << 18;
+
 static void historyEncodePlanes(const uint8_t *src, size_t valueCount, uint8_t *out)
 {
     const size_t pixels = valueCount / HISTORY_CHANNELS;
     const size_t planeStride = valueCount;
-    for (size_t c = 0; c < HISTORY_CHANNELS; ++c)
-    {
-        const size_t planeBase = c * pixels;
-        for (size_t i = 0; i < pixels; ++i)
+    forEachBlock(pixels, HISTORY_PLANE_BLOCK, [&](size_t from, size_t to) {
+        for (size_t c = 0; c < HISTORY_CHANNELS; ++c)
         {
-            const uint8_t *s = src + (i * HISTORY_CHANNELS + c) * HISTORY_VALUE_BYTES;
-            const size_t d = planeBase + i;
-            out[d] = s[0];
-            out[planeStride + d] = s[1];
-            out[2 * planeStride + d] = s[2];
-            out[3 * planeStride + d] = s[3];
+            const size_t planeBase = c * pixels;
+            for (size_t i = from; i < to; ++i)
+            {
+                const uint8_t *s = src + (i * HISTORY_CHANNELS + c) * HISTORY_VALUE_BYTES;
+                const size_t d = planeBase + i;
+                out[d] = s[0];
+                out[planeStride + d] = s[1];
+                out[2 * planeStride + d] = s[2];
+                out[3 * planeStride + d] = s[3];
+            }
         }
-    }
+    });
 }
 
 static void historyDecodePlanes(const uint8_t *src, size_t valueCount, uint8_t *out)
 {
     const size_t pixels = valueCount / HISTORY_CHANNELS;
     const size_t planeStride = valueCount;
-    for (size_t c = 0; c < HISTORY_CHANNELS; ++c)
-    {
-        const size_t planeBase = c * pixels;
-        for (size_t i = 0; i < pixels; ++i)
+    forEachBlock(pixels, HISTORY_PLANE_BLOCK, [&](size_t from, size_t to) {
+        for (size_t c = 0; c < HISTORY_CHANNELS; ++c)
         {
-            uint8_t *d = out + (i * HISTORY_CHANNELS + c) * HISTORY_VALUE_BYTES;
-            const size_t s = planeBase + i;
-            d[0] = src[s];
-            d[1] = src[planeStride + s];
-            d[2] = src[2 * planeStride + s];
-            d[3] = src[3 * planeStride + s];
+            const size_t planeBase = c * pixels;
+            for (size_t i = from; i < to; ++i)
+            {
+                uint8_t *d = out + (i * HISTORY_CHANNELS + c) * HISTORY_VALUE_BYTES;
+                const size_t s = planeBase + i;
+                d[0] = src[s];
+                d[1] = src[planeStride + s];
+                d[2] = src[2 * planeStride + s];
+                d[3] = src[3 * planeStride + s];
+            }
         }
-    }
+    });
 }
 
 // Holds a typed array alive across the async boundary and exposes its bytes.
@@ -6314,6 +6321,9 @@ public:
         : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
     {
         source.hold(input);
+        Napi::Buffer<uint8_t> buffer = Napi::Buffer<uint8_t>::New(env, source.byteLength);
+        out = buffer.Data();
+        outRef = Napi::Persistent(buffer);
     }
 
     void Execute() override
@@ -6326,15 +6336,14 @@ public:
             SetError("history state is not a whole number of RGBA pixels");
             return;
         }
-        out.resize(source.byteLength);
-        if (!out.empty())
-            historyEncodePlanes(source.data, valueCount, out.data());
+        if (source.byteLength)
+            historyEncodePlanes(source.data, valueCount, out);
     }
 
     void OnOK() override
     {
         Napi::HandleScope scope(Env());
-        deferred.Resolve(Napi::Buffer<uint8_t>::Copy(Env(), out.data(), out.size()));
+        deferred.Resolve(outRef.Value());
     }
 
     void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
@@ -6343,7 +6352,8 @@ public:
 private:
     Napi::Promise::Deferred deferred;
     HistoryBufferRef source;
-    std::vector<uint8_t> out;
+    Napi::Reference<Napi::Buffer<uint8_t>> outRef;
+    uint8_t *out = nullptr;
 };
 
 // Restores a packed state from plane order.
@@ -6453,6 +6463,43 @@ static const char *historyCheckFootprint(const HistoryBufferRef &base, const His
     return nullptr;
 }
 
+/** Each range's first pixel in the footprint's compact order, then the footprint's pixel count. */
+static std::vector<size_t> historyFootprintStarts(const std::vector<uint32_t> &ranges)
+{
+    std::vector<size_t> starts;
+    starts.reserve(ranges.size() / 2 + 1);
+    size_t at = 0;
+    for (size_t r = 0; r + 1 < ranges.size(); r += 2)
+    {
+        starts.push_back(at);
+        at += ranges[r + 1];
+    }
+    starts.push_back(at);
+    return starts;
+}
+
+/**
+ * Calls `run(statePixel, compactPixel, count)` for each piece of the footprint
+ * inside compact pixels [from, to), where `statePixel` is the piece's first
+ * pixel in a whole state.
+ */
+template <typename Run>
+static void historyFootprintRuns(const std::vector<uint32_t> &ranges, const std::vector<size_t> &starts, size_t from,
+                                 size_t to, Run &&run)
+{
+    size_t r = std::upper_bound(starts.begin(), starts.end() - 1, from) - starts.begin() - 1;
+    for (; r + 1 < starts.size() && starts[r] < to; ++r)
+    {
+        const size_t lo = std::max(from, starts[r]);
+        const size_t hi = std::min(to, starts[r + 1]);
+        if (lo < hi)
+            run(static_cast<size_t>(ranges[r * 2]) + (lo - starts[r]), lo, hi - lo);
+    }
+}
+
+// Pixels one thread of a footprint compare or delta takes at least.
+static const size_t HISTORY_FOOTPRINT_BLOCK = 1 << 16;
+
 // True if any value inside the footprint ranges differs between base and after.
 class HistoryFootprintChangedWorker : public Napi::AsyncWorker
 {
@@ -6478,23 +6525,19 @@ public:
 
         const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
         const uint32_t *afterBits = reinterpret_cast<const uint32_t *>(after.data);
-        size_t p = 0;
-        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
-        {
-            const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
-            const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
-            const uint32_t *baseRun = baseBits + (baseCompact ? p : start);
-            const uint32_t *afterRun = afterBits + (afterCompact ? p : start);
-            for (size_t i = 0; i < count; ++i)
-            {
-                if (baseRun[i] != afterRun[i])
-                {
-                    changed = true;
+        const std::vector<size_t> starts = historyFootprintStarts(ranges);
+        std::atomic<bool> found{false};
+        forEachBlock(starts.back(), HISTORY_FOOTPRINT_BLOCK, [&](size_t from, size_t to) {
+            historyFootprintRuns(ranges, starts, from, to, [&](size_t statePixel, size_t compactPixel, size_t count) {
+                if (found.load(std::memory_order_relaxed))
                     return;
-                }
-            }
-            p += count;
-        }
+                const uint32_t *baseRun = baseBits + (baseCompact ? compactPixel : statePixel) * HISTORY_CHANNELS;
+                const uint32_t *afterRun = afterBits + (afterCompact ? compactPixel : statePixel) * HISTORY_CHANNELS;
+                if (memcmp(baseRun, afterRun, count * HISTORY_CHANNELS * HISTORY_VALUE_BYTES) != 0)
+                    found.store(true, std::memory_order_relaxed);
+            });
+        });
+        changed = found.load();
     }
 
     void OnOK() override
@@ -6555,14 +6598,17 @@ public:
             residuals.assign(residualsJs.Data(), residualsJs.Data() + (residualsJs.ElementLength() / 2) * 2);
             hasTurns = true;
         }
+        for (size_t r = 1; r < ranges.size(); r += 2)
+            total += static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
+        const size_t turnsBytes = hasTurns ? 4 + turns.size() * 16 + 4 + residuals.size() * 4 : 0;
+        headerBytes = 4 + ranges.size() * sizeof(uint32_t) + turnsBytes;
+        Napi::Buffer<uint8_t> buffer = Napi::Buffer<uint8_t>::New(env, headerBytes + total * sizeof(uint32_t));
+        out = buffer.Data();
+        outRef = Napi::Persistent(buffer);
     }
 
     void Execute() override
     {
-        size_t total = 0;
-        for (size_t r = 1; r < ranges.size(); r += 2)
-            total += static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
-
         const char *err = historyCheckFootprint(base, after, ranges, baseCompact, afterCompact, "history delta");
         if (err)
         {
@@ -6570,32 +6616,13 @@ public:
             return;
         }
 
-        const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
-        const uint32_t *afterBits = reinterpret_cast<const uint32_t *>(after.data);
-
-        std::vector<uint32_t> diff(total);
-        size_t p = 0;
-        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
-        {
-            const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
-            const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
-            const uint32_t *baseRun = baseBits + (baseCompact ? p : start);
-            const uint32_t *afterRun = afterBits + (afterCompact ? p : start);
-            for (size_t i = 0; i < count; ++i)
-                diff[p + i] = afterRun[i] - baseRun[i];
-            p += count;
-        }
-
-        const size_t turnsBytes = hasTurns ? 4 + turns.size() * 16 + 4 + residuals.size() * 4 : 0;
-        const size_t headerBytes = 4 + ranges.size() * sizeof(uint32_t) + turnsBytes;
-        out.resize(headerBytes + total * sizeof(uint32_t));
         const uint32_t header = static_cast<uint32_t>(ranges.size() / 2) | (hasTurns ? HISTORY_DELTA_TURNS_FLAG : 0u);
-        memcpy(out.data(), &header, 4);
+        memcpy(out, &header, 4);
         if (!ranges.empty())
-            memcpy(out.data() + 4, ranges.data(), ranges.size() * sizeof(uint32_t));
+            memcpy(out + 4, ranges.data(), ranges.size() * sizeof(uint32_t));
         if (hasTurns)
         {
-            uint8_t *p = out.data() + 4 + ranges.size() * sizeof(uint32_t);
+            uint8_t *p = out + 4 + ranges.size() * sizeof(uint32_t);
             const uint32_t turnCount = static_cast<uint32_t>(turns.size());
             memcpy(p, &turnCount, 4);
             p += 4;
@@ -6613,14 +6640,37 @@ public:
             if (!residuals.empty())
                 memcpy(p, residuals.data(), residuals.size() * 4);
         }
-        if (total > 0)
-            historyEncodePlanes(reinterpret_cast<const uint8_t *>(diff.data()), total, out.data() + headerBytes);
+
+        // The differences in plane order, as historyEncodePlanes lays values out.
+        const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
+        const uint32_t *afterBits = reinterpret_cast<const uint32_t *>(after.data);
+        const std::vector<size_t> starts = historyFootprintStarts(ranges);
+        const size_t pixels = starts.back();
+        uint8_t *planes = out + headerBytes;
+        forEachBlock(pixels, HISTORY_FOOTPRINT_BLOCK, [&](size_t from, size_t to) {
+            historyFootprintRuns(ranges, starts, from, to, [&](size_t statePixel, size_t compactPixel, size_t count) {
+                const uint32_t *baseRun = baseBits + (baseCompact ? compactPixel : statePixel) * HISTORY_CHANNELS;
+                const uint32_t *afterRun = afterBits + (afterCompact ? compactPixel : statePixel) * HISTORY_CHANNELS;
+                for (size_t c = 0; c < HISTORY_CHANNELS; ++c)
+                {
+                    uint8_t *plane = planes + c * pixels + compactPixel;
+                    for (size_t i = 0; i < count; ++i)
+                    {
+                        const uint32_t d = afterRun[i * HISTORY_CHANNELS + c] - baseRun[i * HISTORY_CHANNELS + c];
+                        plane[i] = static_cast<uint8_t>(d);
+                        plane[total + i] = static_cast<uint8_t>(d >> 8);
+                        plane[2 * total + i] = static_cast<uint8_t>(d >> 16);
+                        plane[3 * total + i] = static_cast<uint8_t>(d >> 24);
+                    }
+                }
+            });
+        });
     }
 
     void OnOK() override
     {
         Napi::HandleScope scope(Env());
-        deferred.Resolve(Napi::Buffer<uint8_t>::Copy(Env(), out.data(), out.size()));
+        deferred.Resolve(outRef.Value());
     }
 
     void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
@@ -6630,7 +6680,10 @@ private:
     Napi::Promise::Deferred deferred;
     HistoryBufferRef base, after;
     std::vector<uint32_t> ranges;
-    std::vector<uint8_t> out;
+    size_t total = 0;
+    size_t headerBytes = 0;
+    Napi::Reference<Napi::Buffer<uint8_t>> outRef;
+    uint8_t *out = nullptr;
     bool baseCompact = false;
     bool afterCompact = false;
     bool hasTurns = false;
