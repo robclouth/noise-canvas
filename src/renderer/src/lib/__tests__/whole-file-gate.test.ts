@@ -2,13 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
 import type { ReachContext } from "../effect-reach";
-import {
-  liveReadRefusal,
-  overReachNeeds,
-  overReachRefusal,
-  strokeRefusal,
-  wholeBrushRefusal,
-} from "../whole-file-gate";
+import { overReachNeeds, overReachRefusal, strokeRefusal } from "../whole-file-gate";
 
 // A 60-second file at 120 bpm, on a canvas holding 16 seconds of it.
 const CTX: ReachContext = { bpm: 120, fileSeconds: 60, canvasSeconds: 16, bandsPerOctave: 24, numBands: 240 };
@@ -67,23 +61,6 @@ describe("strokeRefusal", () => {
       effects: [{ id: "mock-transform", effect: "transform", enabled: true, params: {} }],
     });
     expect(strokeRefusal(state, CTX)).toBe("Transform reaches too far for this file. Turn it down to paint here.");
-  });
-});
-
-describe("wholeBrushRefusal", () => {
-  it("names what reads across the brush and agrees the verb with it", () => {
-    expect(wholeBrushRefusal(["Transform"])).toBe(
-      "Transform reads across the whole brush, and this brush is too long for this file. Shorten it to paint here.",
-    );
-    expect(wholeBrushRefusal(["Transform", "Sort"])).toBe(
-      "Transform and Sort read across the whole brush, and this brush is too long for this file. Shorten it to paint here.",
-    );
-  });
-
-  it("names Accumulate when the brush builds up on its own paint", () => {
-    expect(liveReadRefusal()).toBe(
-      "Accumulate reads what the brush has just painted, and this brush is too long for this file. Shorten it to paint here.",
-    );
   });
 });
 

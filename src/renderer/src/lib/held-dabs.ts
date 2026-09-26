@@ -1,4 +1,4 @@
-import { blockOfFrame, frameRangeOfBlock, type BlockGrid } from "./block-grid";
+import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock, type BlockGrid } from "./block-grid";
 
 /** A span of file frames, [start, end). */
 export type FrameSpan = { start: number; end: number };
@@ -32,7 +32,16 @@ type HeldDab<T> = {
   payload: T;
   paint: DabPainter;
   byBlock: boolean;
+  holdsBack: boolean;
 };
+
+/**
+ * How a held dab paints: `byBlock` paints each block on its own rather than
+ * in a run with its ready neighbours, so what a piece reads elsewhere stays
+ * one block's worth; `holdsBack` keeps every later dab waiting until it has
+ * painted all of it.
+ */
+export type HoldOptions = { byBlock?: boolean; holdsBack?: boolean };
 
 /** The blocks a dab writes, in order and without repeats. */
 export function blocksOfDab(grid: BlockGrid, extent: DabExtent): number[] {
@@ -80,7 +89,7 @@ export function blockReadSpan(grid: BlockGrid, extent: DabExtent, block: number)
     return { start: Math.max(0, first - extent.before), end: Math.min(grid.numFrames, last + extent.after) };
   }
   const frames = frameRangeOfBlock(grid, block);
-  const margin = grid.blockFrames / Math.min(...grid.binsPerBlock);
+  const margin = coarsestBinFrames(grid);
   const continues = (edge: number): boolean => extent.writes.some((span) => span.start < edge && span.end > edge);
   return {
     start: Math.max(
@@ -102,7 +111,8 @@ export function blockReadSpan(grid: BlockGrid, extent: DabExtent, block: number)
  * way itself, for those with a block within its reach. Everything else may go
  * ahead. So the canvas paints whatever it holds at once, however far behind
  * an older dab waits, and every pixel still takes its dabs in the order they
- * came.
+ * came. A dab held with `holdsBack` is the exception: nothing after it paints
+ * before it has.
  */
 export class HeldDabs<T> {
   private readonly grid: BlockGrid;
@@ -117,6 +127,11 @@ export class HeldDabs<T> {
     return this.queue.length;
   }
 
+  /** The payload of the dab held longest, or null when none is held. */
+  oldest(): T | null {
+    return this.queue[0]?.payload ?? null;
+  }
+
   /** Blocks still to paint, over every dab. */
   get pieces(): number {
     let count = 0;
@@ -124,14 +139,12 @@ export class HeldDabs<T> {
     return count;
   }
 
-  /**
-   * Holds a dab. With `byBlock` each block paints on its own rather than in a
-   * run with its ready neighbours, so what a piece reads elsewhere stays one
-   * block's worth.
-   */
-  push(extent: DabExtent, payload: T, paint: DabPainter, byBlock = false): void {
+  /** Holds a dab. */
+  push(extent: DabExtent, payload: T, paint: DabPainter, options: HoldOptions = {}): void {
     const blocks = blocksOfDab(this.grid, extent);
-    if (blocks.length > 0) this.queue.push({ extent, blocks, total: blocks.length, payload, paint, byBlock });
+    if (blocks.length === 0) return;
+    const { byBlock = false, holdsBack = false } = options;
+    this.queue.push({ extent, blocks, total: blocks.length, payload, paint, byBlock, holdsBack });
   }
 
   clear(): void {
@@ -172,6 +185,7 @@ export class HeldDabs<T> {
         }
         dab.blocks = dab.blocks.filter((block) => !done.has(block));
       }
+      if (dab.holdsBack && dab.blocks.length > 0) break;
       for (const block of dab.blocks) {
         older.add(block);
         if (!extent.readsLive) continue;
@@ -207,6 +221,7 @@ export class HeldDabs<T> {
         span = next;
         if (index === 0) payloads.push(dab.payload);
       }
+      if (dab.holdsBack) break;
     }
     return span ? { span, payloads, part } : null;
   }

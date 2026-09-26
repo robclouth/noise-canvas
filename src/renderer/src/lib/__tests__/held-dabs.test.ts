@@ -126,7 +126,7 @@ describe("held dabs", () => {
         clips.push(clip);
         return true;
       },
-      true,
+      { byBlock: true },
     );
     held.release(() => true);
     expect(clips).toEqual([frameRangeOfBlock(grid, 1), frameRangeOfBlock(grid, 2)]);
@@ -147,6 +147,20 @@ describe("held dabs", () => {
     expect(painted).toEqual([]);
     held.release(() => true);
     expect(painted).toEqual(["reader", "writer"]);
+  });
+
+  it("holds every later dab back until a dab held with holdsBack has painted all of it", () => {
+    const held = new HeldDabs<string>(grid);
+    const painted: string[] = [];
+    let ready = false;
+    held.push(extent(B + 10, B + 20), "beside", () => ready && painted.push("beside") > 0, { holdsBack: true });
+    held.push(extent(4 * B + 10, 4 * B + 20), "apart", () => painted.push("apart") > 0);
+    held.release(() => true);
+    expect(painted).toEqual([]);
+    expect(held.target(() => true)?.payloads).toEqual(["beside"]);
+    ready = true;
+    held.release(() => true);
+    expect(painted).toEqual(["beside", "apart"]);
   });
 
   it("keeps a run that could not paint for the next release", () => {

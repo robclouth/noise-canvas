@@ -42,7 +42,7 @@ import { packedFold, padToFold } from "../constants";
 import { metadataTextureRows } from "../band-layout";
 
 const SAMPLE_RATE = 8000;
-const BLOCK_SECONDS = 0.3;
+const BLOCK_SECONDS = 0.32;
 
 function packedTexture(
   data: Float32Array,
@@ -320,6 +320,7 @@ describe("a canvas window that follows the brush", () => {
     expect(spans).toEqual([
       [0, 3],
       [1, 4],
+      [2, 5],
       [3, 6],
     ]);
     // Only the blocks the windows held were read, each exactly once.

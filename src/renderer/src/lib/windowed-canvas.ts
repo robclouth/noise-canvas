@@ -15,6 +15,7 @@ import {
 } from "./block-grid";
 import {
   clipRangesToView,
+  clipToView,
   composeViewContent,
   fileRangesToView,
   fileUvToViewUv,
@@ -102,6 +103,25 @@ const READ_PIECE_PIXELS = 1 << 16;
 
 /** Work the slot refresh after a commit does before it lets a frame through. */
 const SLOT_REFRESH_BUDGET_MS = 4;
+
+/** A stroke's paint over some file pixels: their values, and each brush step's mask weights, in range order. */
+export type StrokePaint = { ranges: Uint32Array; values: Float32Array; masks: (Float32Array | null)[] };
+
+/**
+ * A dab painted beside the canvas: `compute` paints it once every older dab
+ * has painted and resolves what it painted, or null when it could not; the
+ * canvas then lays that paint on each block as it holds it. `pitch` is the
+ * dab's pitch span in unpacked UV, for the stroke's painted box.
+ */
+/**
+ * A dab painted beside the canvas: how to work out its paint, calling
+ * `tileDone` as each of its `tiles` is painted, and the pitch span it covers.
+ */
+export type PaintBeside = {
+  compute: (tileDone: () => void) => Promise<StrokePaint | null>;
+  tiles: number;
+  pitch: { min: number; max: number };
+};
 
 export type StrokeSettlement =
   | { status: "completed" }
@@ -221,6 +241,10 @@ export class WindowedCanvas {
   private pendingKey = 0;
   // Counts the dabs the stroke on the canvas has painted.
   private strokeKey = 0;
+  // Dabs painting beside the canvas, and whether one of this stroke's failed.
+  private readonly besideJobs = new Set<Promise<void>>();
+  private besideFailed = false;
+  private besideTilesLeft = 0;
   private stroking = false;
   // Set from `beginStroke` until the stroke ends or is discarded.
   private discardable = false;
@@ -809,10 +833,38 @@ export class WindowedCanvas {
     return blocksOfDab(this.grid, extent).every((block) => {
       const read = blockReadSpan(this.grid, extent, block);
       if (!this.fitsWindow(read.start, read.end)) return false;
-      if (!needs || needs.sources.length === 0) return true;
-      const part = extent.piece ? blockWriteSpan(this.grid, extent, block) : null;
-      return sourceNeedsOver(needs.sources, part).every((need) => this.sourceFits(need));
+      if (!needs) return true;
+      return this.othersFit(needs, extent.piece ? blockWriteSpan(this.grid, extent, block) : null);
     });
+  }
+
+  /** True when one window over each other file a dab reads can hold what it reads while it writes `part`, or all of it for null. */
+  othersFit(needs: DabNeeds, part: FrameSpan | null): boolean {
+    return (
+      sourceNeedsOver(needs.sources, part).every((need) => this.sourceFits(need)) &&
+      needs.impulses.every((need) => this.sourceFits(need))
+    );
+  }
+
+  /**
+   * Points the windows over the other files a dab reads at what it reads
+   * while it writes `part`, and resolves true once they hold it; false when
+   * they cannot.
+   */
+  async holdOthers(needs: DabNeeds, part: FrameSpan | null): Promise<boolean> {
+    const sources = sourceNeedsOver(needs.sources, part);
+    for (let fills = 0; fills < HELD_PAINT_FILLS; fills++) {
+      for (const need of sources) this.aimSource(need);
+      for (const need of needs.impulses) this.aimImpulse(need);
+      if (this.othersHold(needs, part)) return true;
+      const reads = [
+        ...sources.map((need) => (need.self ? this.selfWindow : this.sources.get(need.fileId))?.settled()),
+        ...needs.impulses.map((need) => this.impulses.get(need.fileId)?.settled()),
+      ].filter((read): read is Promise<void> => !!read);
+      if (reads.length === 0) return false;
+      await Promise.all(reads);
+    }
+    return false;
   }
 
   /**
@@ -837,20 +889,146 @@ export class WindowedCanvas {
         return painted;
       }
     }
-    this.held.push(extent, needs, counted, needs.sources.length > 0 && extent.piece !== null);
+    this.held.push(extent, needs, counted, { byBlock: needs.sources.length > 0 && extent.piece !== null });
     this.releaseHeld();
     return true;
+  }
+
+  /**
+   * Holds a dab the canvas cannot paint itself, and paints it beside the
+   * canvas once every dab before it has painted: its paint then lands a block
+   * at a time as the canvas holds each, as a held dab's does.
+   */
+  paintBeside(extent: DabExtent, beside: PaintBeside): void {
+    // Laying the paint reads nothing: the canvas holds the blocks it writes.
+    const needs: DabNeeds = { sources: [], impulses: [], original: false };
+    let result: StrokePaint | null = null;
+    let started = false;
+    const epoch = this.strokeEpoch;
+    const paint: DabPainter = (clip) => {
+      if (!result) {
+        if (!started && this.held.oldest() === needs) {
+          started = true;
+          let tilesLeft = beside.tiles;
+          this.besideTilesLeft += tilesLeft;
+          const tileDone = (): void => {
+            if (epoch !== this.strokeEpoch || tilesLeft === 0) return;
+            tilesLeft--;
+            this.besideTilesLeft--;
+          };
+          const job = beside.compute(tileDone).then(
+            (painted) => {
+              if (epoch !== this.strokeEpoch) return;
+              if (!painted) this.besideFailed = true;
+              result = painted ?? { ranges: new Uint32Array(0), values: new Float32Array(0), masks: [] };
+              this.releaseHeld();
+            },
+            (error) => {
+              diag.error("canvas", "a dab painted beside the canvas failed", { error });
+              if (epoch !== this.strokeEpoch) return;
+              this.besideFailed = true;
+              result = { ranges: new Uint32Array(0), values: new Float32Array(0), masks: [] };
+              this.releaseHeld();
+            },
+          );
+          const tracked = job.finally(() => {
+            this.besideJobs.delete(tracked);
+            while (tilesLeft > 0) tileDone();
+          });
+          this.besideJobs.add(tracked);
+        }
+        return false;
+      }
+      const painted = this.layPaint(result, clip, beside.pitch);
+      if (painted) this.strokeKey++;
+      return painted;
+    };
+    // Each block is laid on its own: a laid piece reads nothing across its cut.
+    for (const block of blocksOfDab(this.grid, extent)) {
+      const writes = [blockWriteSpan(this.grid, extent, block)];
+      const laid: DabExtent = { writes, before: 0, after: 0, readsLive: false, piece: { before: 0, after: 0 } };
+      this.held.push(laid, needs, (clip) => paint(clip ?? writes[0]), { holdsBack: true });
+    }
+    this.releaseHeld();
+  }
+
+  /** Pieces of the stroke still to paint: held blocks and tiles painting beside the canvas. */
+  get pendingWork(): number {
+    return this.held.pieces + this.besideTilesLeft;
+  }
+
+  /** Texels one canvas window holds, which a view painted beside it may hold too. */
+  get texelBudget(): number {
+    return this.windowBlocks * blockTexels(this.grid, 0);
+  }
+
+  /** The file's original values over `ranges`, or null when the store cannot serve them. */
+  readOriginal(ranges: Uint32Array): Promise<Float32Array | null> {
+    return this.deps.readRoot(ranges);
+  }
+
+  /** The file over `ranges` as the stroke found it: the store's values with the paint of strokes still committing. */
+  async readStart(ranges: Uint32Array): Promise<Float32Array | null> {
+    const stored = await this.deps.readCurrent(ranges);
+    if (!stored) return null;
+    await Promise.all(this.pending.map((paint) => paint.landed));
+    const layers: { ranges: Uint32Array; values: Float32Array }[] = [];
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      const layer = this.pendingLayer(this.pending[i]);
+      if (layer) layers.push(layer);
+    }
+    if (layers.length === 0) return stored;
+    layers.push({ ranges, values: stored });
+    return composePixelRangeValues(ranges, layers);
+  }
+
+  /** The pixels of `ranges` the stroke has painted, with their values and step masks. */
+  async readStrokePaint(ranges: Uint32Array): Promise<StrokePaint> {
+    const renderer = this.expectRenderer();
+    const all = this.dirtyPixelRanges();
+    const painted = all ? intersectPixelRanges(all, ranges) : new Uint32Array(0);
+    if (pixelRangeCount(painted) === 0) return { ranges: painted, values: new Float32Array(0), masks: [] };
+    const clipped = clipRangesToView(renderer.committedSource().view, this.layout(), painted);
+    const canvasRead = Promise.all([
+      renderer.readPixelRanges(clipped.viewRanges),
+      renderer.readStrokeMaskRanges(clipped.viewRanges),
+    ]);
+    const slots = this.strokeSlots;
+    const slotted = slots?.within(painted) ?? new Uint32Array(0);
+    const slotRead = slots && slotted.length > 0 ? Promise.all([slots.read(slotted), slots.readMasks(slotted)]) : null;
+    const carried = this.carried;
+    while (!carried.settledNow) await carried.settled();
+    const carry = carried.read(painted);
+    const [canvasValues, canvasMasks] = await canvasRead;
+    const [slotValues, slotMasks] = slotRead ? await slotRead : [null, []];
+    // A block is on the canvas, in the slots or in the carry at a time; the
+    // carry wins where a later write carried a pixel again.
+    const sources = [
+      { ranges: carry.ranges, values: carry.values, masks: carry.masks },
+      ...(slotValues ? [{ ranges: slotted, values: slotValues, masks: slotMasks }] : []),
+      { ranges: clipped.fileRanges, values: canvasValues, masks: canvasMasks },
+    ];
+    const values = composePixelRangeValues(painted, sources);
+    const steps = Math.max(...sources.map((source) => source.masks.length));
+    const masks: (Float32Array | null)[] = [];
+    for (let step = 0; step < steps; step++) {
+      if (sources.every((source) => !source.masks[step])) {
+        masks.push(null);
+        continue;
+      }
+      const layers = sources.map((source) => ({
+        ranges: source.ranges,
+        values: weightsAsTexels(source.masks[step], source.ranges),
+      }));
+      masks.push(firstOfTexels(composePixelRangeValues(painted, layers)));
+    }
+    return { ranges: painted, values, masks };
   }
 
   /** A span of file frames in the canvas's own frames, clamped to what it holds; null stays null. */
   clipToCanvas(clip: FrameSpan | null): { frameStart: number; frameEnd: number } | null {
     const view = this.view();
-    if (!clip || !view) return null;
-    const frames = view.endFrame - view.startFrame;
-    return {
-      frameStart: Math.max(0, clip.start - view.startFrame),
-      frameEnd: Math.min(frames, clip.end - view.startFrame),
-    };
+    return clip && view ? clipToView(view, clip) : null;
   }
 
   /**
@@ -933,6 +1111,7 @@ export class WindowedCanvas {
           this.fill,
           ...[...this.sources.values()].map((slot) => slot.settled()),
           this.selfWindow?.settled() ?? null,
+          ...this.besideJobs,
           ...[...this.impulses.values()].map((slot) => slot.settled()),
         ].filter((read): read is Promise<void> => read !== null);
         if (reads.length === 0) break;
@@ -941,7 +1120,7 @@ export class WindowedCanvas {
         this.releaseHeld();
         stalls = this.held.pieces < before ? 0 : stalls + 1;
       }
-      if (this.held.size > 0) {
+      if (this.held.size > 0 || this.besideFailed) {
         this.held.clear();
         this.request = null;
         return { status: "failed", reason: "unavailable" };
@@ -991,6 +1170,8 @@ export class WindowedCanvas {
   beginStroke(): void {
     this.cancelSettlement?.();
     this.strokeEpoch++;
+    this.besideFailed = false;
+    this.besideTilesLeft = 0;
     this.stroking = true;
     // Paint the last stroke never landed belongs to that stroke, not this one.
     this.held.clear();
@@ -1411,6 +1592,48 @@ export class WindowedCanvas {
     }
   }
 
+  /**
+   * Lays the paint of a dab painted beside the canvas over the file frames
+   * of `clip`, or all of it, on the canvas: values, step masks, and the
+   * stroke's painted box. False when the canvas lacks some of those pixels.
+   */
+  private layPaint(result: StrokePaint, clip: FrameSpan | null, pitch: { min: number; max: number }): boolean {
+    const renderer = this.expectRenderer();
+    const view = renderer.committedSource().view;
+    let target = result.ranges;
+    if (clip) {
+      let frames: Uint32Array = new Uint32Array(0);
+      for (let block = blockOfFrame(this.grid, clip.start); block <= blockOfFrame(this.grid, clip.end - 1); block++) {
+        const list = blockPixelRanges(this.grid, block);
+        frames = mergePixelRanges(frames, list.ranges.subarray(0, list.count * 2));
+      }
+      target = intersectPixelRanges(result.ranges, frames);
+    }
+    if (pixelRangeCount(target) === 0) return true;
+    const viewRanges = fileRangesToView(view, this.layout(), target);
+    if (!viewRanges) return false;
+    // The stroke-start snapshot has to be taken before the paint lands.
+    renderer.holdStrokeScratch();
+    renderer.patchCanvasCompact(composePixelRangeValues(target, [result]), viewRanges);
+    renderer.patchStrokeMasks(
+      viewRanges,
+      result.masks.map((weights) =>
+        weights
+          ? firstOfTexels(
+              composePixelRangeValues(target, [
+                { ranges: result.ranges, values: weightsAsTexels(weights, result.ranges) },
+              ]),
+            )
+          : null,
+      ),
+    );
+    const frames = view.endFrame - view.startFrame;
+    const start = clip ? Math.max(clip.start, view.startFrame) : view.startFrame;
+    const end = clip ? Math.min(clip.end, view.endFrame) : view.endFrame;
+    renderer.addPaintedBox((start - view.startFrame) / frames, (end - view.startFrame) / frames, pitch.min, pitch.max);
+    return true;
+  }
+
   /** The slot in `slots` for the need's file, building one on first use. */
   private aimIn(slots: Map<string, SourceWindowSlot>, need: SourceNeed): SourceWindowTextures | null {
     const blocks = this.deps.sourceBlocks(need.fileId);
@@ -1571,4 +1794,18 @@ export class WindowedCanvas {
     this.carried = new CarriedPaint();
     this.strokeSlots?.clear();
   }
+}
+
+/** Mask weights as texels holding each weight in their first channel; zeros for a step with none. */
+function weightsAsTexels(weights: Float32Array | null | undefined, ranges: Uint32Array): Float32Array {
+  const texels = new Float32Array(pixelRangeCount(ranges) * 4);
+  if (weights) for (let i = 0; i < weights.length; i++) texels[i * 4] = weights[i];
+  return texels;
+}
+
+/** The first channel of each texel. */
+function firstOfTexels(texels: Float32Array): Float32Array {
+  const out = new Float32Array(texels.length >> 2);
+  for (let i = 0; i < out.length; i++) out[i] = texels[i * 4];
+  return out;
 }

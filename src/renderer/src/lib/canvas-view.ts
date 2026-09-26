@@ -32,8 +32,14 @@ export function packedTextureSizeOf(texels: number): Vector2 {
   return new Vector2(width, height);
 }
 
-/** The view spanning the blocks [firstBlock, lastBlock] of `grid`. */
-export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: number): CanvasView {
+/** A run of bands, [first, last], a view may hold on its own. */
+export type BandSpan = { first: number; last: number };
+
+/**
+ * The view spanning the blocks [firstBlock, lastBlock] of `grid`, over every
+ * band or only those of `bands`; the others hold no bins.
+ */
+export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: number, bands?: BandSpan): CanvasView {
   const { layout, numFrames } = grid;
   const startFrame = frameRangeOfBlock(grid, firstBlock).start;
   const endFrame = frameRangeOfBlock(grid, lastBlock).end;
@@ -47,7 +53,8 @@ export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: num
     const step = layout.metadata[band * 4 + 2];
     const k0 = Math.min(length, startFrame / 2 ** step);
     const kEnd = endFrame >= numFrames ? length : Math.min(length, endFrame / 2 ** step);
-    const count = Math.max(0, kEnd - k0);
+    const held = !bands || (band >= bands.first && band <= bands.last);
+    const count = held ? Math.max(0, kEnd - k0) : 0;
     ranges[band * 2] = offset + k0;
     ranges[band * 2 + 1] = count;
     metadata[band * 4] = texels;
@@ -127,6 +134,18 @@ export function viewCoversFile(view: CanvasView, numFrames: number): boolean {
 /** A time UV on the view's span as the same position on the file's span. */
 export function viewUvToFileUv(view: CanvasView, numFrames: number, x: number): number {
   return (view.startFrame + x * (view.endFrame - view.startFrame)) / numFrames;
+}
+
+/** The view frames of `clip`'s file frames [start, end), cut to the view. */
+export function clipToView(
+  view: CanvasView,
+  clip: { start: number; end: number },
+): { frameStart: number; frameEnd: number } {
+  const frames = view.endFrame - view.startFrame;
+  return {
+    frameStart: Math.max(0, clip.start - view.startFrame),
+    frameEnd: Math.min(frames, clip.end - view.startFrame),
+  };
 }
 
 /** A time UV on the file's span as the same position on the view's span. */

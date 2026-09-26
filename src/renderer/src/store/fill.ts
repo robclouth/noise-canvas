@@ -2,6 +2,7 @@ import { notifications } from "@mantine/notifications";
 import { diag } from "@renderer/lib/diag-log";
 import type { FileRendererHandle, StrokeDispatch } from "@renderer/lib/file-renderer-types";
 import { resolveGridFill, type GridFillTarget } from "@renderer/lib/grid/grid-fill";
+import type { JobProgress } from "./edit-progress";
 import { activeLoopRegion, openFiles } from "./files";
 import type { State, ZustandGet, ZustandSet } from "./types";
 
@@ -11,15 +12,10 @@ export const FILL_PROGRESS_THRESHOLD = 256;
 /** Strokes painted between yields to the browser. */
 const FILL_CHUNK = 256;
 
-export interface FillProgress {
-  done: number;
-  total: number;
-}
-
 export interface FillState {
   isFilling: boolean;
   /** Set while a large fill paints, which is the only time the dialog shows. */
-  fillProgress: FillProgress | null;
+  fillProgress: JobProgress | null;
   /** Asks the running fill to stop and put back the pixels from before it. */
   cancelFill: () => void;
   /** Paints the active brush on every grid cell, as one stroke and one history step. */

@@ -132,7 +132,7 @@ void main() {
     float srcBandIdxF = effSourceUvX * sourceFrameCount / max(srcBandTimeScale, 1e-6);
 
     // --- File-bounds / global wrap on the source index. ----------------------
-    float srcIdxFloor = floor(srcBandIdxF);
+    float srcIdxFloor = binAt(srcBandIdxF);
     float srcIdx;
     bool srcInBounds;
     if (wrapSrcTime) {

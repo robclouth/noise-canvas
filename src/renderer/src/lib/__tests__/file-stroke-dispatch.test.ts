@@ -16,7 +16,6 @@ import {
   strokeRefusal,
   type FileStrokeContext,
 } from "../file-stroke-dispatch";
-import { liveReadRefusal, wholeBrushRefusal } from "../whole-file-gate";
 import { sourceNeedsOver } from "../source-window";
 import { disposeOnsetTexture } from "../onset-map";
 import { penState } from "../pen-state";
@@ -122,7 +121,7 @@ async function harness(windowBlocks = 2) {
 }
 
 describe("file-space stroke dispatch", () => {
-  it("paints a full-length brush a piece at a time, and refuses one only the whole dab can serve", async () => {
+  it("paints a full-length brush on a windowed canvas whatever it reads", async () => {
     const { context } = await harness(3);
     const full = (effect: "passthrough" | "transform", step: Record<string, unknown>) =>
       createStateForEffects([effect], {
@@ -132,10 +131,8 @@ describe("file-space stroke dispatch", () => {
       });
     const aim = { x: 0.5, y: 0.5 };
     expect(strokeRefusal(context, full("passthrough", {}), aim)).toBeNull();
-    expect(strokeRefusal(context, full("transform", { transformScaleTime: -1, transformEdgeMode: 0 }), aim)).toBe(
-      wholeBrushRefusal(["Transform"]),
-    );
-    expect(strokeRefusal(context, full("passthrough", { accumulate: true }), aim)).toBe(liveReadRefusal());
+    expect(strokeRefusal(context, full("transform", { transformScaleTime: -1, transformEdgeMode: 0 }), aim)).toBeNull();
+    expect(strokeRefusal(context, full("passthrough", { accumulate: true }), aim)).toBeNull();
   });
 
   it("uses the prepared source request without calculating it again", async () => {
@@ -155,7 +152,7 @@ describe("file-space stroke dispatch", () => {
     const span = dabSpan(context, state, aim, canvas);
     expect(span.needs.sources).toHaveLength(1);
     expect(resolve).toHaveBeenCalledTimes(1);
-    expect(dispatchStroke(context, state, aim, false, undefined, span)).toBe(false);
+    expect(dispatchStroke(context, state, aim, false, { span })).toBe(false);
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(aimSource.mock.calls[0][0]).toEqual(sourceNeedsOver(span.needs.sources, null)[0]);
   });
@@ -174,7 +171,7 @@ describe("file-space stroke dispatch", () => {
     const span = dabSpan(context, state, aim, canvas);
     expect(span.needs.impulses).toHaveLength(1);
     expect(impulseNeeds).toHaveBeenCalledTimes(1);
-    expect(dispatchStroke(context, state, aim, false, undefined, span)).toBe(false);
+    expect(dispatchStroke(context, state, aim, false, { span })).toBe(false);
     expect(impulseNeeds).toHaveBeenCalledTimes(1);
     expect(aimImpulse.mock.calls[0][0]).toBe(span.needs.impulses[0]);
   });
@@ -242,9 +239,7 @@ describe("file-space stroke dispatch", () => {
     const render = vi.spyOn(renderer, "renderStroke");
     const onsetCalls = vi.mocked(context.getFileOnsets).mock.calls.length;
     canvas.beginStroke();
-    canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
-      dispatchStroke(context, state, aim, false, undefined, span, clip),
-    );
+    canvas.paintWhenHeld(span.extent, span.needs, (clip) => dispatchStroke(context, state, aim, false, { span, clip }));
     release();
     await canvas.settle();
     expect(render).toHaveBeenCalledTimes(1);

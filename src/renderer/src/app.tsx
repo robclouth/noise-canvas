@@ -18,6 +18,7 @@ import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
 import { AppMenuBar } from "./components/layout/menu-bar";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
+import { EditProgressModal } from "./components/edit-progress-modal";
 import { FillProgressModal } from "./components/fill-progress-modal";
 import { HelpOverlay } from "./components/help-overlay";
 import { ManualViewer } from "./components/manual-viewer";
@@ -578,6 +579,7 @@ function App(): React.JSX.Element {
         <ManualViewer />
         <HelpOverlay />
         <FillProgressModal />
+        <EditProgressModal />
       </Group>
     </Stack>
   );

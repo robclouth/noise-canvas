@@ -223,7 +223,13 @@ async function mount(state: State, blocks: number, durationSeconds = 300, reques
   };
 }
 
-function brush(anchor: number, gridSize = false, withReach = false, multiple = false): State {
+function brush(
+  anchor: number,
+  gridSize = false,
+  withReach = false,
+  multiple = false,
+  extra: Partial<TestBrushStep> = {},
+): State {
   const steps: Array<{ name: string; overrides: Partial<TestBrushStep> }> = [
     {
       name: "Dab",
@@ -244,6 +250,7 @@ function brush(anchor: number, gridSize = false, withReach = false, multiple = f
               },
             ]
           : [{ id: "dynamics", effect: "dynamics", enabled: true, params: { dynamicsGainDb: -6 } }],
+        ...extra,
       },
     },
   ];
@@ -394,6 +401,65 @@ describe("anchored dab residency", () => {
     expect(holds).toHaveBeenCalledWith(...aimed.mock.calls[0].slice(0, 2), false);
   });
 
+  it("shows how far a slow stroke has got, and takes it back when cancelled", async () => {
+    const rig = await mount(brush(1), 2);
+    let aborted = false;
+    vi.spyOn(rig.canvas, "settle").mockImplementation(
+      (signal) =>
+        new Promise((resolve) =>
+          signal?.addEventListener("abort", () => {
+            aborted = true;
+            resolve({ status: "cancelled" });
+          }),
+        ),
+    );
+    vi.spyOn(rig.canvas, "pendingWork", "get").mockReturnValue(3);
+    rig.ref.current!.beginStroke();
+    const settling = rig.ref.current!.settleStroke();
+    expect(rig.useStore.getState().editProgress).toBeNull();
+    await vi.waitFor(() => expect(rig.useStore.getState().editProgress).toEqual({ done: 0, total: 3 }));
+    rig.useStore.getState().cancelEdit();
+    expect(await settling).toEqual({ status: "cancelled" });
+    expect(aborted).toBe(true);
+    expect(rig.useStore.getState().editProgress).toBeNull();
+  });
+
+  it("paints a live dab wider than the window beside it, as a canvas over the whole file does", async () => {
+    const state = brush(1, false, false, false, { brushSizeTime: 16, accumulate: true });
+    const paintLive = async (blocks: number) => {
+      const rig = await mount(state, blocks);
+      const aim = 0.5;
+      const [beats, pitch] = uvToUnits(aim, 0.5, 120, 300, rig.data.bandsPerOctave, rig.data.numBands);
+      rig.useTransientStore.setState({ cursorPosition: { beats, pitch }, cursorVisible: true });
+      const beside = vi.spyOn(rig.canvas, "paintBeside");
+      rig.ref.current!.beginStroke();
+      rig.ref.current!.renderStroke(false);
+      rig.frame();
+      expect(await rig.ref.current!.settleStroke()).toEqual({ status: "completed" });
+      const ranges = rig.ref.current!.getDirtyPixelRanges()!;
+      const values = await rig.ref.current!.readPixelRanges(ranges);
+      const besideCalls = beside.mock.calls.length;
+      await rig.unmount();
+      return { ranges, values, besideCalls };
+    };
+    const windowed = await paintLive(2);
+    expect(windowed.besideCalls).toBe(1);
+    const whole = await paintLive(Infinity);
+    expect(whole.besideCalls).toBe(0);
+    const expected = seed.slice();
+    scatterCompactPixelRanges(expected, whole.values, whole.ranges);
+    const actual = seed.slice();
+    scatterCompactPixelRanges(actual, windowed.values, windowed.ranges);
+    let changed = 0;
+    let maxError = 0;
+    for (let i = 0; i < seed.length; i++) {
+      if (expected[i] !== seed[i]) changed++;
+      maxError = Math.max(maxError, Math.abs(actual[i] - expected[i]));
+    }
+    expect(changed).toBeGreaterThan(0);
+    expect(maxError).toBeLessThanOrEqual(1e-5);
+  });
+
   it.each([
     { name: "centre at the left edge", anchor: 1, right: false, gridSize: false, multiple: false },
     { name: "centre at the right edge", anchor: 1, right: true, gridSize: false, multiple: false },
@@ -531,7 +597,7 @@ describe("visible screen residency", () => {
   });
 });
 
-it("uses block capacity for the visible refusal and batch admission", async () => {
+it("admits and paints a dab wider than the window", async () => {
   const state = brush(0);
   const rig = await mount(state, 2);
   const wideBrush = createMockStateWithSteps([
@@ -547,9 +613,10 @@ it("uses block capacity for the visible refusal and batch admission", async () =
   ]);
   const wide = { ...rig.state, brushes: wideBrush.brushes };
   const aim = { x: (grid.blockFrames - 1) / rig.data.numFrames, y: 0.5 };
-  expect(rig.ref.current!.strokeRefusal(wide, aim)).not.toBeNull();
+  expect(rig.ref.current!.strokeRefusal(wide, aim)).toBeNull();
   rig.ref.current!.beginStroke();
-  expect(rig.ref.current!.renderStrokeBatch([{ state: wide, aimX: aim.x, aimY: aim.y }])).toBe(0);
+  expect(rig.ref.current!.renderStrokeBatch([{ state: wide, aimX: aim.x, aimY: aim.y }])).toBe(1);
+  expect(await rig.ref.current!.settleStroke()).toEqual({ status: "completed" });
 });
 
 it("disposes each display material and releases its renderer properties across remounts", async () => {

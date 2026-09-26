@@ -126,6 +126,15 @@ export class CarriedPaint {
   }
 
   /**
+   * The carried pixels within `ranges`, with the mask weights they were
+   * carried with, left in the carry. Call once the reads have settled.
+   */
+  read(ranges: Uint32Array): TakenPaint {
+    const within = intersectPixelRanges(this.ranges(), ranges);
+    return { ranges: within, ...this.valuesOf(within) };
+  }
+
+  /**
    * Takes the carried pixels within `ranges` out of the carry, with the mask
    * weights they were carried with. Call once the reads have settled.
    */

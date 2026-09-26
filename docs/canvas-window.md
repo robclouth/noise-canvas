@@ -28,9 +28,11 @@ Four words, and everything else follows from them.
   band lengths laid end to end, with no width, no height and no padding. The
   unit everything outside the renderer speaks in. A texture built from any part
   of it picks its own fold through `packedFold`.
-- **Block** — a fixed span of the file, about two seconds, aligned to the
-  coarsest band's bin grid. The file is a row of blocks. Blocks are what the
-  disk store, the GPU slot cache and the undo footprints all count in.
+- **Block** — a fixed span of the file, about two seconds, and a whole, even
+  number of the coarsest band's bins. The file is a row of blocks. Blocks are
+  what the disk store, the GPU slot cache and the undo footprints all count
+  in. Because the number is even, a bin's index in a view has the parity of
+  its index in the file, and a sort pairs the same neighbours on both.
 - **View** — a run of blocks, expressed as its own packed layout: its own band
   offsets, its own metadata texture, its own frame count. A view looks exactly
   like a small file, which is why no shader had to change.
@@ -110,7 +112,9 @@ fails if a new file starts converting.
 The shader side has the same split and the compiler cannot help there.
 `effect-common.glsl` names it instead: `destFileSec` and `destFileUvX` are the
 file's clock, plain `destUv` is the canvas's. Anything absolute — an onset, a
-carrier phase, a modulator pattern, a random seed — takes the file's.
+carrier phase, a modulator pattern, a random seed — takes the file's. A read
+that lands on a bin's edge takes its bin through `binAt`, which moves it a
+hundredth of a bin in, so the canvas and a view round it to the same bin.
 
 ## What must stay true
 
@@ -130,12 +134,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    with the brush laid out over the file, not the canvas, so every piece
    paints the same pixels a whole-file canvas would. A dab that fits and finds
    nothing held paints whole, at once.
-   Some dabs cannot be cut. An effect that may read anywhere in the brush (a
-   warp that scales, turns or mirrors time, a sort along time, any read an
-   edge mode wraps round) would read blocks the canvas does not hold, and an
-   Accumulate dab would read, across a cut, what its own earlier piece
-   painted. `DabExtent.piece` is null for them, every block reads the whole
-   dab, and one wider than the window is refused with a notice that names why.
+   Some dabs cannot be cut on the canvas. An effect that may read anywhere in
+   the brush (a warp that scales, turns or mirrors time, any read an edge mode
+   wraps round) would read blocks the canvas does not hold, and an Accumulate
+   dab would read, across a cut, what its own earlier piece painted.
+   `DabExtent.piece` is null for them, and every block reads the whole dab.
+   One the window cannot hold is painted beside the canvas (rule 16).
    A block of a dab waits for the older dabs that still have that block to
    paint or, when they read the canvas as the dabs before them left it
    (Accumulate), still have it to read; and, when it reads the canvas that way
@@ -295,9 +299,10 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     convolve steps the read one response bin per tap, the way Rate's sign
     points. `effect-reach.ts` says how far, in seconds of the file, and the aim
     and the dab's own wait widen by it.
-    A dab is painted a block at a time, so only an effect whose one block plus
-    reach is wider than a whole window can never be served: `overReachNeeds`
-    names it and the dab is refused.
+    Effects run one after another, and a step runs its effects
+    `brushIterations` times over, each reading what the one before wrote, so
+    their reaches add up along the chain. A sort reads a few bins and two
+    bands either side per run, not the whole brush.
 11. **An offset added to a source UV converts against the span the source
     textures hold.** A blur's beats and a repeat's gap are source-UV distances
     (`sourceLayout`), a warp's shift is a destination-UV one
@@ -394,6 +399,39 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     reaches `beginDisplaySeedFromStore` with no coarse strip to stand in, and
     the levels fill in one block at a time.
 
+16. **A dab the window cannot hold is painted beside the canvas, in tiles.**
+    `besideFor` cuts it into tiles of bands over runs of blocks. `readBoxes`
+    says what region a tile reads: from the brush's last effect back, each
+    effect widens the region by what it reads around a pixel, maps it through
+    its warp, or takes its step's whole brush when it may read anywhere in it.
+    A tile that reads more than a window holds is halved across bands or
+    blocks, whichever reads less, and a tile that cannot read less is refused.
+    A warp that is the brush's first effect, run once, samples the first
+    step's input through a view of its own, so reversing a whole file reads
+    its far end without one view spanning both ends.
+    Each tile paints on a renderer of its own (`StrokeRenderer.beside`) loaded
+    with the file as the stroke found it (`readStart`) and the stroke's paint
+    and masks so far (`readStrokePaint`), after the other files' windows hold
+    what it reads there (`holdOthers`). The paint goes back on the canvas a
+    block at a time as the window holds each (`layPaint`), each block held on
+    its own, because laying reads nothing past it. Every tile reads the
+    file as it was before the dab, so tiles never read one another's paint and
+    an Accumulate dab cuts like any other. The dab starts once every earlier
+    dab has painted, and holds every later one back until it has laid all its
+    paint (`HoldOptions.holdsBack`).
+    The same rule holds on the canvas: every pass of a step but the last
+    writes the packed rows of the brush's bands and of the bands the passes
+    after it read (`calculateScissorRows` with `pitchReachBands`). With fewer
+    rows the next pass reads stale texels, which differ with the layout.
+
+17. **Every dab of a stroke goes through `paintDab`.** The pointer's trail,
+    the dab under the cursor, a region edit and a grid fill all ask it, and
+    it paints on the canvas or beside it. A path that called `paintWhenHeld`
+    itself would drop every dab the window cannot hold. When settling a
+    stroke runs past half a second, the engine shows how many pieces are left
+    (`WindowedCanvas.pendingWork`) in a dialog whose Cancel takes the stroke
+    back.
+
 ## How to check it still works
 
 The unit suite cannot see most of this: it compares two renderers, and both can
@@ -409,6 +447,12 @@ npm run window:check      # builds windowed, paints, and checks the picture
 file with an eight-block window, paints, and fails if any column of the
 spectrogram went black or the committed footprint does not match the whole-file
 build. It also prints resident memory.
+
+`canvas-parity-matrix.test.ts` paints every effect at one beat, wider than the
+window and over the whole file, with Accumulate off and on, through the real
+dispatch on a canvas over the whole file and on a six-block window, and
+compares the two. It runs a 60-second file; `VITE_PARITY_SECONDS=300,600` adds
+the five- and ten-minute ones.
 
 ## Where the memory goes now
 

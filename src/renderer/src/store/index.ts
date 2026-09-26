@@ -24,6 +24,7 @@ import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
 import { createEffectsSlice } from "./effects";
 import { createFilesSlice, FILES_PERSISTED_KEYS, openFiles } from "./files";
+import { createEditProgressSlice } from "./edit-progress";
 import { createFillSlice } from "./fill";
 import { createSelectionAuditionSlice } from "./selection-audition";
 import { createSelectionClipboardSlice } from "./selection-clipboard";
@@ -226,6 +227,7 @@ export const useStore = create<State>()(
         ...createLinkSlice(set, get),
         ...createLayerStacksSlice(set, get),
         ...createFillSlice(set, get),
+        ...createEditProgressSlice(set),
         ...createSelectionAuditionSlice(set, get),
         ...createSelectionClipboardSlice(set, get),
         ...createSelectionRippleSlice(set, get),

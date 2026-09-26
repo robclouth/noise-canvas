@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
-import { brushReaches, pieceReach, strokeReach, type ReachContext, type TimeReach } from "../effect-reach";
+import { brushReaches, pieceReach, pitchReach, strokeReach, type ReachContext, type TimeReach } from "../effect-reach";
 
 // A 60-second file at 120 bpm, on a canvas holding 16 seconds of it. The mock
 // brush is one beat wide, so its own span is half a second.
@@ -314,10 +314,15 @@ describe("the brush's reach as a whole", () => {
     expect(reachOf(step)).toEqual({ before: 0, after: 0 });
   });
 
-  it("takes the furthest reach of any step", () => {
+  it("adds the reaches of steps, each reading what the one before it wrote", () => {
     const near = withEffect("transform", { transformShiftBeats: 1, transformEdgeMode: 1 });
     const far = withEffect("transform", { transformShiftBeats: 4, transformEdgeMode: 1 });
-    expect(reachOf(near, far).before).toBeCloseTo(2, 10);
+    expect(reachOf(near, far).before).toBeCloseTo(2.5, 10);
+  });
+
+  it("multiplies a step's reach by the times its effects run over", () => {
+    const repeated = withEffect("transform", { transformShiftBeats: 1, transformEdgeMode: 1, brushIterations: 3 });
+    expect(reachOf(repeated).before).toBeCloseTo(1.5, 10);
   });
 
   it("reports each reach with the step and the brush span it belongs to", () => {
@@ -342,13 +347,13 @@ describe("piece reach", () => {
 
   it("reads a blur's smear around every pixel, even where the edge cuts it at the brush", () => {
     expect(pieceOf(withEffect("blur", { blurAmountTime: 25, blurEdgeMode: 0, blurOrigin: 1 }))).toEqual({
-      reach: { before: 0.5, after: 0.5 },
-      wholeBrush: [],
+      before: 0.5,
+      after: 0.5,
     });
   });
 
   it("reads a shift around every pixel", () => {
-    expect(pieceOf(withEffect("transform", { transformShiftBeats: 2, transformEdgeMode: 0 })).reach).toEqual({
+    expect(pieceOf(withEffect("transform", { transformShiftBeats: 2, transformEdgeMode: 0 }))).toEqual({
       before: 1,
       after: 1,
     });
@@ -361,12 +366,42 @@ describe("piece reach", () => {
     ["a shift wrapped round the brush", "transform", { transformShiftBeats: 1, transformEdgeMode: 2 }],
     ["a smear wrapped round the brush", "blur", { blurAmountTime: 25, blurEdgeMode: 2 }],
     ["copies wrapped round the brush", "clone", { cloneCountX: 3, cloneSpaceBeats: 0.25, cloneEdgeMode: 2 }],
-    ["a sort along time", "sort", { sortDirection: 0 }],
   ])("reads anywhere in the brush for %s", (_, effect, overrides) => {
-    expect(pieceOf(withEffect(effect, overrides))).toEqual({ reach: null, wholeBrush: [effect] });
+    expect(pieceOf(withEffect(effect, overrides))).toBeNull();
   });
 
   it("reads only the pixel for a sort along pitch", () => {
-    expect(pieceOf(withEffect("sort", { sortDirection: 1 })).reach).toEqual({ before: 0, after: 0 });
+    expect(pieceOf(withEffect("sort", { sortDirection: 1 }))).toEqual({ before: 0, after: 0 });
+  });
+
+  it.each([0, 2])(
+    "reads a few of the coarsest band's bins around every pixel for a sort in direction %i",
+    (direction) => {
+      const state = createMockStateWithSteps([
+        { name: "Sort", overrides: withEffect("sort", { sortDirection: direction }) },
+      ]);
+      expect(pieceReach(state, { ...CTX, binSeconds: 0.125 })).toEqual({ before: 0.75, after: 0.75 });
+    },
+  );
+});
+
+describe("pitch reach", () => {
+  function pitchOf(...steps: Array<Partial<TestBrushStep>>): number | null {
+    return pitchReach(createMockStateWithSteps(steps.map((overrides, i) => ({ name: `Step ${i}`, overrides }))), 24);
+  }
+
+  it("reads two bands either side for a sort across pitch", () => {
+    expect(pitchOf(withEffect("sort", { sortDirection: 1 }))).toBe(1);
+    expect(pitchOf(withEffect("sort", { sortDirection: 0 }))).toBe(0);
+  });
+
+  it("adds the reaches of steps and the times their effects run over", () => {
+    const shift = withEffect("transform", { transformShiftSemis: 3 });
+    const repeated = withEffect("transform", { transformShiftSemis: 2, brushIterations: 2 });
+    expect(pitchOf(shift, repeated)).toBe(7);
+  });
+
+  it("may read any band for a transmute to pitch", () => {
+    expect(pitchOf(withEffect("transmute", { transmuteTo: 3 }))).toBeNull();
   });
 });

@@ -33,10 +33,10 @@ const small = layoutOf(2, SMALL_RATE, 4);
 const smallGrid = blockGrid(small, small.numFrames, SMALL_RATE, 0.25);
 
 describe("blockGrid", () => {
-  it("holds a whole number of every band's bins", () => {
+  it("holds a whole, even number of every band's bins", () => {
     for (let band = 0; band < small.numBands; band++) {
       const step = 2 ** small.metadata[band * 4 + 2];
-      expect(smallGrid.blockFrames % step, `band ${band}`).toBe(0);
+      expect(smallGrid.blockFrames % (2 * step), `band ${band}`).toBe(0);
       expect(smallGrid.binsPerBlock[band]).toBe(smallGrid.blockFrames / step);
     }
   });
@@ -48,9 +48,9 @@ describe("blockGrid", () => {
     expect(grid.blockFrames / 48000).toBeLessThan(2.5);
   });
 
-  it("rounds the target up to the coarsest band's step when that is longer", () => {
+  it("rounds the target up to two of the coarsest band's bins when that is longer", () => {
     const grid = blockGrid(small, small.numFrames, SMALL_RATE, 0.0001);
-    expect(grid.blockFrames).toBe(2 ** coarsestStepLog2(small));
+    expect(grid.blockFrames).toBe(2 * 2 ** coarsestStepLog2(small));
   });
 
   it("covers the whole file", () => {

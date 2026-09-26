@@ -1,26 +1,42 @@
 import { notifications } from "@mantine/notifications";
-import { Vector2 } from "three";
+import { DataTexture, FloatType, NearestFilter, RGBAFormat, Vector2 } from "three";
 import type { State, OpenFile, SpectrogramData } from "../store/types";
 import type { BrushUnionUv, DabSpan, StrokeDispatch, FileRendererHandle } from "./file-renderer-types";
-import { viewCoversFile } from "./canvas-view";
+import {
+  canvasViewOf,
+  clipToView,
+  fileRangesToView,
+  fileUvToViewUv,
+  viewCoversFile,
+  viewRangesToFile,
+  type BandSpan,
+  type CanvasView,
+} from "./canvas-view";
+import { bandAtPixel, metadataTextureRows } from "./band-layout";
+import { composePixelRangeValues, intersectPixelRanges, pixelRangeCount } from "./pixel-ranges";
 import { sourceNeedsOver, type SourceRead, type SourceWindowTextures } from "./source-window";
-import type { DabNeeds, WindowedCanvas } from "./windowed-canvas";
+import type { DabNeeds, PaintBeside, StrokePaint, WindowedCanvas } from "./windowed-canvas";
 import type { SelfState } from "./self-window";
-import { blockOfFrame } from "./block-grid";
+import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock } from "./block-grid";
 import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
-import { pieceReach, strokeReach, type ReachContext } from "./effect-reach";
-import type { EffectType } from "../effects/types";
-import { strokeRefusal as refusalFor, overReachRefusal, wholeBrushRefusal, liveReadRefusal } from "./whole-file-gate";
+import { pieceReach, readBoxes, strokeReach, unionBox, type ReachContext, type ReadBox } from "./effect-reach";
+import { strokeRefusal as refusalFor, overReachRefusal } from "./whole-file-gate";
 import { impulseNeeds, type ImpulseNeed } from "./impulse-need";
 import { GpuMemoryError, type ImpulseFileInfo, type SourceFileInfo, type StrokeRenderer } from "./stroke-renderer";
-import { DEFAULT_ONSET_SENSITIVITY, EFFECT_LABELS } from "./constants";
+import { DEFAULT_ONSET_SENSITIVITY } from "./constants";
 import { getOnsetTexture, type Onset } from "./onset-map";
 import { countDiagStroke } from "./diag-sampler";
 import { diag } from "./diag-log";
 import { perfMark } from "./perf-probe";
 import { penState } from "./pen-state";
 import { footprintAimToBlUv } from "./brush-anchor";
-import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
+import {
+  bandIndexToPitchUv,
+  pitchUvToBandIndex,
+  resolveBrushAnchor,
+  resolveBrushFootprint,
+  swungGridCellWidthUv,
+} from "./utils";
 
 type FileStrokeFile = Pick<OpenFile, "id" | "filePath" | "displayName" | "spectrogramData" | "onsets"> & {
   rendererRef?: { current: Pick<FileRendererHandle, "getTextures" | "getCanvasView"> | null };
@@ -173,22 +189,27 @@ function impulseNeedsFor(context: FileStrokeContext, state: State): ImpulseNeed[
   });
 }
 
-export function brushUnionAt(
+/** One step's brush at a dab: its bottom-left corner and size in file UV, and how it spans or wraps. */
+type StepBrush = {
+  anchor: Vector2;
+  sizeUv: Vector2;
+  fullTime: boolean;
+  fullPitch: boolean;
+  wrapsTime: boolean;
+  wrapsPitch: boolean;
+};
+
+/** Each step's brush at a dab aimed at `cursorPos`. */
+function stepBrushesAt(
   context: FileStrokeContext,
   state: State,
   cursorPos: Vector2,
   bpm: number,
   totalDuration: number,
-): BrushUnionUv {
+): StepBrush[] {
   const { fileId, spectrogramData, createStepStateView, getFileOnsets } = context;
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-  const min = new Vector2(Infinity, Infinity);
-  const max = new Vector2(-Infinity, -Infinity);
-  let fullTime = false;
-  let fullPitch = false;
-  let wrapsTime = false;
-  let wrapsPitch = false;
-  for (let i = 0; i < steps.length; i++) {
+  return steps.map((_, i) => {
     const stepState = createStepStateView(state, i);
     const stepFp = resolveBrushFootprint({
       brushSizeTime: stepState.brushSizeTime,
@@ -221,41 +242,83 @@ export function brushUnionAt(
       gridSizeBeats: stepState.gridSizeBeats,
       snapTime: stepState.snapTime,
     });
-    const stepAnchor = resolveBrushAnchor(new Vector2(blX, blY), stepFp.fullTime, stepFp.fullPitch);
-    min.x = Math.min(min.x, stepAnchor.x);
-    min.y = Math.min(min.y, stepAnchor.y);
-    max.x = Math.max(max.x, stepAnchor.x + stepFp.sizeUv.x);
-    max.y = Math.max(max.y, stepAnchor.y + stepFp.sizeUv.y);
-    if (stepFp.fullTime) fullTime = true;
-    if (stepFp.fullPitch) fullPitch = true;
     const stepWrap = stepState.brushWrapMode as number;
-    if (stepWrap === 1 || stepWrap === 3) wrapsTime = true;
-    if (stepWrap === 2 || stepWrap === 3) wrapsPitch = true;
+    return {
+      anchor: resolveBrushAnchor(new Vector2(blX, blY), stepFp.fullTime, stepFp.fullPitch),
+      sizeUv: stepFp.sizeUv,
+      fullTime: stepFp.fullTime,
+      fullPitch: stepFp.fullPitch,
+      wrapsTime: stepWrap === 1 || stepWrap === 3,
+      wrapsPitch: stepWrap === 2 || stepWrap === 3,
+    };
+  });
+}
+
+export function brushUnionAt(
+  context: FileStrokeContext,
+  state: State,
+  cursorPos: Vector2,
+  bpm: number,
+  totalDuration: number,
+): BrushUnionUv {
+  const min = new Vector2(Infinity, Infinity);
+  const max = new Vector2(-Infinity, -Infinity);
+  let fullTime = false;
+  let fullPitch = false;
+  let wrapsTime = false;
+  let wrapsPitch = false;
+  const steps = stepBrushesAt(context, state, cursorPos, bpm, totalDuration);
+  for (const step of steps) {
+    min.x = Math.min(min.x, step.anchor.x);
+    min.y = Math.min(min.y, step.anchor.y);
+    max.x = Math.max(max.x, step.anchor.x + step.sizeUv.x);
+    max.y = Math.max(max.y, step.anchor.y + step.sizeUv.y);
+    fullTime ||= step.fullTime;
+    fullPitch ||= step.fullPitch;
+    wrapsTime ||= step.wrapsTime;
+    wrapsPitch ||= step.wrapsPitch;
   }
   const hasSteps = steps.length > 0;
   const sizeUv = hasSteps ? new Vector2(max.x - min.x, max.y - min.y) : new Vector2(0, 0);
   return { min, max, sizeUv, fullTime, fullPitch, wrapsTime, wrapsPitch, hasSteps };
 }
 
+/**
+ * How one dab is dispatched beyond its state and aim: the spectrogram it
+ * samples when that is not an open file, the span `dabSpan` worked out for it,
+ * the file frames it may write, or null for all of them.
+ */
+export type DispatchOptions = {
+  source?: SourceFileInfo;
+  span?: DabSpan;
+  clip?: FrameSpan | null;
+  /**
+   * A renderer beside the canvas to paint on, the view it holds, and what the
+   * first step reads the painted file through when that is not the view.
+   */
+  beside?: { renderer: StrokeRenderer; view: CanvasView; input?: SourceFileInfo };
+};
+
 export function dispatchStroke(
   context: FileStrokeContext,
   state: State,
   cursorPos: Vector2,
   preview: boolean,
-  sourceOverride?: SourceFileInfo,
-  preparedSpan?: DabSpan,
-  clip?: FrameSpan | null,
+  options: DispatchOptions = {},
 ): boolean {
+  const { source: sourceOverride, span: preparedSpan, clip, beside } = options;
   const { fileId, strokeRendererRef, canvasRef, openFiles, getOpenFileByPath } = context;
-  const strokeRenderer = strokeRendererRef.current;
+  const strokeRenderer = beside?.renderer ?? strokeRendererRef.current;
   const file = openFiles[fileId];
   if (!strokeRenderer || !file?.spectrogramData) return false;
 
   const bpm = state.filepathsBpm[file.filePath] || 120;
   const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
-  const canvas = canvasRef.current;
-  const span = preparedSpan ?? (canvas ? dabSpan(context, state, cursorPos, canvas) : null);
+  const canvas = beside ? null : canvasRef.current;
+  // The windows over other files: a dab painted beside the canvas reads them too.
+  const windows = canvasRef.current;
+  const span = preparedSpan ?? (canvasRef.current ? dabSpan(context, state, cursorPos, canvasRef.current) : null);
   if (canvas && span) {
     // A preview draws what the canvas holds of a dab wider than a window.
     const reads = clip ? readSpanOf(span.extent, clip) : wholeReadSpan(span.extent);
@@ -263,23 +326,32 @@ export function dispatchStroke(
     if (!(preview && wide) && (!reads || !canvas.holdsFrames(reads.start, reads.end, span.needs.original)))
       return false;
   }
-  const dabCursor = canvas ? canvas.dabCursor(cursorPos) : cursorPos;
-  const dabDuration = canvas ? canvas.dabDuration(totalDuration) : totalDuration;
+  const numFrames = file.spectrogramData.numFrames;
+  const dabCursor = beside
+    ? new Vector2(fileUvToViewUv(beside.view, numFrames, cursorPos.x), cursorPos.y)
+    : canvas
+      ? canvas.dabCursor(cursorPos)
+      : cursorPos;
+  const dabDuration = beside
+    ? (beside.view.endFrame - beside.view.startFrame) / file.spectrogramData.sampleRate
+    : canvas
+      ? canvas.dabDuration(totalDuration)
+      : totalDuration;
 
-  if (strokeRefusal(context, state) !== null) return false;
+  if (!beside && strokeRefusal(context, state) !== null) return false;
 
   const reads = span?.needs.sources ?? sourceReadsFor(context, state, cursorPos);
   const sourceWindows = new Map<string, SourceWindowTextures>();
   for (const need of sourceNeedsOver(reads, clip ?? null)) {
-    const window = canvas?.aimSource(need);
+    const window = windows?.aimSource(need);
     if (!window) return false;
     if (!need.self) sourceWindows.set(need.fileId, window);
   }
   // Steps that read this file far from the dab read it through its window.
   const selfSources = new Map<number, SourceFileInfo>();
   for (const read of reads) {
-    if (!read.self || !canvas || !file.spectrogramData) continue;
-    const textures = canvas.selfTextures(read.self.state);
+    if (!read.self || !windows || !file.spectrogramData) continue;
+    const textures = windows.selfTextures(read.self.state);
     if (!textures) return false;
     selfSources.set(read.self.step, {
       id: `${fileId}:self`,
@@ -303,7 +375,7 @@ export function dispatchStroke(
     const spectrogram = response?.spectrogramData;
     if (!spectrogram) return false;
     if (responseIsWindowed(context, entry.need.fileId)) {
-      const window = canvas?.aimImpulse(entry.need);
+      const window = windows?.aimImpulse(entry.need);
       if (!window) return false;
       impulses.set(entry.key, {
         spectrogramData: spectrogram,
@@ -323,9 +395,11 @@ export function dispatchStroke(
   const toSourceInfo = (openFile: FileStrokeFile | undefined): SourceFileInfo | undefined => {
     if (!openFile?.spectrogramData) return undefined;
     const window = sourceWindows.get(openFile.id);
-    const textures = window ?? openFile.rendererRef?.current?.getTextures();
+    // A dab painted beside the canvas reads this file off the renderer it paints on.
+    const own = beside && openFile.id === fileId ? beside.renderer : openFile.rendererRef?.current;
+    const textures = window ?? own?.getTextures();
     if (!textures) return undefined;
-    const ownView = openFile.rendererRef?.current?.getCanvasView();
+    const ownView = beside && openFile.id === fileId ? beside.view : openFile.rendererRef?.current?.getCanvasView();
     const span = ownView && !viewCoversFile(ownView, openFile.spectrogramData.numFrames) ? ownView : undefined;
     return {
       id: openFile.id,
@@ -345,6 +419,7 @@ export function dispatchStroke(
 
   const sourceFileInfo =
     sourceOverride ??
+    beside?.input ??
     toSourceInfo(state.activeFileId ? openFiles[state.activeFileId] : undefined) ??
     toSourceInfo(openFiles[fileId]);
   if (!sourceFileInfo) return false;
@@ -390,7 +465,7 @@ export function dispatchStroke(
           impulses,
           stepSources,
           selection: state.filesSelection[fileId] ?? null,
-          clip: canvas ? canvas.clipToCanvas(clip ?? null) : null,
+          clip: beside && clip ? clipToView(beside.view, clip) : (canvas?.clipToCanvas(clip ?? null) ?? null),
         },
         state,
         sourceFileInfo,
@@ -425,6 +500,7 @@ function reachContext(context: FileStrokeContext, state: State): ReachContext | 
     fileSeconds: spectrogram.numFrames / spectrogram.sampleRate,
     canvasSeconds: canvas.windowSeconds(),
     blockSeconds: canvas.grid.blockFrames / spectrogram.sampleRate,
+    binSeconds: coarsestBinFrames(canvas.grid) / spectrogram.sampleRate,
     bandsPerOctave: spectrogram.bandsPerOctave,
     numBands: spectrogram.numBands,
     responseSpan: (path) => {
@@ -445,7 +521,6 @@ export type StateReach = {
   refusal: string | null;
   frames: { before: number; after: number };
   piece: { before: number; after: number } | null;
-  wholeBrush: EffectType[];
 };
 
 function reachOf(context: FileStrokeContext, state: State): StateReach {
@@ -461,14 +536,12 @@ function reachOf(context: FileStrokeContext, state: State): StateReach {
   });
   let frames = { before: 0, after: 0 };
   let piece: StateReach["piece"] = { before: 0, after: 0 };
-  let wholeBrush: EffectType[] = [];
   if (ctx) {
     frames = toFrames(strokeReach(state, ctx));
     const around = pieceReach(state, ctx);
-    piece = around.reach ? toFrames(around.reach) : null;
-    wholeBrush = around.wholeBrush;
+    piece = around ? toFrames(around) : null;
   }
-  const entry = { refusal, frames, piece, wholeBrush };
+  const entry = { refusal, frames, piece };
   // A reach calculated before the canvas exists must not be cached.
   if (canvasRef.current) reachByState.set(state, entry);
   return entry;
@@ -478,15 +551,12 @@ export function strokeRefusal(context: FileStrokeContext, state: State, aim?: { 
   const { canvasRef } = context;
   const reach = reachOf(context, state);
   const canvas = canvasRef.current;
-  if (reach.refusal || !canvas || !aim) return reach.refusal;
-  const span = dabSpan(context, state, new Vector2(aim.x, aim.y), canvas);
-  if (canvas.servable(span.extent)) return null;
-  if (!span.extent.piece) {
-    if (reach.wholeBrush.length > 0)
-      return wholeBrushRefusal(reach.wholeBrush.map((effect) => EFFECT_LABELS[effect] ?? effect));
-    if (span.extent.readsLive) return liveReadRefusal();
-  }
-  return overReachRefusal(["The brush"]);
+  if (!canvas || !aim) return reach.refusal;
+  const cursor = new Vector2(aim.x, aim.y);
+  const span = dabSpan(context, state, cursor, canvas);
+  if (!reach.refusal && canvas.servable(span.extent, span.needs)) return null;
+  if (besideFor(context, state, cursor, span, canvas)) return null;
+  return reach.refusal ?? overReachRefusal(["The brush"]);
 }
 
 /** What a dab reads while it writes `clip`. */
@@ -538,7 +608,7 @@ export function dabSpan(
   const totalDuration = numFrames / sampleRate;
   const none = { before: 0, after: 0 };
   const reach: StateReach = canvas.holdsWholeFile
-    ? { refusal: null, frames: none, piece: none, wholeBrush: [] }
+    ? { refusal: null, frames: none, piece: none }
     : reachOf(context, state);
   const union = resolvedUnion ?? brushUnionAt(context, state, cursorPos, bpm, totalDuration);
   const impulseBindings = impulseNeedsFor(context, state);
@@ -591,6 +661,408 @@ function selfReadsInFile(reads: readonly SourceRead[]): boolean {
   );
 }
 
+/** The bands [first, last] a pitch UV span covers, one band either side for the reads between bands. */
+function bandsOfPitch(minY: number, maxY: number, numBands: number): BandSpan {
+  const a = pitchUvToBandIndex(Math.min(1, Math.max(0, maxY)), numBands);
+  const b = pitchUvToBandIndex(Math.min(1, Math.max(0, minY)), numBands);
+  return {
+    first: Math.max(0, Math.floor(Math.min(a, b)) - 1),
+    last: Math.min(numBands - 1, Math.ceil(Math.max(a, b)) + 1),
+  };
+}
+
+// The most tiles one dab is cut into beside the canvas before it is refused.
+const MAX_BESIDE_TILES = 4096;
+
+/** The bands a region of the file covers any of. */
+function bandsOfBox(box: ReadBox, numBands: number): BandSpan {
+  return {
+    first: Math.max(0, Math.floor(pitchUvToBandIndex(box.high, numBands) + 1e-9)),
+    last: Math.min(numBands - 1, Math.ceil(pitchUvToBandIndex(box.low, numBands) - 1e-9) - 1),
+  };
+}
+
+/**
+ * One piece of a dab painted beside the canvas: the view it paints on, the
+ * view its first step reads its input through when that is apart, and the
+ * bands and frames it keeps.
+ */
+type BesideTile = { view: CanvasView; input: CanvasView | null; bands: BandSpan; frames: FrameSpan };
+
+/** A step's brush as the region of the file it covers; all of the file along an axis it wraps round. */
+function brushBox(brush: StepBrush, fileSeconds: number): ReadBox {
+  const endX = brush.anchor.x + brush.sizeUv.x;
+  const endY = brush.anchor.y + brush.sizeUv.y;
+  const wrapsTime = brush.wrapsTime && (brush.anchor.x < 0 || endX > 1);
+  const wrapsPitch = brush.wrapsPitch && (brush.anchor.y < 0 || endY > 1);
+  return {
+    start: wrapsTime ? 0 : Math.max(0, brush.anchor.x) * fileSeconds,
+    end: wrapsTime ? fileSeconds : Math.min(1, endX) * fileSeconds,
+    low: wrapsPitch ? 0 : Math.max(0, brush.anchor.y),
+    high: wrapsPitch ? 1 : Math.min(1, endY),
+  };
+}
+
+/**
+ * How to paint a dab the canvas window cannot hold: beside the canvas, in
+ * tiles of bands over runs of blocks. Each tile is read through a view of the
+ * region its effects read to paint it, and a tile whose view holds more than
+ * a window is halved, across bands or blocks, whichever reads less. Every tile
+ * reads the file as it was before the dab, so the tiles never read each
+ * other's paint, and a dab that reads the canvas as it paints is cut as any
+ * other. Null when a tile that cannot shrink its read still reads more than a
+ * view holds.
+ */
+function besideFor(
+  context: FileStrokeContext,
+  state: State,
+  cursorPos: Vector2,
+  span: DabSpan,
+  canvas: WindowedCanvas,
+  options: DispatchOptions = {},
+): PaintBeside | null {
+  const renderer = context.strokeRendererRef.current;
+  const file = context.openFiles[context.fileId];
+  const ctx = reachContext(context, state);
+  if (!renderer || !file || !ctx) return null;
+  const { numBands, numFrames, sampleRate } = context.spectrogramData;
+  const { grid } = canvas;
+  let start = numFrames;
+  let end = 0;
+  for (const write of span.extent.writes) {
+    start = Math.min(start, write.start);
+    end = Math.max(end, write.end);
+  }
+  if (end <= start) return null;
+  const union = brushUnionAt(context, state, cursorPos, ctx.bpm, ctx.fileSeconds);
+  const whole = union.fullPitch || union.wrapsPitch;
+  const written: BandSpan = whole ? { first: 0, last: numBands - 1 } : bandsOfPitch(union.min.y, union.max.y, numBands);
+  const brushes = stepBrushesAt(context, state, cursorPos, ctx.bpm, ctx.fileSeconds).map((brush) =>
+    brushBox(brush, ctx.fileSeconds),
+  );
+  // A step reading this file near the dab reads it off the canvas, moved.
+  const moves = span.needs.sources.some((read) => read.self)
+    ? []
+    : sourceReadsFor(context, state, cursorPos)
+        .filter((read) => read.self)
+        .map((read) => (read.read.start - read.dest.start) / sampleRate);
+  const seam = coarsestBinFrames(grid);
+
+  // The first step reads the painted file off the canvas unless it reads
+  // another file or a window of this one far away. Its warped read then goes
+  // through a view of its own, unless a step also reads the original.
+  const firstSource = state.brushes[state.activeBrushIndex]?.steps[0]?.sourceFile?.path;
+  const firstReadsHere =
+    !span.needs.sources.some((read) => read.self) &&
+    (firstSource === undefined
+      ? (state.activeFileId || context.fileId) === context.fileId
+      : context.getOpenFileByPath(firstSource)?.id === context.fileId);
+  const inputApart = firstReadsHere && !span.needs.original;
+  const viewOfBox = (box: ReadBox): CanvasView => {
+    let readStart = box.start;
+    let readEnd = box.end;
+    for (const move of moves) {
+      readStart = Math.min(readStart, box.start + move);
+      readEnd = Math.max(readEnd, box.end + move);
+    }
+    const first = Math.max(0, Math.floor(readStart * sampleRate) - seam);
+    const last = Math.min(numFrames, Math.ceil(readEnd * sampleRate) + seam) - 1;
+    return canvasViewOf(
+      grid,
+      blockOfFrame(grid, first),
+      blockOfFrame(grid, Math.max(first, last)),
+      bandsOfBox(box, numBands),
+    );
+  };
+  const tileOf = (bands: BandSpan, frames: FrameSpan): BesideTile => {
+    const { own, input } = readBoxes(
+      state,
+      ctx,
+      {
+        start: frames.start / sampleRate,
+        end: frames.end / sampleRate,
+        low: bandIndexToPitchUv(bands.last + 1, numBands),
+        high: bandIndexToPitchUv(bands.first, numBands),
+      },
+      brushes,
+    );
+    if (!input || inputApart) return { view: viewOfBox(own), input: input && viewOfBox(input), bands, frames };
+    return { view: viewOfBox(firstReadsHere ? unionBox(own, input) : own), input: null, bands, frames };
+  };
+  const framesOf = (from: number, to: number): FrameSpan => ({
+    start: Math.max(start, frameRangeOfBlock(grid, from).start),
+    end: Math.min(end, frameRangeOfBlock(grid, to).end),
+  });
+  const halves = (tile: BesideTile): [BesideTile, BesideTile][] => {
+    const out: [BesideTile, BesideTile][] = [];
+    const from = blockOfFrame(grid, tile.frames.start);
+    const to = blockOfFrame(grid, tile.frames.end - 1);
+    if (to > from) {
+      const mid = Math.floor((from + to) / 2);
+      out.push([tileOf(tile.bands, framesOf(from, mid)), tileOf(tile.bands, framesOf(mid + 1, to))]);
+    }
+    const { first, last } = tile.bands;
+    if (last > first) {
+      const mid = Math.floor((first + last) / 2);
+      out.push([tileOf({ first, last: mid }, tile.frames), tileOf({ first: mid + 1, last }, tile.frames)]);
+    }
+    return out;
+  };
+
+  const budget = canvas.texelBudget;
+  const cost = (tile: BesideTile): number => Math.max(tile.view.texels, tile.input?.texels ?? 0);
+  const fits = (tile: BesideTile): boolean => cost(tile) <= budget && canvas.othersFit(span.needs, tile.frames);
+  const larger = ([a, b]: [BesideTile, BesideTile]): number => Math.max(cost(a), cost(b));
+  const tiles: BesideTile[] = [];
+  const pending = [tileOf(written, { start, end })];
+  for (let tile = pending.pop(); tile; tile = pending.pop()) {
+    if (fits(tile)) {
+      tiles.push(tile);
+      continue;
+    }
+    // A split must not read more; smaller tiles may read less further down.
+    const split = halves(tile)
+      .filter((pair) => larger(pair) <= cost(tile))
+      .sort((a, b) => larger(a) - larger(b))[0];
+    if (!split || tiles.length + pending.length >= MAX_BESIDE_TILES) return null;
+    pending.push(...split);
+  }
+  const compute = async (tileDone: () => void): Promise<StrokePaint | null> => {
+    const parts: StrokePaint[] = [];
+    for (const tile of tiles) {
+      const part = await paintTileBeside(context, state, cursorPos, span, canvas, renderer, tile, options);
+      if (!part) return null;
+      parts.push(part);
+      tileDone();
+    }
+    return joinPaint(parts);
+  };
+  const pitch = whole ? { min: 0, max: 1 } : { min: Math.max(0, union.min.y), max: Math.min(1, union.max.y) };
+  return { compute, tiles: tiles.length, pitch };
+}
+
+/**
+ * Paints the dab on a renderer beside the canvas over the tile's view,
+ * loaded with the file as the stroke found it and the stroke's paint so far,
+ * and returns what it painted on the tile's bands and frames.
+ */
+async function paintTileBeside(
+  context: FileStrokeContext,
+  state: State,
+  cursorPos: Vector2,
+  span: DabSpan,
+  canvas: WindowedCanvas,
+  renderer: StrokeRenderer,
+  tile: BesideTile,
+  options: DispatchOptions,
+): Promise<StrokePaint | null> {
+  const { view, bands, frames } = tile;
+  const fileRanges = heldRanges(view.ranges);
+  const input = tile.input ? await inputSource(context, state, canvas, tile.input) : null;
+  if (tile.input && !input) return null;
+  const [start, paint, original] = await Promise.all([
+    canvas.readStart(fileRanges),
+    canvas.readStrokePaint(fileRanges),
+    span.needs.original ? canvas.readOriginal(fileRanges) : Promise.resolve(null),
+  ]);
+  if (!start || (span.needs.original && !original)) return null;
+  if (!(await canvas.holdOthers(span.needs, frames))) return null;
+  const layout = { numBands: context.spectrogramData.numBands, metadata: context.spectrogramData.metadata };
+  const beside = renderer.beside(view);
+  const originalTexture = original ? viewTexture(view, original) : null;
+  try {
+    beside.initialize();
+    beside.setFBOData(viewTexels(view, start));
+    beside.holdStrokeScratch();
+    const painted = pixelRangeCount(paint.ranges) > 0 ? fileRangesToView(view, layout, paint.ranges) : null;
+    if (painted) {
+      beside.patchCanvasCompact(paint.values, painted);
+      beside.patchStrokeMasks(painted, paint.masks);
+    }
+    if (originalTexture) beside.setOriginalTexture(originalTexture);
+    beside.beginStroke();
+    const painting = { ...options, span, clip: frames, beside: { renderer: beside, view, input: input?.source } };
+    if (!dispatchStroke(context, state, cursorPos, false, painting)) return null;
+    const dirty = beside.getDirtyPixelRanges();
+    const onBands = dirty ? viewRangesToFile(view, rangesOnBands(view, dirty, bands)) : new Uint32Array(0);
+    const keptFile = intersectPixelRanges(onBands, frameSpanPixels(canvas, frames));
+    const kept = pixelRangeCount(keptFile) > 0 ? fileRangesToView(view, layout, keptFile) : null;
+    if (!kept) return { ranges: new Uint32Array(0), values: new Float32Array(0), masks: [] };
+    const [values, masks] = await Promise.all([beside.readPixelRanges(kept), beside.readStrokeMaskRanges(kept)]);
+    return { ranges: keptFile, values, masks };
+  } finally {
+    beside.dispose();
+    originalTexture?.dispose();
+    input?.dispose();
+  }
+}
+
+/**
+ * The painted file over `view` as the first step of the brush reads it: as
+ * the stroke found it for a step that reads its start, and with the stroke's
+ * paint so far for one that reads it as it stands.
+ */
+async function inputSource(
+  context: FileStrokeContext,
+  state: State,
+  canvas: WindowedCanvas,
+  view: CanvasView,
+): Promise<{ source: SourceFileInfo; dispose: () => void } | null> {
+  const file = context.openFiles[context.fileId];
+  const ranges = heldRanges(view.ranges);
+  const live = context.createStepStateView(state, 0).sourceDataMode !== "start";
+  const [start, paint] = await Promise.all([
+    canvas.readStart(ranges),
+    live ? canvas.readStrokePaint(ranges) : Promise.resolve(null),
+  ]);
+  if (!file || !start) return null;
+  const values =
+    paint && pixelRangeCount(paint.ranges) > 0
+      ? composePixelRangeValues(ranges, [paint, { ranges, values: start }])
+      : start;
+  const packed = viewTexture(view, values);
+  const metadata = new DataTexture(metadataTextureRows(view.layout), view.layout.numBands, 1, RGBAFormat, FloatType);
+  metadata.minFilter = NearestFilter;
+  metadata.magFilter = NearestFilter;
+  metadata.needsUpdate = true;
+  const { spectrogramData } = context;
+  const source: SourceFileInfo = {
+    id: `${context.fileId}:input`,
+    filePath: file.filePath,
+    displayName: file.displayName,
+    spectrogramData,
+    textures: { packed: { texture: packed, dispose: () => packed.dispose() }, metadata },
+    view,
+    onsetTexture: getOnsetTexture(
+      context.fileId,
+      file.onsets,
+      spectrogramData.numFrames / spectrogramData.sampleRate,
+      state.filepathsOnsetSensitivity[file.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
+    ),
+  };
+  return {
+    source,
+    dispose: () => {
+      packed.dispose();
+      metadata.dispose();
+    },
+  };
+}
+
+/** Every band's file pixels over the blocks a frame span covers, cut to its frames. */
+function frameSpanPixels(canvas: WindowedCanvas, frames: FrameSpan): Uint32Array {
+  const view = canvasViewOf(
+    canvas.grid,
+    blockOfFrame(canvas.grid, frames.start),
+    blockOfFrame(canvas.grid, frames.end - 1),
+  );
+  const out: number[] = [];
+  const { metadata, numBands } = view.layout;
+  for (let band = 0; band < numBands; band++) {
+    const step = 2 ** metadata[band * 4 + 2];
+    const k0 = view.bandK0[band];
+    const count = view.ranges[band * 2 + 1];
+    const from = Math.max(k0, Math.ceil(frames.start / step));
+    const to = Math.min(k0 + count, Math.ceil(frames.end / step));
+    if (to > from) out.push(view.ranges[band * 2] + (from - k0), to - from);
+  }
+  return Uint32Array.from(out);
+}
+
+/** A view's file ranges without the bands it holds no bins of. */
+function heldRanges(ranges: Uint32Array): Uint32Array {
+  const out: number[] = [];
+  for (let i = 0; i + 1 < ranges.length; i += 2) if (ranges[i + 1] > 0) out.push(ranges[i], ranges[i + 1]);
+  return Uint32Array.from(out);
+}
+
+/** The view's own pixel ranges that lie on the bands of `bands`. */
+function rangesOnBands(view: CanvasView, ranges: Uint32Array, bands: BandSpan): Uint32Array {
+  const out: number[] = [];
+  for (let i = 0; i + 1 < ranges.length; i += 2) {
+    const band = bandAtPixel(view.layout, ranges[i]);
+    if (band >= bands.first && band <= bands.last) out.push(ranges[i], ranges[i + 1]);
+  }
+  return Uint32Array.from(out);
+}
+
+/** Values compact over a view's held bands, padded to the view's texture. */
+function viewTexels(view: CanvasView, values: Float32Array): Float32Array {
+  const texels = new Float32Array(view.textureWidth * view.textureHeight * 4);
+  texels.set(values);
+  return texels;
+}
+
+/** Values compact over a view's held bands as a texture laid out as the view is. */
+function viewTexture(view: CanvasView, values: Float32Array): DataTexture {
+  const texture = new DataTexture(
+    viewTexels(view, values),
+    view.textureWidth,
+    view.textureHeight,
+    RGBAFormat,
+    FloatType,
+  );
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** Paint from pieces over different bands as one. */
+function joinPaint(parts: readonly StrokePaint[]): StrokePaint {
+  const ranges = Uint32Array.from(parts.flatMap((part) => Array.from(part.ranges)));
+  const values = new Float32Array(parts.reduce((sum, part) => sum + part.values.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    values.set(part.values, at);
+    at += part.values.length;
+  }
+  const steps = Math.max(0, ...parts.map((part) => part.masks.length));
+  const masks: (Float32Array | null)[] = [];
+  for (let step = 0; step < steps; step++) {
+    if (parts.every((part) => !part.masks[step])) {
+      masks.push(null);
+      continue;
+    }
+    const weights = new Float32Array(values.length >> 2);
+    let offset = 0;
+    for (const part of parts) {
+      const mask = part.masks[step];
+      if (mask) weights.set(mask, offset);
+      offset += part.values.length >> 2;
+    }
+    masks.push(weights);
+  }
+  return { ranges, values, masks };
+}
+
+/**
+ * Paints one dab through the canvas: on it, a block at a time as it holds
+ * them, when a window can serve what the dab reads, and beside it otherwise.
+ * False when neither can. `painted` is called each time a piece lands.
+ */
+export function paintDab(
+  context: FileStrokeContext,
+  canvas: WindowedCanvas,
+  state: State,
+  aim: Vector2,
+  span: DabSpan,
+  options: DispatchOptions = {},
+  painted?: () => void,
+): boolean {
+  if (canvas.servable(span.extent, span.needs)) {
+    return canvas.paintWhenHeld(span.extent, span.needs, (clip) => {
+      const done = dispatchStroke(context, state, aim, false, { ...options, span, clip });
+      if (done) painted?.();
+      return done;
+    });
+  }
+  const beside = besideFor(context, state, aim, span, canvas, options);
+  if (!beside) return false;
+  canvas.paintBeside(span.extent, beside);
+  return true;
+}
+
 export function prepareStrokeBatch(
   context: FileStrokeContext,
   canvas: WindowedCanvas,
@@ -610,11 +1082,7 @@ export function prepareStrokeBatch(
     const aim = new Vector2(stroke.aimX, stroke.aimY);
     const span = dabSpan(context, stroke.state, aim, canvas);
     const dabState = stroke.state;
-    if (
-      canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
-        dispatchStroke(context, dabState, aim, false, undefined, span, clip),
-      )
-    ) {
+    if (paintDab(context, canvas, dabState, aim, span)) {
       painted++;
     }
   }

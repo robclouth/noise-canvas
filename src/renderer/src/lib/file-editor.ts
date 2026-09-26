@@ -82,7 +82,7 @@ export function prepareFileEditor(
     closeFile: (id) => state.closeFile(id),
     reachByState: engine.reachByState,
   };
-  const { paint: dispatchStroke, span: dabSpan } = engine.strokeDispatch(strokeContext);
+  const { paint: dispatchStroke, span: dabSpan, layDab } = engine.strokeDispatch(strokeContext);
   const { cursorPosition, cursorVisible, hoveredFile: hoveredFileId } = transient;
 
   const file = openFiles[fileId];
@@ -201,25 +201,20 @@ export function prepareFileEditor(
     canvas.dropSourcesExcept(sources);
     canvas.dropImpulsesExcept(needs.impulses);
     if (preview) {
-      if (
-        !canvas.holdsFrames(hover.start, hover.end, original) ||
-        !dispatchStroke(state, cursorPos, true, undefined, span)
-      ) {
+      if (!canvas.holdsFrames(hover.start, hover.end, original) || !dispatchStroke(state, cursorPos, true, { span })) {
         displayMode.current = "committed";
       } else {
         displayMode.current = "preview";
         applyStroke.current = false;
       }
     } else {
-      engine.paintStrokeTrail(state, canvas, spectrogramData, bpm, dispatchStroke, dabSpan);
+      engine.paintStrokeTrail(state, canvas, spectrogramData, bpm, layDab, dabSpan);
       engine.lastStrokeDab = cursorPosition;
       const dabState = state;
       const dabPos = cursorPos.clone();
       const record = recordDab(fileId, brushOriginUv.x, brushOriginUv.y, brushSizeUv.x, brushSizeUv.y);
-      canvas.paintWhenHeld(span.extent, needs, (clip) => {
-        const painted = dispatchStroke(dabState, dabPos, false, undefined, span, clip);
-        if (painted && record) record.paintedAt = Date.now();
-        return painted;
+      layDab(dabState, dabPos, canvas, span, {}, () => {
+        if (record) record.paintedAt = Date.now();
       });
       displayMode.current = "committed";
       applyStroke.current = false;

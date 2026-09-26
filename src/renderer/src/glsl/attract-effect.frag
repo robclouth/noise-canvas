@@ -47,7 +47,7 @@ float attractKernelWeight(float u) {
 // Packed read with the band's metadata already in hand, so repeated reads on
 // one band pay a single texel fetch each instead of a metadata fetch too.
 vec4 attractPackedRead(sampler2D dataTex, vec4 meta, float xUv, float frameCount) {
-  float timeIndex = clamp(floor(clamp(xUv, 0.0, 1.0) * frameCount / exp2(meta.b)), 0.0, meta.g - 1.0);
+  float timeIndex = clamp(binAt(clamp(xUv, 0.0, 1.0) * frameCount / exp2(meta.b)), 0.0, meta.g - 1.0);
   ivec2 texSize = textureSize(dataTex, 0);
   float widthF = float(max(texSize.x, 1));
   float linearIndex = meta.r + timeIndex;
@@ -60,7 +60,7 @@ vec4 attractPackedRead(sampler2D dataTex, vec4 meta, float xUv, float frameCount
 // coefficient per 2^step frames, anchored at the bin's left edge.
 float attractCoeffTimeSec(float xUv, float stepExp) {
   float strideFrames = exp2(stepExp);
-  return floor(xUv * destFrameCount / strideFrames) * strideFrames / max(destSampleRate, 1e-6);
+  return binAt(destFileFrame(xUv) / strideFrames) * strideFrames / max(destSampleRate, 1e-6);
 }
 
 // Magnitude of the picked file's spectrogram at an absolute (time UV,
@@ -167,7 +167,7 @@ void main() {
     float stepSemis = float(stride) / bandsPerSemi;
     int iMax = min(halfTaps + 1, int(windowBands / float(stride)) + 1);
     float tD = attractCoeffTimeSec(destUv.x, destMeta.b);
-    float tAnchorSec = anchorUvX * destFrameCount / max(destSampleRate, 1e-6);
+    float tAnchorSec = destFileSec(anchorUvX);
 
     float fieldMag[ATTRACT_LATTICE];
     int mHalf = 0;

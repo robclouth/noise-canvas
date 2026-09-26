@@ -1,6 +1,6 @@
 import { buildShapeTable, type CloneShapeKey } from "@renderer/effects/clone-shapes";
 import type { EffectType } from "@renderer/effects/types";
-import { EVOLVE_SCALE_FULL_BEATS } from "@renderer/lib/constants";
+import { EVOLVE_SCALE_FULL_BEATS, EVOLVE_SCALE_FULL_SEMIS } from "@renderer/lib/constants";
 import { responsePath } from "@renderer/lib/impulse-key";
 import { modulationWeight } from "@renderer/lib/static-modulation";
 import { originFraction, resolveBrushFootprint } from "@renderer/lib/utils";
@@ -32,10 +32,12 @@ export type ReachContext = {
   blockSeconds?: number;
   bandsPerOctave: number;
   numBands: number;
+  /** One bin of the file's coarsest band, in seconds. */
+  binSeconds?: number;
 };
 
-/** One effect's reach in one step, with the brush span it is measured around. */
-export type StepReach = { effect: EffectType; step: number; brushSeconds: number; reach: TimeReach };
+/** One effect's reach in one step, with the brush span it is measured around and how many times it runs. */
+export type StepReach = { effect: EffectType; step: number; brushSeconds: number; reach: TimeReach; repeats: number };
 
 const NO_REACH: TimeReach = { before: 0, after: 0 };
 
@@ -48,6 +50,17 @@ const WRAP_EDGE = 2;
 
 // Sort directions that order a band along time.
 const SORTS_ALONG_TIME: ReadonlySet<number> = new Set([0, 2]);
+
+// Sort directions that order a frame across pitch.
+const SORTS_ALONG_PITCH: ReadonlySet<number> = new Set([1, 2]);
+
+// Bins of its band one sort reads either side of a pixel: its two passes along
+// time each swap with a neighbour whose own neighbours set its instantaneous
+// frequency, and its two passes across pitch read one more bin each side.
+const SORT_TIME_BINS = 6;
+
+// Bands one sort reads either side of a pixel: one for each pass across pitch.
+const SORT_PITCH_BANDS = 2;
 
 // The attract time pass gathers over three kernels and reads its field a
 // kernel past that.
@@ -266,25 +279,19 @@ function brushSpan(step: State, ctx: ReachContext): { seconds: number; pitchUv: 
  * span. Effects that read only the texel they write are absent.
  */
 export function brushReaches(state: State, ctx: ReachContext): StepReach[] {
-  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const out: StepReach[] = [];
-  for (let index = 0; index < steps.length; index++) {
-    const step = createStepStateView(state, index);
-    const span = brushSpan(step, ctx);
-    for (const item of step.effects) {
-      if (!item.enabled) continue;
-      const effect = createEffectStateView(state, index, item);
-      let reach = NO_REACH;
-      if (item.effect === "blur") reach = blurReach(effect, ctx);
-      else if (item.effect === "clone") reach = cloneReach(effect, ctx);
-      else if (item.effect === "transform") reach = transformReach(effect, ctx, span.seconds, span.pitchUv);
-      else if (item.effect === "transmute") reach = transmuteReach(effect, ctx);
-      else if (item.effect === "attract") reach = attractReach(effect, ctx);
-      else if (item.effect === "evolve") reach = evolveReach(effect, ctx);
-      else if (item.effect === "convolve") reach = convolveReach(effect, ctx);
-      if (reach.before <= 0 && reach.after <= 0) continue;
-      out.push({ effect: item.effect, step: index, brushSeconds: span.seconds, reach });
-    }
+  for (const { effect, view, step, repeats } of chainedEffects(state)) {
+    const span = brushSpan(createStepStateView(state, step), ctx);
+    let reach = NO_REACH;
+    if (effect === "blur") reach = blurReach(view, ctx);
+    else if (effect === "clone") reach = cloneReach(view, ctx);
+    else if (effect === "transform") reach = transformReach(view, ctx, span.seconds, span.pitchUv);
+    else if (effect === "transmute") reach = transmuteReach(view, ctx);
+    else if (effect === "attract") reach = attractReach(view, ctx);
+    else if (effect === "evolve") reach = evolveReach(view, ctx);
+    else if (effect === "convolve") reach = convolveReach(view, ctx);
+    if (reach.before <= 0 && reach.after <= 0) continue;
+    out.push({ effect, step, brushSeconds: span.seconds, reach, repeats });
   }
   return out;
 }
@@ -321,8 +328,11 @@ function pieceReachOf(effect: EffectType, state: State, ctx: ReachContext): Time
       if (warps || (shift > 0 && Number(state.transformEdgeMode) === WRAP_EDGE)) return null;
       return { before: shift, after: shift };
     }
-    case "sort":
-      return SORTS_ALONG_TIME.has(Number(state.sortDirection)) ? null : NO_REACH;
+    case "sort": {
+      if (!SORTS_ALONG_TIME.has(Number(state.sortDirection))) return NO_REACH;
+      const span = SORT_TIME_BINS * (ctx.binSeconds ?? 0);
+      return { before: span, after: span };
+    }
     case "attract": {
       if (widest(stateRange(state, "attractAmountX")) === 0) return NO_REACH;
       const span = ATTRACT_PIECE_KERNELS * widest(stateRange(state, "attractSmoothX")) * (60 / ctx.bpm);
@@ -341,29 +351,267 @@ function pieceReachOf(effect: EffectType, state: State, ctx: ReachContext): Time
 
 /**
  * How far from each pixel it paints the brush reads, in seconds of the file:
- * what a dab painted a piece at a time must hold around each piece. Null, with
- * the effects that make it so, when some effect may read anywhere in the
- * brush, so only the whole dab at once can serve it.
+ * what a dab painted a piece at a time must hold around each piece. Null
+ * when some effect may read anywhere in the brush, so only the whole dab at
+ * once can serve it.
  */
-export function pieceReach(state: State, ctx: ReachContext): { reach: TimeReach | null; wholeBrush: EffectType[] } {
-  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+export function pieceReach(state: State, ctx: ReachContext): TimeReach | null {
   let before = 0;
   let after = 0;
-  const wholeBrush: EffectType[] = [];
+  for (const { effect, view, repeats } of chainedEffects(state)) {
+    const reach = pieceReachOf(effect, view, ctx);
+    if (!reach) return null;
+    before += reach.before * repeats;
+    after += reach.after * repeats;
+  }
+  return { before, after };
+}
+
+/**
+ * Every enabled effect of the brush in the order it runs, with how many times
+ * it runs. Each reads what the one before it wrote, so reaches along the
+ * chain add up.
+ */
+function chainedEffects(state: State): { effect: EffectType; view: State; step: number; repeats: number }[] {
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+  const out: { effect: EffectType; view: State; step: number; repeats: number }[] = [];
   for (let index = 0; index < steps.length; index++) {
     const step = createStepStateView(state, index);
+    const repeats = Math.max(1, Math.floor(Number(step.brushIterations) || 1));
     for (const item of step.effects) {
-      if (!item.enabled) continue;
-      const reach = pieceReachOf(item.effect, createEffectStateView(state, index, item), ctx);
-      if (!reach) {
-        if (!wholeBrush.includes(item.effect)) wholeBrush.push(item.effect);
-        continue;
-      }
-      before = Math.max(before, reach.before);
-      after = Math.max(after, reach.after);
+      if (item.enabled)
+        out.push({ effect: item.effect, view: createEffectStateView(state, index, item), step: index, repeats });
     }
   }
-  return { reach: wholeBrush.length > 0 ? null : { before, after }, wholeBrush };
+  return out;
+}
+
+// The Transmute route that moves a band across pitch.
+const TRANSMUTE_TO_PITCH = 3;
+
+/**
+ * How far across pitch, in semitones, one effect reads from a band it
+ * writes, or null when it may read any band.
+ */
+function pitchReachOf(effect: EffectType, state: State, bandsPerOctave: number): number | null {
+  switch (effect) {
+    case "transform": {
+      // A turn or a pitch scale reads about the pivot, within the brush's
+      // height scaled by the pitch scale.
+      const shift = widest(stateRange(state, "transformShiftSemis"));
+      const scale = narrowest(stateRange(state, "transformScalePitch"));
+      if (only(stateRange(state, "transformScalePitch"), 1) && only(stateRange(state, "transformRotation"), 0))
+        return shift;
+      if (scale <= NO_SCALE_BELOW) return null;
+      return shift + widest(stateRange(state, "brushSizePitch")) * Math.max(1, 1 / scale);
+    }
+    case "blur":
+      return ((widest(stateRange(state, "blurAmountPitch")) + widest(stateRange(state, "blurNoisePitch"))) / 100) * 12;
+    case "clone":
+      return Number(state.cloneCountY) * widest(stateRange(state, "cloneSpaceSemis"));
+    case "evolve":
+      return (EVOLVE_REACH_NEIGHBOURHOODS * widest(stateRange(state, "evolveScaleY")) * EVOLVE_SCALE_FULL_SEMIS) / 100;
+    case "attract":
+      return widest(stateRange(state, "attractAmountY")) === 0
+        ? 0
+        : ATTRACT_PIECE_KERNELS * widest(stateRange(state, "attractSmoothY"));
+    case "transmute":
+      return Number(state.transmuteTo) === TRANSMUTE_TO_PITCH ? null : 0;
+    case "convolve":
+      return widest(stateRange(state, "convolveIrPitchShift"));
+    case "sort":
+      return SORTS_ALONG_PITCH.has(Number(state.sortDirection)) ? (SORT_PITCH_BANDS * 12) / bandsPerOctave : 0;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * How far across pitch, in semitones, the brush reads from the bands it
+ * writes, or null when some effect may read any band.
+ */
+export function pitchReach(state: State, bandsPerOctave: number): number | null {
+  let reach = 0;
+  for (const { effect, view, repeats } of chainedEffects(state)) {
+    const semis = pitchReachOf(effect, view, bandsPerOctave);
+    if (semis === null) return null;
+    reach += semis * repeats;
+  }
+  return reach;
+}
+
+/**
+ * How many bands either side of the bands it writes the brush reads, with one
+ * more for reads between bands, or null when some effect may read any band.
+ */
+export function pitchReachBands(state: State, bandsPerOctave: number): number | null {
+  const semis = pitchReach(state, bandsPerOctave);
+  if (semis === null) return null;
+  return semis === 0 ? 0 : Math.ceil((semis * bandsPerOctave) / 12) + 1;
+}
+
+/** A region of the file: seconds [start, end) along time and pitch UV [low, high] across it. */
+export type ReadBox = { start: number; end: number; low: number; high: number };
+
+// The edge modes that fold a read past the brush back inside it rather than
+// zero it or let it through: Wrap, Clamp and Reflect.
+const FOLDS_INTO_BRUSH: ReadonlySet<number> = new Set([2, 3, 4]);
+
+// Semitones a scale snap can move a transform's pitch shift either way.
+const SNAP_SEMIS = 6;
+
+/**
+ * The region of the file the brush reads to paint `box`, where `brushes`
+ * holds each step's own brush. Effects run one after another, so the region
+ * is worked out from the last effect back: each widens what the one after it
+ * reads by what it reads around each pixel, or maps it through its warp.
+ *
+ * A warp that is the brush's first effect, run once, reads the file only
+ * where it samples the first step's input, so that read is set apart:
+ * `input` is where it samples, and `own` what the rest of the brush reads.
+ * `input` is null when the first effect is no such warp.
+ */
+export function readBoxes(
+  state: State,
+  ctx: ReachContext,
+  box: ReadBox,
+  brushes: readonly ReadBox[],
+): { own: ReadBox; input: ReadBox | null } {
+  const chain = chainedEffects(state);
+  const [first] = chain;
+  const apart = !!first && first.step === 0 && first.repeats === 1 && first.effect === "transform" && warps(first.view);
+  let region = box;
+  for (let i = chain.length - 1; i >= (apart ? 1 : 0); i--) {
+    const { effect, view, step, repeats } = chain[i];
+    const brush = brushes[step] ?? region;
+    for (let r = 0; r < repeats; r++) region = effectReadBox(effect, view, ctx, region, brush);
+  }
+  if (!apart) return { own: region, input: null };
+  return { own: region, input: clampBox(warpBox(first.view, ctx, region, brushes[0] ?? region), ctx) };
+}
+
+/** What one effect reads to paint `box`, within its step's `brush`. */
+function effectReadBox(effect: EffectType, view: State, ctx: ReachContext, box: ReadBox, brush: ReadBox): ReadBox {
+  if (effect === "transform" && warps(view)) return clampBox(unionBox(box, warpBox(view, ctx, box, brush)), ctx);
+  const time = pieceReachOf(effect, view, ctx);
+  const semis = pitchReachOf(effect, view, ctx.bandsPerOctave);
+  // A read across pitch lands between bands, so it takes one band more.
+  const pitch = semis === null ? 1 : semis === 0 ? 0 : semitonesToUv(semis, ctx) + 1 / ctx.numBands;
+  return clampBox(
+    {
+      start: time ? box.start - time.before : Math.min(box.start, brush.start),
+      end: time ? box.end + time.after : Math.max(box.end, brush.end),
+      low: box.low - pitch,
+      high: box.high + pitch,
+    },
+    ctx,
+  );
+}
+
+/** True when a transform scales, turns or mirrors rather than only shifting. */
+function warps(view: State): boolean {
+  return (
+    !only(stateRange(view, "transformScaleTime"), 1) ||
+    !only(stateRange(view, "transformScalePitch"), 1) ||
+    !only(stateRange(view, "transformSpeed"), 1) ||
+    !only(stateRange(view, "transformRotation"), 0)
+  );
+}
+
+/**
+ * Where a transform reads to paint `box`: every corner turned about the pivot
+ * by each turn it can take, divided by each scale, and shifted, as the shader
+ * maps a pixel. A turn is taken with time measured in lengths of the file.
+ * A read the edge mode folds back or zeroes stays within the brush.
+ */
+function warpBox(view: State, ctx: ReachContext, box: ReadBox, brush: ReadBox): ReadBox {
+  const edge = Number(view.transformEdgeMode);
+  const inside = !READS_PAST_BRUSH.has(edge);
+  if (FOLDS_INTO_BRUSH.has(edge)) return brush;
+  const speed = stateRange(view, "transformSpeed");
+  const scaleTime = stateRange(view, "transformScaleTime");
+  const scalePitch = stateRange(view, "transformScalePitch");
+  if ([speed, scaleTime, scalePitch].some((range) => narrowest(range) <= NO_SCALE_BELOW)) {
+    return inside ? brush : { start: 0, end: ctx.fileSeconds, low: 0, high: 1 };
+  }
+  const rotation = valueRange(view, "transformRotation", Number(view.transformRotation ?? 0), { min: -180, max: 180 });
+  const turns = [rotation.lo, rotation.hi];
+  for (let quarter = Math.ceil(rotation.lo / 90); quarter * 90 <= rotation.hi; quarter++) turns.push(quarter * 90);
+  const originTime = originFraction(Number(view.transformOriginTime));
+  const originPitch = originFraction(Number(view.transformOriginPitch));
+  const pivotTime = brush.start + originTime * (brush.end - brush.start);
+  const pivotPitch = brush.low + originPitch * (brush.high - brush.low);
+  const beat = 60 / ctx.bpm;
+  const shiftTime = stateRange(view, "transformShiftBeats");
+  const shiftSemis = stateRange(view, "transformShiftSemis");
+  const snap = Number(view.gridSizeSemis) <= 0 && Boolean(view.snapPitch) ? SNAP_SEMIS : 0;
+  const speedSemis = [12 * Math.log2(speed.lo), 12 * Math.log2(speed.hi)];
+  let out: ReadBox | null = null;
+  for (const turn of turns) {
+    const cos = Math.cos((turn * Math.PI) / 180);
+    const sin = Math.sin((turn * Math.PI) / 180);
+    for (const sx of [
+      scaleTime.lo / speed.lo,
+      scaleTime.lo / speed.hi,
+      scaleTime.hi / speed.lo,
+      scaleTime.hi / speed.hi,
+    ]) {
+      for (const sy of [scalePitch.lo, scalePitch.hi]) {
+        for (const t of [box.start, box.end]) {
+          for (const y of [box.low, box.high]) {
+            const relTime = (t - pivotTime) / ctx.fileSeconds;
+            const relPitch = y - pivotPitch;
+            let time = pivotTime + ((cos * relTime - sin * relPitch) / sx) * ctx.fileSeconds;
+            let pitch = pivotPitch + (sin * relTime + cos * relPitch) / sy;
+            if (sx < 0) time += (1 - 2 * originTime) * (brush.end - brush.start);
+            if (sy < 0) pitch += (1 - 2 * originPitch) * (brush.high - brush.low);
+            const read: ReadBox = {
+              start: time - shiftTime.hi * beat,
+              end: time - shiftTime.lo * beat,
+              low: pitch - semitonesToUv(shiftSemis.hi + Math.max(...speedSemis) + snap, ctx) - 1 / ctx.numBands,
+              high: pitch - semitonesToUv(shiftSemis.lo + Math.min(...speedSemis) - snap, ctx) + 1 / ctx.numBands,
+            };
+            out = out ? unionBox(out, read) : read;
+          }
+        }
+      }
+    }
+  }
+  const warped = out ?? box;
+  return inside ? (intersectBox(warped, brush) ?? box) : warped;
+}
+
+function semitonesToUv(semis: number, ctx: ReachContext): number {
+  return (semis * ctx.bandsPerOctave) / 12 / ctx.numBands;
+}
+
+/** The smallest region holding both. */
+export function unionBox(a: ReadBox, b: ReadBox): ReadBox {
+  return {
+    start: Math.min(a.start, b.start),
+    end: Math.max(a.end, b.end),
+    low: Math.min(a.low, b.low),
+    high: Math.max(a.high, b.high),
+  };
+}
+
+function intersectBox(a: ReadBox, b: ReadBox): ReadBox | null {
+  const out = {
+    start: Math.max(a.start, b.start),
+    end: Math.min(a.end, b.end),
+    low: Math.max(a.low, b.low),
+    high: Math.min(a.high, b.high),
+  };
+  return out.end > out.start && out.high > out.low ? out : null;
+}
+
+function clampBox(box: ReadBox, ctx: ReachContext): ReadBox {
+  return {
+    start: Math.max(0, box.start),
+    end: Math.min(ctx.fileSeconds, box.end),
+    low: Math.max(0, box.low),
+    high: Math.min(1, box.high),
+  };
 }
 
 /**
@@ -374,8 +622,8 @@ export function strokeReach(state: State, ctx: ReachContext): TimeReach {
   let before = 0;
   let after = 0;
   for (const entry of brushReaches(state, ctx)) {
-    before = Math.max(before, entry.reach.before);
-    after = Math.max(after, entry.reach.after);
+    before += entry.reach.before * entry.repeats;
+    after += entry.reach.after * entry.repeats;
   }
   return { before, after };
 }

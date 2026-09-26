@@ -35,6 +35,7 @@ const ALLOWED = new Map([
   ["carried-paint.ts", "names the pixels a stroke painted on blocks leaving the window"],
   ["block-slot-cache.ts", "places a block's own pixels inside the view it composes into"],
   ["self-window.ts", "lays paint the store lacks over the window of the file it composes"],
+  ["file-stroke-dispatch.ts", "paints a dab beside the canvas on a view of its own, and names what it kept"],
 ]);
 
 /** The glob's keys are relative to this file; drop the climb out of it. */

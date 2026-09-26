@@ -1,4 +1,3 @@
-import type { FrameSpan } from "./held-dabs";
 import { notifications } from "@mantine/notifications";
 import type { Texture, WebGLRenderer, WebGLRenderTarget } from "three";
 import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat, RGFormat, Vector2 } from "three";
@@ -21,7 +20,9 @@ import {
   dispatchStroke as dispatchFileStroke,
   dabSpan as fileDabSpan,
   strokeRefusal as fileStrokeRefusal,
+  paintDab,
   prepareStrokeBatch,
+  type DispatchOptions,
   type FileStrokeContext,
 } from "./file-stroke-dispatch";
 import type { serializeFileTask } from "./file-task-queue";
@@ -61,14 +62,7 @@ export interface FileEngineContext {
 }
 
 /** Paints one dab; a preview goes to the partner buffer. */
-type StrokePainter = (
-  state: State,
-  cursorPos: Vector2,
-  preview: boolean,
-  sourceOverride?: SourceFileInfo,
-  preparedSpan?: DabSpan,
-  clip?: FrameSpan | null,
-) => boolean;
+type StrokePainter = (state: State, cursorPos: Vector2, preview: boolean, options?: DispatchOptions) => boolean;
 /** The frames and reads one dab at `cursorPos` needs. */
 type StrokeSpanner = (
   state: State,
@@ -78,6 +72,23 @@ type StrokeSpanner = (
 ) => DabSpan;
 /** Why the brush cannot paint here, or null. */
 type StrokeRefuser = (state: State, aim?: { x: number; y: number }) => string | null;
+/**
+ * Paints one committed dab through the canvas, on it or beside it; false
+ * when neither can. `painted` is called each time a piece lands.
+ */
+type DabLayer = (
+  state: State,
+  aim: Vector2,
+  canvas: WindowedCanvas,
+  span: DabSpan,
+  options?: DispatchOptions,
+  painted?: () => void,
+) => boolean;
+
+// Settling a stroke longer than this shows how far it has got.
+const EDIT_PROGRESS_AFTER_MS = 500;
+// How often the progress it shows is brought up to date.
+const EDIT_PROGRESS_INTERVAL_MS = 100;
 
 /** Owns an open file's editable resources and operations. */
 export class FileEngine {
@@ -480,7 +491,7 @@ export class FileEngine {
     canvas: WindowedCanvas,
     spec: SpectrogramData,
     bpm: number,
-    paint: StrokePainter,
+    layDab: DabLayer,
     span: StrokeSpanner,
   ): void => {
     if (this.strokeTrail.length === 0) return;
@@ -497,10 +508,8 @@ export class FileEngine {
         ? brushUnionForAim(state, aim.x, aim.y, bpm, totalDuration, spec.bandsPerOctave, spec.numBands)
         : null;
       const record = union ? recordDab(this.fileId, union.blX, union.blY, union.sizeUvX, union.sizeUvY) : null;
-      canvas.paintWhenHeld(dab.extent, dab.needs, (clip) => {
-        const painted = paint(state, aim, false, undefined, dab, clip);
-        if (painted && record) record.paintedAt = Date.now();
-        return painted;
+      layDab(state, aim, canvas, dab, {}, () => {
+        if (record) record.paintedAt = Date.now();
       });
     }
   };
@@ -709,7 +718,7 @@ export class FileEngine {
     } = this;
     const { invalidateRef, strokeContext } = this.context;
     const { openFiles, getState, getTransientState } = this.services;
-    const { paint: dispatchStroke, span: dabSpan, refusal: strokeRefusal } = this.strokeDispatch(strokeContext);
+    const { paint: dispatchStroke, span: dabSpan, refusal: strokeRefusal, layDab } = this.strokeDispatch(strokeContext);
     return {
       renderExportImage: this.renderExportImage,
       renderRegionStroke: (stroke: RegionStroke, preview: boolean) => {
@@ -717,14 +726,12 @@ export class FileEngine {
         const canvas = canvasRef.current;
         let painted: boolean;
         if (preview || !canvas) {
-          painted = dispatchStroke(stroke.state, aim, preview, stroke.source);
+          painted = dispatchStroke(stroke.state, aim, preview, { source: stroke.source });
         } else {
           // Like a brush dab, a region lands once the canvas holds its frames;
           // `settleStroke` waits for it.
           const span = dabSpan(stroke.state, aim, canvas);
-          painted = canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
-            dispatchStroke(stroke.state, aim, false, stroke.source, span, clip),
-          );
+          painted = layDab(stroke.state, aim, canvas, span, { source: stroke.source });
         }
         if (!painted) return false;
         displayMode.current = preview ? "preview" : "committed";
@@ -802,7 +809,7 @@ export class FileEngine {
           const spec = file?.spectrogramData;
           const bpm = (file && state.filepathsBpm[file.filePath]) || 120;
           if (spec) {
-            this.paintStrokeTrail(state, canvas, spec, bpm, dispatchStroke, dabSpan);
+            this.paintStrokeTrail(state, canvas, spec, bpm, layDab, dabSpan);
             displayMode.current = "committed";
           }
           if (paintCursor && spec && cursorPosition && (state.activeFileId === fileId || hoveredFile === fileId)) {
@@ -816,18 +823,19 @@ export class FileEngine {
             );
             if (aim.x >= 0) {
               this.lastStrokeDab = cursorPosition;
-              const span = dabSpan(state, aim, canvas);
-              canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
-                dispatchStroke(state, aim, false, undefined, span, clip),
-              );
+              layDab(state, aim, canvas, dabSpan(state, aim, canvas));
             }
           }
         }
         if (!canvas) return { status: "cancelled" };
         this.settlingStroke = true;
         const revision = canvas.strokeRevision;
+        const stop = new AbortController();
+        const forward = () => stop.abort();
+        signal?.addEventListener("abort", forward, { once: true });
+        const unwatch = this.watchSettle(canvas, forward);
         try {
-          const result = await canvas.settle(signal);
+          const result = await canvas.settle(stop.signal);
           if (canvas !== canvasRef.current || revision !== canvas.strokeRevision) return { status: "cancelled" };
           if (result.status !== "completed") {
             this.applyStroke.current = false;
@@ -842,6 +850,8 @@ export class FileEngine {
           }
           return result;
         } finally {
+          unwatch();
+          signal?.removeEventListener("abort", forward);
           this.settlingStroke = false;
         }
       },
@@ -855,22 +865,43 @@ export class FileEngine {
         canvasRef.current?.expandDirtyRegion(startX, endX, startY, endY),
     };
   };
+  /**
+   * Shows how far `canvas` has got painting the stroke once settling it runs
+   * long, with `cancel` to stop it, until the returned function is called. A
+   * grid fill shows its own progress instead.
+   */
+  private watchSettle(canvas: WindowedCanvas, cancel: () => void): () => void {
+    const { getState } = this.services;
+    if (getState().isFilling) return () => {};
+    let total = canvas.pendingWork;
+    let shown = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const update = (): void => {
+      const left = canvas.pendingWork;
+      total = Math.max(total, left);
+      getState().showEditProgress({ done: total - left, total }, cancel);
+      shown = true;
+    };
+    const delay = setTimeout(() => {
+      update();
+      interval = setInterval(update, EDIT_PROGRESS_INTERVAL_MS);
+    }, EDIT_PROGRESS_AFTER_MS);
+    return () => {
+      clearTimeout(delay);
+      if (interval) clearInterval(interval);
+      if (shown) getState().showEditProgress(null);
+    };
+  }
   strokeDispatch = (
     strokeContext: FileStrokeContext,
-  ): { paint: StrokePainter; span: StrokeSpanner; refusal: StrokeRefuser } => ({
-    paint: (
-      state: State,
-      cursorPos: Vector2,
-      preview: boolean,
-      sourceOverride?: SourceFileInfo,
-      preparedSpan?: DabSpan,
-      clip?: FrameSpan | null,
-    ): boolean =>
-      !this.rollbackFailed &&
-      dispatchFileStroke(strokeContext, state, cursorPos, preview, sourceOverride, preparedSpan, clip),
+  ): { paint: StrokePainter; span: StrokeSpanner; refusal: StrokeRefuser; layDab: DabLayer } => ({
+    paint: (state: State, cursorPos: Vector2, preview: boolean, options?: DispatchOptions): boolean =>
+      !this.rollbackFailed && dispatchFileStroke(strokeContext, state, cursorPos, preview, options),
     span: (state: State, cursorPos: Vector2, canvas: WindowedCanvas, resolvedUnion?: BrushUnionUv): DabSpan =>
       fileDabSpan(strokeContext, state, cursorPos, canvas, resolvedUnion),
     refusal: (state: State, aim?: { x: number; y: number }): string | null =>
       fileStrokeRefusal(strokeContext, state, aim),
+    layDab: (state, aim, canvas, span, options, painted) =>
+      !this.rollbackFailed && paintDab(strokeContext, canvas, state, aim, span, options, painted),
   });
 }

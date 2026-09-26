@@ -39,6 +39,7 @@ import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
 import { createEffectStateView, createStepStateView } from "../store";
+import { pitchReachBands } from "./effect-reach";
 import { hasActiveModulatorRouting, hasNestedModulatorRouting, paramsRouteModulators } from "../store/modulators";
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
@@ -235,7 +236,7 @@ export interface SourceFileInfo {
   displayName: string;
   spectrogramData: SpectrogramData;
   textures: {
-    packed: WebGLRenderTarget;
+    packed: Pick<WebGLRenderTarget, "texture" | "dispose">;
     metadata: DataTexture;
     /** No shader samples the source's inverse map; a source window has none. */
     inverse?: Texture;
@@ -391,6 +392,9 @@ export class StrokeRenderer {
   // Per-stroke scratch targets, shared across all files through the pool.
   // Bound (and refreshed if another file painted since) by acquireScratch().
   private pool: StrokeScratchPool;
+  // A pool of this renderer's own, for one that paints beside the file's
+  // canvas without taking the shared targets the canvas's stroke is using.
+  private readonly ownPool: StrokeScratchPool | null;
   private scratch: StrokeScratch | null = null;
 
   // Scene objects
@@ -473,12 +477,14 @@ export class StrokeRenderer {
     fileId: string,
     effects: EffectsRegistry,
     view?: CanvasView,
+    ownPool?: StrokeScratchPool,
   ) {
     this.gl = gl;
     this.spectrogramData = spectrogramData;
     this.textures = textures;
     this.fileId = fileId;
     this.effects = effects;
+    this.ownPool = ownPool ?? null;
 
     // Create camera
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
@@ -543,7 +549,7 @@ export class StrokeRenderer {
 
     this.fbo1 = this.createFBO(textureWidth, textureHeight, RGBAFormat);
     this.fbo2 = this.createFBO(textureWidth, textureHeight, RGBAFormat);
-    this.pool = getStrokeScratchPool(gl);
+    this.pool = this.ownPool ?? getStrokeScratchPool(gl);
 
     // Modulator precompute material — evaluates all modulators per pixel into
     // the scratch modulatorFbo's two targets. Reuses the common-uniform set so
@@ -1221,7 +1227,11 @@ export class StrokeRenderer {
    * The packed band indices [lowBand, highBand] a brush of the given UV extent
    * can paint, widened by the neighbouring bands effects sample.
    */
-  brushBandRange(brushBottomLeftUv: Vector2, brushSizeUv: Vector2): { lowBand: number; highBand: number } {
+  brushBandRange(
+    brushBottomLeftUv: Vector2,
+    brushSizeUv: Vector2,
+    reachBands = 0,
+  ): { lowBand: number; highBand: number } {
     const { numBands } = this.spectrogramData;
 
     // Band indices count down in frequency, so the brush's low pitch edge is
@@ -1229,23 +1239,28 @@ export class StrokeRenderer {
     const brushLowPitchY = brushBottomLeftUv.y;
     const brushHighPitchY = brushBottomLeftUv.y + brushSizeUv.y;
 
-    const margin = 4;
+    const margin = Math.max(4, reachBands);
     const highBand = Math.min(numBands - 1, Math.floor(pitchUvToBandIndex(brushLowPitchY, numBands)) + margin);
     const lowBand = Math.max(0, Math.floor(pitchUvToBandIndex(brushHighPitchY, numBands)) - margin);
     return { lowBand, highBand };
   }
 
   /**
-   * Calculate the scissor row range in the packed texture for a given brush UV extent.
-   * Returns null if scissoring wouldn't help (brush covers most of the texture).
+   * The rows of the packed texture the passes before the last write: the
+   * brush's bands and the `reachBands` either side the passes after them
+   * read. Null when they are to write the whole texture: the brush and its
+   * reach cover most of it, or `reachBands` is null for a brush that may read
+   * any band.
    */
   calculateScissorRows(
     brushBottomLeftUv: Vector2,
     brushSizeUv: Vector2,
+    reachBands: number | null = 0,
   ): { rowStart: number; rowCount: number } | null {
+    if (reachBands === null) return null;
     const { numBands, metadata } = this.view.layout;
     const { textureWidth, textureHeight } = this.view;
-    const { lowBand, highBand } = this.brushBandRange(brushBottomLeftUv, brushSizeUv);
+    const { lowBand, highBand } = this.brushBandRange(brushBottomLeftUv, brushSizeUv, reachBands);
 
     // If brush covers most of the bands, don't bother with scissor
     const bandSpan = highBand - lowBand + 1;
@@ -1415,7 +1430,13 @@ export class StrokeRenderer {
     // packed rows. The last pass is only ever read at the pixels it paints, so
     // it writes the brush footprint alone. The brush's time window is rounded
     // to frames the way the brush shader rounds it.
-    const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
+    const scissorRows = yWrapsOutOfBounds
+      ? null
+      : this.calculateScissorRows(
+          unionAnchor,
+          maxBrushSizeUv,
+          pitchReachBands(state, this.spectrogramData.bandsPerOctave),
+        );
     const { textureWidth } = this.view;
     const numFrames = this.viewFrameCount;
     const clip = preview ? null : (params.clip ?? null);
@@ -2171,6 +2192,19 @@ export class StrokeRenderer {
     }
   }
 
+  /** Each brush step's mask weights over `pixelRanges`, one weight a pixel in range order; null for a step with none. */
+  async readStrokeMaskRanges(pixelRanges: Uint32Array): Promise<(Float32Array | null)[]> {
+    return await Promise.all(
+      this.strokeMaskTextures().map(async (mask) => {
+        if (!mask) return null;
+        const rgba = await this.gatherRanges(mask, pixelRanges);
+        const weights = new Float32Array(rgba.length >> 2);
+        for (let i = 0; i < weights.length; i++) weights[i] = rgba[i * 4];
+        return weights;
+      }),
+    );
+  }
+
   /** Each brush step's stroke mask, null for a step with none, while this renderer holds the stroke's scratch. */
   strokeMaskTextures(): (Texture | null)[] {
     if (!this.pool.ownedBy(this) || !this.scratch) return [];
@@ -2720,6 +2754,37 @@ export class StrokeRenderer {
    * outside the painted rect — boundary conditioning writes into a margin
    * around the stroke's time edges.
    */
+  /**
+   * A renderer over `view` beside this one: the same file, textures and
+   * effects, with scratch targets of its own, so it can paint while this
+   * one's stroke keeps its stroke-start snapshot and masks.
+   */
+  beside(view: CanvasView): StrokeRenderer {
+    return new StrokeRenderer(
+      this.gl,
+      this.spectrogramData,
+      this.textures,
+      this.fileId,
+      this.effects,
+      view,
+      new StrokeScratchPool(),
+    );
+  }
+
+  /** Takes the scratch targets now, so the stroke-start snapshot holds what the canvas holds at this call. */
+  holdStrokeScratch(): void {
+    this.acquireScratch();
+  }
+
+  /** Counts a box of the view, in unpacked UV, as painted by the current stroke. */
+  addPaintedBox(startX: number, endX: number, startY: number, endY: number): void {
+    this.expandDirtyRegion(startX, endX, startY, endY);
+    this.committedTimeMin = Math.min(this.committedTimeMin, startX);
+    this.committedTimeMax = Math.max(this.committedTimeMax, endX);
+    this.committedPitchMin = Math.min(this.committedPitchMin, startY);
+    this.committedPitchMax = Math.max(this.committedPitchMax, endY);
+  }
+
   expandDirtyRegion(startX: number, endX: number, startY: number, endY: number): void {
     if (this.dirtyRegion) {
       this.dirtyRegion.startX = Math.min(this.dirtyRegion.startX, startX);
@@ -2839,6 +2904,9 @@ export class StrokeRenderer {
   }
 
   dispose(): void {
+    // Work still in flight checks this before it draws, and would otherwise
+    // build new targets on a renderer nothing disposes again.
+    this.isInitialized = false;
     this.selectionMaskCache?.texture.dispose();
     this.selectionMaskCache = null;
     this.pool.release(this);

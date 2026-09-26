@@ -166,6 +166,9 @@ vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount
 // modulator patterns and the noise seed all take file positions: a canvas
 // holding one span of the file must place them where the whole file would.
 float destFileFrame(float uvX) { return destViewStartFrame + uvX * destFrameCount; }
+// The bin a position `bins` bins along a band falls in. Reads land on bin
+// edges; a hundredth of a bin keeps rounding on one side of them.
+float binAt(float bins) { return floor(bins + 0.01); }
 float sourceFileFrame(float uvX) { return sourceViewStartFrame + uvX * sourceFrameCount; }
 float destFileSec(float uvX) { return destFileFrame(uvX) / max(destSampleRate, 1e-6); }
 float sourceFileSec(float uvX) { return sourceFileFrame(uvX) / max(sourceSampleRate, 1e-6); }

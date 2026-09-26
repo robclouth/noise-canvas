@@ -158,7 +158,7 @@ async function paint(
     far.push(span.needs.sources.some((read) => read.self));
     expect(
       canvas.paintWhenHeld(span.extent, span.needs, (clip) =>
-        dispatchStroke(context, state, aim, false, undefined, span, clip),
+        dispatchStroke(context, state, aim, false, { span, clip }),
       ),
     ).toBe(true);
     expect((await canvas.settle()).status).toBe("completed");

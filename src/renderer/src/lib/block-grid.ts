@@ -8,9 +8,10 @@ export const BLOCK_TARGET_SECONDS = 2;
 export const PACKED_BYTES_PER_TEXEL = 16;
 
 /**
- * The file cut into fixed spans of time. A block's span is a whole number of
- * every band's bins, so no bin straddles a block edge and a block can be read,
- * written and encoded on its own.
+ * The file cut into fixed spans of time. A block's span is a whole, even
+ * number of every band's bins, so no bin straddles a block edge, a block can
+ * be read, written and encoded on its own, and a bin's index in a view has the
+ * parity of its index in the file.
  */
 export type BlockGrid = {
   layout: BandLayout;
@@ -28,7 +29,7 @@ export function blockGrid(
   sampleRate: number,
   targetSeconds = BLOCK_TARGET_SECONDS,
 ): BlockGrid {
-  const quantum = 2 ** coarsestStepLog2(layout);
+  const quantum = 2 ** (coarsestStepLog2(layout) + 1);
   const blockFrames = quantum * Math.max(1, Math.round((targetSeconds * sampleRate) / quantum));
   const binsPerBlock = new Float32Array(layout.numBands);
   for (let band = 0; band < layout.numBands; band++) {
@@ -41,6 +42,11 @@ export function blockGrid(
     blockCount: Math.max(1, Math.ceil(numFrames / blockFrames)),
     binsPerBlock,
   };
+}
+
+/** Frames in one bin of the coarsest band: how far past a cut a pixel beside it interpolates. */
+export function coarsestBinFrames(grid: BlockGrid): number {
+  return grid.blockFrames / Math.min(...grid.binsPerBlock);
 }
 
 /** The block holding a frame, clamped to the file. */

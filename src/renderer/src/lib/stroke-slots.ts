@@ -1,5 +1,5 @@
 import type { Texture, WebGLRenderer, WebGLRenderTarget } from "three";
-import { blockPixelRanges, blockTexels, type BlockGrid } from "./block-grid";
+import { blockPixelRanges, blocksForPixelRanges, blockTexels, type BlockGrid } from "./block-grid";
 import { BlockSlotCache, MASK_SLOT_TEXEL, PACKED_SLOT_TEXEL } from "./block-slot-cache";
 import type { CanvasView } from "./canvas-view";
 import type { CarriedRead, PaintBox } from "./carried-paint";
@@ -163,6 +163,20 @@ export class StrokeSlots {
    */
   read(fileRanges: Uint32Array): Promise<Float32Array> {
     return this.paint.read(fileRanges);
+  }
+
+  /**
+   * Each brush step's mask weights over the named file pixels, which must all
+   * lie on held blocks, one weight a pixel in range order; null for a step
+   * that kept no mask on some of those blocks.
+   */
+  readMasks(fileRanges: Uint32Array): Promise<(Float32Array | null)[]> {
+    const blocks = blocksForPixelRanges(this.grid, fileRanges);
+    return Promise.all(
+      this.masks.map((cache) =>
+        cache && blocks.every((block) => cache.has(block)) ? cache.read(fileRanges).then(firstOfFour) : null,
+      ),
+    );
   }
 
   /** The held pixels among `fileRanges`. */

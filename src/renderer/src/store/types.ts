@@ -8,6 +8,7 @@ import type { AudioState } from "./audio";
 import type { BrushState } from "./brush";
 import type { EffectsState } from "./effects";
 import type { FilesState } from "./files";
+import type { EditProgressState } from "./edit-progress";
 import type { FillState } from "./fill";
 import type { SelectionAuditionState } from "./selection-audition";
 import type { SelectionClipboardState } from "./selection-clipboard";
@@ -148,6 +149,7 @@ export type State = BrushState &
   StepsState &
   LinkState &
   FillState &
+  EditProgressState &
   LayerStacksState &
   SelectionAuditionState &
   SelectionClipboardState &

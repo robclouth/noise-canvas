@@ -1,7 +1,8 @@
 // Checks brushes that reach past the canvas window on a long file: one dab of
 // a brush the length of the file, one dab of a brush that wraps past the
-// file's end, one full-length dab that paints from a second long file, and one
-// dab that copies this file from far along it, each read back from the store.
+// file's end, one full-length dab that paints from a second long file, one
+// dab that copies this file from far along it, and one full-length reversal,
+// each read back from the store.
 //
 // Usage: node scripts/drive/probe-brush.mjs [--seconds 285] [--no-build]
 import { copyFileSync } from "node:fs";
@@ -163,6 +164,43 @@ try {
       );
     if (differed < 2) failures.push("the dab and 80% are too alike to tell a clone");
     if (matched < dest.length) failures.push("the far clone did not copy from 80% of the file");
+  }
+  // A full-length reversal, at a pitch the others left alone: every block of it
+  // reads the far end of the file, which no window holds beside it.
+  await page.evaluate(() => {
+    const state = globalThis.__store.getState();
+    state.setParameter("sourcePositionMode", "follow");
+    state.setParameter("sourceTimeOffset", 0);
+    state.setParameter("effects", [
+      {
+        id: "drive-reverse",
+        effect: "transform",
+        enabled: true,
+        params: { transformScaleTime: -1, transformEdgeMode: 0 },
+      },
+    ]);
+  });
+  await setStep("brushSizeTime", 32);
+  const reverseStarted = performance.now();
+  const reversed = await clickAt(0.5, 0.15);
+  console.log(`full-length reversal committed in ${Math.round(performance.now() - reverseStarted)} ms`);
+  if (!reversed) failures.push("the full-length reversal was never logged");
+  else {
+    const p = reversed.y + reversed.height / 2;
+    // Inside the brush's fades, where the reversal replaces the file outright.
+    const fractions = [0.25, 0.4, 0.6, 0.75];
+    const dest = await truth(fractions.map((f) => ({ f, p })));
+    const mirror = await truth(fractions.map((f) => ({ f: 1 - f, p })));
+    const matched = dest.filter((r, i) => {
+      const off = Math.abs(Math.log(r.store / mirror[i].original));
+      return off < 0.35 && off < 0.5 * Math.abs(Math.log(r.original / mirror[i].original));
+    }).length;
+    console.log(`reversal: ${matched}/${dest.length} hold the file's other end`);
+    for (let i = 0; i < dest.length; i++)
+      console.log(
+        `  at ${fractions[i]}: dest ${dest[i].store.toExponential(3)} (was ${dest[i].original.toExponential(3)}), mirror ${mirror[i].original.toExponential(3)}`,
+      );
+    if (matched < dest.length) failures.push("the full-length reversal did not mirror the file");
   }
   for (const c of consoleLines)
     if (c.type === "error" && !/HRTF|valid audio stream/.test(c.text))

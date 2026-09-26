@@ -17,11 +17,11 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   // wrapped half to the same anchor — one loop earlier in absolute time.
   float anchorDistUv = getEffectiveBrushOffset(coords.dest).x - ALIGN_ANCHOR_01 * brushSizeUv.x;
   float anchorUvX  = coords.dest.x - anchorDistUv;
-  float anchorSec  = anchorUvX * destFrameCount / destSampleRate;
+  float anchorSec  = destFileSec(anchorUvX);
   float octaves    = log2(fHz / max(destMinFreq, 1e-6));
   float bandAnchor = anchorSec + ALIGN_TILT_SPO * octaves;
 
-  float pixelSec = coords.dest.x * destFrameCount / destSampleRate;
+  float pixelSec = destFileSec(coords.dest.x);
   float distSec  = pixelSec - bandAnchor;
 
   // Symmetric Gaussian coherence. Sigma combines per-band Gabor support (wide
