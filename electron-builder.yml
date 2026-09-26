@@ -56,6 +56,7 @@ nsis:
   createDesktopShortcut: always
 mac:
   icon: resources/icon.png
+  minimumSystemVersion: "12.0"
   artifactName: ${name}-mac-${arch}.${ext}
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist

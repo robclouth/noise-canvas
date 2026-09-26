@@ -947,6 +947,16 @@ export async function mergeSpectrograms(
 }
 
 /**
+ * True when AI stem separation can run here: the addon was built with ONNX
+ * Runtime and the library opens on this system.
+ */
+export function aiSeparationAvailable(): boolean {
+  const gab: { aiSeparate?: unknown; aiSeparationAvailable?: () => boolean } = init();
+  if (typeof gab.aiSeparate !== "function") return false;
+  return gab.aiSeparationAvailable?.() ?? true;
+}
+
+/**
  * Separate audio (already decoded to channels) into 4 stems using htdemucs ONNX.
  * Call with Gaborator-synthesized audio, then re-analyse each stem with Gaborator.
  * Stems: drums, bass, other, vocals

@@ -23,7 +23,14 @@ import { FileMixControls } from "./file-mix-controls";
 // ONNX Runtime has no macOS x86_64 build past 1.23, so the separation addon is
 // not compiled for Intel Macs. It would download the model and then fail, so
 // the menu item is hidden entirely.
-const AI_SEPARATION_SUPPORTED = !(host.env.platform === "darwin" && host.env.arch === "x64");
+let aiSeparationSupported: boolean | null = null;
+
+/** Whether this system can run AI stem separation, asked of the addon once. */
+function canSeparateStems(): boolean {
+  aiSeparationSupported ??=
+    host.analysis.aiSeparationAvailable?.() ?? !(host.env.platform === "darwin" && host.env.arch === "x64");
+  return aiSeparationSupported;
+}
 
 // Helper to get resolution label from bands per octave value
 function getResolutionLabel(bpo: number): string {
@@ -363,7 +370,7 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
               >
                 Split into N Parts (NMF)…
               </Menu.Item>
-              {AI_SEPARATION_SUPPORTED && (
+              {canSeparateStems() && (
                 <>
                   <Menu.Divider />
                   <Menu.Item

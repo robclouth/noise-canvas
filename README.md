@@ -16,7 +16,7 @@ Noise Canvas is a tool for doing spectral sound design. It loads audio files, sh
 
 Not sure which Mac you have? Apple menu → **About This Mac**. A "Chip" line means Apple Silicon. A "Processor" line means Intel.
 
-**Which macOS?** The app needs macOS 11 Big Sur or newer. I've only tested it on Sequoia (15), and one person reported problems on Monterey (12). If it won't run on yours, [open an issue](https://github.com/robclouth/noise-canvas/issues) and say which version you're on.
+**Which macOS?** The app needs macOS 12 Monterey or newer. AI stem separation needs more: an Apple Silicon Mac on macOS 14 Sonoma or newer. On an older system or an Intel Mac, everything else works. I've only tested it on Sequoia (15). If it won't run on yours, [open an issue](https://github.com/robclouth/noise-canvas/issues) and say which version you're on.
 
 **It leans on your graphics card.** Every effect is a shader, so the GPU does the work rather than the CPU. Integrated graphics are fine, but an older machine will paint slowly on long files, and can run out of GPU memory on very long ones. Shorter files are the fix. I'm currently investigating how to improve performance on older computers.
 

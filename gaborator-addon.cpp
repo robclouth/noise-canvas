@@ -5896,10 +5896,56 @@ Napi::Value MergeSpectrogramsAsync(const Napi::CallbackInfo &info)
 // ─── AI Separation (via ONNX Runtime C++; not built for Intel macOS) ────────
 
 #ifdef GABORATOR_ONNX_ENABLED
+#ifdef __APPLE__
+#define ORT_API_MANUAL_INIT
+#include <dlfcn.h>
+#endif
 #include "vendor/onnxruntime/include/onnxruntime_cxx_api.h"
 #include <map>
 #include <mutex>
 #include <memory>
+
+/**
+ * Why ONNX Runtime cannot be used, or null once it can. On macOS the library
+ * needs a newer system than the addon, so the addon does not link it: it is
+ * opened from beside the addon on first use, and the addon loads without it.
+ */
+static const char *ortUnavailable()
+{
+#ifdef __APPLE__
+    static std::once_flag once;
+    static std::string reason;
+    std::call_once(once, [] {
+        Dl_info self;
+        if (!dladdr(reinterpret_cast<const void *>(&ortUnavailable), &self) || !self.dli_fname)
+        {
+            reason = "the addon's own path is unknown";
+            return;
+        }
+        std::string path(self.dli_fname);
+        path = path.substr(0, path.find_last_of('/') + 1) + "libonnxruntime.1.24.3.dylib";
+        void *library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        if (!library)
+        {
+            const char *error = dlerror();
+            reason = error ? error : "the library did not open";
+            return;
+        }
+        using GetApiBase = const OrtApiBase *(ORT_API_CALL *)();
+        const auto getApiBase = reinterpret_cast<GetApiBase>(dlsym(library, "OrtGetApiBase"));
+        const OrtApi *api = getApiBase ? getApiBase()->GetApi(ORT_API_VERSION) : nullptr;
+        if (!api)
+        {
+            reason = "the library has no API for this version";
+            return;
+        }
+        Ort::InitApi(api);
+    });
+    return reason.empty() ? nullptr : reason.c_str();
+#else
+    return nullptr;
+#endif
+}
 
 static std::vector<float> aiLinearResample(const std::vector<float> &audio, double fromRate, double toRate)
 {
@@ -6001,6 +6047,11 @@ public:
 
     void Execute() override
     {
+        if (const char *reason = ortUnavailable())
+        {
+            SetError(std::string("ONNX Runtime could not load: ") + reason);
+            return;
+        }
         try { ExecuteImpl(); }
         catch (const Ort::Exception &e) { SetError(std::string("ORT error: ") + e.what()); }
         catch (const std::exception &e) { SetError(std::string("Error: ") + e.what()); }
@@ -6151,6 +6202,11 @@ private:
     std::vector<std::string> stemNames;
     std::vector<std::pair<std::vector<float>, std::vector<float>>> stems;
 };
+
+Napi::Value AiSeparationAvailable(const Napi::CallbackInfo &info)
+{
+    return Napi::Boolean::New(info.Env(), ortUnavailable() == nullptr);
+}
 
 Napi::Value AiSeparateAsync(const Napi::CallbackInfo &info)
 {
@@ -7517,6 +7573,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("mergeSpectrograms", Napi::Function::New(env, MergeSpectrogramsAsync));
 #ifdef GABORATOR_ONNX_ENABLED
     exports.Set("aiSeparate", Napi::Function::New(env, AiSeparateAsync));
+    exports.Set("aiSeparationAvailable", Napi::Function::New(env, AiSeparationAvailable));
 #endif
     return exports;
 }

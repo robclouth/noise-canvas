@@ -49,16 +49,12 @@
                                 # ONNX Runtime ships no macOS x86_64 build after
                                 # 1.23, so Intel Macs are the one target without
                                 # stem separation. Callers must treat aiSeparate
-                                # as absent there.
+                                # as absent there. The library is not linked: the
+                                # addon opens it on first use (ortUnavailable).
                                 'target_arch=="arm64"',
                                 {
                                     "defines": ["GABORATOR_ONNX_ENABLED=1"],
                                     "include_dirs": ["vendor/onnxruntime/include"],
-                                    "link_settings": {
-                                        "libraries": [
-                                            "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.dylib",
-                                        ],
-                                    },
                                     "copies": [
                                         {
                                             "destination": "<(PRODUCT_DIR)",
