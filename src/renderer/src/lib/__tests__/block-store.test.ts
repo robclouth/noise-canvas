@@ -6,7 +6,7 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { layoutTexels } from "../band-layout";
 import { blockGrid, blockPixelRanges } from "../block-grid";
 import { BlockStore, type BlockBackend, type BlockCodec } from "../block-store";
-import { gatherPixelRanges, gatherTaps } from "../pixel-ranges";
+import { copyCompactOverlap, gatherPixelRanges, gatherTaps } from "../pixel-ranges";
 
 const SAMPLE_RATE = 8000;
 const data = createConstantQMockSpectrogramData({ durationSeconds: 2, sampleRate: SAMPLE_RATE, bandsPerOctave: 4 });
@@ -520,6 +520,43 @@ describe("BlockStore", () => {
     await flushing;
     expect(overlay.writes - writesBefore).toBe(dirty);
     expect(store.dirtyCount).toBe(0);
+  });
+
+  it("reads a large range off the thread as the store stood, with a patch meanwhile kept for later", async () => {
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let copies = 0;
+    const copyRanges = async (
+      dest: Float32Array,
+      destRanges: Uint32Array,
+      src: Float32Array,
+      srcRanges: Uint32Array,
+    ) => {
+      copies++;
+      await gate;
+      copyCompactOverlap(dest, destRanges, src, srcRanges);
+    };
+    const grid = makeGrid();
+    const store = new BlockStore(grid, memoryBackend(), {
+      codec: rawCodec,
+      maxResidentBytes: 1 << 30,
+      texelCount: data.texels,
+      copyRanges,
+      offThreadReadPixels: 0,
+    });
+    await store.seed(packed);
+    const all = Uint32Array.of(0, layoutTexels(layout));
+
+    const reading = store.readRanges(all);
+    while (copies < grid.blockCount) await new Promise((resolve) => setTimeout(resolve, 1));
+    const patched = gatherPixelRanges(packed, all).map((value) => value * -1);
+    await store.patch(all, patched);
+    release();
+
+    expect(firstDifference(await reading, gatherPixelRanges(packed, all))).toBe(-1);
+    expect(firstDifference(await store.readRanges(all), patched)).toBe(-1);
   });
 
   it("lets a patch past twice the budget flush while a held flush waits ahead of it", async () => {

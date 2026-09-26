@@ -5,6 +5,7 @@ import {
   gatherPixelRanges,
   gatherTaps,
   mergePixelRanges,
+  pixelRangePieces,
   scatterPixelRanges,
   subtractPixelRanges,
   tapCount,
@@ -131,5 +132,25 @@ describe("taps", () => {
       Uint32Array.of(250, 50, 500, 1000, 1520, 20),
     );
     expect(float32BitsEqual(rest, whole)).toBe(true);
+  });
+});
+
+describe("pixelRangePieces", () => {
+  it("cuts ranges into pieces that gather, end to end, what the whole list gathers", () => {
+    const ranges = Uint32Array.of(3, 5, 10, 12, 30, 1, 40, 7);
+    const src = Float32Array.from({ length: 50 * 4 }, (_, i) => i);
+    const whole = gatherPixelRanges(src, ranges);
+    const pieces = pixelRangePieces(ranges, 6);
+    expect(pieces.map((piece) => Array.from(piece.ranges))).toEqual([
+      [3, 5, 10, 1],
+      [11, 6],
+      [17, 5, 30, 1],
+      [40, 6],
+      [40 + 6, 1],
+    ]);
+    for (const piece of pieces) {
+      const part = gatherPixelRanges(src, piece.ranges);
+      expect(Array.from(whole.subarray(piece.at, piece.at + part.length))).toEqual(Array.from(part));
+    }
   });
 });

@@ -331,6 +331,17 @@ export interface AddStrokeOpts {
   afterFootprint?: Float32Array;
   // Whole-turn phase shifts the stroke's projection made past its ranges.
   turns?: PhaseTurns;
+  // The delta already cut over `dirtyRanges`, used in place of
+  // `baseFootprint` when the stroke has no turns.
+  preparedDelta?: PreparedDelta;
+}
+
+/** A footprint stroke's delta, cut before the commit ran. */
+export interface PreparedDelta {
+  // The footprint it covers; it stands only for a stroke over these ranges.
+  ranges: Uint32Array;
+  changed: boolean;
+  bytes: Promise<Uint8Array>;
 }
 
 /** An axis-aligned region in unpacked display uv (Y 0 at the highest band's top). */
@@ -919,25 +930,41 @@ export class HistoryManager {
     // stroke; any other reads them back from the block store's tier.
     const turnsIn = hasPhaseTurns(opts.turns) ? opts.turns : null;
 
-    // The delta's two sides, and the painted footprint values the tier's
-    // patch writes. Null when the stroke has to store whole.
-    let deltaSides: { base: Float32Array; after: Float32Array; patch: Float32Array } | null = null;
+    // The painted footprint values the tier's patch writes, whether the
+    // stroke changed them, and its delta. Null when the stroke has to store
+    // whole.
+    let deltaSides: {
+      after: Float32Array;
+      changed: () => Promise<boolean>;
+      encode: (turns: PhaseTurns | null) => Promise<Uint8Array>;
+    } | null = null;
     // Past half the file a whole snapshot is cheaper to store, but only when
     // the caller has one; a footprint commit has only the footprint.
     if (sameDims && ranges != null && ranges.length > 0 && (footprintPixels < texturePixels * 0.5 || !opts.data)) {
-      const compact =
-        opts.baseFootprint?.length === footprintPixels * 4
-          ? opts.baseFootprint
-          : opts.data
-            ? await this.currentRangesNow(ranges)
-            : null;
       const after =
         opts.afterFootprint?.length === footprintPixels * 4
           ? opts.afterFootprint
           : opts.data
             ? gatherPixelRanges(opts.data, ranges)
             : null;
-      if (compact && after) deltaSides = { base: compact, after, patch: after };
+      const prepared = opts.preparedDelta?.ranges === ranges && !turnsIn ? opts.preparedDelta : null;
+      if (after && prepared) {
+        deltaSides = { after, changed: async () => prepared.changed, encode: async () => await prepared.bytes };
+      } else if (after) {
+        const compact =
+          opts.baseFootprint?.length === footprintPixels * 4
+            ? opts.baseFootprint
+            : opts.data
+              ? await this.currentRangesNow(ranges)
+              : null;
+        if (compact) {
+          deltaSides = {
+            after,
+            changed: () => host.analysis.historyFootprintChanged(compact, after, ranges, true, true),
+            encode: (turns) => host.analysis.encodeHistoryDelta(compact, after, ranges, true, true, turns ?? undefined),
+          };
+        }
+      }
     }
 
     let storage: "delta" | "packed";
@@ -947,8 +974,7 @@ export class HistoryManager {
 
     if (deltaSides != null && ranges != null) {
       const deltaStart = performance.now();
-      const { base: deltaBase, after } = deltaSides;
-      if (!(await host.analysis.historyFootprintChanged(deltaBase, after, ranges, true, true))) {
+      if (!(await deltaSides.changed())) {
         // The stroke changed nothing, so it gets no node of its own. The
         // caller must not then write its audio against the parent's id. The
         // canvas is still the parent's, so its projection state is too.
@@ -959,7 +985,7 @@ export class HistoryManager {
       // The tier takes the stroke before the delta is cut: its turn walk
       // yields the residuals that make the turns invertible over the store.
       const tierStart = performance.now();
-      tierResiduals = await this.tierStrokePatch(parentId, ranges, deltaSides.patch, turnsIn, opts.data);
+      tierResiduals = await this.tierStrokePatch(parentId, ranges, deltaSides.after, turnsIn, opts.data);
       diag.timing("timing", "addStroke tier patch", performance.now() - tierStart, { ranges: ranges.length / 2 });
       if (!this.manifest) return { id: parentId, isNew: false };
       if (turnsIn && tierResiduals == null) {
@@ -971,7 +997,7 @@ export class HistoryManager {
         rangesForPatch = ranges;
         // A checkpoint is stored whole on disk, but its delta still carries
         // the hops to and from it in memory.
-        deltaBytes = await host.analysis.encodeHistoryDelta(deltaBase, after, ranges, true, true, turnsIn ?? undefined);
+        deltaBytes = await deltaSides.encode(turnsIn);
         // A tier on disk already holds the state, and a checkpoint of it would
         // read every block into one array, so a paged file stays on deltas.
         storage =

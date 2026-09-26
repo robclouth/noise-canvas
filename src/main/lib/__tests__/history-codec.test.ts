@@ -9,6 +9,7 @@ import {
   encodeHistoryDelta,
   encodeHistorySnapshot,
   historyFootprintChanged,
+  prepareHistoryDelta,
   readHistoryDeltaTurns,
 } from "../audio-analysis";
 import { parseHistoryDeltaRanges } from "../history-delta";
@@ -294,6 +295,12 @@ describe("compact base", () => {
     const whole = await encodeHistoryDelta(base, after, rs);
     const compact = await encodeHistoryDelta(compactBase, gather(after, rs), rs, true, true);
     expect(compact.equals(whole)).toBe(true);
+    // The same, from a base over two halves of the state that split ranges.
+    const [splitStart, splitCount] = pairs[pairs.length >> 1];
+    const split = splitStart + (splitCount >> 1);
+    const halves = ranges([0, split], [split, pixels - split]);
+    const prepared = await prepareHistoryDelta(base, halves, gather(after, rs), rs);
+    expect(Buffer.from(await prepared.bytes).equals(whole)).toBe(true);
     const restored = await applyHistoryDelta(base, compact);
     const want = new Float32Array(after);
     want[(lastStart + lastCount) * 4 + 1] = base[(lastStart + lastCount) * 4 + 1];
@@ -302,6 +309,30 @@ describe("compact base", () => {
     for (let i = 0; i < got.length; i++) if (got[i] !== bits(want)[i]) differing++;
     expect(differing).toBe(0);
   }, 60_000);
+
+  it("cuts the same delta from a wider base whose ranges split the footprint's", async () => {
+    const base = packedState(PIXELS, 13);
+    const after = new Float32Array(base);
+    for (let p = 90; p < 130; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = ((p * 7 + c) % 61) / 61;
+    after[300 * 4 + 3] = -2;
+    const rs = ranges([90, 40], [300, 1]);
+    const wide = ranges([0, 100], [100, 50], [160, 300]);
+
+    const prepared = await prepareHistoryDelta(gather(base, wide), wide, gather(after, rs), rs);
+    const direct = await encodeHistoryDelta(gather(base, rs), gather(after, rs), rs, true, true);
+    expect(prepared.changed).toBe(true);
+    expect(Buffer.from(await prepared.bytes).equals(direct)).toBe(true);
+
+    const same = await prepareHistoryDelta(gather(base, wide), wide, gather(base, rs), rs);
+    expect(same.changed).toBe(false);
+  });
+
+  it("refuses a wider base that does not hold the footprint", async () => {
+    const base = packedState(PIXELS, 14);
+    const rs = ranges([140, 30]);
+    const wide = ranges([0, 150], [160, 300]);
+    await expect(prepareHistoryDelta(gather(base, wide), wide, gather(base, rs), rs)).rejects.toThrow(/do not hold/);
+  });
 
   it("compares the footprint against its saved values", async () => {
     const base = packedState(PIXELS, 9);

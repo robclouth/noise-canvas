@@ -26,7 +26,7 @@ import {
   unitsToUv,
 } from "@renderer/lib/utils";
 import type { ParameterKey } from "./types";
-import { openFiles } from "./files";
+import { openFiles, type CommitSource } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
 import { getBlockStore } from "@renderer/lib/block-stores";
 import { getHistoryManager } from "@renderer/lib/history-manager";
@@ -208,8 +208,6 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       const commitHeld = async (resumeFlush: () => void): Promise<void> => {
         const readStart = performance.now();
-        const paintedValues = paintedRead ? await paintedRead : null;
-        const paintedMs = performance.now() - readStart;
         // A navigation's synthesis may still be landing — the commit measures
         // against the audio it installs — and may still be reading the packed
         // state this commit writes into.
@@ -223,14 +221,13 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         }
 
         let data: Float32Array | null = null;
-        let baseFootprint: Float32Array | undefined;
-        let footprint: { ranges: Uint32Array; values: Float32Array } | null = null;
-        const baseStart = performance.now();
-        if (footprintOnly && painted && paintedValues) {
-          // The store holds the pre-stroke state, stashed pixels included.
-          baseFootprint = (await historyManager.currentRanges(painted)) ?? undefined;
-          if (baseFootprint) footprint = { ranges: painted, values: paintedValues };
+        let footprint: CommitSource["footprint"] = null;
+        if (footprintOnly && painted && paintedRead) {
+          // The commit reads the pre-stroke state from the store, stashed
+          // pixels included, while the stroke's pixels come off the canvas.
+          footprint = { ranges: painted, values: paintedRead };
         } else if (!footprintOnly) {
+          const paintedValues = paintedRead ? await paintedRead : null;
           data = await historyManager.currentBlockState();
           if (data && painted && paintedValues) scatterCompactPixelRanges(data, paintedValues, painted);
         }
@@ -240,8 +237,6 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         }
         diag.timing("timing", "commit state read", performance.now() - readStart, {
           footprintOnly: footprintOnly ? 1 : 0,
-          paintedMs: Math.round(paintedMs),
-          baseMs: Math.round(performance.now() - baseStart),
         });
 
         // Phase turns an earlier commit could not put on the canvas, because
@@ -270,6 +265,16 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           // into this copy either.
           const turns = hasPhaseTurns(result.tail) ? result.tail : null;
           if (data && turns && result.patch.pixels) applyPhaseTurns(data, turns, false);
+          // The commit cut the delta over the footprint before the stroke
+          // went over the store's values; a projection that widened what the
+          // delta covers needs the footprint's old values instead, which the
+          // store still holds.
+          const preparedDelta = !extent && !turns ? outcome.preparedDelta : null;
+          let baseFootprint = outcome.baseFootprint ?? undefined;
+          if (!data && !preparedDelta && !baseFootprint && painted) {
+            baseFootprint = (await historyManager.currentRanges(painted)) ?? undefined;
+            if (!baseFootprint) throw new Error("the block store could not serve the stroke's old values");
+          }
           if (extent) {
             // The projection reaches past the painted rect, so the delta must
             // cover it too or undo would store stale margins.
@@ -294,7 +299,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           // are cut from the view the commit worked on.
           let afterFootprint: Float32Array | undefined;
           if (!data && footprint && !extent && !turns) {
-            afterFootprint = footprint.values;
+            afterFootprint = await footprint.values;
           } else if (!data && outcome.view && outcome.viewBuffer && historyDirtyRanges) {
             afterFootprint = new Float32Array(pixelRangeCount(historyDirtyRanges) * 4);
             copyCompactOverlap(afterFootprint, historyDirtyRanges, outcome.viewBuffer, outcome.view.ranges);
@@ -312,6 +317,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             baseFootprint,
             afterFootprint,
             turns: turns ?? undefined,
+            preparedDelta: preparedDelta ?? undefined,
           });
           diag.timing("timing", "commit history add", performance.now() - historyStart, { whole: data ? 1 : 0 });
           stored = true;

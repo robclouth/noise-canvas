@@ -53,8 +53,8 @@ import type {
   SplicePiece,
 } from "../../../main/lib/types";
 import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
-import { commitViewOf, composeViewBuffer, scatterCommitPatch, type CommitView } from "../lib/commit-view";
-import { gatherPixelRanges, scatterCompactPixelRanges } from "../lib/pixel-ranges";
+import { commitViewOf, composeViewBuffer, scatterCommitPatch, viewHolds, type CommitView } from "../lib/commit-view";
+import { copyCompactOverlap, gatherPixelRanges, scatterCompactPixelRanges } from "../lib/pixel-ranges";
 import {
   computeOutputLevels,
   measureOutputLevels,
@@ -68,7 +68,7 @@ import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { gatherFileIds, gatherFileGroups, reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
-import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
+import { destroyHistoryManager, getHistoryManager, type PreparedDelta } from "../lib/history-manager";
 import { serializeEditCommand, serializeFileTask } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
@@ -110,12 +110,16 @@ export interface CommitOutcome {
   viewBuffer: Float32Array | null;
   /** The whole painted state, when the commit had to read or was handed one. */
   data: Float32Array | null;
+  /** The stroke's delta, cut from the view before the stroke went over it. */
+  preparedDelta: PreparedDelta | null;
+  /** The footprint's pre-stroke values, when the commit read them and cut no delta. */
+  baseFootprint: Float32Array | null;
 }
 
 /** What a commit reads the painted state from: the whole canvas, or the stroke's footprint over the block store. */
 export interface CommitSource {
   data: Float32Array | null;
-  footprint: { ranges: Uint32Array; values: Float32Array } | null;
+  footprint: { ranges: Uint32Array; values: Float32Array | Promise<Float32Array> } | null;
 }
 
 export interface FilesState {
@@ -2954,7 +2958,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         if (data) return data;
         const whole = await getHistoryManager(fileId).currentBlockState();
         if (whole && source.footprint) {
-          scatterCompactPixelRanges(whole, source.footprint.values, source.footprint.ranges);
+          scatterCompactPixelRanges(whole, await source.footprint.values, source.footprint.ranges);
         }
         if (!whole) throw new Error("the commit could not read the committed state");
         data = whole;
@@ -2973,19 +2977,50 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       let usedView = false;
       let viewFromStore = false;
       let viewBuffer: Float32Array | null = null;
+      let preparedDelta: PreparedDelta | null = null;
+      let baseFootprint: Float32Array | null = null;
+      let viewReadMs = 0;
+      let storeReadMs = 0;
+      let paintedReadMs = 0;
+      let prepareMs = 0;
       let result: CommitStrokeResult;
       // The store's background flush waits while the commit runs, so the two
       // do not share the machine.
       const resumeFlush = (await getBlockStore(fileId))?.pauseFlush() ?? (() => {});
       try {
         if (view && window) {
-          // The view's pre-stroke pixels come from the block store, with the
-          // stroke's own footprint written over them; only when the store
-          // cannot serve them is the view gathered from a whole readback.
-          const preStroke = source.footprint ? await getHistoryManager(fileId).currentRanges(view.ranges) : null;
-          if (preStroke && source.footprint) {
-            viewBuffer = composeViewBuffer(preStroke, view, source.footprint.values, source.footprint.ranges);
-            viewFromStore = viewBuffer != null;
+          // The view's pre-stroke pixels come from the block store, read while
+          // the stroke's own pixels come off the canvas, and those are written
+          // over them; only when the store cannot serve them is the view
+          // gathered from a whole readback. Before the stroke goes over them,
+          // they give the history its delta, or the footprint's old values
+          // when a projection will widen what the delta covers.
+          const footprint = source.footprint;
+          if (footprint && viewHolds(view, footprint.ranges)) {
+            const readStart = performance.now();
+            const [preStroke, values] = await Promise.all([
+              getHistoryManager(fileId)
+                .currentRanges(view.ranges)
+                .finally(() => (storeReadMs = performance.now() - readStart)),
+              Promise.resolve(footprint.values).finally(() => (paintedReadMs = performance.now() - readStart)),
+            ]);
+            viewReadMs = performance.now() - readStart;
+            if (preStroke) {
+              const prepareStart = performance.now();
+              const prepare = snapshot.reanalyzeEnabled ? undefined : host.analysis.prepareHistoryDelta;
+              if (prepare) {
+                preparedDelta = {
+                  ranges: footprint.ranges,
+                  ...(await prepare(preStroke, view.ranges, values, footprint.ranges)),
+                };
+              } else {
+                baseFootprint = new Float32Array(values.length);
+                copyCompactOverlap(baseFootprint, footprint.ranges, preStroke, view.ranges);
+              }
+              prepareMs = performance.now() - prepareStart;
+              viewBuffer = composeViewBuffer(preStroke, view, values, footprint.ranges);
+              viewFromStore = viewBuffer != null;
+            }
           }
           if (!viewBuffer) viewBuffer = gatherPixelRanges(await readWhole(), view.ranges);
           try {
@@ -3024,6 +3059,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         bandRanges: result.patch.ranges.length / 3,
         windowed: usedView ? 1 : 0,
         viewFromStore: viewFromStore ? 1 : 0,
+        viewReadMs: Math.round(viewReadMs),
+        storeReadMs: Math.round(storeReadMs),
+        paintedReadMs: Math.round(paintedReadMs),
+        prepareMs: Math.round(prepareMs),
         ...result.phases,
       });
 
@@ -3058,6 +3097,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         view: usedView ? view : null,
         viewBuffer: usedView ? viewBuffer : null,
         data: data ?? null,
+        preparedDelta,
+        baseFootprint,
       };
     } finally {
       get().setFileSynthesizing(fileId, false);

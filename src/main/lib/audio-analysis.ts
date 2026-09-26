@@ -122,7 +122,19 @@ interface HistoryCodecAddon {
     afterCompact: boolean,
     turns: PhaseTurns | undefined,
   ): Promise<Buffer>;
+  historyEncodeDeltaOver(
+    base: Float32Array,
+    baseRanges: Uint32Array,
+    after: Float32Array,
+    ranges: Uint32Array,
+  ): Promise<{ bytes: Buffer; changed: boolean }>;
   historyApplyDelta(base: Float32Array, delta: Uint8Array): Promise<Float32Array>;
+  copyPixelRanges(
+    dest: Float32Array,
+    destRanges: Uint32Array,
+    src: Float32Array,
+    srcRanges: Uint32Array,
+  ): Promise<void>;
   historyApplyDeltas(
     base: Float32Array,
     out: Float32Array,
@@ -267,6 +279,38 @@ export async function encodeHistoryDelta(
   return await compressDelta(
     await historyCodec().historyEncodeDelta(base, after, ranges, baseCompact, afterCompact, turns),
   );
+}
+
+/**
+ * Copies the pixels two compact range lists share from `src` into `dest`, on
+ * a thread of the pool, as `copyCompactOverlap` does. Neither array may
+ * change until it resolves.
+ */
+export async function copyPixelRanges(
+  dest: Float32Array,
+  destRanges: Uint32Array,
+  src: Float32Array,
+  srcRanges: Uint32Array,
+): Promise<void> {
+  await historyCodec().copyPixelRanges(dest, destRanges, src, srcRanges);
+}
+
+/**
+ * A stroke's delta cut from a base laid out over `baseRanges`, which hold the
+ * footprint, and the painted values over `ranges`. The base is read before
+ * this returns, so the caller may then write over it; the bytes compress
+ * after.
+ */
+export async function prepareHistoryDelta(
+  base: Float32Array,
+  baseRanges: Uint32Array,
+  after: Float32Array,
+  ranges: Uint32Array,
+): Promise<{ changed: boolean; bytes: Promise<Buffer> }> {
+  const { bytes, changed } = await historyCodec().historyEncodeDeltaOver(base, baseRanges, after, ranges);
+  const compressed = compressDelta(bytes);
+  void compressed.catch(() => {});
+  return { changed, bytes: compressed };
 }
 
 // Bytes past which a delta compresses as frames side by side, one a core,

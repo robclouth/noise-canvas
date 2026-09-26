@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const gate = vi.hoisted(() => ({
   stored: null as Float32Array | null,
   committed: [] as Float32Array[],
+  readRanges: null as ((ranges: Uint32Array) => Float32Array) | null,
+  prepared: [] as { base: Float32Array; baseRanges: Uint32Array; after: Float32Array; ranges: Uint32Array }[],
 }));
 
 vi.mock("@renderer/effects", () => ({ effects: {} }));
@@ -22,7 +24,7 @@ vi.mock("../history-manager", () => ({
     getCurrentId: () => "n1",
     movedOnlyByStrokes: (id: string | null) => id === "n1",
     awaitPackedReaders: vi.fn(async () => {}),
-    currentRanges: vi.fn(async () => null),
+    currentRanges: vi.fn(async (ranges: Uint32Array) => gate.readRanges?.(ranges) ?? null),
     currentBlockState: vi.fn(async () => (gate.stored ? Float32Array.from(gate.stored) : null)),
   })),
 }));
@@ -83,11 +85,22 @@ vi.mock("../host", () => ({
           levels: { startHop: 0, peaks: new Float32Array(0), overDb: new Float32Array(0) },
         };
       },
+      prepareHistoryDelta: async (
+        base: Float32Array,
+        baseRanges: Uint32Array,
+        after: Float32Array,
+        ranges: Uint32Array,
+      ) => {
+        gate.prepared.push({ base: Float32Array.from(base), baseRanges, after, ranges });
+        return { changed: true, bytes: Promise.resolve(new Uint8Array(0)) };
+      },
     },
   },
 }));
 
 import { createFilesSlice, openFiles, type CommitSource } from "../../store/files";
+import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
+import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 import { createBrushSlice } from "../../store/brush";
 import type { StrokeCommitSnapshot } from "../stroke-commit";
 import type { State, ZustandGet, ZustandSet } from "../../store/types";
@@ -302,5 +315,89 @@ describe("a commit whose canvas holds a window", () => {
     await brush.applyStrokeAtPosition({ beats: 0, pitch: 0 }, undefined, "Stroke", false);
 
     expect(commitStroke).not.toHaveBeenCalled();
+  });
+});
+
+describe("a commit over a view of the file", () => {
+  const long = {
+    ...createConstantQMockSpectrogramData({ durationSeconds: 40, sampleRate: 4000, bandsPerOctave: 6 }),
+    numChannels: 1,
+  };
+  const layout = long.synthesisMetadata;
+  const band = Math.floor(long.numBands / 2);
+  const k0 = Math.floor((0.52 * long.numFrames) / (1 << layout.bandStepLog2s[band]));
+  const painted = Uint32Array.of(layout.bandOffsets[band] + k0, 3);
+  const paintedValues = Float32Array.from({ length: 12 }, (_, i) => -1 - i);
+  const stored = Float32Array.from({ length: long.texels * 4 }, (_, i) => i * 0.25);
+
+  function openLongFile(): void {
+    openFiles[FILE_ID] = {
+      id: FILE_ID,
+      filePath: "/audio/long.wav",
+      displayName: "long.wav",
+      spectrogramData: long,
+      audioBuffer: audioBuffer(),
+      unprojectedPaint: false,
+      onsets: [],
+      onsetReference: { odfMax: 1, bandMax: new Float32Array(long.numBands) },
+      rendererRef: { current: {} },
+    } as unknown as (typeof openFiles)[string];
+  }
+
+  function viewSnapshot(reanalyzeEnabled: boolean): StrokeCommitSnapshot {
+    return {
+      ...wholeFileSnapshot(),
+      dirtyRegion: { startX: 0.5, endX: 0.55, startY: 0, endY: 1 },
+      dirtyRanges: painted,
+      reanalyzeEnabled,
+      hasUnprojectedPaint: false,
+      spec: long,
+    } as StrokeCommitSnapshot;
+  }
+
+  beforeEach(() => {
+    for (const id of Object.keys(openFiles)) delete openFiles[id];
+    gate.stored = stored;
+    gate.committed = [];
+    gate.prepared = [];
+    gate.readRanges = (ranges) => gatherPixelRanges(stored, ranges);
+  });
+
+  it("cuts the delta from the view as the store held it, then hands the addon the view with the stroke over it", async () => {
+    const { files } = makeStore();
+    openLongFile();
+
+    const outcome = await files.commitStroke(FILE_ID, viewSnapshot(false), {
+      data: null,
+      footprint: { ranges: painted, values: Promise.resolve(paintedValues) },
+    });
+
+    const view = outcome?.view;
+    expect(view).toBeTruthy();
+    expect(outcome?.preparedDelta?.ranges).toBe(painted);
+    expect(outcome?.baseFootprint).toBeNull();
+    expect(gate.prepared).toHaveLength(1);
+    const [prepared] = gate.prepared;
+    expect(prepared.baseRanges).toBe(view!.ranges);
+    expect(firstDifference(prepared.base, gatherPixelRanges(stored, view!.ranges))).toBe(-1);
+    expect(firstDifference(prepared.after, paintedValues)).toBe(-1);
+    const whole = Float32Array.from(stored);
+    scatterCompactPixelRanges(whole, paintedValues, painted);
+    expect(firstDifference(gate.committed[0], gatherPixelRanges(whole, view!.ranges))).toBe(-1);
+  });
+
+  it("keeps the footprint's old values instead when a projection may widen the delta", async () => {
+    const { files } = makeStore();
+    openLongFile();
+
+    const outcome = await files.commitStroke(FILE_ID, viewSnapshot(true), {
+      data: null,
+      footprint: { ranges: painted, values: Promise.resolve(paintedValues) },
+    });
+
+    expect(outcome?.view).toBeTruthy();
+    expect(outcome?.preparedDelta).toBeNull();
+    expect(gate.prepared).toHaveLength(0);
+    expect(firstDifference(outcome!.baseFootprint!, gatherPixelRanges(stored, painted))).toBe(-1);
   });
 });

@@ -70,6 +70,7 @@ import { historyCacheBudgets } from "../history-cache-budgets";
 import { serializeFileTask } from "../file-task-queue";
 import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stash";
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
+import { host } from "../host";
 import type { AudioHop } from "../audio-hop";
 import type { PhaseTurns } from "../../../../main/lib/types";
 import { applyPhaseTurns, applyPhaseTurnsCollecting } from "../../../../main/lib/history-delta";
@@ -1536,6 +1537,66 @@ describe("HistoryManager hops", () => {
     });
     expect(same.isNew).toBe(false);
     expect(same.id).toBe(aId);
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("stores the delta a commit cut before it ran, and only over the ranges it was cut for", async () => {
+    installManagerEnv();
+    const { canvas } = installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    canvas.set(root);
+
+    const ranges = new Uint32Array([2, 3]);
+    const a = paint(root, 2, 3, 1);
+    const after = gatherPixelRanges(a, ranges);
+    const cut = (base: Float32Array): Promise<Uint8Array> =>
+      host.analysis.encodeHistoryDelta(base, after, ranges, true, true);
+    const { id: aId, isNew } = await mgr.addStroke({
+      label: "A",
+      dimensions,
+      dirtyRanges: ranges,
+      afterFootprint: after,
+      preparedDelta: { ranges, changed: true, bytes: cut(gatherPixelRanges(root, ranges)) },
+    });
+    expect(isNew).toBe(true);
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
+    canvas.set(a);
+    await mgr.navigateToParent();
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(root));
+    await mgr.navigateToLastChild();
+    expect(Array.from(canvas)).toEqual(Array.from(a));
+
+    // Cut for other ranges, it is passed over for the saved values.
+    const b = paint(a, 2, 3, 2);
+    const other = { ranges: new Uint32Array(ranges), changed: true, bytes: cut(new Float32Array(after.length)) };
+    const { id: bId } = await mgr.addStroke({
+      label: "B",
+      dimensions,
+      dirtyRanges: ranges,
+      baseFootprint: after,
+      afterFootprint: gatherPixelRanges(b, ranges),
+      preparedDelta: other,
+    });
+    canvas.set(b);
+    await mgr.navigateToParent();
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
+    expect(mgr.getCurrentId()).toBe(aId);
+
+    // One that found nothing changed makes no node.
+    const same = await mgr.addStroke({
+      label: "same",
+      dimensions,
+      dirtyRanges: ranges,
+      afterFootprint: after,
+      preparedDelta: { ranges, changed: false, bytes: cut(after) },
+    });
+    expect([same.isNew, same.id]).toEqual([false, aId]);
+    expect(bId).not.toBe(aId);
 
     mgr.dispose();
     delete fakeOpenFiles["f1"];

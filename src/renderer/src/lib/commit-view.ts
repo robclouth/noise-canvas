@@ -48,6 +48,11 @@ export function scatterCommitPatch(
   }
 }
 
+/** True when every pixel of `ranges` lies in the view. */
+export function viewHolds(view: CommitView, ranges: Uint32Array): boolean {
+  return subtractPixelRanges(ranges, view.ranges).length === 0;
+}
+
 /**
  * The view's pixels for the addon: the pre-stroke values with the stroke's
  * footprint written over them, in place in `preStroke`. Null when the
@@ -60,7 +65,7 @@ export function composeViewBuffer(
   strokeValues: Float32Array,
   strokeRanges: Uint32Array,
 ): Float32Array | null {
-  if (subtractPixelRanges(strokeRanges, view.ranges).length > 0) return null;
+  if (!viewHolds(view, strokeRanges)) return null;
   copyCompactOverlap(preStroke, view.ranges, strokeValues, strokeRanges);
   return preStroke;
 }

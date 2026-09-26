@@ -79,6 +79,37 @@ export function pixelRangeCount(ranges: Uint32Array): number {
   return count;
 }
 
+/**
+ * `ranges` cut into pieces of at most `pixels` pixels, a range split where a
+ * piece ends, each with where its values start in a compact array of all of
+ * `ranges`.
+ */
+export function pixelRangePieces(ranges: Uint32Array, pixels: number): { ranges: Uint32Array; at: number }[] {
+  const pieces: { ranges: Uint32Array; at: number }[] = [];
+  let current: number[] = [];
+  let held = 0;
+  let at = 0;
+  for (let i = 0; i + 1 < ranges.length; i += 2) {
+    let start = ranges[i];
+    let left = ranges[i + 1];
+    while (left > 0) {
+      const take = Math.min(left, pixels - held);
+      current.push(start, take);
+      held += take;
+      start += take;
+      left -= take;
+      if (held === pixels) {
+        pieces.push({ ranges: Uint32Array.from(current), at });
+        at += held * 4;
+        current = [];
+        held = 0;
+      }
+    }
+  }
+  if (held > 0) pieces.push({ ranges: Uint32Array.from(current), at });
+  return pieces;
+}
+
 /** Whether two float arrays hold the same bit patterns, NaNs and signed zeros included. */
 export function float32BitsEqual(a: Float32Array, b: Float32Array): boolean {
   if (a.length !== b.length) return false;

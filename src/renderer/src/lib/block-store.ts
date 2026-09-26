@@ -67,7 +67,24 @@ export type BlockStoreOptions = {
    * as a texture. Defaults to the coefficients alone.
    */
   texelCount?: number;
+  /**
+   * Copies the pixels two compact range lists share off the JS thread; a
+   * large range read copies each block through it. Defaults to the host's.
+   */
+  copyRanges?: PixelRangeCopy;
+  /** Pixels past which a range read copies off the JS thread. */
+  offThreadReadPixels?: number;
 };
+
+/** An off-thread copyCompactOverlap: neither array may change until it resolves. */
+export type PixelRangeCopy = (
+  dest: Float32Array,
+  destRanges: Uint32Array,
+  src: Float32Array,
+  srcRanges: Uint32Array,
+) => Promise<void>;
+
+const OFF_THREAD_READ_PIXELS = 1 << 20;
 
 /**
  * A file's packed state: the tier the strokes patch, and the seeded state
@@ -123,6 +140,8 @@ export class BlockStore implements PackedStateStore {
   private readonly backend: BlockBackend;
   private readonly overlay: BlockBackend | null;
   private readonly codec: BlockCodec;
+  private readonly copyRanges: PixelRangeCopy | undefined;
+  private readonly offThreadReadPixels: number;
   private readonly clean: ByteBudgetCache<Float32Array>;
   // Seeded copies of blocks, kept apart from the resident ones that patches
   // mutate in place.
@@ -134,8 +153,9 @@ export class BlockStore implements PackedStateStore {
   private readonly overlayOnDisk = new Map<number, boolean>();
   private readonly dirty = new Map<number, Float32Array>();
   private readonly dirtyVersion = new Map<number, number>();
-  // Arrays a flush is encoding. A patch copies such a block before writing.
-  private readonly encoding = new Set<Float32Array>();
+  // Arrays a flush is encoding or a read is copying off the JS thread, with
+  // how many are. A patch copies such a block before writing.
+  private readonly pinned = new Map<Float32Array, number>();
   private readonly inflight = new Map<number, Promise<Float32Array>>();
   private readonly ranges: Array<Uint32Array | undefined>;
   private readonly texelCount: number;
@@ -154,6 +174,8 @@ export class BlockStore implements PackedStateStore {
     this.backend = backend;
     this.overlay = options.overlay ?? null;
     this.codec = options.codec ?? packedBlockCodec;
+    this.copyRanges = options.copyRanges ?? host.analysis?.copyPixelRanges;
+    this.offThreadReadPixels = options.offThreadReadPixels ?? OFF_THREAD_READ_PIXELS;
     this.texelCount = Math.max(options.texelCount ?? 0, layoutTexels(grid.layout));
     this.maxResidentBytes = options.maxResidentBytes ?? DEFAULT_RESIDENT_BYTES;
     this.clean = new ByteBudgetCache<Float32Array>(this.maxResidentBytes, (block) => block.byteLength);
@@ -344,17 +366,7 @@ export class BlockStore implements PackedStateStore {
   /** The pixels `ranges` names as they were seeded, laid end to end in range order. */
   async readRootRanges(ranges: Uint32Array): Promise<Float32Array> {
     if (this.disposed) throw new Error("block store is disposed");
-    const out = new Float32Array(pixelRangeCount(ranges) * 4);
-    let since = performance.now();
-    await this.walk(
-      blocksForPixelRanges(this.grid, ranges),
-      (index, sweep) => this.rootBlock(index, sweep),
-      async (index, values) => {
-        copyCompactOverlap(out, ranges, values, this.blockRanges(index));
-        since = await yieldIfLong(since);
-      },
-    );
-    return out;
+    return await this.gather(ranges, (index, sweep) => this.rootBlock(index, sweep));
   }
 
   /**
@@ -362,13 +374,48 @@ export class BlockStore implements PackedStateStore {
    * be sorted and non-overlapping, as every footprint in the app is.
    */
   async readRanges(ranges: Uint32Array): Promise<Float32Array> {
+    return await this.gather(ranges, this.current);
+  }
+
+  /**
+   * The pixels `ranges` names from the blocks `load` gives, in range order. A
+   * large read copies each block off the JS thread as it arrives, the blocks
+   * side by side.
+   */
+  private async gather(
+    ranges: Uint32Array,
+    load: (index: number, sweep: boolean) => Promise<Float32Array>,
+  ): Promise<Float32Array> {
     const out = new Float32Array(pixelRangeCount(ranges) * 4);
+    const copy = pixelRangeCount(ranges) > this.offThreadReadPixels ? this.copyRanges : undefined;
+    const copies: Promise<void>[] = [];
     let since = performance.now();
-    await this.walk(blocksForPixelRanges(this.grid, ranges), this.current, async (index, values) => {
-      copyCompactOverlap(out, ranges, values, this.blockRanges(index));
-      since = await yieldIfLong(since);
-    });
+    try {
+      await this.walk(blocksForPixelRanges(this.grid, ranges), load, async (index, values) => {
+        if (copy) {
+          copies.push(this.whilePinned(values, () => copy(out, ranges, values, this.blockRanges(index))));
+          return;
+        }
+        copyCompactOverlap(out, ranges, values, this.blockRanges(index));
+        since = await yieldIfLong(since);
+      });
+    } finally {
+      await Promise.allSettled(copies);
+    }
+    await Promise.all(copies);
     return out;
+  }
+
+  /** Runs `work` with `block` pinned, so a patch meanwhile writes to a copy of it. */
+  private async whilePinned<T>(block: Float32Array, work: () => Promise<T>): Promise<T> {
+    this.pinned.set(block, (this.pinned.get(block) ?? 0) + 1);
+    try {
+      return await work();
+    } finally {
+      const left = (this.pinned.get(block) ?? 1) - 1;
+      if (left > 0) this.pinned.set(block, left);
+      else this.pinned.delete(block);
+    }
   }
 
   /** The magnitudes at the taps `runs` names, two floats per tap in run order. */
@@ -457,9 +504,9 @@ export class BlockStore implements PackedStateStore {
     }
   }
 
-  /** The block itself, or a copy of it while a flush is encoding it. */
+  /** The block itself, or a copy of it while a flush or a read holds it. */
   private writable(block: Float32Array): Float32Array {
-    return this.encoding.has(block) ? block.slice() : block;
+    return this.pinned.has(block) ? block.slice() : block;
   }
 
   private markDirty(index: number, block: Float32Array): void {
@@ -505,13 +552,7 @@ export class BlockStore implements PackedStateStore {
     const flushOne = async (index: number, block: Float32Array): Promise<void> => {
       if (this.disposed) return;
       const version = this.dirtyVersion.get(index);
-      this.encoding.add(block);
-      let bytes: Uint8Array;
-      try {
-        bytes = await this.codec.encode(block);
-      } finally {
-        this.encoding.delete(block);
-      }
+      const bytes = await this.whilePinned(block, () => this.codec.encode(block));
       if (this.disposed) return;
       await (this.overlay ?? this.backend).write(index, bytes);
       if (this.dirtyVersion.get(index) !== version) return;

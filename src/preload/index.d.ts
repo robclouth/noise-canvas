@@ -265,6 +265,27 @@ declare global {
         afterCompact?: boolean,
         turns?: PhaseTurns,
       ) => Promise<Uint8Array>;
+      /**
+       * A stroke's delta cut from a base laid out over `baseRanges`, which
+       * hold the footprint. The base is read once this resolves; the bytes
+       * compress after.
+       */
+      /**
+       * Copies the pixels two compact range lists share from `src` into
+       * `dest` off the JS thread. Neither array may change until it resolves.
+       */
+      copyPixelRanges?: (
+        dest: Float32Array,
+        destRanges: Uint32Array,
+        src: Float32Array,
+        srcRanges: Uint32Array,
+      ) => Promise<void>;
+      prepareHistoryDelta?: (
+        base: Float32Array,
+        baseRanges: Uint32Array,
+        after: Float32Array,
+        ranges: Uint32Array,
+      ) => Promise<{ changed: boolean; bytes: Promise<Uint8Array> }>;
       readHistoryDeltaTurns: (bytes: Uint8Array) => Promise<PhaseTurns | null>;
       applyHistoryDelta: (base: Float32Array, bytes: Uint8Array) => Promise<Float32Array>;
       applyHistoryDeltas: (

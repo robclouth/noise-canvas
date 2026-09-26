@@ -44,6 +44,7 @@ import {
   type DabPainter,
   type FrameSpan,
 } from "./held-dabs";
+import { host } from "./host";
 import { PackedWindow } from "./packed-window";
 import {
   composePixelRangeValues,
@@ -53,6 +54,7 @@ import {
   intersectPixelRanges,
   mergePixelRanges,
   pixelRangeCount,
+  pixelRangePieces,
   subtractPixelRanges,
   tapCount,
   tapSpanRanges,
@@ -100,6 +102,10 @@ type PendingPaint = {
 
 /** Pixels the pen-up read copies between two checks for a frame. */
 const READ_PIECE_PIXELS = 1 << 16;
+
+/** Pixels past which the pen-up read copies off the JS thread, and how many each copy takes. */
+const OFF_THREAD_READ_PIXELS = 1 << 20;
+const OFF_THREAD_PIECE_PIXELS = 1 << 21;
 
 /** Work the slot refresh after a commit does before it lets a frame through. */
 const SLOT_REFRESH_BUDGET_MS = 4;
@@ -1268,8 +1274,21 @@ export class WindowedCanvas {
     const slotValues = slotRead ? await slotRead : null;
     // What the canvas no longer holds was kept in the stroke slots or carried
     // into RAM as the window slid; a block is in one of the three at a time.
-    // A piece at a time, so a stroke over most of the file leaves room for frames.
+    // A piece at a time, so a stroke over most of the file leaves room for
+    // frames; a large read copies its pieces off the JS thread, side by side.
     const out = new Float32Array(pixelRangeCount(pixelRanges) * 4);
+    const copy = host.analysis?.copyPixelRanges;
+    if (copy && pixelRangeCount(pixelRanges) > OFF_THREAD_READ_PIXELS) {
+      await Promise.all(
+        pixelRangePieces(pixelRanges, OFF_THREAD_PIECE_PIXELS).map(async (piece) => {
+          const part = out.subarray(piece.at, piece.at + pixelRangeCount(piece.ranges) * 4);
+          await copy(part, piece.ranges, inView, clipped.fileRanges);
+          if (slotValues) await copy(part, piece.ranges, slotValues, slotted);
+          carried.copyInto(part, piece.ranges);
+        }),
+      );
+      return out;
+    }
     const piece = new Uint32Array(2);
     let since = performance.now();
     let at = 0;
