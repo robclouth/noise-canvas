@@ -30,6 +30,7 @@ import {
 import type { BandLayout } from "./band-layout";
 import { bandMetadataTexture } from "./band-metadata-texture";
 import { copyMaterial } from "../components/copy-material";
+import { inverseMapMaterial } from "../components/inverse-map-material";
 import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
 import { scatterIntoTargets } from "./target-scatter";
@@ -384,7 +385,9 @@ export class StrokeRenderer {
   private viewSize: Vector2;
   private viewSpec: BandLayout & { textureWidth: number; textureHeight: number };
   private viewMetadataTex: DataTexture;
-  private viewInverseMapTex: DataTexture;
+  private viewInverseMapTex: Texture;
+  // The target the inverse map was drawn into, when the GPU drew it.
+  private viewInverseMapTarget: WebGLRenderTarget | null = null;
   private ownsViewTextures = false;
 
   // FBOs for ping-pong rendering
@@ -512,13 +515,7 @@ export class StrokeRenderer {
     // and inverse-map textures; the whole-file default shares the file's.
     if (view) {
       this.viewMetadataTex = bandMetadataTexture(view.layout, spectrogramData.sampleRate);
-      this.viewInverseMapTex = viewDataTexture(
-        canvasViewInverseMap(view),
-        textureWidth,
-        textureHeight,
-        RGFormat,
-        "RG32F",
-      );
+      this.viewInverseMapTex = this.drawInverseMap(view, this.viewMetadataTex);
       this.ownsViewTextures = true;
     } else {
       this.viewMetadataTex = textures.metadataTex;
@@ -2508,7 +2505,7 @@ export class StrokeRenderer {
 
   getTextures(): {
     packed: WebGLRenderTarget;
-    inverse: DataTexture;
+    inverse: Texture;
     metadata: DataTexture;
     original: Texture;
   } {
@@ -2687,18 +2684,51 @@ export class StrokeRenderer {
     if (layoutChanged) {
       if (this.ownsViewTextures) {
         this.viewMetadataTex.dispose();
-        this.viewInverseMapTex.dispose();
+        this.disposeInverseMap();
       }
       this.viewMetadataTex = bandMetadataTexture(next.layout, this.spectrogramData.sampleRate);
-      this.viewInverseMapTex = viewDataTexture(
-        canvasViewInverseMap(next),
-        next.textureWidth,
-        next.textureHeight,
-        RGFormat,
-        "RG32F",
-      );
+      this.viewInverseMapTex = this.drawInverseMap(next, this.viewMetadataTex);
       this.ownsViewTextures = true;
     }
+  }
+
+  /**
+   * A view's inverse map. The GPU draws it from the view's metadata texture
+   * while float offsets hold the view exactly; past that it is built here and
+   * uploaded, as a draw would place some pixels in the wrong band.
+   */
+  private drawInverseMap(view: CanvasView, metadata: DataTexture): Texture {
+    if (view.texels > 2 ** 24) {
+      return viewDataTexture(canvasViewInverseMap(view), view.textureWidth, view.textureHeight, RGFormat, "RG32F");
+    }
+    const target = new WebGLRenderTarget(view.textureWidth, view.textureHeight, {
+      type: FloatType,
+      format: RGFormat,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      generateMipmaps: false,
+    });
+    target.texture.internalFormat = "RG32F";
+    const previousMaterial = this.fboMesh.material;
+    const previousTarget = this.gl.getRenderTarget();
+    inverseMapMaterial.uniforms.metaTex.value = metadata;
+    inverseMapMaterial.uniforms.numBands.value = view.layout.numBands;
+    inverseMapMaterial.uniforms.textureWidth.value = view.textureWidth;
+    this.fboMesh.material = inverseMapMaterial;
+    this.gl.setRenderTarget(target);
+    this.gl.render(this.fboScene, this.camera);
+    this.gl.setRenderTarget(previousTarget);
+    this.fboMesh.material = previousMaterial;
+    inverseMapMaterial.uniforms.metaTex.value = null;
+    this.viewInverseMapTarget = target;
+    return target.texture;
+  }
+
+  private disposeInverseMap(): void {
+    if (this.viewInverseMapTarget) this.viewInverseMapTarget.dispose();
+    else this.viewInverseMapTex.dispose();
+    this.viewInverseMapTarget = null;
   }
 
   /**
@@ -2922,7 +2952,7 @@ export class StrokeRenderer {
     this.previewRangeTex.dispose();
     if (this.ownsViewTextures) {
       this.viewMetadataTex.dispose();
-      this.viewInverseMapTex.dispose();
+      this.disposeInverseMap();
     }
     this.displayPyramid?.dispose();
     this.displayPyramid = null;

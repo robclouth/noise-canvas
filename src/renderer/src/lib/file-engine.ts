@@ -562,7 +562,7 @@ export class FileEngine {
   };
   getTextures = (): {
     packed: WebGLRenderTarget;
-    inverse: DataTexture;
+    inverse: Texture;
     metadata: DataTexture;
     original: Texture;
   } | null => {

@@ -112,7 +112,7 @@ export interface FileRendererHandle {
   /** Returns the textures used for rendering. */
   getTextures: () => {
     packed: WebGLRenderTarget;
-    inverse: DataTexture;
+    inverse: Texture;
     metadata: DataTexture;
     original: Texture;
   } | null;
