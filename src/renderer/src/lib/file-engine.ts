@@ -35,6 +35,7 @@ import { StrokeRenderer, type SourceFileInfo, type StrokeTextures } from "./stro
 import { brushUnionForAim } from "./brush-anchor";
 import { driveDabLog, recordDab } from "./drive-probe";
 import { unitsToUv } from "./utils";
+import { CoarseCanvas } from "./coarse-canvas";
 import { WindowedCanvas, type UvRegion } from "./windowed-canvas";
 
 type EngineTextures = { packed: DataTexture; inverse: DataTexture; meta: DataTexture };
@@ -94,6 +95,7 @@ const EDIT_PROGRESS_INTERVAL_MS = 100;
 export class FileEngine {
   readonly strokeRendererRef: { current: StrokeRenderer | null } = { current: null };
   readonly canvasRef: { current: WindowedCanvas | null } = { current: null };
+  readonly coarseRef: { current: CoarseCanvas | null } = { current: null };
   readonly historyHookedRef = { current: false };
   readonly liveTexturesRef: { current: EngineTextures | null } = { current: null };
   readonly isParkedRef: { current: boolean | undefined } = { current: false };
@@ -239,13 +241,30 @@ export class FileEngine {
           };
         },
       });
+      this.coarseRef.current = new CoarseCanvas(gl);
     }
     return canvasRef.current;
   };
   disposeCanvas = (): void => {
-    const { canvasRef } = this;
+    const { canvasRef, coarseRef } = this;
+    coarseRef.current?.dispose();
+    coarseRef.current = null;
     canvasRef.current?.dispose();
     canvasRef.current = null;
+  };
+  /**
+   * Paints a dab on the coarse canvas too, as a preview or as part of the
+   * stroke on it, for a canvas that holds a window of the file. False when
+   * the coarse canvas has no picture to paint on yet.
+   */
+  paintCoarse = (state: State, aim: Vector2, span: DabSpan, preview: boolean, paint: StrokePainter): boolean => {
+    const coarse = this.coarseRef.current;
+    const parent = this.strokeRendererRef.current;
+    if (!coarse || !parent || this.canvasRef.current?.holdsWholeFile !== false) return false;
+    if (!coarse.sync(parent, this.context.spectrogramData.numFrames)) return false;
+    const target = coarse.target;
+    if (!target) return false;
+    return paint(state, aim, preview, { span, beside: { ...target, reads: span.hover } });
   };
   dispose = (): void => {
     if (this.disposed) return;
@@ -631,6 +650,7 @@ export class FileEngine {
     const hadStroke = canvas?.strokeDiscardable ?? false;
     try {
       const restoration = canvas ? canvas.discardStroke() : Promise.resolve(false);
+      this.coarseRef.current?.endStroke();
       revision = canvas?.strokeRevision;
       const restored = await restoration;
       if (canvas !== canvasRef.current || revision !== canvas?.strokeRevision) return false;
@@ -680,6 +700,13 @@ export class FileEngine {
     this.strokeTrail.length = 0;
     this.lastStrokeDab = null;
     this.canvasRef.current.beginStroke();
+    const parent = this.strokeRendererRef.current;
+    if (
+      parent &&
+      !this.canvasRef.current.holdsWholeFile &&
+      this.coarseRef.current?.sync(parent, this.context.spectrogramData.numFrames)
+    )
+      this.coarseRef.current.beginStroke();
     return true;
   };
   endStroke = () => {
@@ -901,7 +928,13 @@ export class FileEngine {
       fileDabSpan(strokeContext, state, cursorPos, canvas, resolvedUnion),
     refusal: (state: State, aim?: { x: number; y: number }): string | null =>
       fileStrokeRefusal(strokeContext, state, aim),
-    layDab: (state, aim, canvas, span, options, painted) =>
-      !this.rollbackFailed && paintDab(strokeContext, canvas, state, aim, span, options, painted),
+    layDab: (state, aim, canvas, span, options, painted) => {
+      if (this.rollbackFailed || !paintDab(strokeContext, canvas, state, aim, span, options, painted)) return false;
+      if (this.coarseRef.current?.holdsStroke)
+        this.paintCoarse(state, aim, span, false, (dabState, cursor, preview, coarse) =>
+          dispatchFileStroke(strokeContext, dabState, cursor, preview, { ...options, ...coarse }),
+        );
+      return true;
+    },
   });
 }

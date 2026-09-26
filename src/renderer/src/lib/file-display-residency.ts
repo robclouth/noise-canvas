@@ -1,6 +1,7 @@
 import type { RawShaderMaterial, WebGLRenderer } from "three";
 import type { SpectrogramData } from "../store/types";
 import type { AimRest } from "./canvas-window";
+import type { CoarseCanvas } from "./coarse-canvas";
 import { displayLevelChoice } from "./display-pyramid";
 import type { DisplayTileRing } from "./display-tiles-textures";
 import type { StrokeRenderer } from "./stroke-renderer";
@@ -13,6 +14,8 @@ export interface FileDisplayResidencyContext {
   glRef: { current: WebGLRenderer };
   strokeRendererRef: { current: StrokeRenderer | null };
   canvasRef: { current: WindowedCanvas | null };
+  /** The coarse canvas, which takes the level of the picture the screen draws. */
+  coarseRef?: { current: CoarseCanvas | null };
   invalidateRef: { current: () => void };
   ringRequestsRef: { current: Set<string> };
   loadingSinceRef: { current: number | null };
@@ -137,6 +140,7 @@ export function applyDisplayPyramidUniforms(
     return;
   }
   const framesPerPixel = spectrogramData.numFrames / (Math.pow(2, viewZoomPower) * Math.max(1, viewportWidth));
+  context.coarseRef?.current?.aimAt(framesPerPixel);
   const finestStepLog2 = pyramid.levels[0].stepLog2;
   const ringLacks = applyDisplayTileUniforms(
     context,

@@ -72,6 +72,7 @@ wider than the canvas too: it paints a block at a time (rule 1).
 | `lib/whole-file-gate.ts`   | what a brush asks for that a window cannot serve                           |
 | `lib/stroke-slots.ts`      | a stroke's paint and masks on blocks that left the window, on the GPU      |
 | `lib/carried-paint.ts`     | the same in RAM, for blocks the stroke slots had no room for               |
+| `lib/coarse-canvas.ts`     | the file at screen resolution, for a preview and a stroke not yet landed   |
 | `lib/windowed-canvas.ts`   | **the boundary.** File coordinates in, view coordinates out                |
 | `lib/stroke-renderer.ts`   | painting, in view coordinates only                                         |
 
@@ -437,6 +438,21 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     (`WindowedCanvas.pendingWork`) in a dialog whose Cancel takes the stroke
     back.
 
+18. **The picture shows an edit before its full-resolution paint lands.** A
+    dab the canvas cannot show whole, and every dab of a stroke on a file the
+    canvas holds a window of, is painted on the coarse canvas too
+    (`lib/coarse-canvas.ts`): a renderer beside the canvas over the whole
+    file, laid out as the display pyramid level the screen draws (at most a
+    million texels), holding that level's magnitudes with zero phase. The
+    display draws, in order, the canvas's preview, a dab previewed on the
+    coarse canvas, and outside the canvas the stroke painted on it
+    (`overlayDbAt` in `display.frag`). The coarse canvas is drawn again from
+    the pyramid when the level or the picture moves (`DisplayPyramid.revision`),
+    except while it holds a stroke, which it lets go once the canvas has
+    settled and the store holds the paint (`hasUnstoredPaint`). It is a
+    preview: phase is zero and the level is coarse, so it shows where the
+    edit lands and how loud, not every detail.
+
 ## How to check it still works
 
 The unit suite cannot see most of this: it compares two renderers, and both can
@@ -447,6 +463,10 @@ npm run test:run          # 1400+ unit tests, whole-file path
 npm run test:addon        # the native addon
 npm run window:check      # builds windowed, paints, and checks the picture
 ```
+
+`npm run drive:preview` checks the coarse picture in the built app: a
+full-length brush must darken its row while it hovers, and a dab of it must
+show well before its commit lands.
 
 `window:check` is the one that catches the bugs the suite cannot: it opens a
 file with an eight-block window, paints, and fails if any column of the

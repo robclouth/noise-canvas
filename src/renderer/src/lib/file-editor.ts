@@ -201,12 +201,16 @@ export function prepareFileEditor(
     canvas.dropSourcesExcept(sources);
     canvas.dropImpulsesExcept(needs.impulses);
     if (preview) {
-      if (!canvas.holdsFrames(hover.start, hover.end, original) || !dispatchStroke(state, cursorPos, true, { span })) {
-        displayMode.current = "committed";
-      } else {
-        displayMode.current = "preview";
-        applyStroke.current = false;
-      }
+      // A dab the canvas cannot show whole is previewed on the coarse canvas.
+      const writes = span.extent.writes;
+      const whole =
+        canvas.holdsFrames(hover.start, hover.end, original) &&
+        writes.every((write) => canvas.holdsFrames(write.start, write.end, original));
+      const shown = whole && dispatchStroke(state, cursorPos, true, { span });
+      const coarse = !whole && engine.paintCoarse(state, cursorPos, span, true, dispatchStroke);
+      engine.coarseRef.current?.showPreview(coarse);
+      displayMode.current = shown || coarse ? "preview" : "committed";
+      if (shown) applyStroke.current = false;
     } else {
       engine.paintStrokeTrail(state, canvas, spectrogramData, bpm, layDab, dabSpan);
       engine.lastStrokeDab = cursorPosition;
@@ -224,6 +228,11 @@ export function prepareFileEditor(
   if (state.pickingFileParam !== null) {
     displayMode.current = "committed";
   }
+  const coarse = engine.coarseRef.current;
+  if (displayMode.current !== "preview") coarse?.showPreview(false);
+  // The stroke's dabs stay on the coarse canvas until the store holds them.
+  if (coarse?.holdsStroke && !canvas.isStroking && canvas.pendingWork === 0 && !canvas.hasUnstoredPaint)
+    coarse.endStroke();
   const isPreview = displayMode.current === "preview";
   const previewDisplay = strokeRenderer.getPreviewDisplay();
 
@@ -234,6 +243,15 @@ export function prepareFileEditor(
   displayMaterial.uniforms.previewTex.value = previewDisplay.preview;
   displayMaterial.uniforms.previewBinRangesTex.value = previewDisplay.binRanges;
   displayMaterial.uniforms.previewActive.value = isPreview && previewDisplay.active;
+  const coarsePreview = coarse?.previewDisplay() ?? null;
+  const coarseStroke = coarse?.strokeDisplay() ?? null;
+  displayMaterial.uniforms.coarseMetaTex.value = coarse?.metadata ?? null;
+  displayMaterial.uniforms.coarseCommittedTex.value = coarsePreview?.committed ?? coarseStroke?.committed ?? null;
+  displayMaterial.uniforms.coarsePreviewTex.value = coarsePreview?.preview ?? null;
+  displayMaterial.uniforms.coarsePreviewBinRangesTex.value = coarsePreview?.binRanges ?? null;
+  displayMaterial.uniforms.coarsePreviewActive.value = coarsePreview !== null;
+  displayMaterial.uniforms.coarseStrokeBinRangesTex.value = coarseStroke?.binRanges ?? null;
+  displayMaterial.uniforms.coarseStrokeActive.value = coarseStroke !== null;
 
   const displayBrushAnchor = resolveBrushAnchor(brushOriginUv, displayFullAxes.fullTime, displayFullAxes.fullPitch);
   displayMaterial.uniforms.brushBottomLeftUv.value = displayBrushAnchor;

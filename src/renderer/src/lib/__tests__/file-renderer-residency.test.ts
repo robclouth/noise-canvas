@@ -597,6 +597,59 @@ describe("visible screen residency", () => {
   });
 });
 
+describe("the coarse canvas", () => {
+  // Eight seconds of brush turning the gain down, twice what a two-block window holds.
+  const wide = () => brush(1, false, false, false, { brushSizeTime: 16 });
+
+  async function aimAt(rig: Awaited<ReturnType<typeof mount>>, x: number): Promise<void> {
+    const [beats, pitch] = uvToUnits(x, 0.5, 120, 300, rig.data.bandsPerOctave, rig.data.numBands);
+    rig.useTransientStore.setState({ cursorPosition: { beats, pitch }, cursorVisible: true });
+    await vi.waitFor(() => {
+      rig.frame();
+      expect(rig.strokeRenderer.getDisplayPyramid()?.texture(0)).toBeTruthy();
+    });
+  }
+
+  it("previews a dab the window cannot show whole, darker where the dab turns the gain down", async () => {
+    const rig = await mount(wide(), 2);
+    await aimAt(rig, 0.5);
+    const material = rig.getMaterial()!;
+    await vi.waitFor(() => {
+      rig.ref.current!.renderStroke(true);
+      rig.frame();
+      expect(material.uniforms.coarsePreviewActive.value).toBe(true);
+    });
+    const { createByteTarget, renderMaterialToBytes } = await import("../snapshot-capture");
+    const target = createByteTarget(300, 20);
+    disposers.push(() => target.dispose());
+    material.uniforms.drawOverlays.value = false;
+    const brightness = async (): Promise<number> => {
+      const pixels = (await renderMaterialToBytes(rig.gl, material, target))!;
+      let sum = 0;
+      for (let y = 0; y < 20; y++) for (let x = 147; x < 153; x++) sum += pixels[(y * 300 + x) * 4];
+      return sum;
+    };
+    const previewed = await brightness();
+    material.uniforms.coarsePreviewActive.value = false;
+    expect(previewed).toBeLessThan(await brightness());
+  });
+
+  it("shows a stroke's dabs from the coarse canvas until the stroke has settled", async () => {
+    const rig = await mount(wide(), 2);
+    await aimAt(rig, 0.5);
+    const material = rig.getMaterial()!;
+    const handle = rig.ref.current!;
+    handle.beginStroke();
+    handle.renderStroke(false);
+    rig.frame();
+    expect(material.uniforms.coarseStrokeActive.value).toBe(true);
+    expect(await handle.settleStroke()).toEqual({ status: "completed" });
+    handle.endStroke();
+    rig.frame();
+    expect(material.uniforms.coarseStrokeActive.value).toBe(false);
+  });
+});
+
 it("admits and paints a dab wider than the window", async () => {
   const state = brush(0);
   const rig = await mount(state, 2);
@@ -647,13 +700,15 @@ describe("pending frame dab settlement", () => {
     const aim = 0.7;
     const [beats, pitch] = uvToUnits(aim, 0.5, 120, duration, rig.data.bandsPerOctave, rig.data.numBands);
     rig.useTransientStore.setState({ cursorPosition: { beats, pitch }, cursorVisible: true });
-    const painted = vi.spyOn(StrokeRenderer.prototype, "renderStroke");
+    const spy = vi.spyOn(StrokeRenderer.prototype, "renderStroke");
+    // The coarse canvas paints the stroke too, on a renderer of its own.
+    const painted = () => spy.mock.contexts.filter((context) => context === rig.strokeRenderer).length;
     handle.beginStroke();
     handle.renderStroke(false);
-    expect(painted).not.toHaveBeenCalled();
+    expect(painted()).toBe(0);
 
     await handle.settleStroke();
-    expect(painted).toHaveBeenCalledTimes(1);
+    expect(painted()).toBe(1);
     const footprint = handle.getCommittedFootprintUv();
     expect(footprint).not.toBeNull();
     const ranges = handle.getDirtyPixelRanges()!;
@@ -662,13 +717,13 @@ describe("pending frame dab settlement", () => {
     expect(committed.some((value, i) => Math.abs(value - original[i]) > 1e-6)).toBe(true);
     handle.endStroke();
     rig.frame();
-    expect(painted).toHaveBeenCalledTimes(1);
+    expect(painted()).toBe(1);
     expect(await handle.readPixelRanges(ranges)).toEqual(committed);
 
     handle.beginStroke();
     handle.renderStrokeBatch([{ state: rig.state, aimX: aim, aimY: 0.5 }]);
     await handle.settleStroke();
-    expect(painted).toHaveBeenCalledTimes(2);
+    expect(painted()).toBe(2);
     expect(handle.getCommittedFootprintUv()).toEqual(footprint);
     handle.endStroke();
   });

@@ -52,6 +52,19 @@ uniform sampler2D previewTex;
 uniform sampler2D previewBinRangesTex;
 uniform bool previewActive;
 
+// The coarse canvas: the file at the resolution the screen shows it, over the
+// whole file. A dab the canvas cannot show whole is previewed on it, in the
+// bins coarsePreviewBinRangesTex holds; a stroke on a windowed file is painted
+// on it as well, in the bins coarseStrokeBinRangesTex holds, and shows outside
+// the canvas until its full-resolution paint lands.
+uniform sampler2D coarseMetaTex;
+uniform sampler2D coarseCommittedTex;
+uniform sampler2D coarsePreviewTex;
+uniform sampler2D coarsePreviewBinRangesTex;
+uniform bool coarsePreviewActive;
+uniform sampler2D coarseStrokeBinRangesTex;
+uniform bool coarseStrokeActive;
+
 // The canvas holds the committed state over a block-aligned frame span of the
 // file, laid out by its own metadata; these place that span on the file's
 // timeline. The preview's bin ranges are in the same view-local bins.
@@ -138,28 +151,48 @@ bool sampleLevelDb(vec2 uv, sampler2D levelTex, sampler2D levelMetaTex, out vec2
     return true;
 }
 
-// The uncommitted preview's dB pair, where the preview covers this bin. The
-// preview lives on the canvas in the source layout, so it is addressed there
-// rather than in a level's. A tap outside the preview's ranges reads the
-// committed canvas, the way the canvas path picks per texel.
-bool previewDbAt(vec2 uv, out vec2 db) {
-    if (!previewActive) return false;
+// True when the canvas view spans this unpacked UV.
+bool canvasSpans(vec2 uv) {
     vec2 viewUv = canvasViewUv(uv);
+    return viewUv.x >= 0.0 && viewUv.x <= 1.0;
+}
+
+// The dB pair a packed picture holds at `viewUv` of its own span, where
+// `binRanges` says `painted` covers either tap's bin: each tap is read from
+// `painted` where it is covered and from `under` otherwise. False where
+// neither tap is covered.
+bool paintedDbAt(vec2 viewUv, sampler2D metaTex, float frameCount, sampler2D painted, sampler2D under,
+                 sampler2D binRanges, out vec2 db) {
     if (viewUv.x < 0.0 || viewUv.x > 1.0) return false;
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
-    packedInterpBins(viewUv, canvasMetadataTex, canvasFrameCount, sourceBandCount,
+    packedInterpBins(viewUv, metaTex, frameCount, sourceBandCount,
                      bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
-    vec2 bins = texelFetch(previewBinRangesTex, ivec2(int(bandIndex), 0), 0).rg;
+    vec2 bins = texelFetch(binRanges, ivec2(int(bandIndex), 0), 0).rg;
     bool covers0 = timeIndex0 >= bins.x && timeIndex0 < bins.y;
     bool covers1 = timeIndex1 >= bins.x && timeIndex1 < bins.y;
     if (!covers0 && !covers1) return false;
-    ivec2 texSize = textureSize(previewTex, 0);
-    vec4 sample1 = fetchDisplayTexel(int(bandIndex), bandStartOffset, timeIndex0, texSize);
-    vec4 sample2 = fetchDisplayTexel(int(bandIndex), bandStartOffset, timeIndex1, texSize);
+    ivec2 texSize = textureSize(painted, 0);
+    ivec2 texel0 = packedTexel(bandStartOffset + timeIndex0, texSize);
+    ivec2 texel1 = packedTexel(bandStartOffset + timeIndex1, texSize);
+    vec4 sample1 = covers0 ? texelFetch(painted, texel0, 0) : texelFetch(under, texel0, 0);
+    vec4 sample2 = covers1 ? texelFetch(painted, texel1, 0) : texelFetch(under, texel1, 0);
     vec2 left = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
     vec2 right = interpolateComplex(sample1.ba, sample2.ba, timeFraction);
     db = vec2(displayMagToDb(left.x), displayMagToDb(right.x));
     return true;
+}
+
+// Paint not yet in the committed picture: the canvas's preview, else a dab
+// previewed on the coarse canvas, else outside the canvas a stroke painted on
+// the coarse canvas. False where none of them covers this UV.
+bool overlayDbAt(vec2 uv, out vec2 db) {
+    if (previewActive && paintedDbAt(canvasViewUv(uv), canvasMetadataTex, canvasFrameCount, previewTex,
+                                     sourceSpectrogramTex, previewBinRangesTex, db)) return true;
+    if (coarsePreviewActive && paintedDbAt(uv, coarseMetaTex, sourceFrameCount, coarsePreviewTex,
+                                           coarseCommittedTex, coarsePreviewBinRangesTex, db)) return true;
+    return coarseStrokeActive && !canvasSpans(uv) &&
+           paintedDbAt(uv, coarseMetaTex, sourceFrameCount, coarseCommittedTex, coarseCommittedTex,
+                       coarseStrokeBinRangesTex, db);
 }
 
 // One bin of a band in the tile ring, when the tile holding it is resident.
@@ -215,12 +248,6 @@ bool samplePyramidDb(vec2 uv, out vec2 db) {
     return true;
 }
 
-// True when the canvas view spans this unpacked UV.
-bool canvasSpans(vec2 uv) {
-    vec2 viewUv = canvasViewUv(uv);
-    return viewUv.x >= 0.0 && viewUv.x <= 1.0;
-}
-
 // Left and right magnitudes of the picture at an unpacked UV: a resident
 // tile, else the canvas where it is the finest picture there, else the
 // pyramid, else the canvas. `loading` is 1 where the pyramid stands in for
@@ -230,6 +257,10 @@ vec2 sampleDisplayMags(vec2 uv, out float loading, out float unknown) {
     loading = displayLoadingAll ? 1.0 : 0.0;
     unknown = 0.0;
     vec2 db;
+    if (overlayDbAt(uv, db)) {
+        loading = 0.0;
+        return vec2(displayDbToMag(db.x), displayDbToMag(db.y));
+    }
     bool have = sampleRingDb(uv, db);
     if (!have && displayCanvasFirst && canvasSpans(uv)) {
         loading = 0.0;
@@ -248,8 +279,6 @@ vec2 sampleDisplayMags(vec2 uv, out float loading, out float unknown) {
         }
         if (displayFinerWanted) loading = 1.0;
     }
-    vec2 preview;
-    if (previewDbAt(uv, preview)) db = preview;
     return vec2(displayDbToMag(db.x), displayDbToMag(db.y));
 }
 

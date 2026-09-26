@@ -120,6 +120,7 @@ export class ViewDisplay {
             glRef: { current: this.registry.gl },
             strokeRendererRef: engine.strokeRendererRef,
             canvasRef: engine.canvasRef,
+            coarseRef: engine.coarseRef,
             invalidateRef: { current: () => this.mark(record) },
             ringRequestsRef: { current: new Set() },
             loadingSinceRef: { current: null },

@@ -15,6 +15,7 @@
     "drive:session": "node scripts/drive/session.mjs",
     "drive:stroke": "node scripts/drive/probe-stroke.mjs",
     "drive:select": "node scripts/drive/probe-select.mjs",
+    "drive:preview": "node scripts/drive/probe-preview.mjs",
     "window:display:check": "node scripts/window-display-check.mjs",
     "window:original:check": "node scripts/window-original-check.mjs",
     "window:stack:check": "node scripts/window-stack-check.mjs",

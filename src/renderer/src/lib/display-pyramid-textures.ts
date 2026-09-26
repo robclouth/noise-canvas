@@ -52,6 +52,7 @@ export class DisplayPyramid {
   private seeded = false;
   private marked = false;
   private readyFrom = 0;
+  private drawn = 0;
 
   constructor(layout: BandLayout, opts?: { maxTexels?: number; uploadChunkBins?: number }) {
     this.layout = layout;
@@ -142,6 +143,7 @@ export class DisplayPyramid {
   private markUnknown(gl: WebGLRenderer): void {
     if (this.marked) return;
     this.marked = true;
+    this.drawn++;
     const context = gl.getContext() as WebGL2RenderingContext;
     const previous = gl.getRenderTarget();
     for (const target of this.targets) {
@@ -149,6 +151,11 @@ export class DisplayPyramid {
       context.clearBufferfv(context.COLOR, 0, [DISPLAY_DB_UNKNOWN, DISPLAY_DB_UNKNOWN, 0, 0]);
     }
     gl.setRenderTarget(previous);
+  }
+
+  /** Changes whenever any level is drawn into. */
+  get revision(): number {
+    return this.drawn;
   }
 
   /** The per-band layout of one level, for the display's metadata sampler. */
@@ -401,6 +408,7 @@ export class DisplayPyramid {
     mode: SourcePixels,
     instances: DecimateInstance[],
   ): void {
+    this.drawn++;
     this.draw.run(gl, this.targets[levelIndex], source, srcWidth, mode, instances);
   }
 
