@@ -19,6 +19,9 @@ uniform float attractScaleOffsets[12];
 uniform float attractGridSemis;   // 0 = grid follows the scale
 uniform float attractGridBeats;
 uniform float attractUvPerBeat;
+// How far into its grid step the canvas starts, in canvas UV: the grid runs
+// from the file's start, and a window over a long file starts on a block edge.
+uniform float attractGridOffsetUv;
 uniform int attractFieldMode;     // 0 = self (live canvas), 1 = picked file
 uniform sampler2D attractFieldTex;
 uniform sampler2D attractFieldMetaTex;
@@ -58,10 +61,15 @@ vec4 attractPackedRead(sampler2D dataTex, vec4 meta, float xUv, float frameCount
 
 // Coefficient time in seconds at a dest position: dyadic bands store one
 // coefficient per 2^step frames, anchored at the bin's left edge.
-float attractCoeffTimeSec(float xUv, float stepExp) {
+Frames attractCoeffFrames(float xUv, float stepExp) {
+  // A view starts on a block edge, a whole number of every band's bins, so
+  // the bin grid in view frames is the file's.
   float strideFrames = exp2(stepExp);
-  return binAt(destFileFrame(xUv) / strideFrames) * strideFrames / max(destSampleRate, 1e-6);
+  return Frames(destViewStartFrame, binAt(xUv * destFrameCount / strideFrames) * strideFrames);
 }
+
+// Seconds from b to a.
+float attractSecBetween(Frames a, Frames b) { return framesBetween(a, b) / max(destSampleRate, 1e-6); }
 
 // Magnitude of the picked file's spectrogram at an absolute (time UV,
 // frequency Hz) position.
@@ -166,8 +174,9 @@ void main() {
     int stride = max(1, int(ceil(windowBands / float(halfTaps))));
     float stepSemis = float(stride) / bandsPerSemi;
     int iMax = min(halfTaps + 1, int(windowBands / float(stride)) + 1);
-    float tD = attractCoeffTimeSec(destUv.x, destMeta.b);
-    float tAnchorSec = destFileSec(anchorUvX);
+    Frames tD = attractCoeffFrames(destUv.x, destMeta.b);
+    Frames tAnchor = destFrames(anchorUvX);
+    vec2 rateDest = destBandRate(destUv);
 
     float fieldMag[ATTRACT_LATTICE];
     int mHalf = 0;
@@ -240,11 +249,12 @@ void main() {
         // dyadic coefficient time: detrend swap at tJ, retune ramp from the
         // brush anchor, then extrapolation from tJ to this band's coefficient
         // time at the landed frequency.
-        float tJ = attractCoeffTimeSec(destUv.x, jMeta.b);
+        Frames tJ = attractCoeffFrames(destUv.x, jMeta.b);
         float fTargetHz = fTrueJ * exp2(dispSemis / 12.0);
-        float phaseAdd = carrierRebase(fcJ, fcDest, tJ)
-                       + contentAdvance(fTargetHz, fTrueJ, tJ - tAnchorSec)
-                       + contentAdvance(fTargetHz, fcDest, tD - tJ);
+        float rebaseTurns = turnsOver(1.0, destBandRate(jUv), tJ).fraction - turnsOver(1.0, rateDest, tJ).fraction;
+        float phaseAdd = TWO_PI * rebaseTurns
+                       + contentAdvance(fTargetHz, fTrueJ, attractSecBetween(tJ, tAnchor))
+                       + contentAdvance(fTargetHz, fcDest, attractSecBetween(tD, tJ));
 
         accL += toComplex(vec2(getMag(jTexel.rg) * hat, jTexel.g + phaseAdd));
         accR += toComplex(vec2(getMag(jTexel.ba) * hat, jTexel.a + phaseAdd));
@@ -273,11 +283,12 @@ void main() {
         float hat = 1.0 - abs(landBand - myBand) / max(float(stride), 1.0);
         if (hat <= 0.0) continue;
 
-        float tJ = attractCoeffTimeSec(destUv.x, jMeta.b);
+        Frames tJ = attractCoeffFrames(destUv.x, jMeta.b);
         float fTargetHz = fTrueJ * exp2(dispSemis / 12.0);
-        float phaseAdd = carrierRebase(fcJ, fcDest, tJ)
-                       + contentAdvance(fTargetHz, fTrueJ, tJ - tAnchorSec)
-                       + contentAdvance(fTargetHz, fcDest, tD - tJ);
+        float rebaseTurns = turnsOver(1.0, destBandRate(jUv), tJ).fraction - turnsOver(1.0, rateDest, tJ).fraction;
+        float phaseAdd = TWO_PI * rebaseTurns
+                       + contentAdvance(fTargetHz, fTrueJ, attractSecBetween(tJ, tAnchor))
+                       + contentAdvance(fTargetHz, fcDest, attractSecBetween(tD, tJ));
 
         accL += toComplex(vec2(getMag(jTexel.rg) * hat, jTexel.g + phaseAdd));
         accR += toComplex(vec2(getMag(jTexel.ba) * hat, jTexel.a + phaseAdd));
@@ -303,7 +314,8 @@ void main() {
     float tapUv = strideUv * float(strideT);
     int iMax = min(halfTaps + 1, int((windowUv + strideUv) / tapUv));
     float uvPerTooth = attractUvPerBeat * max(attractGridBeats, 1e-6);
-    float tDCoeff = attractCoeffTimeSec(destUv.x, destMeta.b);
+    Frames tDCoeff = attractCoeffFrames(destUv.x, destMeta.b);
+    vec2 rateDest = destBandRate(destUv);
 
     float fieldMag[ATTRACT_LATTICE];
     int mHalf = 0;
@@ -354,7 +366,7 @@ void main() {
         }
         pullUv = wsum > 1e-9 ? sum / wsum : 0.0;
       } else {
-        float tooth = floor(jUv.x / uvPerTooth + 0.5) * uvPerTooth;
+        float tooth = floor((jUv.x + attractGridOffsetUv) / uvPerTooth + 0.5) * uvPerTooth - attractGridOffsetUv;
         float d = tooth - jUv.x;
         pullUv = d * attractKernelWeight(abs(d) / max(smoothXUv, 1e-6));
       }
@@ -371,8 +383,8 @@ void main() {
       // Time-move carrier correction at exact coefficient times: the moved
       // waveform keeps its absolute phase, and the new slot detrends by
       // fc * tD instead of fc * tJ.
-      float tJ = attractCoeffTimeSec(jUv.x, destMeta.b);
-      float phaseAdd = contentAdvance(0.0, fcDest, tDCoeff - tJ);
+      Frames tJ = attractCoeffFrames(jUv.x, destMeta.b);
+      float phaseAdd = -TWO_PI * turnsOver(1.0, rateDest, Frames(0, framesBetween(tDCoeff, tJ))).fraction;
 
       // The tap lattice is anchored to this output, so the only two landings
       // that can take this contribution sit tapUv apart and carry weights hat

@@ -1,5 +1,6 @@
 import { commands } from "@vitest/browser/context";
 import { packedTextureSizeOf } from "../lib/canvas-view";
+import type { EffectType } from "../effects";
 import type { State } from "../store/types";
 import { PARITY_FILE_PATH, type ParityData } from "./canvas-parity";
 import { createStateForEffects } from "./render-harness";
@@ -39,12 +40,11 @@ export function encodeBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-/** The analysis `scripts/transform-fixture.mjs` wrote. */
-export async function loadTransformFixture(): Promise<TransformFixture> {
-  const layout: Omit<TransformFixture, "packed"> = JSON.parse(
-    await commands.readFile(`${TRANSFORM_FIXTURE_DIR}/fixture.json`),
-  );
-  const bytes = decodeBase64(await commands.readFile(`${TRANSFORM_FIXTURE_DIR}/fixture.bin`, "base64"));
+/** The analysis `scripts/transform-fixture.mjs` wrote, or the one it wrote with `--name name`. */
+export async function loadTransformFixture(name?: string): Promise<TransformFixture> {
+  const base = `${TRANSFORM_FIXTURE_DIR}/${name ? `fixture-${name}` : "fixture"}`;
+  const layout: Omit<TransformFixture, "packed"> = JSON.parse(await commands.readFile(`${base}.json`));
+  const bytes = decodeBase64(await commands.readFile(`${base}.bin`, "base64"));
   return { ...layout, packed: new Float32Array(bytes.buffer) };
 }
 
@@ -81,10 +81,15 @@ export function parityDataOf(fixture: TransformFixture): ParityData {
 
 /** A four-beat, two-octave transform brush with `step` on its one step, as the parity file's state. */
 export function transformBrush(algorithm: number, step: Record<string, unknown>): State {
-  return createStateForEffects(["transform"], {
+  return fixtureBrush("transform", { ...step, algorithm });
+}
+
+/** A four-beat, two-octave brush of one effect with `step` on its one step, as the parity file's state. */
+export function fixtureBrush(effect: EffectType, step: Record<string, unknown>): State {
+  return createStateForEffects([effect], {
     brushSizeTime: 4,
     brushSizePitch: 24,
-    stepOverrides: { ...step, algorithm, accumulate: false, sourcePositionMode: "follow" },
+    stepOverrides: { ...step, accumulate: false, sourcePositionMode: "follow" },
     overrides: {
       activeFileId: "parity",
       filepathsBpm: { [PARITY_FILE_PATH]: 120 },

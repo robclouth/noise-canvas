@@ -54,6 +54,7 @@ class AttractEffect extends BaseEffect {
             attractGridSemis: { value: 0 },
             attractGridBeats: { value: 1 },
             attractUvPerBeat: { value: 0 },
+            attractGridOffsetUv: { value: 0 },
             attractFieldMode: { value: 0 },
             attractFieldTex: { value: null },
             attractFieldMetaTex: { value: null },
@@ -141,6 +142,11 @@ class AttractEffect extends BaseEffect {
         dest.bandsPerOctave,
         dest.numBands,
       ).x;
+      const canvasFrames = props.commonUniforms.destFrameCount.value;
+      const framesPerTooth =
+        ((60 * props.commonUniforms.destSampleRate.value) / dest.bpm) * material.uniforms.attractGridBeats.value;
+      const offsetFrames = props.commonUniforms.destViewStartFrame.value % framesPerTooth;
+      material.uniforms.attractGridOffsetUv.value = canvasFrames > 0 ? offsetFrames / canvasFrames : 0;
     }
   }
 }

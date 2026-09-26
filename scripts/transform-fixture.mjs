@@ -1,10 +1,11 @@
 // Writes a real analysis for the transform comparison tests: six seconds of
 // stereo tones off their bands' centres, a chord, a sweep, low noise and a
-// click every 0.75 s, analysed by the addon at 44.1 kHz and 24 bands an
-// octave. The layout goes to fixture.json and the packed coefficients to
-// fixture.bin, both in .cache/transform-golden.
+// click every 0.75 s, analysed by the addon, by default at 44.1 kHz and 24
+// bands an octave. The layout goes to fixture.json and the packed
+// coefficients to fixture.bin, both in .cache/transform-golden; --name writes
+// fixture-<name>.* instead, for a second file to paint from.
 //
-// Usage: node scripts/transform-fixture.mjs [--seconds 6]
+// Usage: node scripts/transform-fixture.mjs [--seconds 6] [--sample-rate 44100] [--bpo 24] [--name source]
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -15,10 +16,15 @@ const require = createRequire(import.meta.url);
 const addon = require(join(root, "build/Release/gaborator_addon.node"));
 
 const args = process.argv.slice(2);
-const at = args.indexOf("--seconds");
-const SECONDS = at >= 0 ? Number(args[at + 1]) : 6;
-const SAMPLE_RATE = 44100;
-const PARAMS = { bandsPerOctave: 24, minFreq: 40 };
+const option = (flag, fallback) => {
+  const at = args.indexOf(flag);
+  return at >= 0 ? args[at + 1] : fallback;
+};
+const SECONDS = Number(option("--seconds", 6));
+const SAMPLE_RATE = Number(option("--sample-rate", 44100));
+const PARAMS = { bandsPerOctave: Number(option("--bpo", 24)), minFreq: 40 };
+const NAME = option("--name", null);
+const BASE = NAME ? `fixture-${NAME}` : "fixture";
 const CLICK_EVERY = 0.75;
 
 let seed = 12345;
@@ -58,7 +64,7 @@ const ar = await addon.analyze([left, right], 2, SAMPLE_RATE, PARAMS);
 const dir = join(root, ".cache/transform-golden");
 mkdirSync(dir, { recursive: true });
 writeFileSync(
-  join(dir, "fixture.json"),
+  join(dir, `${BASE}.json`),
   JSON.stringify({
     sampleRate: SAMPLE_RATE,
     bandsPerOctave: PARAMS.bandsPerOctave,
@@ -74,5 +80,5 @@ writeFileSync(
     onsets,
   }),
 );
-writeFileSync(join(dir, "fixture.bin"), Buffer.from(ar.data.buffer, ar.data.byteOffset, ar.data.byteLength));
+writeFileSync(join(dir, `${BASE}.bin`), Buffer.from(ar.data.buffer, ar.data.byteOffset, ar.data.byteLength));
 console.log(`wrote ${ar.numBands} bands, ${ar.texels} texels, ${(ar.data.byteLength / 1e6).toFixed(1)} MB to ${dir}`);

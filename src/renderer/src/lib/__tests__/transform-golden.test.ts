@@ -1,11 +1,19 @@
 import { commands } from "@vitest/browser/context";
+import { Vector2 } from "three";
+import { effects } from "../../effects";
+import type { State } from "../../store/types";
+import { createHarnessTextures, disposeHarnessTextures, toStrokeTextures } from "../../test/render-harness";
+import { DEFAULT_ONSET_SENSITIVITY } from "../constants";
+import { getOnsetTexture } from "../onset-map";
+import { StrokeRenderer, type SourceFileInfo } from "../stroke-renderer";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { paintStroke, parityCanvas, parityRenderer } from "../../test/canvas-parity";
+import { paintStroke, parityCanvas, parityRenderer, type ParityData } from "../../test/canvas-parity";
 import {
   decodeBase64,
   encodeBase64,
   loadTransformFixture,
   parityDataOf,
+  fixtureBrush,
   TRANSFORM_FIXTURE_DIR,
   transformBrush,
   type TransformFixture,
@@ -65,7 +73,28 @@ const MOVES: { name: string; step: Record<string, unknown> }[] = [
   { name: "reverse, reflect", step: { transformScaleTime: -1, transformEdgeMode: 4 } },
 ];
 
-const CASES = ALGORITHMS.flatMap((algorithm) => MOVES.map((move) => ({ algorithm, move })));
+const ATTRACT_MOVES: { name: string; step: Record<string, unknown> }[] = [
+  { name: "pitch pull, source", step: { attractAmountY: 100 } },
+  { name: "pitch pull, scale", step: { attractMap: 1, attractAmountY: 100 } },
+  { name: "time pull, source", step: { attractAmountX: 100, attractAmountY: 0 } },
+  { name: "time pull, grid", step: { attractMap: 2, attractAmountX: 100, attractAmountY: 0 } },
+  { name: "pitch and time pull", step: { attractAmountX: 60, attractAmountY: 60 } },
+];
+
+const CASES = [
+  ...ALGORITHMS.flatMap((algorithm) =>
+    MOVES.map((move) => ({
+      label: `algorithm ${algorithm}: ${move.name}`,
+      key: `a${algorithm}-${move.name}`,
+      state: () => transformBrush(algorithm, move.step),
+    })),
+  ),
+  ...ATTRACT_MOVES.map((move) => ({
+    label: `attract: ${move.name}`,
+    key: `attract-${move.name}`,
+    state: () => fixtureBrush("attract", move.step),
+  })),
+];
 
 /** The phase each texel may differ by: a float's step at its band's largest product of centre and time, RECORDED_STEPS times, over a floor. */
 function phaseTolerance(fixture: TransformFixture): Float32Array {
@@ -94,16 +123,16 @@ describe.skipIf(!MODE)("what the transform paints", () => {
     tolerance = phaseTolerance(fixture);
   });
   it.each(CASES)(
-    "algorithm $algorithm: $move.name",
-    async ({ algorithm, move }) => {
+    "$label",
+    async ({ key, state }) => {
       const onsets = Float32Array.from(fixture!.onsets);
       const canvas = parityCanvas(parityDataOf(fixture!), Infinity, sharedRenderer().gl, undefined, onsets);
       try {
-        const stroke = await paintStroke(canvas, [{ x: 0.42, y: 0.55, state: transformBrush(algorithm, move.step) }]);
+        const stroke = await paintStroke(canvas, [{ x: 0.42, y: 0.55, state: state() }]);
         expect(stroke.refused).toBeNull();
         const ranges = stroke.ranges!;
         const values = stroke.values!;
-        const name = `${TRANSFORM_FIXTURE_DIR}/a${algorithm}-${move.name.replace(/[^a-z0-9.+-]+/gi, "_")}`;
+        const name = `${TRANSFORM_FIXTURE_DIR}/${key.replace(/[^a-z0-9.+-]+/gi, "_")}`;
         if (MODE === "record") {
           await commands.writeFile(`${name}.ranges`, encodeBase64(new Uint8Array(ranges.buffer)), "base64");
           await commands.writeFile(`${name}.values`, encodeBase64(new Uint8Array(values.buffer)), "base64");
@@ -176,7 +205,20 @@ const LONG_MOVES: { name: string; step: Record<string, unknown> }[] = [
   },
 ];
 
-const LONG_CASES = [4, 6].flatMap((algorithm) => LONG_MOVES.map((move) => ({ algorithm, move })));
+const LONG_CASES = [
+  ...[4, 6].flatMap((algorithm) =>
+    LONG_MOVES.map((move) => ({
+      label: `algorithm ${algorithm}: ${move.name}`,
+      state: (step: Record<string, unknown>) => transformBrush(algorithm, { ...move.step, ...step }),
+    })),
+  ),
+  // Attract moves nothing by a stretch or a stored-phase scale, so it must
+  // agree far in on every map.
+  ...ATTRACT_MOVES.map((move) => ({
+    label: `attract: ${move.name}`,
+    state: (step: Record<string, unknown>) => fixtureBrush("attract", { ...move.step, ...step }),
+  })),
+];
 
 /** The fixture's bands up to HIGHEST_HZ, laid out on their own. */
 function lowBands(fixture: TransformFixture): TransformFixture {
@@ -280,8 +322,8 @@ describe.skipIf(!MODE)("a transform far into a long file", () => {
   });
 
   it.each(LONG_CASES)(
-    "algorithm $algorithm: $move.name paints what it paints near the start",
-    async ({ algorithm, move }) => {
+    "$label paints what it paints near the start",
+    async ({ state: brush }) => {
       const paint = async (fixture: TransformFixture, windowBlocks: number) => {
         const canvas = parityCanvas(
           parityDataOf(fixture),
@@ -291,7 +333,7 @@ describe.skipIf(!MODE)("a transform far into a long file", () => {
           Float32Array.from(fixture.onsets),
         );
         try {
-          const state = transformBrush(algorithm, { ...move.step, brushAnchorMode: BRUSH_ANCHOR_MODE_CENTER });
+          const state = brush({ brushAnchorMode: BRUSH_ANCHOR_MODE_CENTER });
           const stroke = await paintStroke(canvas, [{ x: 0.5, y: 0.55, state }]);
           expect(stroke.refused).toBeNull();
           return { ranges: stroke.ranges!, values: stroke.values! };
@@ -363,5 +405,137 @@ describe.skipIf(!MODE)("a transform far into a long file", () => {
       ).toEqual({ sameFootprint: true, magnitude: true, phase: true });
     },
     300_000,
+  );
+});
+
+/**
+ * What the transform paints on the fixture from a second file analysed at
+ * another sample rate and band density: each dest frame reads a source frame
+ * at a different rate, and each dest band sits between source bands. Checked
+ * against a recording, as the moves on the fixture itself are.
+ */
+const CROSS_SOURCES = ["48k-36bpo", "48k-12bpo"];
+const CROSS_SOURCE_PATH = "/cross-source.wav";
+const CROSS_MOVES: { name: string; step: Record<string, unknown> }[] = [
+  { name: "paste", step: {} },
+  { name: "reverse", step: { transformScaleTime: -1 } },
+  { name: "pitch +7", step: { transformShiftSemis: 7 } },
+  { name: "shift +1 beat, bleed", step: { transformShiftBeats: 1, transformEdgeMode: 1 } },
+];
+const CROSS_CASES = CROSS_SOURCES.flatMap((source) =>
+  [4, 6].flatMap((algorithm) =>
+    CROSS_MOVES.map((move) => ({
+      label: `from ${source}, algorithm ${algorithm}: ${move.name}`,
+      key: `cross-${source}-a${algorithm}-${move.name}`,
+      source,
+      algorithm,
+      move,
+    })),
+  ),
+);
+
+/** A stroke renderer over the whole of `data`, with its textures, for a test to paint on or from. */
+function strokeRendererOver(data: ParityData, id: string): { renderer: StrokeRenderer; dispose: () => void } {
+  const textures = createHarnessTextures(data);
+  const renderer = new StrokeRenderer(sharedRenderer().gl, data, toStrokeTextures(textures), id, effects);
+  renderer.initialize();
+  return {
+    renderer,
+    dispose: () => {
+      renderer.dispose();
+      disposeHarnessTextures(textures);
+    },
+  };
+}
+
+const crossSources: Record<string, TransformFixture> = {};
+
+describe.skipIf(!MODE)("what the transform paints from another file", () => {
+  beforeAll(async () => {
+    fixture ??= await loadTransformFixture();
+    tolerance ??= phaseTolerance(fixture);
+    for (const name of CROSS_SOURCES) crossSources[name] = await loadTransformFixture(name);
+  });
+
+  it.each(CROSS_CASES)(
+    "$label",
+    async ({ key, source, algorithm, move }) => {
+      const from = crossSources[source];
+      const dest = strokeRendererOver(parityDataOf(fixture!), "cross-dest");
+      const read = strokeRendererOver(parityDataOf(from), "cross-source");
+      try {
+        const textures = read.renderer.getTextures();
+        const sourceFile: SourceFileInfo = {
+          id: "cross-source",
+          filePath: CROSS_SOURCE_PATH,
+          displayName: "cross-source.wav",
+          spectrogramData: parityDataOf(from),
+          textures: {
+            packed: textures.packed,
+            inverse: textures.inverse,
+            metadata: textures.metadata,
+            original: textures.original,
+          },
+          onsetTexture: getOnsetTexture(
+            "cross-source",
+            Float32Array.from(from.onsets),
+            from.numFrames / from.sampleRate,
+            DEFAULT_ONSET_SENSITIVITY,
+          ),
+        };
+        const brush = transformBrush(algorithm, move.step);
+        const state: State = { ...brush, filepathsBpm: { ...brush.filepathsBpm, [CROSS_SOURCE_PATH]: 120 } };
+        dest.renderer.renderStroke(
+          {
+            cursorPos: new Vector2(0.35, 0.4),
+            preview: false,
+            bpm: 120,
+            totalDuration: fixture!.numFrames / fixture!.sampleRate,
+            viewZoomPower: 0,
+            viewOffset: 0,
+            viewZoomPowerY: 0,
+            viewOffsetY: 0,
+            pressure: 1,
+            tiltX: 0,
+            tiltY: 0,
+          },
+          state,
+          sourceFile,
+        );
+        const values = await dest.renderer.getFBOData();
+        const name = `${TRANSFORM_FIXTURE_DIR}/${key.replace(/[^a-z0-9.+-]+/gi, "_")}`;
+        if (MODE === "record") {
+          await commands.writeFile(`${name}.values`, encodeBase64(new Uint8Array(values.buffer)), "base64");
+          return;
+        }
+        const want = new Float32Array(decodeBase64(await commands.readFile(`${name}.values`, "base64")).buffer);
+        expect(values.length).toBe(want.length);
+        let magnitude = 0;
+        let beyond = 0;
+        let changed = 0;
+        let worst = 0;
+        for (let pixel = 0; pixel < fixture!.texels; pixel++) {
+          for (let channel = 0; channel < 2; channel++) {
+            const at = pixel * 4 + channel * 2;
+            const loud = Math.max(want[at], values[at]);
+            magnitude = Math.max(magnitude, Math.abs(want[at] - values[at]) / Math.max(loud, 1e-3));
+            const turned = values[at + 1] - want[at + 1];
+            const off = Math.abs(turned - 2 * Math.PI * Math.round(turned / (2 * Math.PI))) * Math.min(1, loud / 1e-3);
+            if (off / tolerance![pixel] > 1) beyond++;
+            if (want[at] !== fixture!.packed[at] || want[at + 1] !== fixture!.packed[at + 1]) changed++;
+            worst = Math.max(worst, off / tolerance![pixel]);
+          }
+        }
+        expect(changed, "the recorded stroke changed nothing").toBeGreaterThan(0);
+        expect(
+          { magnitude: magnitude < MAGNITUDE_TOLERANCE, beyond: beyond <= SEAM_SHARE * changed },
+          `magnitude ${magnitude}, ${beyond} of ${changed} changed texels past tolerance, worst ${worst}×`,
+        ).toEqual({ magnitude: true, beyond: true });
+      } finally {
+        read.dispose();
+        dest.dispose();
+      }
+    },
+    120_000,
   );
 });
