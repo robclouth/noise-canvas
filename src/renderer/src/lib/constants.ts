@@ -314,6 +314,7 @@ export const EFFECT_COLORS: Record<string, string> = {
   convolve: "blue",
   align: "gray",
   attract: "lime",
+  neural: "yellow",
 };
 
 export const EFFECT_LABELS: Record<string, string> = {
@@ -330,6 +331,7 @@ export const EFFECT_LABELS: Record<string, string> = {
   convolve: "Convolve",
   align: "Align",
   attract: "Attract",
+  neural: "Neural",
 };
 
 // Read at the moment of choosing, by someone who does not yet know what the
@@ -349,4 +351,5 @@ export const EFFECT_DESCRIPTIONS: Record<string, string> = {
   convolve: "Prints another sound's character onto this one: rooms, plates, resonant junk.",
   align: "Snaps everything into one sharp impulse, then lets it drift apart again.",
   attract: "Pulls energy onto a map of valleys, gathering smear into notes and hits.",
+  neural: "Lets a tiny neural network rework the sound, into alien growths and glitches.",
 };

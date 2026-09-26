@@ -44,7 +44,7 @@ If it's worth money to you, please consider giving that money to people working 
 ## What it does
 
 - **Paint on spectrograms.** Brushes paint effects across time and pitch, snapped to a musical grid and scale.
-- **11 spectral effects** — dynamics, transform, blur, repeat, synthesise, evolve, binaural, sort, transmute, convolve, attract — stackable and reorderable, several instances at a time.
+- **12 spectral effects** — dynamics, transform, blur, repeat, synthesise, evolve, binaural, sort, transmute, convolve, attract, neural — stackable and reorderable, several instances at a time.
 - **Multi-step brushes** with four macros, a preset library, and hotkeys.
 - **Deep modulation** — three per-pixel 2D modulators (patterns, procedural textures, your own images, envelope follower, sequencer), plus macros, pen pressure/tilt, and contextual sources.
 - **Branching history** that survives restarts, with favourites and per-branch audio export.

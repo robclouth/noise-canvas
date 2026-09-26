@@ -18,6 +18,7 @@ import { ConvolveEffect } from "./effect-views/convolve-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { EvolveEffect } from "./effect-views/evolve-effect";
 import { AttractEffect } from "./effect-views/attract-effect";
+import { NeuralEffect } from "./effect-views/neural-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
 import { SortEffect } from "./effect-views/sort-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
@@ -37,6 +38,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   waveshape: <WaveshapeEffect />,
   convolve: <ConvolveEffect />,
   attract: <AttractEffect />,
+  neural: <NeuralEffect />,
 };
 
 import { ParameterKey } from "@/store/types";

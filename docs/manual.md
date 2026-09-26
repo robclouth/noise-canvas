@@ -28,7 +28,7 @@ Every control has a tooltip and an entry in the `?` overlay.
    - [Warp Algorithms](#warp-algorithms)
    - [Blend Modes](#blend-modes)
 5. [Effects](#effects)
-   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Repeat](#repeat) · [Synthesise](#synthesise) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Convolve](#convolve) · [Attract](#attract)
+   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Repeat](#repeat) · [Synthesise](#synthesise) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Convolve](#convolve) · [Attract](#attract) · [Neural](#neural)
 6. [Modulation](#modulation)
    - [How Modulation Amount Works](#how-modulation-amount-works)
    - [Modulator Modes](#modulator-modes)
@@ -588,6 +588,23 @@ Pulls energy across time and pitch toward a map: a landscape of valleys that sou
 
 - Paint the same spot repeatedly, or enable accumulate. Each pass gathers more content into the valleys and settles it there.
 - Point **Map** at a modulator running an image, and the picture becomes terrain the sound falls into.
+
+### Neural
+
+Runs a small neural network over the sound, generation after generation. Each band looks at the bands around it, and the network decides whether it grows, fades or turns. The next generation reads the result, so the sound keeps reworking itself. It never makes a band louder than the loudest one near it, so it spreads and carves rather than boosting.
+
+- **Seed** – which network runs. Each seed has its own habits, and the same seed always behaves the same way. Neighbouring numbers are unrelated.
+- **Generations** – how many times the network reruns on its own result each time the brush paints. **Iterations** in Options multiplies it.
+- **Rate** – how far each generation can move a band's level. At 0 the level holds still.
+- **Chaos** – low values change the sound smoothly and gradually. High values make the network switch hard between growing and eating.
+- **Twist** – lets the network turn the phase as well. Small amounts ring metallic, large ones smear.
+- **Edge** – what Neural reads past the brush border.
+- **Reach ↔ / ↕** – how far away each band's neighbours are, in beats and semitones. Wider reach grows coarser, larger patterns.
+
+**Hints**
+
+- Step through **Seed** one number at a time until something bites, then shape it with Rate and Chaos.
+- Enable accumulate and drag over the same area. Each pass carries on from where the last one stopped.
 
 ---
 

@@ -5,6 +5,7 @@ import { cloneEffect } from "./clone-effect";
 import { convolveEffect } from "./convolve-effect";
 import { dynamicsEffect } from "./dynamics-effect";
 import { evolveEffect } from "./evolve-effect";
+import { neuralEffect } from "./neural-effect";
 import { passThroughEffect } from "./passthrough-effect";
 import { sortEffect } from "./sort-effect";
 import { attractEffect } from "./attract-effect";
@@ -32,4 +33,5 @@ export const effects = {
   convolve: convolveEffect,
   align: alignEffect,
   attract: attractEffect,
+  neural: neuralEffect,
 };
