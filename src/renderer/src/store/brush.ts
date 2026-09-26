@@ -28,6 +28,7 @@ import {
 import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
+import { getBlockStore } from "@renderer/lib/block-stores";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { packOnsetState } from "@renderer/lib/onset-map";
 import { useTransientStore } from "./transient";
@@ -205,7 +206,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       let stored = false;
       let storedOwn: Uint32Array | null = null;
 
-      const commitTask = serializeFileTask(activeFileId, async () => {
+      const commitHeld = async (resumeFlush: () => void): Promise<void> => {
         const readStart = performance.now();
         const paintedValues = paintedRead ? await paintedRead : null;
         const paintedMs = performance.now() - readStart;
@@ -314,6 +315,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           });
           diag.timing("timing", "commit history add", performance.now() - historyStart, { whole: data ? 1 : 0 });
           stored = true;
+          resumeFlush();
 
           // The turns go on the canvas as an operation; the pixels the commit
           // changed past the stroke are uploaded from the state — the whole
@@ -401,6 +403,16 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           // The canvas on the GPU is no longer known to match the history, so
           // the next navigation restores in full rather than by delta.
           getHistoryManager(activeFileId).markFboOutOfSync();
+        }
+      };
+      const commitTask = serializeFileTask(activeFileId, async () => {
+        // The store's background flush waits until the stroke is stored, so
+        // the two do not share the machine.
+        const resumeFlush = (await getBlockStore(activeFileId))?.pauseFlush() ?? (() => {});
+        try {
+          await commitHeld(resumeFlush);
+        } finally {
+          resumeFlush();
         }
       });
       try {

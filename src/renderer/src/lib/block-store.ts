@@ -143,6 +143,8 @@ export class BlockStore implements PackedStateStore {
   private flushing: Promise<void> = Promise.resolve();
   private flushQueued = false;
   private flushPauses = 0;
+  // Flushes a patch waits on; while one is queued, a held flush carries on.
+  private urgentFlushes = 0;
   private readonly flushResumes: Array<() => void> = [];
   private disposed = false;
   private seeded = false;
@@ -475,9 +477,17 @@ export class BlockStore implements PackedStateStore {
    * waits for the one in flight.
    */
   async flush(pausable = true): Promise<void> {
+    if (!pausable) {
+      this.urgentFlushes++;
+      for (const resume of this.flushResumes.splice(0)) resume();
+    }
     const run = this.flushing.then(() => this.flushNow(pausable));
     this.flushing = run.catch(() => undefined);
-    return await run;
+    try {
+      return await run;
+    } finally {
+      if (!pausable) this.urgentFlushes--;
+    }
   }
 
   pauseFlush(): () => void {
@@ -512,7 +522,7 @@ export class BlockStore implements PackedStateStore {
     // A few blocks encode and write at once; each is its own record.
     const dirty = [...this.dirty];
     for (let start = 0; start < dirty.length; start += FLUSH_AHEAD) {
-      while (pausable && this.flushPauses > 0 && !this.disposed) {
+      while (pausable && this.flushPauses > 0 && this.urgentFlushes === 0 && !this.disposed) {
         await new Promise<void>((resume) => this.flushResumes.push(resume));
       }
       await Promise.all(dirty.slice(start, start + FLUSH_AHEAD).map(([index, block]) => flushOne(index, block)));

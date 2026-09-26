@@ -1,9 +1,9 @@
 import { existsSync } from "fs";
 import { copyFile } from "fs/promises";
-import { totalmem } from "os";
+import { availableParallelism, totalmem } from "os";
 import { extname, join } from "path";
 import { promisify } from "util";
-import { zstdCompress, zstdDecompress } from "zlib";
+import { constants as zlibConstants, zstdCompress, zstdDecompress } from "zlib";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
 import { parseHistoryDeltaTurns } from "./history-delta";
 import type {
@@ -269,12 +269,13 @@ export async function encodeHistoryDelta(
   );
 }
 
-// Bytes past which a delta compresses as frames side by side, each on a
-// thread of its own. The frames sit behind a header of their own, "NCD1",
-// which no zstd frame can begin with, so a delta written as one stream still
-// reads as one.
+// Bytes past which a delta compresses as frames side by side, one a core,
+// at zstd's fastest level. The frames sit behind a header of their own,
+// "NCD1", which no zstd frame can begin with, so a delta written as one
+// stream still reads as one.
 const DELTA_FRAME_BYTES = 8 * 1024 * 1024;
-const DELTA_MAX_FRAMES = 8;
+const DELTA_MAX_FRAMES = Math.min(16, availableParallelism());
+const DELTA_FRAME_LEVEL = 1;
 const DELTA_FRAMED_MAGIC = 0x4e434431;
 
 /** A delta's bytes compressed: one zstd stream, or frames behind a header when it is large. */
@@ -286,7 +287,12 @@ async function compressDelta(input: Buffer): Promise<Buffer> {
     input.subarray(index * per, Math.min(input.byteLength, (index + 1) * per)),
   );
   const frames = await Promise.all(
-    raws.map((raw) => zstdCompressAsync(raw, { chunkSize: zstdChunkSize(raw.byteLength) })),
+    raws.map((raw) =>
+      zstdCompressAsync(raw, {
+        chunkSize: zstdChunkSize(raw.byteLength),
+        params: { [zlibConstants.ZSTD_c_compressionLevel]: DELTA_FRAME_LEVEL },
+      }),
+    ),
   );
   const header = Buffer.alloc(8 + count * 8);
   header.writeUInt32BE(DELTA_FRAMED_MAGIC, 0);

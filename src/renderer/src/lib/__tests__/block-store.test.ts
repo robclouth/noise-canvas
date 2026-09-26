@@ -522,6 +522,24 @@ describe("BlockStore", () => {
     expect(store.dirtyCount).toBe(0);
   });
 
+  it("lets a patch past twice the budget flush while a held flush waits ahead of it", async () => {
+    const all = Uint32Array.of(0, layoutTexels(layout));
+    const { store } = await seeded({ maxResidentBytes: Math.floor(gatherPixelRanges(packed, all).byteLength / 5) });
+    const release = store.pauseFlush();
+    const held = store.flush();
+    const patched = store.patch(
+      all,
+      gatherPixelRanges(packed, all).map((value) => value * -1),
+    );
+    const settled = await Promise.race([
+      patched.then(() => "patched"),
+      new Promise((resolve) => setTimeout(() => resolve("stuck"), 2000)),
+    ]);
+    release();
+    await held;
+    expect(settled).toBe("patched");
+  });
+
   it("stops an in-flight flush when it is disposed, leaving nothing behind", async () => {
     const grid = makeGrid();
     const backend = memoryBackend();
