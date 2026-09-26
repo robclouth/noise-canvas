@@ -292,6 +292,18 @@ export const UI_CONTROLS = {
     manualSection: "envelope",
   },
 
+  // Neural
+  "neural-learn": {
+    label: "Learn",
+    description: "Learns the brush-sized patch of sound under the next click on a spectrogram.",
+    manualSection: "neural",
+  },
+  "neural-stop": {
+    label: "Stop learning",
+    description: "Stops learning and keeps what the model has learnt so far.",
+    manualSection: "neural",
+  },
+
   // Randomization
   "randomize-dice": {
     label: "Randomise",

@@ -69,11 +69,6 @@ const SPECS: FactoryPaletteSpec[] = [
       "morph",
     ],
   },
-  {
-    id: "factory-creatures",
-    name: "Creatures",
-    presetIds: ["mould", "termites", "static-bloom", "shapeshifter", "chatter"],
-  },
 ];
 
 function buildPalette(spec: FactoryPaletteSpec): PaletteType {

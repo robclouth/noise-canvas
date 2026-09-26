@@ -1238,13 +1238,15 @@ export class StrokeRenderer {
           value: stepIndex === 0 ? scratch.strokeStartFbo.texture : stepInputFbo.texture,
         };
 
-        effect.updateEffectUniforms({
+        const effectProps = {
           commonUniforms: uniformsForThisIteration,
           passIndex: p,
           file: sourceFile,
           state: effectState,
           modContext: iterationContext,
-        });
+        };
+        effect.updateEffectUniforms(effectProps);
+        effect.prepare?.(this.gl, effectProps);
 
         this.drawRanges(material, currentWriteFbo, isFinalPass ? finalRanges : passRanges);
 

@@ -11,7 +11,8 @@ import { aimUvToBrushBlUv } from "../lib/brush-anchor";
 import { heldRepeatIntervalMs } from "../lib/brush-repeat";
 import { getFileOnsets } from "../lib/file-onsets";
 import { penState } from "../lib/pen-state";
-import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
+import { resolveBrushFootprint, sourceBandUvSlope, uvToUnits } from "../lib/utils";
+import { startNcaTraining } from "../lib/nca/nca-training";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
@@ -93,6 +94,36 @@ function aimToBrushBlUv(aim: AimUv, fileId: string, bpm: number): { blX: number;
     spectrogramData.bandsPerOctave,
     spectrogramData.numBands,
   );
+}
+
+// Starts a Neural effect learning the brush-sized region whose bottom-left corner is `bl`.
+function learnRegion(fileId: string, effectId: string, bl: { blX: number; blY: number }, bpm: number): void {
+  const file = openFiles[fileId];
+  const spectrogramData = file?.spectrogramData;
+  if (!spectrogramData) return;
+  const state = useStore.getState();
+  const step = state.getActiveStep();
+  const { sizeUv } = resolveBrushFootprint({
+    brushSizeTime: (step?.brushSizeTime as number | undefined) ?? state.brushSizeTime,
+    brushSizePitch: (step?.brushSizePitch as number | undefined) ?? state.brushSizePitch,
+    gridSizeBeats: state.gridSizeBeats,
+    gridSizeSemis: state.gridSizeSemis,
+    bpm,
+    totalDuration: spectrogramData.numFrames / spectrogramData.sampleRate,
+    bandsPerOctave: spectrogramData.bandsPerOctave,
+    numBands: spectrogramData.numBands,
+  });
+  const beat = (bl.blX * (spectrogramData.numFrames / spectrogramData.sampleRate) * bpm) / 60;
+  void startNcaTraining({
+    effectId,
+    label: `${file.filePath.split(/[\\/]/).pop()} at beat ${(beat + 1).toFixed(2)}`,
+    rect: { x0: bl.blX, y0: bl.blY, x1: bl.blX + sizeUv.x, y1: bl.blY + sizeUv.y },
+    readSpectrogram: async () => {
+      const packedData = (await file.rendererRef?.current?.getFBOData()) ?? spectrogramData.packedData;
+      return { ...spectrogramData, packedData };
+    },
+    apply: (modelText) => useStore.getState().setParameter("neuralModel", modelText, effectId),
+  });
 }
 
 export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
@@ -534,6 +565,14 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         bpm,
       );
       if (!aim) return;
+
+      // Learn mode: the brush-sized region under the click is what a Neural effect learns.
+      if (state.pickingFileParam === "neuralModel") {
+        const effectId = state.pickingEffectId;
+        state.setPickingFileParam(null);
+        if (effectId) learnRegion(fileId, effectId, aimToBrushBlUv(aim, fileId, bpm), bpm);
+        return;
+      }
 
       // Pick mode: clicking on a canvas sets the file path and position params
       if (state.pickingFileParam) {

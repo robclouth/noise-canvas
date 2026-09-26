@@ -591,20 +591,17 @@ Pulls energy across time and pitch toward a map: a landscape of valleys that sou
 
 ### Neural
 
-Runs a small neural network over the sound, generation after generation. Each band looks at the bands around it, and the network decides whether it grows, fades or turns. The next generation reads the result, so the sound keeps reworking itself. It never makes a band louder than the loudest one near it, so it spreads and carves rather than boosting.
+Learns a sound, then grows it wherever you paint. A small network looks at each band and its neighbours, over and over, and learns to rebuild the sound it was shown: from silence, from other sound, and back over holes torn in it. Painting grows that sound out of whatever is under the brush.
 
-- **Seed** – which network runs. Each seed has its own habits, and the same seed always behaves the same way. Neighbouring numbers are unrelated.
-- **Generations** – how many times the network reruns on its own result each time the brush paints. **Iterations** in Options multiplies it.
-- **Rate** – how far each generation can move a band's level. At 0 the level holds still.
-- **Chaos** – low values change the sound smoothly and gradually. High values make the network switch hard between growing and eating.
-- **Twist** – lets the network turn the phase as well. Small amounts ring metallic, large ones smear.
-- **Edge** – what Neural reads past the brush border.
-- **Reach ↔ / ↕** – how far away each band's neighbours are, in beats and semitones. Wider reach grows coarser, larger patterns.
+- **Learn** – press it, then click a spectrogram. The brush-sized patch under the click is what the network learns, and the brush outline shows where that is. Learning takes a few minutes. The card shows the patch and what the network grows from it so far, and **Stop** keeps what it has learnt.
+- **Steps** – how long the sound grows each time the brush paints. Few steps leave a trace of what was there, many let the learnt sound take over.
+
+The learnt sound is stretched to the brush, so a bigger brush paints a bigger copy. It is saved with the brush, so a brush can carry it into another file.
 
 **Hints**
 
-- Step through **Seed** one number at a time until something bites, then shape it with Rate and Chaos.
-- Enable accumulate and drag over the same area. Each pass carries on from where the last one stopped.
+- Learn a patch, erase part of it with another brush, then paint over the hole to grow it back.
+- Learn a short hit, then paint across a pad with few Steps for a hybrid of the two.
 
 ---
 

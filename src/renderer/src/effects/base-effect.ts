@@ -221,6 +221,13 @@ export abstract class BaseEffect {
   abstract updateEffectUniforms(props: UpdateEffectUniformsProps): void;
 
   /**
+   * GPU work a pass needs before it draws, into buffers of the effect's own
+   * rather than the spectrogram's. Runs after updateEffectUniforms, with the
+   * same props.
+   */
+  prepare?(gl: THREE.WebGLRenderer, props: UpdateEffectUniformsProps): void;
+
+  /**
    * Pass indices that do real work at the given settings. Returning fewer
    * indices skips those passes for the stroke, and an empty array skips the
    * effect. Left undefined, every pass runs.

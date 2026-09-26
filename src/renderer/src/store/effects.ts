@@ -48,14 +48,8 @@ export interface EffectsState {
   evolveScaleX: number;
   evolveScaleY: number;
   evolveEdgeMode: number;
-  neuralSeed: number;
-  neuralGenerations: number;
-  neuralRate: number;
-  neuralChaos: number;
-  neuralTwist: number;
-  neuralReachX: number;
-  neuralReachY: number;
-  neuralEdgeMode: number;
+  neuralModel: string;
+  neuralSteps: number;
   binauralAzimuth: number;
   binauralDistance: number;
   binauralStereoAngle: number;
@@ -145,14 +139,8 @@ export const createEffectsSlice = (): EffectsState => {
     evolveEdgeMode: getParameterDef("evolveEdgeMode").default,
 
     // ---------------- Neural ----------------
-    neuralSeed: getParameterDef("neuralSeed").default,
-    neuralGenerations: getParameterDef("neuralGenerations").default,
-    neuralRate: getParameterDef("neuralRate").default,
-    neuralChaos: getParameterDef("neuralChaos").default,
-    neuralTwist: getParameterDef("neuralTwist").default,
-    neuralReachX: getParameterDef("neuralReachX").default,
-    neuralReachY: getParameterDef("neuralReachY").default,
-    neuralEdgeMode: getParameterDef("neuralEdgeMode").default,
+    neuralModel: getParameterDef("neuralModel").default,
+    neuralSteps: getParameterDef("neuralSteps").default,
 
     // ---------------- Binaural ----------------
     binauralAzimuth: getParameterDef("binauralAzimuth").default,

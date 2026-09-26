@@ -50,6 +50,9 @@
     "@codemirror/view": "^6.43.8",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@tensorflow/tfjs-backend-cpu": "^4.22.0",
+    "@tensorflow/tfjs-backend-webgl": "^4.22.0",
+    "@tensorflow/tfjs-core": "^4.22.0",
     "ffmpeg-static": "^5.2.0",
     "simplex-noise": "^4.0.3"
   },

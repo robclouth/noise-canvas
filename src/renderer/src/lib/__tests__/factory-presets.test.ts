@@ -190,7 +190,6 @@ describe("factory palettes", () => {
       "Mixing",
       "Space",
       "Mangle",
-      "Creatures",
     ]);
   });
 });

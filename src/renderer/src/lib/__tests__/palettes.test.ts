@@ -126,7 +126,7 @@ beforeEach(() => {
 
 describe("factory palettes", () => {
   it("resolves every named preset into a brush", () => {
-    expect(factoryPalettes).toHaveLength(8);
+    expect(factoryPalettes).toHaveLength(7);
     for (const palette of factoryPalettes) {
       expect(palette.brushes.length).toBeGreaterThan(0);
       // A missing preset id would be dropped, leaving a short list.

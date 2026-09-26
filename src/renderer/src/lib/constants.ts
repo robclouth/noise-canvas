@@ -351,5 +351,5 @@ export const EFFECT_DESCRIPTIONS: Record<string, string> = {
   convolve: "Prints another sound's character onto this one: rooms, plates, resonant junk.",
   align: "Snaps everything into one sharp impulse, then lets it drift apart again.",
   attract: "Pulls energy onto a map of valleys, gathering smear into notes and hits.",
-  neural: "Lets a tiny neural network rework the sound, into alien growths and glitches.",
+  neural: "Grows a learnt sound out of what is under the brush, regrowing it where torn.",
 };
