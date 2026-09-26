@@ -264,19 +264,65 @@ export async function encodeHistoryDelta(
   afterCompact = false,
   turns?: PhaseTurns,
 ): Promise<Buffer> {
-  return await zstdCompressAsync(
+  return await compressDelta(
     await historyCodec().historyEncodeDelta(base, after, ranges, baseCompact, afterCompact, turns),
   );
 }
 
+// Bytes past which a delta compresses as frames side by side, each on a
+// thread of its own. The frames sit behind a header of their own, "NCD1",
+// which no zstd frame can begin with, so a delta written as one stream still
+// reads as one.
+const DELTA_FRAME_BYTES = 8 * 1024 * 1024;
+const DELTA_MAX_FRAMES = 8;
+const DELTA_FRAMED_MAGIC = 0x4e434431;
+
+/** A delta's bytes compressed: one zstd stream, or frames behind a header when it is large. */
+async function compressDelta(input: Buffer): Promise<Buffer> {
+  const count = Math.min(DELTA_MAX_FRAMES, Math.floor(input.byteLength / DELTA_FRAME_BYTES));
+  if (count <= 1) return await zstdCompressAsync(input);
+  const per = Math.ceil(input.byteLength / count);
+  const raws = Array.from({ length: count }, (_unused, index) =>
+    input.subarray(index * per, Math.min(input.byteLength, (index + 1) * per)),
+  );
+  const frames = await Promise.all(raws.map((raw) => zstdCompressAsync(raw)));
+  const header = Buffer.alloc(8 + count * 8);
+  header.writeUInt32BE(DELTA_FRAMED_MAGIC, 0);
+  header.writeUInt32LE(count, 4);
+  frames.forEach((frame, index) => {
+    header.writeUInt32LE(frame.byteLength, 8 + index * 8);
+    header.writeUInt32LE(raws[index].byteLength, 12 + index * 8);
+  });
+  return Buffer.concat([header, ...frames]);
+}
+
+/** A delta's bytes as `compressDelta` wrote them, or as one zstd stream. */
+async function decompressDelta(bytes: Uint8Array): Promise<Buffer> {
+  const head = new DataView(bytes.buffer, bytes.byteOffset, Math.min(bytes.byteLength, 8));
+  if (bytes.byteLength < 8 || head.getUint32(0, false) !== DELTA_FRAMED_MAGIC) return await zstdDecompressAsync(bytes);
+  const count = head.getUint32(4, true);
+  const table = new DataView(bytes.buffer, bytes.byteOffset + 8, count * 8);
+  let offset = 8 + count * 8;
+  const frames: Array<{ bytes: Uint8Array; raw: number }> = [];
+  for (let index = 0; index < count; index++) {
+    const length = table.getUint32(index * 8, true);
+    frames.push({ bytes: bytes.subarray(offset, offset + length), raw: table.getUint32(index * 8 + 4, true) });
+    offset += length;
+  }
+  const parts = await Promise.all(
+    frames.map((frame) => zstdDecompressAsync(frame.bytes, { chunkSize: zstdChunkSize(frame.raw) })),
+  );
+  return Buffer.concat(parts);
+}
+
 /** The phase turns a stored delta carries, or null when it has none. */
 export async function readHistoryDeltaTurns(bytes: Uint8Array): Promise<PhaseTurns | null> {
-  return parseHistoryDeltaTurns(await zstdDecompressAsync(bytes));
+  return parseHistoryDeltaTurns(await decompressDelta(bytes));
 }
 
 /** Rebuild the state a stroke produced, given the state it was painted onto. */
 export async function applyHistoryDelta(base: Float32Array, bytes: Uint8Array): Promise<Float32Array> {
-  return await historyCodec().historyApplyDelta(base, await zstdDecompressAsync(bytes));
+  return await historyCodec().historyApplyDelta(base, await decompressDelta(bytes));
 }
 
 /**
@@ -290,7 +336,7 @@ export async function applyHistoryDeltas(
   deltas: Uint8Array[],
   inverts: boolean[],
 ): Promise<Float32Array> {
-  const raw = await Promise.all(deltas.map((bytes) => zstdDecompressAsync(bytes)));
+  const raw = await Promise.all(deltas.map((bytes) => decompressDelta(bytes)));
   return await historyCodec().historyApplyDeltas(base, out, raw, inverts);
 }
 
@@ -309,7 +355,7 @@ export async function applyHistoryDeltasWindowed(
   inverts: boolean[],
   totalPixels: number,
 ): Promise<Float32Array> {
-  const raw = await Promise.all(deltas.map((bytes) => zstdDecompressAsync(bytes)));
+  const raw = await Promise.all(deltas.map((bytes) => decompressDelta(bytes)));
   return await historyCodec().historyApplyDeltasWindowed(values, table, raw, inverts, totalPixels);
 }
 

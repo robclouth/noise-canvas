@@ -2,8 +2,8 @@
 // every dab: which dabs reached the store, and which parts of each.
 //
 // Usage: node scripts/drive/probe-stroke.mjs [--seconds 285] [--extra 8] [--no-build]
-//        [--power 0] [--strokes 1] [--settle 60000] [--before 1500] [--duration 500]
-import { copyFileSync } from "node:fs";
+//        [--power 0] [--strokes 1] [--settle 60000] [--before 1500] [--duration 500] [--log keep.log]
+import { copyFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build, diagLines, launch, openFiles, seedEraseBrush, sleep, viewOf, writeNoise, closeApp } from "./app.mjs";
@@ -141,5 +141,7 @@ try {
     if (l.t >= t0 - 1000) console.log(`diag ${l.t - t0} ms: ${l.line.slice(24, 400)}`);
   console.log(`\n${dabs.length} dabs: ${lostDabs} not in the store at all, ${partDabs} partly`);
 } finally {
+  const keep = option("log", null);
+  if (keep && existsSync(logPath)) copyFileSync(logPath, keep);
   await closeApp(app, profile);
 }

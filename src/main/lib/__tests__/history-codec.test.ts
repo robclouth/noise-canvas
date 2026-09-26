@@ -116,6 +116,23 @@ describe("history stroke delta", () => {
     expect(Array.from(bits(restored))).toEqual(Array.from(bits(after)));
   });
 
+  it("reproduces a painted state large enough to be compressed in frames side by side", async () => {
+    const pixels = 1_500_000;
+    const base = packedState(pixels, 3);
+    const after = new Float32Array(base);
+    for (let p = 0; p < pixels; p += 3) for (let c = 0; c < 4; c++) after[p * 4 + c] = ((p * 7 + c) % 91) / 91;
+    const rs = ranges([0, pixels]);
+    const encoded = await encodeHistoryDelta(base, after, rs);
+    // "NCD1": the frames sit behind their own header.
+    expect(encoded.readUInt32BE(0)).toBe(0x4e434431);
+    const restored = await applyHistoryDelta(base, encoded);
+    const want = bits(after);
+    const got = bits(restored);
+    let differing = 0;
+    for (let i = 0; i < want.length; i++) if (want[i] !== got[i]) differing++;
+    expect([got.length, differing]).toEqual([want.length, 0]);
+  }, 60_000);
+
   it("does not drift when the same delta is replayed", async () => {
     // Undo and redo replay a delta against the same base over and over; an
     // additive float delta would accumulate error on each pass.
