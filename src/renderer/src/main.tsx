@@ -7,9 +7,11 @@ import "@mantine/notifications/styles.css";
 import ReactDOM from "react-dom/client";
 import App from "./app";
 import "./assets/main.css";
+import { AppErrorBoundary, AppFailure } from "./components/app-failure";
 import { modals } from "./components/modals";
 import { installNativeAudioContext } from "./lib/audio-context";
-import { installDiagErrorCapture } from "./lib/diag-log";
+import { diag, installDiagErrorCapture } from "./lib/diag-log";
+import { host } from "./lib/host";
 import { APP_MODAL_PROPS } from "./lib/modals";
 
 installDiagErrorCapture();
@@ -75,11 +77,20 @@ document.addEventListener(
   { capture: true },
 );
 
+const addonError = host.analysis?.nativeAddonLoadError?.() ?? null;
+if (addonError) diag.error("renderer", "the native addon did not load", { message: addonError });
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <MantineProvider forceColorScheme="dark" theme={theme}>
-    <ModalsProvider modals={modals} modalProps={APP_MODAL_PROPS}>
-      <Notifications zIndex={1000} />
-      <App />
-    </ModalsProvider>
+    {addonError ? (
+      <AppFailure title="Noise Canvas Could Not Start" error={addonError} canReload={false} />
+    ) : (
+      <AppErrorBoundary>
+        <ModalsProvider modals={modals} modalProps={APP_MODAL_PROPS}>
+          <Notifications zIndex={1000} />
+          <App />
+        </ModalsProvider>
+      </AppErrorBoundary>
+    )}
   </MantineProvider>,
 );

@@ -31,6 +31,7 @@ const OUT_OF_SCOPE = [
   "components/manual-viewer.tsx", // a help surface
   "components/help-overlay.tsx", // a help surface
   "components/empty-state.tsx", // its body text is the explanation
+  "components/app-failure.tsx", // its body text is the explanation
   "components/controls/help-control.tsx", // defines the wrappers
   "components/controls/brush-picker.tsx", // dialog
   "components/layout/menu-bar.tsx", // menu titles, described under Menus in the manual

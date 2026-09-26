@@ -79,6 +79,16 @@ export function init() {
   return gaborator;
 }
 
+/** Why the native addon cannot load, or null once it has. */
+export function nativeAddonLoadError(): string | null {
+  try {
+    init();
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 // Budget for a GPU no query covers: enough for a few minutes of audio, never
 // a multi-gigabyte figure taken from system RAM.
 const UNKNOWN_GPU_BYTES = 2 * 1024 ** 3;

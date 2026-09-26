@@ -193,6 +193,8 @@ declare global {
       isModelDownloaded: (modelFile: string) => boolean;
       downloadModel: (modelFile: string, onProgress?: (downloaded: number, total: number) => void) => Promise<void>;
       aiSeparate: (audioChannels: Float32Array[], sampleRate: number) => Promise<Record<string, Float32Array[]>>;
+      /** Why the native addon cannot load, or null once it has. */
+      nativeAddonLoadError?: () => string | null;
       /** True when AI stem separation can run on this system. */
       aiSeparationAvailable?: () => boolean;
       detectOnsets: (
