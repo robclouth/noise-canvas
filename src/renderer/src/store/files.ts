@@ -26,7 +26,7 @@ import {
   type OpenFileTexels,
 } from "../lib/gpu-budget";
 import { blockBandLayout, blockGrid, blockTexels, frameRangeOfBlock, type BlockGrid } from "../lib/block-grid";
-import { destroyBlockStore, openBlockStore } from "../lib/block-stores";
+import { destroyBlockStore, getBlockStore, openBlockStore } from "../lib/block-stores";
 import { needsCanvasWindow } from "../lib/canvas-window";
 import { viewCoversFile } from "../lib/canvas-view";
 import {
@@ -2974,36 +2974,43 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       let viewFromStore = false;
       let viewBuffer: Float32Array | null = null;
       let result: CommitStrokeResult;
-      if (view && window) {
-        // The view's pre-stroke pixels come from the block store, with the
-        // stroke's own footprint written over them; only when the store
-        // cannot serve them is the view gathered from a whole readback.
-        const preStroke = source.footprint ? await getHistoryManager(fileId).currentRanges(view.ranges) : null;
-        if (preStroke && source.footprint) {
-          viewBuffer = composeViewBuffer(preStroke, view, source.footprint.values, source.footprint.ranges);
-          viewFromStore = viewBuffer != null;
-        }
-        if (!viewBuffer) viewBuffer = gatherPixelRanges(await readWhole(), view.ranges);
-        try {
-          result = await host.analysis.commitStroke(
-            viewBuffer,
-            { ...layout, viewStartFrame: view.startFrame, viewEndFrame: view.endFrame },
-            spec.sampleRate,
-            params,
-            existingAudio,
-            window,
-            stroke,
-          );
-          usedView = true;
-        } catch (error) {
-          if (!(error instanceof Error) || !/view/.test(error.message)) throw error;
-          // The view fell short of a pass's reach; the whole state still
-          // commits correctly, at the cost of reading all of it.
-          console.error("windowed commit fell back to the whole state:", error);
+      // The store's background flush waits while the commit runs, so the two
+      // do not share the machine.
+      const resumeFlush = (await getBlockStore(fileId))?.pauseFlush() ?? (() => {});
+      try {
+        if (view && window) {
+          // The view's pre-stroke pixels come from the block store, with the
+          // stroke's own footprint written over them; only when the store
+          // cannot serve them is the view gathered from a whole readback.
+          const preStroke = source.footprint ? await getHistoryManager(fileId).currentRanges(view.ranges) : null;
+          if (preStroke && source.footprint) {
+            viewBuffer = composeViewBuffer(preStroke, view, source.footprint.values, source.footprint.ranges);
+            viewFromStore = viewBuffer != null;
+          }
+          if (!viewBuffer) viewBuffer = gatherPixelRanges(await readWhole(), view.ranges);
+          try {
+            result = await host.analysis.commitStroke(
+              viewBuffer,
+              { ...layout, viewStartFrame: view.startFrame, viewEndFrame: view.endFrame },
+              spec.sampleRate,
+              params,
+              existingAudio,
+              window,
+              stroke,
+            );
+            usedView = true;
+          } catch (error) {
+            if (!(error instanceof Error) || !/view/.test(error.message)) throw error;
+            // The view fell short of a pass's reach; the whole state still
+            // commits correctly, at the cost of reading all of it.
+            console.error("windowed commit fell back to the whole state:", error);
+            result = await commitWhole();
+          }
+        } else {
           result = await commitWhole();
         }
-      } else {
-        result = await commitWhole();
+      } finally {
+        resumeFlush();
       }
       if (usedView && view && viewBuffer && data) {
         scatterCommitPatch(data, view, viewBuffer, result.patch.ranges, layout);

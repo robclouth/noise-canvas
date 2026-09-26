@@ -16,6 +16,9 @@ import { yieldIfLong } from "./frame-yield";
 
 // Blocks a read or write over many blocks keeps in flight at once.
 const READ_ALL_AHEAD = 8;
+// Blocks a flush encodes at once. A flush runs behind the work that waits on
+// it, so it keeps to part of the thread pool and leaves the rest to a commit.
+const FLUSH_AHEAD = 4;
 
 /** Where a store keeps its encoded blocks between reads. */
 export interface BlockBackend {
@@ -99,6 +102,12 @@ export interface PackedStateStore {
   patch(ranges: Uint32Array, values: Float32Array): Promise<void>;
   applyTurnsCollecting(turns: PhaseTurns): Promise<Uint32Array>;
   flush(): Promise<void>;
+  /**
+   * Holds a background flush between its batches until the returned release
+   * is called, so work that waits on the machine is not slowed by it. A flush
+   * a patch waits on is never held.
+   */
+  pauseFlush(): () => void;
   dispose(): Promise<void>;
 }
 
@@ -131,6 +140,8 @@ export class BlockStore implements PackedStateStore {
   private readonly maxResidentBytes: number;
   private flushing: Promise<void> = Promise.resolve();
   private flushQueued = false;
+  private flushPauses = 0;
+  private readonly flushResumes: Array<() => void> = [];
   private disposed = false;
   private seeded = false;
 
@@ -429,7 +440,7 @@ export class BlockStore implements PackedStateStore {
    */
   private async flushIfOver(): Promise<void> {
     const bytes = this.currentResidentBytes;
-    if (bytes > 2 * this.maxResidentBytes) await this.flush();
+    if (bytes > 2 * this.maxResidentBytes) await this.flush(false);
     else if (bytes > this.maxResidentBytes && !this.flushQueued) {
       this.flushQueued = true;
       void this.flush()
@@ -454,13 +465,24 @@ export class BlockStore implements PackedStateStore {
    * dirty for the next flush. Calls run one after another, and `dispose`
    * waits for the one in flight.
    */
-  async flush(): Promise<void> {
-    const run = this.flushing.then(() => this.flushNow());
+  async flush(pausable = true): Promise<void> {
+    const run = this.flushing.then(() => this.flushNow(pausable));
     this.flushing = run.catch(() => undefined);
     return await run;
   }
 
-  private async flushNow(): Promise<void> {
+  pauseFlush(): () => void {
+    this.flushPauses++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.flushPauses--;
+      if (this.flushPauses === 0) for (const resume of this.flushResumes.splice(0)) resume();
+    };
+  }
+
+  private async flushNow(pausable: boolean): Promise<void> {
     const flushOne = async (index: number, block: Float32Array): Promise<void> => {
       if (this.disposed) return;
       const version = this.dirtyVersion.get(index);
@@ -474,14 +496,18 @@ export class BlockStore implements PackedStateStore {
     };
     // A few blocks encode and write at once; each is its own record.
     const dirty = [...this.dirty];
-    for (let start = 0; start < dirty.length; start += READ_ALL_AHEAD) {
-      await Promise.all(dirty.slice(start, start + READ_ALL_AHEAD).map(([index, block]) => flushOne(index, block)));
+    for (let start = 0; start < dirty.length; start += FLUSH_AHEAD) {
+      while (pausable && this.flushPauses > 0 && !this.disposed) {
+        await new Promise<void>((resume) => this.flushResumes.push(resume));
+      }
+      await Promise.all(dirty.slice(start, start + FLUSH_AHEAD).map(([index, block]) => flushOne(index, block)));
     }
   }
 
   /** Drops everything, on disk and in RAM. The store cannot be read after this. */
   async dispose(): Promise<void> {
     this.disposed = true;
+    for (const resume of this.flushResumes.splice(0)) resume();
     await this.flushing.catch(() => undefined);
     this.dirty.clear();
     this.dirtyVersion.clear();

@@ -1,6 +1,7 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
+import { availableParallelism } from "os";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
 import { hasSupportedAudioExtension } from "./lib/audio-extensions";
@@ -12,8 +13,11 @@ import { checkForUpdates, initUpdater } from "./lib/updater";
 
 // The history codec and zstd run on libuv's thread pool, in this process and
 // in the renderer that inherits this environment. Four threads leave most of
-// the machine idle while a whole state is written.
-if (!process.env.UV_THREADPOOL_SIZE) process.env.UV_THREADPOOL_SIZE = "8";
+// the machine idle while a whole state is written; one a core, up to 16, keep
+// a block flush from queueing a commit's own work behind it.
+if (!process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = String(Math.min(16, Math.max(8, availableParallelism())));
+}
 
 // Which ANGLE backend translates our shaders, chosen per platform because the
 // default is the wrong trade on both. Set NOISE_CANVAS_ANGLE (gl, vulkan, d3d11,

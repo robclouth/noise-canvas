@@ -497,6 +497,26 @@ describe("BlockStore", () => {
     expect(Array.from(again)).toEqual(Array.from(gatherPixelRanges(packed, all)));
   });
 
+  it("holds a flush while paused and lets it finish once released", async () => {
+    const { overlay, store } = await seeded();
+    const all = Uint32Array.of(0, layoutTexels(layout));
+    await store.patch(
+      all,
+      gatherPixelRanges(packed, all).map((value) => value * -1),
+    );
+    const dirty = store.dirtyCount;
+    expect(dirty).toBeGreaterThan(4);
+    const release = store.pauseFlush();
+    const writesBefore = overlay.writes;
+    const flushing = store.flush();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(overlay.writes - writesBefore).toBe(0);
+    release();
+    await flushing;
+    expect(overlay.writes - writesBefore).toBe(dirty);
+    expect(store.dirtyCount).toBe(0);
+  });
+
   it("stops an in-flight flush when it is disposed, leaving nothing behind", async () => {
     const grid = makeGrid();
     const backend = memoryBackend();

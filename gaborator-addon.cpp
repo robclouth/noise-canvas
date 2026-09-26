@@ -158,6 +158,8 @@ static void forEachBlock(size_t count, size_t minPerThread, const std::function<
 
 // Samples one thread of the true-peak scan takes at least.
 static constexpr size_t TRUE_PEAK_BLOCK = 1 << 16;
+// Samples one thread of the limiter's per-sample passes takes at least.
+static constexpr size_t LIMITER_PASS_BLOCK = 1 << 18;
 
 // Channel-linked per-sample true peak. Detection follows ITU-R BS.1770:
 // oversample with a polyphase windowed-sinc FIR and take the peak of the
@@ -205,12 +207,21 @@ static std::vector<float> truePeakPerSample(const std::vector<std::vector<float>
                 // Only reconstruct between samples that are loud enough to overshoot.
                 if (interior && std::max(here, next) > 0.25f)
                 {
+                    const float *x = channels[ch].data() + (i + 1 - HT);
                     for (int ph = 1; ph < OS; ++ph)
                     {
-                        float acc = 0.0f;
-                        for (int t = 0; t < 2 * HT; ++t)
-                            acc += channels[ch][i + t - HT + 1] * kernels[ph][t];
-                        chPeak = std::max(chPeak, std::abs(acc));
+                        // Four running sums over interleaved taps, so the
+                        // compiler can keep them in one vector.
+                        const float *k = kernels[ph];
+                        float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+                        for (int t = 0; t < 2 * HT; t += 4)
+                        {
+                            a0 += x[t] * k[t];
+                            a1 += x[t + 1] * k[t + 1];
+                            a2 += x[t + 2] * k[t + 2];
+                            a3 += x[t + 3] * k[t + 3];
+                        }
+                        chPeak = std::max(chPeak, std::abs((a0 + a1) + (a2 + a3)));
                     }
                 }
                 peak = std::max(peak, chPeak);
@@ -4704,19 +4715,21 @@ private:
         std::vector<float> mask(n, 1.0f);
         if (footEnd > footStart)
         {
-            for (size_t i = 0; i < n; ++i)
-            {
-                const int64_t t = w0 + (int64_t)i;
-                if (t < footStart || t >= footEnd)
+            forEachBlock(n, LIMITER_PASS_BLOCK, [&](size_t from, size_t to) {
+                for (size_t i = from; i < to; ++i)
                 {
-                    mask[i] = 0.0f;
-                    continue;
+                    const int64_t t = w0 + (int64_t)i;
+                    if (t < footStart || t >= footEnd)
+                    {
+                        mask[i] = 0.0f;
+                        continue;
+                    }
+                    const float dS = (footStart > 0 && !gatedStart) ? (float)(t - footStart) : rampSamples;
+                    const float dE = (footEnd < numFrames && !gatedEnd) ? (float)(footEnd - 1 - t) : rampSamples;
+                    const float u = std::min(1.0f, std::min(dS, dE) / rampSamples);
+                    mask[i] = u * u * (3.0f - 2.0f * u);
                 }
-                const float dS = (footStart > 0 && !gatedStart) ? (float)(t - footStart) : rampSamples;
-                const float dE = (footEnd < numFrames && !gatedEnd) ? (float)(footEnd - 1 - t) : rampSamples;
-                const float u = std::min(1.0f, std::min(dS, dE) / rampSamples);
-                mask[i] = u * u * (3.0f - 2.0f * u);
-            }
+            });
         }
 
         // Required gain per sample. The output is keep + g*act, where keep =
@@ -4733,42 +4746,48 @@ private:
         {
             keepWin[(size_t)ch].resize(n);
             actWin[(size_t)ch].resize(n);
-            for (size_t i = 0; i < n; ++i)
-            {
-                const float keep = (1.0f - mask[i]) * exWin[(size_t)ch][i];
-                keepWin[(size_t)ch][i] = keep;
-                actWin[(size_t)ch][i] = mixWin[(size_t)ch][i] - keep;
-            }
+            forEachBlock(n, LIMITER_PASS_BLOCK, [&](size_t from, size_t to) {
+                for (size_t i = from; i < to; ++i)
+                {
+                    const float keep = (1.0f - mask[i]) * exWin[(size_t)ch][i];
+                    keepWin[(size_t)ch][i] = keep;
+                    actWin[(size_t)ch][i] = mixWin[(size_t)ch][i] - keep;
+                }
+            });
         }
         const std::vector<float> keepPeak = truePeakPerSample(keepWin);
         const std::vector<float> actPeak = truePeakPerSample(actWin);
         std::vector<float> gain(n, 1.0f);
-        for (size_t i = 0; i < n; ++i)
-        {
-            const float ceiling = std::max(LIMITER_CEILING, exLoud[i]);
-            const float room = std::max(0.0f, ceiling - keepPeak[i]);
-            if (actPeak[i] > room)
-                gain[i] = actPeak[i] > 0.0f ? room / actPeak[i] : 1.0f;
-        }
+        forEachBlock(n, LIMITER_PASS_BLOCK, [&](size_t from, size_t to) {
+            for (size_t i = from; i < to; ++i)
+            {
+                const float ceiling = std::max(LIMITER_CEILING, exLoud[i]);
+                const float room = std::max(0.0f, ceiling - keepPeak[i]);
+                if (actPeak[i] > room)
+                    gain[i] = actPeak[i] > 0.0f ? room / actPeak[i] : 1.0f;
+            }
+        });
         smoothLimiterGain(gain, sampleRate, 40.0f, 200.0f);
 
         weightedGain.assign(n, 1.0f);
-        for (size_t i = 0; i < n; ++i)
-        {
-            const float g = gain[i];
-            if (g >= 1.0f)
-                continue;
-            const float w = mask[i];
-            for (int ch = 0; ch < channels; ++ch)
+        forEachBlock(n, LIMITER_PASS_BLOCK, [&](size_t from, size_t to) {
+            for (size_t i = from; i < to; ++i)
             {
-                const float ex = exWin[(size_t)ch][i];
-                const float mix = mixWin[(size_t)ch][i];
-                // = g*mix + (1-g)*(1-w)*ex, written so mix == ex passes ex
-                // through bit-exact when w is 0.
-                audioChannels[ch][(size_t)(w0 + (int64_t)i)] = ex + g * (mix - ex) - w * (1.0f - g) * ex;
+                const float g = gain[i];
+                if (g >= 1.0f)
+                    continue;
+                const float w = mask[i];
+                for (int ch = 0; ch < channels; ++ch)
+                {
+                    const float ex = exWin[(size_t)ch][i];
+                    const float mix = mixWin[(size_t)ch][i];
+                    // = g*mix + (1-g)*(1-w)*ex, written so mix == ex passes ex
+                    // through bit-exact when w is 0.
+                    audioChannels[ch][(size_t)(w0 + (int64_t)i)] = ex + g * (mix - ex) - w * (1.0f - g) * ex;
+                }
+                weightedGain[i] = 1.0f + (g - 1.0f) * w;
             }
-            weightedGain[i] = 1.0f + (g - 1.0f) * w;
-        }
+        });
     }
 
     /**

@@ -186,6 +186,11 @@ export class WholeStateStore implements PackedStateStore {
   }
 
   /** Resolves once the seeded blocks are written. */
+  /** Its writes are its seed's, which nothing waits on. */
+  pauseFlush(): () => void {
+    return () => {};
+  }
+
   flush(): Promise<void> {
     return this.writing;
   }
