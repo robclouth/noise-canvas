@@ -82,6 +82,7 @@ const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon
     window: CommitWindow,
     stroke: CommitStroke,
   ) => Promise<CommitResult>;
+  synthesisReadReach: (rate: number, params: { bandsPerOctave: number; minFreq: number }) => number;
   detectOnsets: (
     packedData: Float32Array,
     meta: {
@@ -175,6 +176,41 @@ async function roundTrip(analysis: GaboratorAnalysisResult, data: Float32Array):
 }
 
 describe("commit stroke", () => {
+  it(
+    "gives the audio one synthesis pass gives, however many threads it splits the file over",
+    async () => {
+      // Long enough that the commit splits the file into spans of time.
+      const reach = addon.synthesisReadReach(SR, PARAMS);
+      const seconds = Math.ceil(3 * Math.max(8 * reach, 2)) + 1;
+      const analysis = await addon.analyze([makeNoise(0.3, 1234567, seconds * SR)], 1, SR, PARAMS);
+      const whole = await roundTrip(analysis, analysis.data);
+      const commit = await addon.commitStroke(
+        analysis.data,
+        metaOf(analysis),
+        SR,
+        PARAMS,
+        [],
+        { startFrame: 0, endFrame: analysis.numFrames, startBand: 0, endBand: analysis.numBands },
+        gateStroke({
+          hardEdgeStart: false,
+          hardEdgeEnd: false,
+          project: false,
+          footStartFrame: 0,
+          footEndFrame: analysis.numFrames,
+        }),
+      );
+      let worst = 0;
+      let loudest = 0;
+      for (let i = 0; i < whole.length; i++) {
+        worst = Math.max(worst, Math.abs(commit.channels[0][i] - whole[i]));
+        loudest = Math.max(loudest, Math.abs(whole[i]));
+      }
+      expect(loudest).toBeGreaterThan(0.1);
+      expect(worst, `largest sample difference ${worst}`).toBeLessThan(2e-6);
+    },
+    TIMEOUT,
+  );
+
   it(
     "gates a hard erase as exactly as the boundary conditioner did",
     async () => {

@@ -1,5 +1,6 @@
-// Times edits the canvas window cannot hold on a long file: a full-length
-// erase, a full-length reversal and a full-length copy from a second file.
+// Times edits on a long file: a full-length erase, a full-length reversal and
+// a full-length copy from a second file, then erases of two and eight beats
+// and a two-beat reversal.
 // For each it prints the wait from pen up to the commit, and the "beside dab"
 // diag line: tiles, texels, and the milliseconds spent reading, setting up,
 // painting and reading back.
@@ -63,6 +64,7 @@ try {
     await sleep(40);
     await page.mouse.up();
     const upAt = performance.now();
+    const upClock = new Date().toISOString();
     for (let i = 0; i < 2400 && commits() <= before; i++) await sleep(50);
     const waitMs = Math.round(performance.now() - upAt);
     if (cdp) {
@@ -75,6 +77,7 @@ try {
     const sum = (key) => Math.round(beside.reduce((total, entry) => total + (entry[key] ?? 0), 0));
     const row = {
       name,
+      up: upClock,
       waitMs,
       dabs: beside.length,
       tiles: sum("tiles"),
@@ -118,6 +121,31 @@ try {
       state.setParameter("sourceFile", { path });
     }, sourcePath);
     await timeDab("copy", 0.7);
+    // Strokes of an everyday size: two beats and eight beats.
+    await setStep("sourceFile", null);
+    await page.evaluate(() =>
+      globalThis.__store
+        .getState()
+        .setParameter("effects", [
+          { id: "drive-erase", effect: "dynamics", enabled: true, params: { dynamicsGainDb: -60 } },
+        ]),
+    );
+    await setStep("brushSizeTime", 2);
+    await timeDab("erase 2 beats", 0.35);
+    await setStep("brushSizeTime", 8);
+    await timeDab("erase 8 beats", 0.4);
+    await page.evaluate(() =>
+      globalThis.__store.getState().setParameter("effects", [
+        {
+          id: "drive-reverse",
+          effect: "transform",
+          enabled: true,
+          params: { transformScaleTime: -1, transformEdgeMode: 0 },
+        },
+      ]),
+    );
+    await setStep("brushSizeTime", 2);
+    await timeDab("reverse 2 beats", 0.55);
   }
 } finally {
   const keep = option("log", null);

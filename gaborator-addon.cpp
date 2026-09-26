@@ -18,6 +18,7 @@
 #include <chrono>
 #include <functional>
 #include <thread>
+#include <atomic>
 #include "gaborator/gaborator.h"
 
 #ifdef _WIN32
@@ -78,30 +79,81 @@ static constexpr float LIMITER_CEILING = 0.794f;
  * Runs `work` over [0, count) split into equal blocks, one thread each. Fewer
  * items than `minPerThread` run on the calling thread alone.
  */
+/**
+ * Runs `work(task)` for every task in [0, count) on up to one thread per core,
+ * each thread taking the next task as it finishes its last: a core that runs
+ * slower than the others then takes fewer tasks rather than holding the rest up.
+ * Tasks are taken in index order, so the costliest go first. Returns the first
+ * failure's message, or an empty string.
+ */
+static std::string forEachTask(int count, const std::function<void(int)> &work)
+{
+    if (count <= 0)
+        return std::string();
+    std::vector<std::exception_ptr> failures((size_t)count);
+    std::atomic<int> next{0};
+    const auto drain = [&]() {
+        for (int task = next++; task < count; task = next++)
+        {
+            try
+            {
+                work(task);
+            }
+            catch (...)
+            {
+                failures[(size_t)task] = std::current_exception();
+            }
+        }
+    };
+    const int threads = std::min(count, std::max(1, (int)std::thread::hardware_concurrency()));
+    std::vector<std::thread> others;
+    for (int t = 1; t < threads; ++t)
+        others.emplace_back(drain);
+    drain();
+    for (auto &thread : others)
+        thread.join();
+    for (const auto &failure : failures)
+    {
+        if (!failure)
+            continue;
+        try
+        {
+            std::rethrow_exception(failure);
+        }
+        catch (const std::exception &e)
+        {
+            return std::string(e.what());
+        }
+        catch (...)
+        {
+            return std::string("a task failed");
+        }
+    }
+    return std::string();
+}
+
 static void forEachBlock(size_t count, size_t minPerThread, const std::function<void(size_t, size_t)> &work)
 {
     if (!count)
         return;
     const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    // Several pieces a core, so a slow core takes fewer of them.
     const size_t wanted = std::max<size_t>(1, count / std::max<size_t>(1, minPerThread));
-    const size_t threads = std::min<size_t>(wanted, cores);
-    if (threads <= 1)
+    const size_t pieces = std::min<size_t>(wanted, (size_t)cores * 4);
+    if (pieces <= 1)
     {
         work(0, count);
         return;
     }
-    const size_t per = (count + threads - 1) / threads;
-    std::vector<std::thread> others;
-    for (size_t t = 1; t < threads; ++t)
-    {
-        const size_t lo = std::min(count, t * per);
+    const size_t per = (count + pieces - 1) / pieces;
+    const std::string failed = forEachTask((int)pieces, [&](int piece) {
+        const size_t lo = std::min(count, (size_t)piece * per);
         const size_t hi = std::min(count, lo + per);
         if (lo < hi)
-            others.emplace_back(work, lo, hi);
-    }
-    work(0, std::min(count, per));
-    for (auto &thread : others)
-        thread.join();
+            work(lo, hi);
+    });
+    if (!failed.empty())
+        throw std::runtime_error(failed);
 }
 
 // Samples one thread of the true-peak scan takes at least.
@@ -328,8 +380,10 @@ struct PackedCoefs
  * fillEnd). Bands outside the packed layout, and times outside a band's stored
  * range, read as silence.
  */
+// Fills bands [fillBandBegin, fillBandEnd) when given, of the bands [bandBegin, bandEnd) the packed buffer holds.
 static void fillCoefsFromPacked(const PackedCoefs &src, int channel, int bandBegin, int bandEnd,
-                                int64_t fillStart, int64_t fillEnd, gaborator::coefs<float> &out)
+                                int64_t fillStart, int64_t fillEnd, gaborator::coefs<float> &out,
+                                int fillBandBegin = -1, int fillBandEnd = -1)
 {
     gaborator::fill(
         [&](int b, int64_t t, std::complex<float> &coef)
@@ -357,7 +411,8 @@ static void fillCoefsFromPacked(const PackedCoefs &src, int channel, int bandBeg
             coef.real(mag * std::cos(ph));
             coef.imag(mag * std::sin(ph));
         },
-        bandBegin, bandEnd, fillStart, fillEnd, out);
+        fillBandBegin < 0 ? bandBegin : fillBandBegin, fillBandEnd < 0 ? bandEnd : fillBandEnd, fillStart, fillEnd,
+        out);
 }
 
 /**
@@ -2188,6 +2243,10 @@ struct OnsetCurves
  * Whitens the coefficients and accumulates the detection curves. Returns
  * false when there is nothing to read.
  */
+// Runs the bands of an onset pass split into; fixed, so the curves' sums do
+// not depend on the machine.
+static constexpr int ONSET_BAND_GROUPS = 8;
+
 static bool computeOnsetCurves(const float *packed,
                                size_t packedFloats,
                                const OnsetBandLayout &layout,
@@ -2273,9 +2332,13 @@ static bool computeOnsetCurves(const float *packed,
     uint32_t longestBand = 0;
     for (int b = 0; b < layout.numBands; ++b)
         longestBand = std::max(longestBand, layout.bandLengths[b]);
-    std::vector<float> mags(longestBand, 0.0f);
 
-    for (int b = 0; b < layout.numBands; ++b)
+    // Each band whitens on its own, so the bands are shared out across threads
+    // as each finishes its last.
+    std::atomic<int> nextBand{0};
+    const std::string whitenFailure = forEachChannel(ONSET_BAND_GROUPS, [&](int) {
+    std::vector<float> mags(longestBand, 0.0f);
+    for (int b = nextBand++; b < layout.numBands; b = nextBand++)
     {
         const uint32_t len = layout.bandLengths[b];
         if (len == 0)
@@ -2379,6 +2442,9 @@ static bool computeOnsetCurves(const float *packed,
             whitened[b][k - kKeep] = c / peak;
         }
     }
+    });
+    if (!whitenFailure.empty())
+        throw std::runtime_error(whitenFailure);
 
     // A band deposits one coefficient every stride samples, so dropping each
     // whole contribution into the single bin it starts in makes the low bands —
@@ -2411,6 +2477,28 @@ static bool computeOnsetCurves(const float *packed,
     std::vector<double> complexD2(curveLen, 0.0);
     std::vector<double> energyD2(curveLen, 0.0);
 
+    // The bands deposit into their curves in a fixed number of runs of about
+    // equal work, each into curves of its own, added up in run order: the
+    // sums come out the same on any machine, however many threads it has.
+    std::vector<int> groupStart(ONSET_BAND_GROUPS + 1, layout.numBands);
+    {
+        double total = 0.0;
+        for (int b = 0; b < layout.numBands; ++b)
+            total += (double)layout.bandLengths[b];
+        double run = 0.0;
+        int group = 0;
+        groupStart[0] = 0;
+        for (int b = 0; b < layout.numBands && group + 1 < ONSET_BAND_GROUPS; ++b)
+        {
+            run += (double)layout.bandLengths[b];
+            if (run >= total * (double)(group + 1) / ONSET_BAND_GROUPS)
+                groupStart[(size_t)(++group)] = b + 1;
+        }
+        for (int g = group + 1; g <= ONSET_BAND_GROUPS; ++g)
+            groupStart[(size_t)g] = layout.numBands;
+    }
+    std::vector<std::vector<double>> groupD2((size_t)ONSET_BAND_GROUPS * 3);
+
     const auto addTriangle = [pad](std::vector<double> &d2, int64_t centre, int64_t half, double peak) {
         const double slope = peak / (double)half;
         d2[(size_t)(pad + centre - half + 1)] += slope;
@@ -2418,7 +2506,14 @@ static bool computeOnsetCurves(const float *packed,
         d2[(size_t)(pad + centre + half + 1)] += slope;
     };
 
-    for (int b = 0; b < layout.numBands; ++b)
+    const std::string depositFailure = forEachChannel(ONSET_BAND_GROUPS, [&](int group) {
+    std::vector<double> &energyD2 = groupD2[(size_t)group * 3];
+    std::vector<double> &fluxD2 = groupD2[(size_t)group * 3 + 1];
+    std::vector<double> &complexD2 = groupD2[(size_t)group * 3 + 2];
+    energyD2.assign(curveLen, 0.0);
+    fluxD2.assign(curveLen, 0.0);
+    complexD2.assign(curveLen, 0.0);
+    for (int b = groupStart[(size_t)group]; b < groupStart[(size_t)group + 1]; ++b)
     {
         const uint32_t len = layout.bandLengths[b];
         if (len == 0)
@@ -2508,6 +2603,18 @@ static bool computeOnsetCurves(const float *packed,
             // content and lands on the same scale as the flux term.
             const double cdev = (double)(whitenedAt(b, (int64_t)k) * relDev * channelScale);
             addTriangle(complexD2, centre, span, cdev * spread);
+        }
+    }
+    });
+    if (!depositFailure.empty())
+        throw std::runtime_error(depositFailure);
+    for (int group = 0; group < ONSET_BAND_GROUPS; ++group)
+    {
+        for (size_t i = 0; i < curveLen; ++i)
+        {
+            energyD2[i] += groupD2[(size_t)group * 3][i];
+            fluxD2[i] += groupD2[(size_t)group * 3 + 1][i];
+            complexD2[i] += groupD2[(size_t)group * 3 + 2][i];
         }
     }
 
@@ -4114,35 +4221,109 @@ public:
                                hardEdgeSpan(w0, w1, f0, f1, bandLo, bandHi);
         std::vector<std::vector<float>> stems((size_t)channels);
 
-        const std::string synthFailure = forEachChannel(wantEdges ? channels * 2 : channels, [&](int job) {
-            const int ch = job % channels;
-            if (job >= channels)
+        // Synthesis sums over bands, so the window's bands split in two: the
+        // short ones, which hold most coefficients, and the long ones, whose
+        // atoms reach far. Each group splits the window into spans of time,
+        // each synthesised on its own thread from the group's coefficients
+        // within reach of it, which gives the samples one pass over the window
+        // gives. The long group's reach is longer, so it takes fewer spans.
+        const int threads = std::max(1, (int)std::thread::hardware_concurrency());
+        const int perChannel = std::max(1, threads / std::max(1, channels));
+        // Short spans a channel: a few a core, taken as cores come free.
+        const int shortTarget = 2 * perChannel;
+        const int64_t reachLimit = (w1 - w0) / shortTarget / 8;
+        const auto bandReach = [&](int bi) -> int64_t {
+            return 3 * (int64_t)std::ceil(analyzer.band_synthesis_support(bandBegin + bi));
+        };
+        int split = 0;
+        int64_t shortReach = 0;
+        int64_t longReach = 0;
+        for (int bi = 0; bi < numBands; ++bi)
+        {
+            const int64_t reach = bandReach(bi);
+            if (bi == split && reach <= reachLimit)
             {
-                synthesiseEdgeStem(analyzer, src, bandBegin, bandEnd, ch, bandLo, bandHi, f0, f1, fillStart, fillEnd,
-                                   stems[(size_t)ch]);
-                return;
-            }
-            std::vector<float> synth((size_t)(w1 - w0));
-            gaborator::coefs<float> coefs(analyzer);
-            fillCoefsFromPacked(src, ch, bandBegin, bandEnd, fillStart, fillEnd, coefs);
-            analyzer.synthesize(coefs, w0, w1, synth.data());
-
-            if (partial)
-            {
-                audioChannels[ch].assign(existingAudio[ch], existingAudio[ch] + existingAudioLens[ch]);
-                crossfadeSpliceInto(audioChannels[ch], existingAudio[ch], synth, w0, w1, numFrames,
-                                    crossfadeSamples);
+                shortReach = std::max(shortReach, reach);
+                ++split;
             }
             else
             {
-                audioChannels[ch] = std::move(synth);
+                longReach = std::max(longReach, reach);
             }
+        }
+        const bool splitBands = perChannel > 1 && split > 0;
+        const bool hasLong = splitBands && split < numBands;
+        const int longChunks =
+            hasLong ? (int)std::max<int64_t>(1, std::min<int64_t>(perChannel, (w1 - w0) / std::max<int64_t>(1, 3 * longReach)))
+                    : 0;
+        const int shortChunks = splitBands ? shortTarget : 1;
+        std::vector<std::vector<float>> synths((size_t)channels);
+        std::vector<std::vector<float>> longSynths((size_t)(hasLong ? channels : 0));
+        for (auto &synth : synths)
+            synth.resize((size_t)(w1 - w0));
+        for (auto &synth : longSynths)
+            synth.resize((size_t)(w1 - w0));
+        // Tasks, costliest first: the long bands' spans, the edge stems, then
+        // the short bands' spans.
+        const int longJobs = channels * longChunks;
+        const int edgeJobs = wantEdges ? channels : 0;
+        const int shortJobs = splitBands ? channels * shortChunks : channels;
+
+        const std::string synthFailure = forEachTask(longJobs + edgeJobs + shortJobs, [&](int task) {
+            if (task >= longJobs && task < longJobs + edgeJobs)
+            {
+                const int ch = task - longJobs;
+                synthesiseEdgeStem(analyzer, src, bandBegin, bandEnd, ch, bandLo, bandHi, f0, f1, fillStart,
+                                   fillEnd, stems[(size_t)ch]);
+                return;
+            }
+            gaborator::coefs<float> coefs(analyzer);
+            if (!splitBands)
+            {
+                const int ch = task - longJobs - edgeJobs;
+                fillCoefsFromPacked(src, ch, bandBegin, bandEnd, fillStart, fillEnd, coefs);
+                analyzer.synthesize(coefs, w0, w1, synths[(size_t)ch].data());
+                return;
+            }
+            const bool isLong = task < longJobs;
+            const int index = isLong ? task : task - longJobs - edgeJobs;
+            const int ch = index % channels;
+            const int chunk = index / channels;
+            const int chunks = isLong ? longChunks : shortChunks;
+            const int64_t reach = isLong ? longReach : shortReach;
+            const int64_t c0 = w0 + (w1 - w0) * chunk / chunks;
+            const int64_t c1 = w0 + (w1 - w0) * (chunk + 1) / chunks;
+            fillCoefsFromPacked(src, ch, bandBegin, bandEnd, std::max(fillStart, c0 - reach),
+                                std::min(fillEnd, c1 + reach), coefs, isLong ? bandBegin + split : bandBegin,
+                                isLong ? bandEnd : bandBegin + split);
+            float *out = (isLong ? longSynths : synths)[(size_t)ch].data();
+            analyzer.synthesize(coefs, c0, c1, out + (c0 - w0));
         });
+        for (size_t ch = 0; ch < longSynths.size(); ++ch)
+        {
+            float *out = synths[ch].data();
+            const float *add = longSynths[ch].data();
+            for (size_t i = 0; i < synths[ch].size(); ++i)
+                out[i] += add[i];
+        }
         if (!synthFailure.empty())
         {
             joinOnsets();
             SetError(synthFailure);
             return;
+        }
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            if (partial)
+            {
+                audioChannels[ch].assign(existingAudio[ch], existingAudio[ch] + existingAudioLens[ch]);
+                crossfadeSpliceInto(audioChannels[ch], existingAudio[ch], synths[(size_t)ch], w0, w1, numFrames,
+                                    crossfadeSamples);
+            }
+            else
+            {
+                audioChannels[ch] = std::move(synths[(size_t)ch]);
+            }
         }
         phaseSynthMs = millisSince(mark);
 
