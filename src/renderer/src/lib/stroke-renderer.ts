@@ -470,6 +470,9 @@ export class StrokeRenderer {
   // so the hover preview shows the values the stroke it precedes will use.
   private randomSeed = 0;
 
+  // False for a renderer painting beside the canvas, which nothing displays.
+  private drawsDisplay = true;
+
   constructor(
     gl: WebGLRenderer,
     spectrogramData: SpectrogramData,
@@ -770,7 +773,7 @@ export class StrokeRenderer {
     // next acquireScratch to rebuild it.
     this.pool.disown(this);
 
-    if (!this.displayPyramid) {
+    if (this.drawsDisplay && !this.displayPyramid) {
       const layout = { numBands: this.spectrogramData.numBands, metadata: this.spectrogramData.metadata };
       this.displayPyramid = new DisplayPyramid(layout);
       this.displayTiles = new DisplayTileRing(layout, this.spectrogramData.numFrames);
@@ -999,9 +1002,10 @@ export class StrokeRenderer {
    * source textures hold, so a window of either file reads the frames the
    * whole file would. Whole-file spans on both sides return the file-space
    * value untouched. `positionUv` is the step's own source position, which
-   * the shader adds: on a window, a dab whose read runs past either end of
-   * the file is moved a whole file length back into it, as the shader's wrap
-   * of a whole-file source would move it, because the window was placed there.
+   * the shader adds. On a window, the read of a step whose brush wraps in time
+   * is moved a whole file length back in when it runs past either end of the
+   * file, as the shader's wrap of a whole-file source would move it, because
+   * the window was placed there; any other read clamps at the file's edge.
    */
   private sourceOffsetForViews(
     sourceSpec: SpectrogramData,
@@ -1013,6 +1017,7 @@ export class StrokeRenderer {
     bandScale: number,
     beatRatio: number,
     positionUv: number,
+    wrapsTime: boolean,
   ): Vector2 {
     const sourceStart = sourceView?.startFrame ?? 0;
     const sourceFrames = sourceView ? sourceView.endFrame - sourceView.startFrame : sourceSpec.numFrames;
@@ -1025,7 +1030,7 @@ export class StrokeRenderer {
     // Where the destination span's first frame falls in the source, beat for beat.
     const spanStartSec = (beatRatio * this.view.startFrame) / this.spectrogramData.sampleRate;
     let readFrame = (spanStartSec + fileOffset.x * sourceDuration) * sourceSpec.sampleRate;
-    if (!wholeSource) {
+    if (!wholeSource && wrapsTime) {
       const scale = (beatRatio * sourceSpec.sampleRate) / this.spectrogramData.sampleRate;
       const dabRead = readFrame + anchor.x * this.viewFrameCount * scale + positionUv * sourceSpec.numFrames;
       readFrame -= wholeFilesPast(dabRead, sourceSpec.numFrames) * sourceSpec.numFrames;
@@ -1544,6 +1549,8 @@ export class StrokeRenderer {
       // A step reading this file reads the canvas, which is a window of it
       // like any other, so its file-space offset lands on the canvas's span.
       const stepPositionUv = stepPositionMode === "follow" ? 0 : Number(stepState.sourceTimeOffset ?? 0) / 100;
+      const stepWrapMode = stepState.brushWrapMode as number;
+      const stepWrapsTime = stepWrapMode === 1 || stepWrapMode === 3;
       const sourceOffsetUv = readsSourceFile
         ? this.sourceOffsetForViews(
             stepSource.spectrogramData,
@@ -1555,6 +1562,7 @@ export class StrokeRenderer {
             sourceBandUvSlope(this.spectrogramData, stepSource.spectrogramData),
             bpm / sourceBpm,
             stepPositionUv,
+            stepWrapsTime,
           )
         : this.sourceOffsetForViews(
             this.spectrogramData,
@@ -1566,6 +1574,7 @@ export class StrokeRenderer {
             1,
             1,
             stepPositionUv,
+            stepWrapsTime,
           );
 
       // Build common uniforms for this step
@@ -2756,11 +2765,11 @@ export class StrokeRenderer {
    */
   /**
    * A renderer over `view` beside this one: the same file, textures and
-   * effects, with scratch targets of its own, so it can paint while this
-   * one's stroke keeps its stroke-start snapshot and masks.
+   * effects and random field, with scratch targets of its own, so it can
+   * paint while this one's stroke keeps its stroke-start snapshot and masks.
    */
   beside(view: CanvasView): StrokeRenderer {
-    return new StrokeRenderer(
+    const renderer = new StrokeRenderer(
       this.gl,
       this.spectrogramData,
       this.textures,
@@ -2769,6 +2778,9 @@ export class StrokeRenderer {
       view,
       new StrokeScratchPool(),
     );
+    renderer.randomSeed = this.randomSeed;
+    renderer.drawsDisplay = false;
+    return renderer;
   }
 
   /** Takes the scratch targets now, so the stroke-start snapshot holds what the canvas holds at this call. */

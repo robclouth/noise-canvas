@@ -376,6 +376,7 @@ function chainedEffects(state: State): { effect: EffectType; view: State; step: 
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const out: { effect: EffectType; view: State; step: number; repeats: number }[] = [];
   for (let index = 0; index < steps.length; index++) {
+    if (steps[index].enabled === false) continue;
     const step = createStepStateView(state, index);
     const repeats = Math.max(1, Math.floor(Number(step.brushIterations) || 1));
     for (const item of step.effects) {
@@ -384,6 +385,11 @@ function chainedEffects(state: State): { effect: EffectType; view: State; step: 
     }
   }
   return out;
+}
+
+/** The index of the brush's first enabled step, which is the one that reads the file; -1 when none is. */
+export function firstEnabledStep(state: State): number {
+  return (state.brushes[state.activeBrushIndex]?.steps ?? []).findIndex((step) => step.enabled !== false);
 }
 
 // The Transmute route that moves a band across pitch.
@@ -396,12 +402,13 @@ const TRANSMUTE_TO_PITCH = 3;
 function pitchReachOf(effect: EffectType, state: State, bandsPerOctave: number): number | null {
   switch (effect) {
     case "transform": {
-      // A turn or a pitch scale reads about the pivot, within the brush's
-      // height scaled by the pitch scale.
+      // A pitch scale reads about the pivot, within the brush's height scaled
+      // by the pitch scale. A turn brings time into pitch, by as much as the
+      // brush is long, so it may read any band.
       const shift = widest(stateRange(state, "transformShiftSemis"));
       const scale = narrowest(stateRange(state, "transformScalePitch"));
-      if (only(stateRange(state, "transformScalePitch"), 1) && only(stateRange(state, "transformRotation"), 0))
-        return shift;
+      if (!only(stateRange(state, "transformRotation"), 0)) return null;
+      if (only(stateRange(state, "transformScalePitch"), 1)) return shift;
       if (scale <= NO_SCALE_BELOW) return null;
       return shift + widest(stateRange(state, "brushSizePitch")) * Math.max(1, 1 / scale);
     }
@@ -479,7 +486,12 @@ export function readBoxes(
 ): { own: ReadBox; input: ReadBox | null } {
   const chain = chainedEffects(state);
   const [first] = chain;
-  const apart = !!first && first.step === 0 && first.repeats === 1 && first.effect === "transform" && warps(first.view);
+  const apart =
+    !!first &&
+    first.step === firstEnabledStep(state) &&
+    first.repeats === 1 &&
+    first.effect === "transform" &&
+    warps(first.view);
   let region = box;
   for (let i = chain.length - 1; i >= (apart ? 1 : 0); i--) {
     const { effect, view, step, repeats } = chain[i];
@@ -487,7 +499,7 @@ export function readBoxes(
     for (let r = 0; r < repeats; r++) region = effectReadBox(effect, view, ctx, region, brush);
   }
   if (!apart) return { own: region, input: null };
-  return { own: region, input: clampBox(warpBox(first.view, ctx, region, brushes[0] ?? region), ctx) };
+  return { own: region, input: clampBox(warpBox(first.view, ctx, region, brushes[first.step] ?? region), ctx) };
 }
 
 /** What one effect reads to paint `box`, within its step's `brush`. */
@@ -535,8 +547,6 @@ function warpBox(view: State, ctx: ReachContext, box: ReadBox, brush: ReadBox): 
     return inside ? brush : { start: 0, end: ctx.fileSeconds, low: 0, high: 1 };
   }
   const rotation = valueRange(view, "transformRotation", Number(view.transformRotation ?? 0), { min: -180, max: 180 });
-  const turns = [rotation.lo, rotation.hi];
-  for (let quarter = Math.ceil(rotation.lo / 90); quarter * 90 <= rotation.hi; quarter++) turns.push(quarter * 90);
   const originTime = originFraction(Number(view.transformOriginTime));
   const originPitch = originFraction(Number(view.transformOriginPitch));
   const pivotTime = brush.start + originTime * (brush.end - brush.start);
@@ -547,20 +557,26 @@ function warpBox(view: State, ctx: ReachContext, box: ReadBox, brush: ReadBox): 
   const snap = Number(view.gridSizeSemis) <= 0 && Boolean(view.snapPitch) ? SNAP_SEMIS : 0;
   const speedSemis = [12 * Math.log2(speed.lo), 12 * Math.log2(speed.hi)];
   let out: ReadBox | null = null;
-  for (const turn of turns) {
-    const cos = Math.cos((turn * Math.PI) / 180);
-    const sin = Math.sin((turn * Math.PI) / 180);
-    for (const sx of [
-      scaleTime.lo / speed.lo,
-      scaleTime.lo / speed.hi,
-      scaleTime.hi / speed.lo,
-      scaleTime.hi / speed.hi,
-    ]) {
-      for (const sy of [scalePitch.lo, scalePitch.hi]) {
-        for (const t of [box.start, box.end]) {
-          for (const y of [box.low, box.high]) {
-            const relTime = (t - pivotTime) / ctx.fileSeconds;
-            const relPitch = y - pivotPitch;
+  for (const t of [box.start, box.end]) {
+    for (const y of [box.low, box.high]) {
+      const relTime = (t - pivotTime) / ctx.fileSeconds;
+      const relPitch = y - pivotPitch;
+      // A corner turned by θ lands furthest along an axis where θ plus the
+      // corner's own angle is a multiple of 90°, or at an end of the range.
+      const angle = (Math.atan2(relPitch, relTime) * 180) / Math.PI;
+      const turns = [rotation.lo, rotation.hi];
+      for (let k = Math.ceil((rotation.lo + angle) / 90); k * 90 - angle <= rotation.hi; k++)
+        turns.push(k * 90 - angle);
+      for (const turn of turns) {
+        const cos = Math.cos((turn * Math.PI) / 180);
+        const sin = Math.sin((turn * Math.PI) / 180);
+        for (const sx of [
+          scaleTime.lo / speed.lo,
+          scaleTime.lo / speed.hi,
+          scaleTime.hi / speed.lo,
+          scaleTime.hi / speed.hi,
+        ]) {
+          for (const sy of [scalePitch.lo, scalePitch.hi]) {
             let time = pivotTime + ((cos * relTime - sin * relPitch) / sx) * ctx.fileSeconds;
             let pitch = pivotPitch + (sin * relTime + cos * relPitch) / sy;
             if (sx < 0) time += (1 - 2 * originTime) * (brush.end - brush.start);

@@ -286,10 +286,15 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    blocks with the paint of strokes still committing laid over them, which is
    the file as a stroke finds it, and, for a step that reads the canvas as the
    stroke leaves it (Accumulate, or a step after the first), this stroke's own
-   paint on top, from the canvas, the stroke slots and the carry. A read that
-   runs past either end of the file is moved a whole file length back in, as
-   a whole-file canvas's wrap would; half a frame of slack keeps rounding from
-   moving one that starts on frame 0 (`wholeFilesPast`).
+   paint on top, from the canvas, the stroke slots and the carry. A read of
+   a brush that wraps in time and runs past either end of the file is moved a
+   whole file length back in, as a whole-file canvas's wrap would; half a
+   frame of slack keeps rounding from moving one that starts on frame 0
+   (`wholeFilesPast`). Any other read past an end clamps at the file's edge,
+   as it does on a canvas over the whole file.
+   One gap is left: an effect that reads past the edge of a brush wrapping
+   round the file's end reads the other end there, and no one window holds
+   both ends, so a long file paints that seam from what the window holds.
 10. **The canvas holds what an effect reads, not only what the dab covers.** A
     blur smear, a repeat gap and a warp's turn, stretch or shift all read past
     the brush when the edge mode is Bleed or Invert; the other edge modes fold

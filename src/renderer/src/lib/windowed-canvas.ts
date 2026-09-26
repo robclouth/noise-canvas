@@ -115,10 +115,11 @@ export type StrokePaint = { ranges: Uint32Array; values: Float32Array; masks: (F
  */
 /**
  * A dab painted beside the canvas: how to work out its paint, calling
- * `tileDone` as each of its `tiles` is painted, and the pitch span it covers.
+ * `tileDone` as each of its `tiles` is painted and stopping with null once
+ * that returns false, and the pitch span it covers.
  */
 export type PaintBeside = {
-  compute: (tileDone: () => void) => Promise<StrokePaint | null>;
+  compute: (tileDone: () => boolean) => Promise<StrokePaint | null>;
   tiles: number;
   pitch: { min: number; max: number };
 };
@@ -244,7 +245,8 @@ export class WindowedCanvas {
   // Dabs painting beside the canvas, and whether one of this stroke's failed.
   private readonly besideJobs = new Set<Promise<void>>();
   private besideFailed = false;
-  private besideTilesLeft = 0;
+  /** Tiles still painting beside the canvas, for the stroke of `epoch`. */
+  private besideTiles = { epoch: -1, left: 0 };
   private stroking = false;
   // Set from `beginStroke` until the stroke ends or is discarded.
   private discardable = false;
@@ -282,6 +284,11 @@ export class WindowedCanvas {
   /** True from `beginStroke` until the stroke ends or is discarded, while `discardStroke` can take it back. */
   get strokeDiscardable(): boolean {
     return this.discardable;
+  }
+
+  /** True while some stroke's paint has still to reach the store. */
+  get hasUnstoredPaint(): boolean {
+    return this.pending.length > 0;
   }
 
   /** True between `beginStroke` and `endStroke`, while dabs are landing. */
@@ -905,17 +912,20 @@ export class WindowedCanvas {
     let result: StrokePaint | null = null;
     let started = false;
     const epoch = this.strokeEpoch;
+    let tilesLeft = beside.tiles;
+    if (this.besideTiles.epoch !== epoch) this.besideTiles = { epoch, left: 0 };
+    this.besideTiles.left += tilesLeft;
+    const tileDone = (): boolean => {
+      if (tilesLeft > 0) {
+        tilesLeft--;
+        if (this.besideTiles.epoch === epoch) this.besideTiles.left--;
+      }
+      return epoch === this.strokeEpoch;
+    };
     const paint: DabPainter = (clip) => {
       if (!result) {
         if (!started && this.held.oldest() === needs) {
           started = true;
-          let tilesLeft = beside.tiles;
-          this.besideTilesLeft += tilesLeft;
-          const tileDone = (): void => {
-            if (epoch !== this.strokeEpoch || tilesLeft === 0) return;
-            tilesLeft--;
-            this.besideTilesLeft--;
-          };
           const job = beside.compute(tileDone).then(
             (painted) => {
               if (epoch !== this.strokeEpoch) return;
@@ -954,7 +964,7 @@ export class WindowedCanvas {
 
   /** Pieces of the stroke still to paint: held blocks and tiles painting beside the canvas. */
   get pendingWork(): number {
-    return this.held.pieces + this.besideTilesLeft;
+    return this.held.pieces + (this.besideTiles.epoch === this.strokeEpoch ? this.besideTiles.left : 0);
   }
 
   /** Texels one canvas window holds, which a view painted beside it may hold too. */
@@ -1171,7 +1181,6 @@ export class WindowedCanvas {
     this.cancelSettlement?.();
     this.strokeEpoch++;
     this.besideFailed = false;
-    this.besideTilesLeft = 0;
     this.stroking = true;
     // Paint the last stroke never landed belongs to that stroke, not this one.
     this.held.clear();

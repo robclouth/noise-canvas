@@ -646,6 +646,37 @@ describe("a canvas that holds a window of the file", () => {
     expect({ missing, wrong, painted: expected.size }).toEqual({ missing: 0, wrong: 0, painted: expected.size });
   });
 
+  it("counts a dab painted beside it as pending at once, and stops it when the stroke is taken back", async () => {
+    const rig = harness(2);
+    await until(() => rig.canvas.holdsFrames(0, 1) && rig.quiet(), "the first window");
+    rig.canvas.beginStroke();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let started = false;
+    const wanted: boolean[] = [];
+    rig.canvas.paintBeside(dabExtent(0, grid.blockFrames), {
+      tiles: 3,
+      pitch: { min: 0, max: 1 },
+      compute: async (tileDone) => {
+        started = true;
+        await gate;
+        for (let tile = 0; tile < 3; tile++) {
+          const stillWanted = tileDone();
+          wanted.push(stillWanted);
+          if (!stillWanted) return null;
+        }
+        return null;
+      },
+    });
+    expect(rig.canvas.pendingWork).toBe(4);
+    await until(() => started, "the tiles to start");
+    expect(await rig.canvas.discardStroke()).toBe(true);
+    release();
+    await until(() => wanted.length > 0, "the first tile");
+    expect(wanted).toEqual([false]);
+    expect(rig.canvas.pendingWork).toBe(0);
+  });
+
   it("paints a block the stroke comes back to as a canvas over the whole file does", async () => {
     // A strong dab, a trip to the far end, and a weaker dab over the first:
     // the window has to let the block go and bring it back mid-stroke, and

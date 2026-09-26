@@ -96,6 +96,56 @@ const CASES = LENGTHS.flatMap((seconds) =>
   ),
 );
 
+const REVERSE = { transformScaleTime: -1, transformEdgeMode: 0 };
+
+/** A stroke that is more than one dab, or a brush more than one step. */
+const SCENARIOS: { name: string; dabs: (seconds: number) => { x: number; y: number; state: State }[] }[] = [
+  {
+    name: "a wide reversal over overlapping dabs, without Accumulate",
+    dabs: () => {
+      const state = brushState("transform", REVERSE, 31, false);
+      return [
+        { x: 0.5, y: 0.5, state },
+        { x: 0.52, y: 0.5, state },
+      ];
+    },
+  },
+  {
+    name: "a wide reversal that runs past the start of the file",
+    dabs: () => [{ x: 0.01, y: 0.5, state: brushState("transform", { ...REVERSE, brushAnchorMode: 1 }, 31, false) }],
+  },
+  {
+    name: "a wide reversal whose step names the file it paints",
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.5,
+        state: brushState("transform", { ...REVERSE, sourceFile: { path: PARITY_FILE_PATH } }, 31, false),
+      },
+    ],
+  },
+  {
+    name: "a disabled narrow step before a wide reversal step",
+    dabs: () => {
+      const state = brushState("transform", REVERSE, 31, false);
+      const steps = state.brushes[state.activeBrushIndex].steps;
+      const narrow = brushState("dynamics", { dynamicsGainDb: -20 }, 1, false).brushes[state.activeBrushIndex].steps[0];
+      steps.unshift({ ...narrow, id: "disabled-narrow", enabled: false });
+      return [{ x: 0.5, y: 0.5, state }];
+    },
+  },
+  {
+    name: "a disabled reversal step before a wide Accumulate step",
+    dabs: () => {
+      const state = brushState("dynamics", { dynamicsGainDb: -20 }, 31, true);
+      const steps = state.brushes[state.activeBrushIndex].steps;
+      const reverse = brushState("transform", REVERSE, 31, false).brushes[state.activeBrushIndex].steps[0];
+      steps.unshift({ ...reverse, id: "disabled-reverse", enabled: false });
+      return [{ x: 0.5, y: 0.5, state }];
+    },
+  },
+];
+
 // One renderer for the whole run, as the app has: the effects are shared and
 // keep targets of the renderer that first drew them.
 let renderer: ReturnType<typeof parityRenderer> | null = null;
@@ -133,6 +183,19 @@ describe("a windowed canvas paints what a whole-file canvas paints", () => {
       const expected = await paintStroke(whole, dabs);
       const got = await paintStroke(windowed, dabs);
       await expectSameStroke(whole, expected, got);
+    },
+    300_000,
+  );
+
+  it.each(LENGTHS.flatMap((seconds) => SCENARIOS.map((scenario) => ({ seconds, scenario }))))(
+    "$seconds s: $scenario.name",
+    async ({ seconds, scenario }) => {
+      const dabs = scenario.dabs(seconds);
+      const whole = canvas(Infinity, seconds);
+      const windowed = canvas(WINDOW_BLOCKS, seconds);
+      const expected = await paintStroke(whole, dabs);
+      const got = await paintStroke(windowed, dabs);
+      expect(await expectSameStroke(whole, expected, got)).toBeGreaterThan(0);
     },
     300_000,
   );

@@ -19,7 +19,15 @@ import type { DabNeeds, PaintBeside, StrokePaint, WindowedCanvas } from "./windo
 import type { SelfState } from "./self-window";
 import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock } from "./block-grid";
 import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
-import { pieceReach, readBoxes, strokeReach, unionBox, type ReachContext, type ReadBox } from "./effect-reach";
+import {
+  firstEnabledStep,
+  pieceReach,
+  readBoxes,
+  strokeReach,
+  unionBox,
+  type ReachContext,
+  type ReadBox,
+} from "./effect-reach";
 import { strokeRefusal as refusalFor, overReachRefusal } from "./whole-file-gate";
 import { impulseNeeds, type ImpulseNeed } from "./impulse-need";
 import { GpuMemoryError, type ImpulseFileInfo, type SourceFileInfo, type StrokeRenderer } from "./stroke-renderer";
@@ -293,10 +301,11 @@ export type DispatchOptions = {
   span?: DabSpan;
   clip?: FrameSpan | null;
   /**
-   * A renderer beside the canvas to paint on, the view it holds, and what the
-   * first step reads the painted file through when that is not the view.
+   * A renderer beside the canvas to paint on, the view it holds, what the
+   * first step reads the painted file through when that is not the view, and
+   * the frames the dab reads there, which the windows over other files hold.
    */
-  beside?: { renderer: StrokeRenderer; view: CanvasView; input?: SourceFileInfo };
+  beside?: { renderer: StrokeRenderer; view: CanvasView; input?: SourceFileInfo; reads: FrameSpan };
 };
 
 export function dispatchStroke(
@@ -342,7 +351,7 @@ export function dispatchStroke(
 
   const reads = span?.needs.sources ?? sourceReadsFor(context, state, cursorPos);
   const sourceWindows = new Map<string, SourceWindowTextures>();
-  for (const need of sourceNeedsOver(reads, clip ?? null)) {
+  for (const need of sourceNeedsOver(reads, beside?.reads ?? clip ?? null)) {
     const window = windows?.aimSource(need);
     if (!window) return false;
     if (!need.self) sourceWindows.set(need.fileId, window);
@@ -432,6 +441,8 @@ export function dispatchStroke(
     const path = step.sourceFile?.path;
     if (path === undefined) return undefined;
     if (sourceOverride) return sourceOverride;
+    if (beside?.input && index === firstEnabledStep(state) && getOpenFileByPath(path)?.id === fileId)
+      return beside.input;
     if (!resolved.has(path)) resolved.set(path, toSourceInfo(getOpenFileByPath(path)));
     return resolved.get(path);
   });
@@ -684,22 +695,27 @@ function bandsOfBox(box: ReadBox, numBands: number): BandSpan {
 
 /**
  * One piece of a dab painted beside the canvas: the view it paints on, the
- * view its first step reads its input through when that is apart, and the
- * bands and frames it keeps.
+ * view its first step reads its input through when that is apart, the bands
+ * and frames it keeps, and the frames it reads, which windows over other
+ * files it reads are placed by.
  */
-type BesideTile = { view: CanvasView; input: CanvasView | null; bands: BandSpan; frames: FrameSpan };
+type BesideTile = { view: CanvasView; input: CanvasView | null; bands: BandSpan; frames: FrameSpan; reads: FrameSpan };
 
-/** A step's brush as the region of the file it covers; all of the file along an axis it wraps round. */
+/**
+ * A step's brush as the region it covers, past the file's ends where it runs
+ * past them, as the shaders pivot it; all of the file along an axis it wraps
+ * round.
+ */
 function brushBox(brush: StepBrush, fileSeconds: number): ReadBox {
   const endX = brush.anchor.x + brush.sizeUv.x;
   const endY = brush.anchor.y + brush.sizeUv.y;
   const wrapsTime = brush.wrapsTime && (brush.anchor.x < 0 || endX > 1);
   const wrapsPitch = brush.wrapsPitch && (brush.anchor.y < 0 || endY > 1);
   return {
-    start: wrapsTime ? 0 : Math.max(0, brush.anchor.x) * fileSeconds,
-    end: wrapsTime ? fileSeconds : Math.min(1, endX) * fileSeconds,
-    low: wrapsPitch ? 0 : Math.max(0, brush.anchor.y),
-    high: wrapsPitch ? 1 : Math.min(1, endY),
+    start: wrapsTime ? 0 : brush.anchor.x * fileSeconds,
+    end: wrapsTime ? fileSeconds : endX * fileSeconds,
+    low: wrapsPitch ? 0 : brush.anchor.y,
+    high: wrapsPitch ? 1 : endY,
   };
 }
 
@@ -751,14 +767,14 @@ function besideFor(
   // The first step reads the painted file off the canvas unless it reads
   // another file or a window of this one far away. Its warped read then goes
   // through a view of its own, unless a step also reads the original.
-  const firstSource = state.brushes[state.activeBrushIndex]?.steps[0]?.sourceFile?.path;
+  const firstSource = state.brushes[state.activeBrushIndex]?.steps[firstEnabledStep(state)]?.sourceFile?.path;
   const firstReadsHere =
     !span.needs.sources.some((read) => read.self) &&
     (firstSource === undefined
       ? (state.activeFileId || context.fileId) === context.fileId
       : context.getOpenFileByPath(firstSource)?.id === context.fileId);
   const inputApart = firstReadsHere && !span.needs.original;
-  const viewOfBox = (box: ReadBox): CanvasView => {
+  const framesOfBox = (box: ReadBox): FrameSpan => {
     let readStart = box.start;
     let readEnd = box.end;
     for (const move of moves) {
@@ -766,11 +782,14 @@ function besideFor(
       readEnd = Math.max(readEnd, box.end + move);
     }
     const first = Math.max(0, Math.floor(readStart * sampleRate) - seam);
-    const last = Math.min(numFrames, Math.ceil(readEnd * sampleRate) + seam) - 1;
+    return { start: first, end: Math.max(first + 1, Math.min(numFrames, Math.ceil(readEnd * sampleRate) + seam)) };
+  };
+  const viewOfBox = (box: ReadBox): CanvasView => {
+    const frames = framesOfBox(box);
     return canvasViewOf(
       grid,
-      blockOfFrame(grid, first),
-      blockOfFrame(grid, Math.max(first, last)),
+      blockOfFrame(grid, frames.start),
+      blockOfFrame(grid, frames.end - 1),
       bandsOfBox(box, numBands),
     );
   };
@@ -786,8 +805,9 @@ function besideFor(
       },
       brushes,
     );
-    if (!input || inputApart) return { view: viewOfBox(own), input: input && viewOfBox(input), bands, frames };
-    return { view: viewOfBox(firstReadsHere ? unionBox(own, input) : own), input: null, bands, frames };
+    const reads = framesOfBox(input ? unionBox(own, input) : own);
+    if (!input || inputApart) return { view: viewOfBox(own), input: input && viewOfBox(input), bands, frames, reads };
+    return { view: viewOfBox(firstReadsHere ? unionBox(own, input) : own), input: null, bands, frames, reads };
   };
   const framesOf = (from: number, to: number): FrameSpan => ({
     start: Math.max(start, frameRangeOfBlock(grid, from).start),
@@ -811,7 +831,7 @@ function besideFor(
 
   const budget = canvas.texelBudget;
   const cost = (tile: BesideTile): number => Math.max(tile.view.texels, tile.input?.texels ?? 0);
-  const fits = (tile: BesideTile): boolean => cost(tile) <= budget && canvas.othersFit(span.needs, tile.frames);
+  const fits = (tile: BesideTile): boolean => cost(tile) <= budget && canvas.othersFit(span.needs, tile.reads);
   const larger = ([a, b]: [BesideTile, BesideTile]): number => Math.max(cost(a), cost(b));
   const tiles: BesideTile[] = [];
   const pending = [tileOf(written, { start, end })];
@@ -827,13 +847,12 @@ function besideFor(
     if (!split || tiles.length + pending.length >= MAX_BESIDE_TILES) return null;
     pending.push(...split);
   }
-  const compute = async (tileDone: () => void): Promise<StrokePaint | null> => {
+  const compute = async (tileDone: () => boolean): Promise<StrokePaint | null> => {
     const parts: StrokePaint[] = [];
     for (const tile of tiles) {
       const part = await paintTileBeside(context, state, cursorPos, span, canvas, renderer, tile, options);
-      if (!part) return null;
+      if (!part || !tileDone()) return null;
       parts.push(part);
-      tileDone();
     }
     return joinPaint(parts);
   };
@@ -858,15 +877,15 @@ async function paintTileBeside(
 ): Promise<StrokePaint | null> {
   const { view, bands, frames } = tile;
   const fileRanges = heldRanges(view.ranges);
-  const input = tile.input ? await inputSource(context, state, canvas, tile.input) : null;
-  if (tile.input && !input) return null;
   const [start, paint, original] = await Promise.all([
     canvas.readStart(fileRanges),
     canvas.readStrokePaint(fileRanges),
     span.needs.original ? canvas.readOriginal(fileRanges) : Promise.resolve(null),
   ]);
   if (!start || (span.needs.original && !original)) return null;
-  if (!(await canvas.holdOthers(span.needs, frames))) return null;
+  if (!(await canvas.holdOthers(span.needs, tile.reads))) return null;
+  const input = tile.input ? await inputSource(context, state, canvas, tile.input) : null;
+  if (tile.input && !input) return null;
   const layout = { numBands: context.spectrogramData.numBands, metadata: context.spectrogramData.metadata };
   const beside = renderer.beside(view);
   const originalTexture = original ? viewTexture(view, original) : null;
@@ -881,7 +900,12 @@ async function paintTileBeside(
     }
     if (originalTexture) beside.setOriginalTexture(originalTexture);
     beside.beginStroke();
-    const painting = { ...options, span, clip: frames, beside: { renderer: beside, view, input: input?.source } };
+    const painting = {
+      ...options,
+      span,
+      clip: frames,
+      beside: { renderer: beside, view, input: input?.source, reads: tile.reads },
+    };
     if (!dispatchStroke(context, state, cursorPos, false, painting)) return null;
     const dirty = beside.getDirtyPixelRanges();
     const onBands = dirty ? viewRangesToFile(view, rangesOnBands(view, dirty, bands)) : new Uint32Array(0);
@@ -898,9 +922,9 @@ async function paintTileBeside(
 }
 
 /**
- * The painted file over `view` as the first step of the brush reads it: as
- * the stroke found it for a step that reads its start, and with the stroke's
- * paint so far for one that reads it as it stands.
+ * The painted file over `view` as the first step of the brush reads it: with
+ * the stroke's paint so far for an accumulating step that reads it as it
+ * stands, and as the stroke found it otherwise.
  */
 async function inputSource(
   context: FileStrokeContext,
@@ -910,7 +934,8 @@ async function inputSource(
 ): Promise<{ source: SourceFileInfo; dispose: () => void } | null> {
   const file = context.openFiles[context.fileId];
   const ranges = heldRanges(view.ranges);
-  const live = context.createStepStateView(state, 0).sourceDataMode !== "start";
+  const first = context.createStepStateView(state, firstEnabledStep(state));
+  const live = first.accumulate && first.sourceDataMode !== "start";
   const [start, paint] = await Promise.all([
     canvas.readStart(ranges),
     live ? canvas.readStrokePaint(ranges) : Promise.resolve(null),
