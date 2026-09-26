@@ -293,9 +293,11 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    frame of slack keeps rounding from moving one that starts on frame 0
    (`wholeFilesPast`). Any other read past an end clamps at the file's edge,
    as it does on a canvas over the whole file.
-   One gap is left: an effect that reads past the edge of a brush wrapping
-   round the file's end reads the other end there, and no one window holds
-   both ends, so a long file paints that seam from what the window holds.
+   An effect that reads past an end of the file under a brush that wraps
+   in time reads the other end there, which no window holds beside the dab,
+   so such a dab is painted beside the canvas (rule 16), where a read past
+   an end of an axis the brush wraps round takes the whole of that axis and
+   a tile's view spans the whole file.
 10. **The canvas holds what an effect reads, not only what the dab covers.** A
     blur smear, a repeat gap and a warp's turn, stretch or shift all read past
     the brush when the edge mode is Bleed or Invert; the other edge modes fold

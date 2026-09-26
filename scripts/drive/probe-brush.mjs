@@ -1,8 +1,9 @@
 // Checks brushes that reach past the canvas window on a long file: one dab of
 // a brush the length of the file, one dab of a brush that wraps past the
 // file's end, one full-length dab that paints from a second long file, one
-// dab that copies this file from far along it, and one full-length reversal,
-// each read back from the store.
+// dab that copies this file from far along it, one full-length reversal, and a
+// blur bleeding past a brush that wraps round the file's end, each read back
+// from the store.
 //
 // Usage: node scripts/drive/probe-brush.mjs [--seconds 285] [--no-build]
 import { copyFileSync } from "node:fs";
@@ -201,6 +202,34 @@ try {
         `  at ${fractions[i]}: dest ${dest[i].store.toExponential(3)} (was ${dest[i].original.toExponential(3)}), mirror ${mirror[i].original.toExponential(3)}`,
       );
     if (matched < dest.length) failures.push("the full-length reversal did not mirror the file");
+  }
+  // A blur that bleeds past the edge of a brush wrapping round the end of the
+  // file, at a pitch the others left alone: near each end it reads the other.
+  await page.evaluate(() => {
+    const state = globalThis.__store.getState();
+    state.setParameter("effects", [
+      { id: "drive-blur", effect: "blur", enabled: true, params: { blurAmountTime: 25, blurEdgeMode: 1 } },
+    ]);
+    state.setParameter("brushWrapMode", 1);
+  });
+  await setStep("brushSizeTime", 8);
+  const blurStarted = performance.now();
+  const blurred = await clickAt(0.998, 0.85);
+  console.log(`wrapping blur committed in ${Math.round(performance.now() - blurStarted)} ms`);
+  if (!blurred) failures.push("the wrapping blur was never logged");
+  else {
+    const p = blurred.y + blurred.height / 2;
+    const [start, end, middle] = await truth([
+      { f: 0.0005, p },
+      { f: 0.9995, p },
+      { f: 0.5, p },
+    ]);
+    const changed = (r) => Math.abs(Math.log(r.store / r.original)) > 0.01;
+    console.log(
+      `wrapping blur: start ${changed(start) ? "changed" : "untouched"}, end ${changed(end) ? "changed" : "untouched"}, middle ${changed(middle) ? "changed" : "untouched"}`,
+    );
+    if (!changed(start) || !changed(end)) failures.push("the wrapping blur missed an end of the file");
+    if (changed(middle)) failures.push("the wrapping blur reached the middle of the file");
   }
   for (const c of consoleLines)
     if (c.type === "error" && !/HRTF|valid audio stream/.test(c.text))

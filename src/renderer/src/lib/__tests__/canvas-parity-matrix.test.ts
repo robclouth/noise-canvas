@@ -115,6 +115,36 @@ const SCENARIOS: { name: string; dabs: (seconds: number) => { x: number; y: numb
     dabs: () => [{ x: 0.01, y: 0.5, state: brushState("transform", { ...REVERSE, brushAnchorMode: 1 }, 31, false) }],
   },
   {
+    name: "a wide blur that wraps round the end of the file",
+    dabs: () => [
+      {
+        x: 0.99,
+        y: 0.5,
+        state: brushState(
+          "blur",
+          { blurAmountTime: 25, blurEdgeMode: 1, brushWrapMode: 1, brushAnchorMode: 1 },
+          31,
+          false,
+        ),
+      },
+    ],
+  },
+  {
+    name: "a short blur that wraps round the end of the file",
+    dabs: () => [
+      {
+        x: 0.999,
+        y: 0.5,
+        state: brushState(
+          "blur",
+          { blurAmountTime: 25, blurEdgeMode: 1, brushWrapMode: 1, brushAnchorMode: 1 },
+          1,
+          false,
+        ),
+      },
+    ],
+  },
+  {
     name: "a wide reversal whose step names the file it paints",
     dabs: () => [
       {

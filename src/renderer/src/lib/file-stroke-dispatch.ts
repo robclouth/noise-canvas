@@ -25,6 +25,7 @@ import {
   readBoxes,
   strokeReach,
   unionBox,
+  type BrushBox,
   type ReachContext,
   type ReadBox,
 } from "./effect-reach";
@@ -656,11 +657,23 @@ export function dabSpan(
       needs.sources = others;
     }
   }
+  // A brush wrapping in time reads past an end of the file at the other end,
+  // which no window holds beside it, so such a dab is painted beside the
+  // canvas, over the whole file.
+  if (!canvas.holdsWholeFile && union.wrapsTime && readsPastEnds(extent, numFrames))
+    extent = { ...extent, before: numFrames, after: numFrames, piece: null };
   const whole = wholeReadSpan(extent);
   const cursorBlock = blockOfFrame(canvas.grid, Math.min(numFrames - 1, Math.max(0, cursorPos.x * numFrames)));
   const hover =
     whole && canvas.fitsWindow(whole.start, whole.end) ? whole : blockReadSpan(canvas.grid, extent, cursorBlock);
   return { extent, hover, needs, impulseBindings };
+}
+
+/** True when a dab reads past either end of a file `numFrames` long. */
+function readsPastEnds(extent: DabExtent, numFrames: number): boolean {
+  const before = Math.max(extent.before, extent.piece?.before ?? 0);
+  const after = Math.max(extent.after, extent.piece?.after ?? 0);
+  return extent.writes.some((write) => write.start - before < 0 || write.end + after > numFrames);
 }
 
 /** True when every read of this file stays inside the file, where the canvas can hold it. */
@@ -706,16 +719,18 @@ type BesideTile = { view: CanvasView; input: CanvasView | null; bands: BandSpan;
  * past them, as the shaders pivot it; all of the file along an axis it wraps
  * round.
  */
-function brushBox(brush: StepBrush, fileSeconds: number): ReadBox {
+function brushBox(brush: StepBrush, fileSeconds: number): BrushBox {
   const endX = brush.anchor.x + brush.sizeUv.x;
   const endY = brush.anchor.y + brush.sizeUv.y;
-  const wrapsTime = brush.wrapsTime && (brush.anchor.x < 0 || endX > 1);
-  const wrapsPitch = brush.wrapsPitch && (brush.anchor.y < 0 || endY > 1);
+  const roundTime = brush.wrapsTime && (brush.anchor.x < 0 || endX > 1);
+  const roundPitch = brush.wrapsPitch && (brush.anchor.y < 0 || endY > 1);
   return {
-    start: wrapsTime ? 0 : brush.anchor.x * fileSeconds,
-    end: wrapsTime ? fileSeconds : endX * fileSeconds,
-    low: wrapsPitch ? 0 : brush.anchor.y,
-    high: wrapsPitch ? 1 : endY,
+    start: roundTime ? 0 : brush.anchor.x * fileSeconds,
+    end: roundTime ? fileSeconds : endX * fileSeconds,
+    low: roundPitch ? 0 : brush.anchor.y,
+    high: roundPitch ? 1 : endY,
+    wrapsTime: brush.wrapsTime,
+    wrapsPitch: brush.wrapsPitch,
   };
 }
 

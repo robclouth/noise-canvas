@@ -460,6 +460,9 @@ export function pitchReachBands(state: State, bandsPerOctave: number): number | 
 /** A region of the file: seconds [start, end) along time and pitch UV [low, high] across it. */
 export type ReadBox = { start: number; end: number; low: number; high: number };
 
+/** A step's brush as the region it covers, and the axes it wraps round the file on. */
+export type BrushBox = ReadBox & { wrapsTime: boolean; wrapsPitch: boolean };
+
 // The edge modes that fold a read past the brush back inside it rather than
 // zero it or let it through: Wrap, Clamp and Reflect.
 const FOLDS_INTO_BRUSH: ReadonlySet<number> = new Set([2, 3, 4]);
@@ -482,7 +485,7 @@ export function readBoxes(
   state: State,
   ctx: ReachContext,
   box: ReadBox,
-  brushes: readonly ReadBox[],
+  brushes: readonly BrushBox[],
 ): { own: ReadBox; input: ReadBox | null } {
   const chain = chainedEffects(state);
   const [first] = chain;
@@ -493,29 +496,32 @@ export function readBoxes(
     first.effect === "transform" &&
     warps(first.view);
   let region = box;
+  const brushOf = (step: number): BrushBox => brushes[step] ?? { ...region, wrapsTime: false, wrapsPitch: false };
   for (let i = chain.length - 1; i >= (apart ? 1 : 0); i--) {
     const { effect, view, step, repeats } = chain[i];
-    const brush = brushes[step] ?? region;
+    const brush = brushOf(step);
     for (let r = 0; r < repeats; r++) region = effectReadBox(effect, view, ctx, region, brush);
   }
   if (!apart) return { own: region, input: null };
-  return { own: region, input: clampBox(warpBox(first.view, ctx, region, brushes[first.step] ?? region), ctx) };
+  const brush = brushOf(first.step);
+  return { own: region, input: fitBox(warpBox(first.view, ctx, region, brush), brush, ctx) };
 }
 
 /** What one effect reads to paint `box`, within its step's `brush`. */
-function effectReadBox(effect: EffectType, view: State, ctx: ReachContext, box: ReadBox, brush: ReadBox): ReadBox {
-  if (effect === "transform" && warps(view)) return clampBox(unionBox(box, warpBox(view, ctx, box, brush)), ctx);
+function effectReadBox(effect: EffectType, view: State, ctx: ReachContext, box: ReadBox, brush: BrushBox): ReadBox {
+  if (effect === "transform" && warps(view)) return fitBox(unionBox(box, warpBox(view, ctx, box, brush)), brush, ctx);
   const time = pieceReachOf(effect, view, ctx);
   const semis = pitchReachOf(effect, view, ctx.bandsPerOctave);
   // A read across pitch lands between bands, so it takes one band more.
   const pitch = semis === null ? 1 : semis === 0 ? 0 : semitonesToUv(semis, ctx) + 1 / ctx.numBands;
-  return clampBox(
+  return fitBox(
     {
       start: time ? box.start - time.before : Math.min(box.start, brush.start),
       end: time ? box.end + time.after : Math.max(box.end, brush.end),
       low: box.low - pitch,
       high: box.high + pitch,
     },
+    brush,
     ctx,
   );
 }
@@ -536,7 +542,7 @@ function warps(view: State): boolean {
  * maps a pixel. A turn is taken with time measured in lengths of the file.
  * A read the edge mode folds back or zeroes stays within the brush.
  */
-function warpBox(view: State, ctx: ReachContext, box: ReadBox, brush: ReadBox): ReadBox {
+function warpBox(view: State, ctx: ReachContext, box: ReadBox, brush: BrushBox): ReadBox {
   const edge = Number(view.transformEdgeMode);
   const inside = !READS_PAST_BRUSH.has(edge);
   if (FOLDS_INTO_BRUSH.has(edge)) return brush;
@@ -621,12 +627,18 @@ function intersectBox(a: ReadBox, b: ReadBox): ReadBox | null {
   return out.end > out.start && out.high > out.low ? out : null;
 }
 
-function clampBox(box: ReadBox, ctx: ReachContext): ReadBox {
+/**
+ * `box` within the file. A read past either end of an axis the brush wraps
+ * round lands at the other end, so it takes the whole of that axis.
+ */
+function fitBox(box: ReadBox, brush: BrushBox, ctx: ReachContext): ReadBox {
+  const pastTime = box.start < 0 || box.end > ctx.fileSeconds;
+  const pastPitch = box.low < 0 || box.high > 1;
   return {
-    start: Math.max(0, box.start),
-    end: Math.min(ctx.fileSeconds, box.end),
-    low: Math.max(0, box.low),
-    high: Math.min(1, box.high),
+    start: brush.wrapsTime && pastTime ? 0 : Math.max(0, box.start),
+    end: brush.wrapsTime && pastTime ? ctx.fileSeconds : Math.min(ctx.fileSeconds, box.end),
+    low: brush.wrapsPitch && pastPitch ? 0 : Math.max(0, box.low),
+    high: brush.wrapsPitch && pastPitch ? 1 : Math.min(1, box.high),
   };
 }
 
