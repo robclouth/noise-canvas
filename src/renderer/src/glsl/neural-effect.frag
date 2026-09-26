@@ -3,8 +3,8 @@
 // Writes what the automaton grew back into the spectrogram. Each band reads
 // the grid at its place in the brush, and the level channel sets its
 // magnitude. The phase follows the path the model grew, from where the learnt
-// sound's phase started on that row (mode 0), or is fresh noise (mode 1), or
-// is the phase already there (mode 2). Where the sound was already stereo,
+// sound's phase started on that row, for the energy the model added (mode 0),
+// or is fresh noise (mode 1), or is the phase already there (mode 2). Where the sound was already stereo,
 // each channel keeps its share of the level.
 
 uniform sampler2D ncaState0;
@@ -63,6 +63,16 @@ float nearestBranch(float target, float reference) {
   return reference + diff - TWO_PI * floor(diff / TWO_PI + 0.5);
 }
 
+// The phase of a band that goes from `fromMagnitude` at `fromPhase` to
+// `toMagnitude`: its own phase weighted by what it had, the learnt phase by
+// what was added. Returned on the branch nearest `fromPhase`.
+float blendPhase(float fromPhase, float fromMagnitude, float learnt, float toMagnitude) {
+  float added = max(toMagnitude - fromMagnitude, 0.0);
+  vec2 sum = fromMagnitude * vec2(cos(fromPhase), sin(fromPhase)) + added * vec2(cos(learnt), sin(learnt));
+  if (dot(sum, sum) < 1e-24) return nearestBranch(learnt, fromPhase);
+  return nearestBranch(atan(sum.y, sum.x), fromPhase);
+}
+
 // A phase per coefficient that stays put from dab to dab.
 float noisePhase(vec2 packedUv, float channel) {
   vec3 p3 = fract(vec3(packedUv.xyx * vec2(1.0, 1.0 + channel).xyx) * vec3(443.897, 441.423, 437.195));
@@ -97,8 +107,11 @@ void main() {
     // A smooth path turns a noisy band into a steady tone, and a bank of those
     // sounds like a comb, so rough rows get per-coefficient jitter back.
     float learnt = grownPhase(local) + noisePhase(vUv, 2.0) * rowRoughness(local);
-    phaseL = nearestBranch(learnt, originalTexel.g);
-    phaseR = nearestBranch(learnt, originalTexel.a);
+    // Only energy the model adds takes the learnt phase: a band that keeps its
+    // level keeps its own phase, and one grown out of silence takes the learnt
+    // one, so painting a little at a time moves the sound only a little.
+    phaseL = blendPhase(originalTexel.g, originalTexel.r, learnt, magnitude * share.x);
+    phaseR = blendPhase(originalTexel.a, originalTexel.b, learnt, magnitude * share.y);
   } else if (neuralPhaseMode != 2) {
     phaseL = nearestBranch(noisePhase(vUv, 0.0), originalTexel.g);
     phaseR = nearestBranch(noisePhase(vUv, 1.0), originalTexel.a);

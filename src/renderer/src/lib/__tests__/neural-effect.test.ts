@@ -154,11 +154,23 @@ describe("Neural effect", () => {
     return worst;
   }
 
-  it("starts the grown phase from the learnt anchor, or keeps the one there", async () => {
+  it("gives only the energy it adds the learnt phase", async () => {
     const byte = 64;
-    const learnt = modelText(stillWeights(), new Uint8Array(NCA_GRID).fill(byte));
-    const withLearnt = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 0 });
-    expect(worstPhaseError(withLearnt.after, dequantisePhase(byte))).toBeLessThan(1e-3);
+    const anchors = new Uint8Array(NCA_GRID).fill(byte);
+    // A band whose level holds keeps its own phase.
+    const still = await paint({ neuralModel: modelText(stillWeights(), anchors), neuralSteps: 2, neuralPhase: 0 });
+    expect(worstPhaseError(still.after, 0)).toBeLessThan(1e-3);
+    // Sound grown out of silence takes the learnt phase.
+    spectrogramData = createMockSpectrogramData({ numFrames: 96, numBands: 96, sampleRate: 1000, pattern: "silence" });
+    disposeHarnessTextures(textures);
+    textures = createHarnessTextures(spectrogramData);
+    const grown = await paint({ neuralModel: modelText(risingWeights(0.3), anchors), neuralSteps: 4, neuralPhase: 0 });
+    expect(grown.after.some((v, i) => i % 4 === 0 && v > 0)).toBe(true);
+    expect(worstPhaseError(grown.after, dequantisePhase(byte))).toBeLessThan(1e-3);
+  });
+
+  it("keeps the phase there, or makes it noise, when asked", async () => {
+    const learnt = modelText(stillWeights(), new Uint8Array(NCA_GRID).fill(64));
     const kept = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 2 });
     expect(worstPhaseError(kept.after, 0)).toBeLessThan(1e-3);
     const noise = await paint({ neuralModel: learnt, neuralSteps: 2, neuralPhase: 1 });
