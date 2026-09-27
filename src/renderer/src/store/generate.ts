@@ -34,7 +34,7 @@ export interface GenerateState {
   generateIntoActiveFile: (settings: GenerateSettings) => Promise<void>;
 }
 
-let lastSettings: GenerateSettings = { prompt: "", strength: 0.8, input: "full-mix" };
+let lastSettings: GenerateSettings = { prompt: "", strength: 0.5, input: "full-mix" };
 let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleRelease(): void {

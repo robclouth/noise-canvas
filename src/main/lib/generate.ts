@@ -131,20 +131,20 @@ function tokenize(prompt: string): Int32Array {
 }
 
 /**
- * The sampler's noise levels for `steps` steps from `strength` down to 0. The
- * model's log-SNR schedule is entered at the level `strength` sits on, so the
- * levels only fall; at strength 1 it is the model's own full schedule.
+ * The sampler's noise levels for `steps` steps, falling to 0. `strength` is
+ * the share of the model's log-SNR schedule that runs: the last `strength` of
+ * it, so at 1 the whole schedule from pure noise.
  */
 export function generateSchedule(strength: number, steps = GENERATE_STEPS): Float32Array {
   const anchor = -6.2;
   const end = 2.0;
-  const start = strength < 1 ? (end + Math.log(strength / (1 - strength))) / (end - anchor) : 1;
+  const start = Math.min(1, strength);
   const sigmas = new Float32Array(steps + 1);
   for (let i = 0; i <= steps; i++) {
     const t = start * (1 - i / steps);
     sigmas[i] = 1 / (1 + Math.exp(end - t * (end - anchor)));
   }
-  sigmas[0] = strength;
+  if (strength >= 1) sigmas[0] = 1;
   sigmas[steps] = 0;
   return sigmas;
 }

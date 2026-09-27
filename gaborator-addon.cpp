@@ -6341,6 +6341,59 @@ static const double SA3_SAMPLE_RATE = 44100.0;
 /** The decoder's float audio, ahead of the 16-bit clip its `pcm` output applies. */
 static const char *const SA3_DECODER_FLOAT_OUTPUT = "/Cast_output_0";
 
+/**
+ * Removes the steady lines the codec leaves at multiples of 44100/256 Hz above
+ * 2 kHz. In 1.5 s Hann frames, a line more than 6 dB over the bins around it
+ * is scaled by their level over its own, leaving it that far below them; every
+ * other bin passes unchanged.
+ */
+static void removeCodecComb(std::vector<float> &audio)
+{
+    const size_t n = 65536, hop = n / 4, spacing = n / 256, lowest = 2000;
+    const size_t length = audio.size();
+    if (length == 0) return;
+    gaborator::rfft<std::complex<float> *> fft(n);
+    std::vector<float> window(n), frame(n);
+    for (size_t i = 0; i < n; i++) window[i] = (float)(0.5 - 0.5 * std::cos(2.0 * M_PI * (double)i / (double)n));
+    std::vector<std::complex<float>> spectrum(n), change(n);
+
+    std::fill(frame.begin(), frame.end(), 0.0f);
+    frame[0] = 1.0f;
+    fft.transform(frame.data(), spectrum.data());
+    fft.itransform(spectrum.data(), frame.data());
+    const float inverseScale = 1.0f / frame[0];
+
+    const size_t firstHarmonic = (size_t)std::ceil((double)lowest * n / SA3_SAMPLE_RATE / spacing);
+    const size_t padded = length + 2 * n;
+    std::vector<float> correction(padded, 0.0f);
+    auto sample = [&](size_t p) { return p >= n && p < n + length ? audio[p - n] : 0.0f; };
+    for (size_t start = 0; start + n <= padded; start += hop)
+    {
+        for (size_t i = 0; i < n; i++) frame[i] = sample(start + i) * window[i];
+        fft.transform(frame.data(), spectrum.data());
+        bool changed = false;
+        std::fill(change.begin(), change.end(), std::complex<float>(0.0f, 0.0f));
+        for (size_t k = firstHarmonic; k < 128; k++)
+        {
+            const size_t bin = k * spacing;
+            double around = 0.0;
+            for (int offset = 4; offset <= 8; offset++)
+                around += std::norm(spectrum[bin - offset]) + std::norm(spectrum[bin + offset]);
+            around /= 10.0;
+            const double line = std::norm(spectrum[bin]);
+            if (line <= 4.0 * around) continue;
+            const float gain = (float)(around / line);
+            for (size_t b = bin - 1; b <= bin + 1; b++) change[b] = spectrum[b] * (gain - 1.0f);
+            changed = true;
+        }
+        if (!changed) continue;
+        fft.itransform(change.data(), frame.data());
+        for (size_t i = 0; i < n; i++) correction[start + i] += frame[i] * inverseScale * window[i];
+    }
+    const float overlap = 1.5f;
+    for (size_t i = 0; i < length; i++) audio[i] += correction[n + i] / overlap;
+}
+
 /** The model files Generate runs: text encoder, audio encoder, diffusion model and audio decoder. */
 struct GenerateModels
 {
@@ -6567,6 +6620,7 @@ private:
         output.assign(2, std::vector<float>(length, 0.0f));
         for (int c = 0; c < 2; c++)
             for (size_t i = 0; i < length && i < decodedLength; i++) output[c][i] = audio[(size_t)c * decodedLength + i];
+        for (std::vector<float> &channel : output) removeCodecComb(channel);
     }
 
     Napi::Promise::Deferred deferred;
@@ -6634,6 +6688,22 @@ Napi::Value GenerateRelease(const Napi::CallbackInfo &info)
     std::lock_guard<std::mutex> lock(gGenerateMutex);
     gGenerateSessions = GenerateSessions{};
     return info.Env().Undefined();
+}
+
+/** Test hook: `removeCodecComb` over caller-supplied channels at 44.1 kHz, returned as new arrays. */
+Napi::Value RemoveCodecCombTest(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    std::vector<std::vector<float>> channels = channelsOf(info[0].As<Napi::Array>());
+    Napi::Array out = Napi::Array::New(env, channels.size());
+    for (uint32_t c = 0; c < channels.size(); c++)
+    {
+        removeCodecComb(channels[c]);
+        Napi::Float32Array data = Napi::Float32Array::New(env, channels[c].size());
+        memcpy(data.Data(), channels[c].data(), channels[c].size() * sizeof(float));
+        out[c] = data;
+    }
+    return out;
 }
 
 /** True when ONNX Runtime opened and will run on a WebGPU device. */
@@ -7978,6 +8048,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("generate", Napi::Function::New(env, GenerateAsync));
     exports.Set("generateRelease", Napi::Function::New(env, GenerateRelease));
     exports.Set("onnxUsesGpu", Napi::Function::New(env, OnnxUsesGpu));
+    exports.Set("removeCodecComb", Napi::Function::New(env, RemoveCodecCombTest));
 #endif
     return exports;
 }

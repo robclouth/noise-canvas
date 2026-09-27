@@ -8,10 +8,19 @@ describe("Generate noise schedule", () => {
     expected.forEach((value, i) => expect(sigmas[i]).toBeCloseTo(value, 3));
   });
 
-  it("starts at the strength and only falls from there", () => {
-    for (const strength of [0.3, 0.6, 0.8, 0.95]) {
+  it("runs the last share of the model's schedule that the strength names", () => {
+    const full = generateSchedule(1, 8);
+    expect(Array.from(generateSchedule(0.5, 4)).map((v) => v.toFixed(5))).toEqual(
+      Array.from(full.slice(4)).map((v) => v.toFixed(5)),
+    );
+    expect(Array.from(generateSchedule(0.25, 2)).map((v) => v.toFixed(5))).toEqual(
+      Array.from(full.slice(6)).map((v) => v.toFixed(5)),
+    );
+  });
+
+  it("only falls, and ends at 0", () => {
+    for (const strength of [0.05, 0.3, 0.6, 0.8, 0.95]) {
       const sigmas = generateSchedule(strength);
-      expect(sigmas[0]).toBeCloseTo(strength, 6);
       expect(sigmas[sigmas.length - 1]).toBe(0);
       for (let i = 1; i < sigmas.length; i++) expect(sigmas[i]).toBeLessThan(sigmas[i - 1]);
     }

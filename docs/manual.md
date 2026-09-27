@@ -953,10 +953,10 @@ The `Shift` variants work on **time itself**. They change the file's length, so 
 
 ### Generating Sound
 
-**Edit → Generate…** (`Cmd/Ctrl+Alt+G`) makes new sound from a text prompt with an AI model. With a selection it changes the selection alone. With nothing selected it changes the whole file. The result is one edit in the history. Undo it and generate again for another take: each run comes out different, and the take you undid stays in the [History](#history) panel as a branch.
+**Edit → Generate…** (`Cmd/Ctrl+E`) makes new sound from a text prompt with an AI model. With a selection it changes the selection alone. With nothing selected it changes the whole file. The result is one edit in the history. Undo it and generate again for another take: each run comes out different, and the take you undid stays in the [History](#history) panel as a branch.
 
 - **Prompt** – the sound you want, such as "warm felt piano chords" or "rain on a window".
-- **Strength** – how far the result moves from what is there. At 100% the selection is replaced, carrying on from the sound either side of it. Lower keeps more of the original. Around 80% changes the character while the rhythm stays.
+- **Strength** – how far the result moves from what is there. Below about 40% the sound keeps its character. Around 45% the character can change while the rhythm holds. From about 50% the rhythm goes too, and the result follows the prompt. At 100% the selection is replaced, carrying on from the sound either side of it.
 - **Input** – shown when the selection leaves some bands out. **Full Mix** lets the model hear every band, **Selection** only the selected ones. Either way, only the selection changes.
 
 The model hears up to 10 seconds either side of a selection. The first run downloads it, about 6 GB, and the first run in each session takes longer while it loads. It runs on the graphics card where it can. Not available on Intel Macs, or on macOS 12 or 13.
@@ -1047,7 +1047,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Cut / Copy / Paste** (`Cmd/Ctrl+X`, `Cmd/Ctrl+C`, `Cmd/Ctrl+V`) – work on the selection. See [Selecting a Region](#selecting-a-region).
 - **Duplicate** (`Cmd/Ctrl+D`) – stamps a copy of the selection directly after it. With nothing selected it duplicates the file.
 - **Silence Selection** (`Backspace`) – empties the selection without copying it.
-- **Generate…** (`Cmd/Ctrl+Alt+G`) – makes new sound for the selection, or the whole file, from a text prompt. See [Generating Sound](#generating-sound).
+- **Generate…** (`Cmd/Ctrl+E`) – makes new sound for the selection, or the whole file, from a text prompt. See [Generating Sound](#generating-sound).
 - **Invert Selection** (`Cmd/Ctrl+I`) – selects everything the selection leaves out. With nothing selected it selects the whole file.
 - **Fill Grid with Brush** (`Cmd/Ctrl+F`) – see [Fill Grid](#fill-grid).
 - **Restore Original** – reloads the unedited file.
@@ -1099,7 +1099,7 @@ The keys below are the ones your keyboard prints. On a layout that prints someth
 | `Backspace` / `Delete` | Silence the selection                                  |
 | `Cmd/Ctrl+I`           | Invert the selection                                   |
 | `Cmd/Ctrl+Shift+X/V/D` | Cut, paste or duplicate a stretch of time              |
-| `Cmd/Ctrl+Alt+G`       | Generate into the selection, or the whole file         |
+| `Cmd/Ctrl+E`           | Generate into the selection, or the whole file         |
 | `1`–`9`, `0`           | Select the top palette's first ten brushes             |
 | `a`–`z`                | Select the brush bound to that key                     |
 | Hold `Shift` + click   | Pick a source file and position                        |

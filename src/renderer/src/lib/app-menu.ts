@@ -111,7 +111,7 @@ export const APP_MENUS: AppMenu[] = [
         type: "item",
         label: "Generate…",
         command: "generate",
-        accelerator: { code: "KeyG", alt: true },
+        accelerator: { code: "KeyE" },
         only: "electron",
       },
       { type: "item", label: "Invert Selection", command: "invert-selection", accelerator: { code: "KeyI" } },
