@@ -2,6 +2,7 @@ import { NumberInput, SimpleGrid, Stack, Text, TextInput, type ModalProps } from
 import { modals, openContextModal } from "@mantine/modals";
 import { type ReactNode, type RefObject } from "react";
 import { StackFilesFields, type StackLayerOption } from "../components/stack-files-fields";
+import { GenerateFields, type GenerateSettings } from "../components/generate-fields";
 import { LengthFields } from "../components/length-fields";
 import { secondsToLength, type LengthValues } from "./length-values";
 
@@ -387,6 +388,50 @@ export function openSetLengthPrompt({
     onConfirm: async () => {
       if (!Number.isFinite(values.current.length) || values.current.length <= 0) return;
       lastSetLengthUnit = values.current.unit;
+      await onConfirm(values.current);
+    },
+    onCancel,
+    onClose,
+  });
+}
+
+type OpenGeneratePromptOptions = {
+  initial: GenerateSettings;
+  /** True when a selection exists, so the result lands in it rather than over the whole file. */
+  hasSelection: boolean;
+  /** True when the selection leaves some bands out, which offers the Input choice. */
+  bandLimited: boolean;
+  onConfirm: (settings: GenerateSettings) => void | Promise<void>;
+  onCancel?: () => void;
+  onClose?: () => void;
+};
+
+export function openGeneratePrompt({
+  initial,
+  hasSelection,
+  bandLimited,
+  onConfirm,
+  onCancel,
+  onClose,
+}: OpenGeneratePromptOptions): void {
+  const values: RefObject<GenerateSettings> = { current: initial };
+  openConfirmModal({
+    title: "Generate",
+    size: "md",
+    children: (
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">
+          {hasSelection
+            ? "Makes new sound for the selection from a prompt. At 100% it replaces the selection, carrying on from the sound around it; lower keeps more of what is there."
+            : "Makes new sound for the whole file from a prompt. At 100% it replaces the file; lower keeps more of what is there."}
+        </Text>
+        <GenerateFields values={values} bandLimited={bandLimited} />
+      </Stack>
+    ),
+    labels: { confirm: "Generate", cancel: "Cancel" },
+    confirmProps: { size: "xs" },
+    cancelProps: { size: "xs" },
+    onConfirm: async () => {
       await onConfirm(values.current);
     },
     onCancel,

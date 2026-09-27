@@ -1,8 +1,8 @@
 import { createWriteStream, existsSync, mkdirSync } from "fs";
-import { rename, unlink } from "fs/promises";
+import { appendFile, rename, unlink } from "fs/promises";
 import { get as httpsGet } from "https";
 import { homedir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 
 export type FourStemName = "drums" | "bass" | "vocals" | "other";
 export type TwoStemName = "vocals" | "accompaniment";
@@ -35,20 +35,40 @@ export function downloadModel(
   modelFile: string,
   onProgress?: (downloaded: number, total: number) => void,
 ): Promise<void> {
+  const url = MODEL_URLS[modelFile];
+  if (!url) throw new Error(`No download URL configured for model: ${modelFile}`);
+  return downloadModelFile(modelFile, url, onProgress);
+}
+
+/**
+ * Downloads `url` to `modelFile` under the model cache, which may name a
+ * subfolder. `append` is written to the end of the payload before the file
+ * takes its name, so a present file is always a finished one.
+ */
+export function downloadModelFile(
+  modelFile: string,
+  url: string,
+  onProgress?: (downloaded: number, total: number) => void,
+  append?: Uint8Array,
+): Promise<void> {
   const existing = inFlightDownloads.get(modelFile);
   if (existing) return existing;
 
-  const download = startDownload(modelFile, onProgress).finally(() => {
+  const download = startDownload(modelFile, url, onProgress, append).finally(() => {
     inFlightDownloads.delete(modelFile);
   });
   inFlightDownloads.set(modelFile, download);
   return download;
 }
 
-function startDownload(modelFile: string, onProgress?: (downloaded: number, total: number) => void): Promise<void> {
+function startDownload(
+  modelFile: string,
+  url: string,
+  onProgress?: (downloaded: number, total: number) => void,
+  append?: Uint8Array,
+): Promise<void> {
   const dest = getModelPath(modelFile);
-  const url = MODEL_URLS[modelFile];
-  if (!url) throw new Error(`No download URL configured for model: ${modelFile}`);
+  mkdirSync(dirname(dest), { recursive: true });
 
   // Download to a temp file and only rename it into place once the full,
   // verified payload is flushed to disk, so an interrupted/corrupt transfer is
@@ -92,7 +112,10 @@ function startDownload(modelFile: string, onProgress?: (downloaded: number, tota
           if (total > 0 && downloaded !== total) {
             return cleanupReject(new Error(`Incomplete download for ${modelFile} (${downloaded}/${total} bytes)`));
           }
-          rename(tmp, dest).then(resolve).catch(cleanupReject);
+          (append ? appendFile(tmp, append) : Promise.resolve())
+            .then(() => rename(tmp, dest))
+            .then(resolve)
+            .catch(cleanupReject);
         });
         response.pipe(file);
       });

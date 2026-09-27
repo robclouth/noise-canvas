@@ -48,9 +48,10 @@
                             [
                                 # ONNX Runtime ships no macOS x86_64 build after
                                 # 1.23, so Intel Macs are the one target without
-                                # stem separation. Callers must treat aiSeparate
-                                # as absent there. The library is not linked: the
-                                # addon opens it on first use (ortUnavailable).
+                                # stem separation or Generate. Callers must treat
+                                # aiSeparate and generate as absent there. The
+                                # library is not linked: the addon opens it on
+                                # first use (ortUnavailable).
                                 'target_arch=="arm64"',
                                 {
                                     "defines": ["GABORATOR_ONNX_ENABLED=1"],
@@ -59,7 +60,7 @@
                                         {
                                             "destination": "<(PRODUCT_DIR)",
                                             "files": [
-                                                "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.1.24.3.dylib",
+                                                "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.1.30.0.dylib",
                                             ],
                                         },
                                     ],
@@ -89,6 +90,9 @@
                                 "destination": "<(PRODUCT_DIR)",
                                 "files": [
                                     "<(module_root_dir)/vendor/onnxruntime/lib/onnxruntime.dll",
+                                    "<(module_root_dir)/vendor/onnxruntime/lib/onnxruntime_providers_webgpu.dll",
+                                    "<(module_root_dir)/vendor/onnxruntime/lib/dxil.dll",
+                                    "<(module_root_dir)/vendor/onnxruntime/lib/dxcompiler.dll",
                                 ],
                             },
                         ],
@@ -111,6 +115,7 @@
                                 "destination": "<(PRODUCT_DIR)",
                                 "files": [
                                     "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.so.1",
+                                    "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime_providers_webgpu.so",
                                 ],
                             },
                         ],

@@ -420,6 +420,11 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubStackFiles);
 
+    const unsubGenerate = ipcOn("generate", () => {
+      void useStore.getState().promptGenerate();
+    });
+    unsubscribers.push(unsubGenerate);
+
     const unsubUnstackFiles = ipcOn("unstack-files", () => {
       useStore.getState().unstackActiveFile();
     });

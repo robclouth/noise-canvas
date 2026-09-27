@@ -48,10 +48,18 @@ await build({
 // first, and without it every stroke in a packaged extension fails.
 await copyFile(join(root, "build/Release/gaborator_addon.node"), join(outDir, "host/gaborator_addon.node"));
 
-// The addon links ONNX Runtime and resolves it from its own directory, so the
-// shared library has to travel with the copy. Only one name exists per platform,
-// and Intel macOS has none.
-for (const library of ["libonnxruntime.1.24.3.dylib", "libonnxruntime.so.1", "onnxruntime.dll"]) {
+// The addon loads ONNX Runtime and its WebGPU provider from its own directory,
+// so the shared libraries have to travel with the copy. Only one platform's set
+// exists per build, and Intel macOS has none.
+for (const library of [
+  "libonnxruntime.1.30.0.dylib",
+  "libonnxruntime.so.1",
+  "libonnxruntime_providers_webgpu.so",
+  "onnxruntime.dll",
+  "onnxruntime_providers_webgpu.dll",
+  "dxil.dll",
+  "dxcompiler.dll",
+]) {
   const from = join(root, "build/Release", library);
   if (existsSync(from)) await copyFile(from, join(outDir, "host", library));
 }

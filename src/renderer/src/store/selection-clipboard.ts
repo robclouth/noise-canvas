@@ -209,6 +209,32 @@ async function commitRegionStrokes(
   }
 }
 
+/**
+ * Writes `region` into `rect` of `fileId` as one edit named `label`, the way a
+ * dropped clipboard lands: the region's copied corner under the rectangle's,
+ * shaped by the rectangle's mask. False when the file cannot take an edit.
+ */
+export async function pasteRegionInto(
+  get: ZustandGet,
+  fileId: string,
+  region: ClipboardRegion,
+  rect: Selection,
+  label: string,
+): Promise<boolean> {
+  const edit = target(get, fileId);
+  const renderer = edit?.file.rendererRef?.current;
+  if (!edit || !renderer) return false;
+  const source = renderer.createRegionSource(CLIPBOARD_PATH, region.spec, region.onsets, region.onsetSensitivity);
+  if (!source) return false;
+  try {
+    const strokes = pasteStrokes(edit.state, rect, edit.geometry, pasteSource(region), fileId);
+    await commitRegionStrokes(edit, strokes, label, get, source);
+  } finally {
+    renderer.disposeRegionSource(source);
+  }
+  return true;
+}
+
 export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet): SelectionClipboardState => ({
   placing: null,
 

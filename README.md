@@ -16,7 +16,7 @@ Noise Canvas is a tool for doing spectral sound design. It loads audio files, sh
 
 Not sure which Mac you have? Apple menu → **About This Mac**. A "Chip" line means Apple Silicon. A "Processor" line means Intel.
 
-**Which macOS?** The app needs macOS 12 Monterey or newer. AI stem separation needs more: an Apple Silicon Mac on macOS 14 Sonoma or newer. On an older system or an Intel Mac, everything else works. I've only tested it on Sequoia (15). If it won't run on yours, [open an issue](https://github.com/robclouth/noise-canvas/issues) and say which version you're on.
+**Which macOS?** The app needs macOS 12 Monterey or newer. AI stem separation and Generate need more: an Apple Silicon Mac on macOS 14 Sonoma or newer. On an older system or an Intel Mac, everything else works. I've only tested it on Sequoia (15). If it won't run on yours, [open an issue](https://github.com/robclouth/noise-canvas/issues) and say which version you're on.
 
 **It leans on your graphics card.** Every effect is a shader, so the GPU does the work rather than the CPU. Integrated graphics are fine, but an older machine will paint slowly on long files, and can run out of GPU memory on very long ones. Shorter files are the fix. I'm currently investigating how to improve performance on older computers.
 
@@ -51,6 +51,7 @@ If it's worth money to you, please consider giving that money to people working 
 - **Deep modulation** — three per-pixel 2D modulators (patterns, procedural textures, your own images, envelope follower, sequencer), plus macros, pen pressure/tilt, and contextual sources.
 - **Branching history** that survives restarts, with favourites and per-branch audio export.
 - **Stem splitting** — harmonic/percussive, NMF, or AI separation — with lossless merge back.
+- **Generate.** New sound from a text prompt, into a selection or over the whole file: fill a gap from the sound around it, or restyle what is there.
 - **Slots into any DAW** as its external sample editor. Ableton Live goes further: a Live 12 extension embeds the whole editor, and Ableton Link keeps tempo in sync.
 
 Everything runs on the GPU and resynthesises after every stroke, so you hear the real audio immediately.
@@ -228,6 +229,7 @@ Other tools that treat sound as something you can look at and draw on.
 - [3dtextures.me](https://3dtextures.me/) – for the textures
 - [Gaborator](https://gaborator.com/) – for spectral analysis
 - [htdemucs](https://huggingface.co/smank/htdemucs-onnx) – for AI stem separation (CC-BY-NC 4.0)
+- [Stable Audio 3 Medium](https://huggingface.co/stabilityai/stable-audio-3-optimized) by Stability AI – for Generate (Stability AI Community License; its T5Gemma text encoder under the Gemma Terms of Use)
 - Tomas Boroski – for the amazing icon ([github](https://github.com/tomasborosko), [instagram](http://instagram.com/fivesteppath))
 
 ---

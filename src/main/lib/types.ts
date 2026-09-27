@@ -210,6 +210,7 @@ export interface IpcRendererEvents {
   "double-active-file-length": () => void;
   "halve-active-file-length": () => void;
   "stack-files": () => void;
+  generate: () => void;
   "unstack-files": () => void;
   "set-file-length": () => void;
   "insert-silence": () => void;

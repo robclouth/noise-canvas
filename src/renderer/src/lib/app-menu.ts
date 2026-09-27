@@ -107,6 +107,13 @@ export const APP_MENUS: AppMenu[] = [
       { type: "item", label: "Paste", command: "paste-selection", accelerator: { code: "KeyV" } },
       { type: "item", label: "Duplicate", command: "duplicate-selection", accelerator: { code: "KeyD" } },
       { type: "item", label: "Silence", command: "silence-selection" },
+      {
+        type: "item",
+        label: "Generate…",
+        command: "generate",
+        accelerator: { code: "KeyG", alt: true },
+        only: "electron",
+      },
       { type: "item", label: "Invert Selection", command: "invert-selection", accelerator: { code: "KeyI" } },
       { type: "separator" },
       { type: "item", label: "Cut Time", command: "cut-time-selection", accelerator: { code: "KeyX", shift: true } },

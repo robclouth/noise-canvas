@@ -34,6 +34,19 @@ import {
   type PackedView,
 } from "./onset-scan";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
+export {
+  bandLimit,
+  downloadGenerateModel,
+  generate,
+  generateAvailable,
+  GENERATE_MAX_SECONDS,
+  GENERATE_SAMPLE_RATE,
+  isGenerateModelDownloaded,
+  matchLevel,
+  onnxUsesGpu,
+  releaseGenerateModels,
+} from "./generate";
+export type { BandRegion, GenerateRequest } from "./generate";
 export type { FourStemName, TwoStemName } from "./ai-separation";
 
 // Only 4-stem is available as a public ONNX — no clean 2-stem ONNX exists yet.
@@ -46,6 +59,7 @@ const AI_MODEL = {
 let gaborator: any = null;
 
 import { allowedExtensions } from "./audio-extensions";
+import { setGenerateAddon } from "./generate";
 
 export { allowedExtensions };
 
@@ -67,6 +81,8 @@ export function getGaboratorPath(): string {
   if (existsSync(bundled)) return bundled;
   return join(__dirname, "../../../build/Release/gaborator_addon.node");
 }
+
+setGenerateAddon(() => init());
 
 export function init() {
   if (!gaborator) {

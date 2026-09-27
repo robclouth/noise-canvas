@@ -29,6 +29,7 @@ import { createFillSlice } from "./fill";
 import { createSelectionAuditionSlice } from "./selection-audition";
 import { createSelectionClipboardSlice } from "./selection-clipboard";
 import { createSelectionRippleSlice } from "./selection-ripple";
+import { createGenerateSlice } from "./generate";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
 import { createModulatorsSlice } from "./modulators";
 import { createPalettesSlice, makeDefaultPalette, PALETTES_PERSISTED_KEYS } from "./palettes";
@@ -231,6 +232,7 @@ export const useStore = create<State>()(
         ...createSelectionAuditionSlice(set, get),
         ...createSelectionClipboardSlice(set, get),
         ...createSelectionRippleSlice(set, get),
+        ...createGenerateSlice(set, get),
         setParameter: (key: ParameterKey, value: unknown, effectId?: string) => {
           const state = get();
           const activeBrush = state.brushes[state.activeBrushIndex];

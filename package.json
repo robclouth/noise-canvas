@@ -17,6 +17,7 @@
     "drive:select": "node scripts/drive/probe-select.mjs",
     "drive:preview": "node scripts/drive/probe-preview.mjs",
     "drive:speed": "node scripts/drive/probe-speed.mjs",
+    "drive:generate": "node scripts/drive/probe-generate.mjs",
     "window:display:check": "node scripts/window-display-check.mjs",
     "window:original:check": "node scripts/window-original-check.mjs",
     "window:stack:check": "node scripts/window-stack-check.mjs",

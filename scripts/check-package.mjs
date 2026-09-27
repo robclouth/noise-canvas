@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 // Assert every packaged app carries the native addon and, where the platform
-// builds it, the ONNX Runtime library the addon links. Both must sit in the same
-// unpacked directory, because that is where the addon resolves the library from.
+// builds it, ONNX Runtime and its WebGPU provider. All must sit in the same
+// unpacked directory, because that is where the addon resolves them from.
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { arch, platform } from "node:process";
 
 // ONNX Runtime ships no macOS x86_64 build after 1.23, so Intel Macs are the one
-// target packaged without stem separation.
-const ONNX_LIBRARY = {
-  darwin: arch === "x64" ? null : "libonnxruntime.1.24.3.dylib",
-  win32: "onnxruntime.dll",
-  linux: "libonnxruntime.so.1",
-}[platform];
+// target packaged without stem separation or Generate.
+const ONNX_LIBRARIES =
+  {
+    darwin: arch === "x64" ? [] : ["libonnxruntime.1.30.0.dylib"],
+    win32: ["onnxruntime.dll", "onnxruntime_providers_webgpu.dll", "dxil.dll", "dxcompiler.dll"],
+    linux: ["libonnxruntime.so.1", "libonnxruntime_providers_webgpu.so"],
+  }[platform] ?? [];
 
 /** Every `app.asar.unpacked/build/Release` directory beneath `dir`. */
 function findUnpackedAddonDirs(dir, found = []) {
@@ -42,7 +43,7 @@ if (addonDirs.length === 0) {
   process.exit(1);
 }
 
-const required = ["gaborator_addon.node", "link_addon.node", ...(ONNX_LIBRARY ? [ONNX_LIBRARY] : [])];
+const required = ["gaborator_addon.node", "link_addon.node", ...ONNX_LIBRARIES];
 let failed = false;
 
 for (const dir of addonDirs) {

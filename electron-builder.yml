@@ -21,11 +21,15 @@ files:
   - "!node_modules/**/{benchmark,benchmarks}"
   - "build/Release/gaborator_addon.node"
   - "build/Release/link_addon.node"
-  # ONNX Runtime, beside the addon that loads it. Only one of these exists per
-  # platform, and Intel macOS has none.
-  - "build/Release/libonnxruntime.1.24.3.dylib"
+  # ONNX Runtime and, off macOS, its WebGPU provider, beside the addon that
+  # loads them. Only one platform's set exists per build, and Intel macOS has none.
+  - "build/Release/libonnxruntime.1.30.0.dylib"
   - "build/Release/libonnxruntime.so.1"
+  - "build/Release/libonnxruntime_providers_webgpu.so"
   - "build/Release/onnxruntime.dll"
+  - "build/Release/onnxruntime_providers_webgpu.dll"
+  - "build/Release/dxil.dll"
+  - "build/Release/dxcompiler.dll"
 
 extraResources:
   - from: resources/hrtf
@@ -42,6 +46,7 @@ asarUnpack:
   - "**/*.node"
   - "**/*.dylib"
   - "**/*.dll"
+  - "**/*.so"
   - "**/*.so.*"
   - "**/node_modules/ffmpeg-static/ffmpeg*"
 # Every artifactName below omits ${version}. The names must stay constant across

@@ -793,7 +793,7 @@ async function mergeStatesIntoBlocks(
  * A fresh analysis as the state the renderer paints on. The analysis returns
  * coefficients alone, so the inverse map is built here.
  */
-async function spectrogramFromAnalysis(
+export async function spectrogramFromAnalysis(
   result: AnalysisResult,
   opts: { minFreq: number; bandsPerOctave: number },
 ): Promise<SpectrogramData & { packedData: Float32Array }> {
@@ -1146,7 +1146,9 @@ async function currentFileAudio(file: OpenFile): Promise<Float32Array[] | null> 
 }
 
 /** A file's audio as it currently sounds, synthesising it when it has no buffer. */
-async function currentFileChannels(fileId: string): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
+export async function currentFileChannels(
+  fileId: string,
+): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
   const snapshot = await snapshotFileAudio(fileId);
   if (snapshot) return { channels: snapshot.channels, sampleRate: snapshot.sampleRate };
 

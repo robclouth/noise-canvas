@@ -197,6 +197,46 @@ declare global {
       nativeAddonLoadError?: () => string | null;
       /** True when AI stem separation can run on this system. */
       aiSeparationAvailable?: () => boolean;
+      /** True when Generate can run on this system. */
+      generateAvailable?: () => boolean;
+      /** True when the ONNX models run on the GPU rather than the CPU. */
+      onnxUsesGpu?: () => boolean;
+      isGenerateModelDownloaded?: () => boolean;
+      downloadGenerateModel?: (onProgress?: (downloaded: number, total: number) => void) => Promise<void>;
+      /** The model's rate; Generate's audio goes in and comes out at it. */
+      GENERATE_SAMPLE_RATE?: number;
+      /**
+       * Runs Stable Audio 3 over 44.1 kHz audio and returns the same length.
+       * At strength 1 `fill` is regenerated from its surroundings; below 1 the
+       * whole clip is restyled from itself.
+       */
+      generate?: (
+        request: {
+          prompt: string;
+          context: Float32Array[];
+          strength: number;
+          fill?: [number, number];
+          seed?: number;
+        },
+        onProgress?: (step: number, steps: number) => void,
+      ) => Promise<Float32Array[]>;
+      /** Frees Generate's model memory; the next Generate loads it again. */
+      releaseGenerateModels?: () => void;
+      /** Keeps only the coefficients inside a band of Hz, over a span of seconds or the whole clip. */
+      bandLimit?: (
+        channels: Float32Array[],
+        sampleRate: number,
+        params: AnalysisParams,
+        region: { loHz: number; hiHz: number; start?: number; end?: number },
+      ) => Promise<Float32Array[]>;
+      /** Scales `take` so its energy inside the region matches `reference`'s, within ±12 dB. */
+      matchLevel?: (
+        take: Float32Array[],
+        reference: Float32Array[],
+        sampleRate: number,
+        params: AnalysisParams,
+        region: { loHz: number; hiHz: number; start?: number; end?: number },
+      ) => Promise<Float32Array[]>;
       detectOnsets: (
         packedData: Float32Array,
         analysisMetadata: {

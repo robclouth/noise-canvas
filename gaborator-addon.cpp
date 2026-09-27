@@ -5898,12 +5898,48 @@ Napi::Value MergeSpectrogramsAsync(const Napi::CallbackInfo &info)
 #ifdef GABORATOR_ONNX_ENABLED
 #ifdef __APPLE__
 #define ORT_API_MANUAL_INIT
+#endif
+#ifndef _WIN32
 #include <dlfcn.h>
 #endif
 #include "vendor/onnxruntime/include/onnxruntime_cxx_api.h"
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <memory>
+#include <random>
+#include <unordered_map>
+
+#ifdef _WIN32
+static const char *const WEBGPU_PROVIDER_LIBRARY = "onnxruntime_providers_webgpu.dll";
+#else
+static const char *const WEBGPU_PROVIDER_LIBRARY = "libonnxruntime_providers_webgpu.so";
+#endif
+
+/** The folder the addon was loaded from, with a trailing separator, or empty when unknown. */
+static std::string addonDirectory()
+{
+#ifdef _WIN32
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(&addonDirectory), &module))
+        return std::string();
+    std::wstring path(32768, L'\0');
+    DWORD length = GetModuleFileNameW(module, path.data(), (DWORD)path.size());
+    if (length == 0) return std::string();
+    path.resize(length);
+    path = path.substr(0, path.find_last_of(L"\\/") + 1);
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, path.data(), (int)path.size(), nullptr, 0, nullptr, nullptr);
+    std::string utf8((size_t)bytes, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, path.data(), (int)path.size(), utf8.data(), bytes, nullptr, nullptr);
+    return utf8;
+#else
+    Dl_info self;
+    if (!dladdr(reinterpret_cast<const void *>(&addonDirectory), &self) || !self.dli_fname) return std::string();
+    std::string path(self.dli_fname);
+    return path.substr(0, path.find_last_of('/') + 1);
+#endif
+}
 
 /**
  * Why ONNX Runtime cannot be used, or null once it can. On macOS the library
@@ -5916,14 +5952,13 @@ static const char *ortUnavailable()
     static std::once_flag once;
     static std::string reason;
     std::call_once(once, [] {
-        Dl_info self;
-        if (!dladdr(reinterpret_cast<const void *>(&ortUnavailable), &self) || !self.dli_fname)
+        const std::string directory = addonDirectory();
+        if (directory.empty())
         {
             reason = "the addon's own path is unknown";
             return;
         }
-        std::string path(self.dli_fname);
-        path = path.substr(0, path.find_last_of('/') + 1) + "libonnxruntime.1.24.3.dylib";
+        const std::string path = directory + "libonnxruntime.1.30.0.dylib";
         void *library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!library)
         {
@@ -5974,10 +6009,11 @@ static std::vector<float> makeTriangularWindow(int n)
     return w;
 }
 
+/** The process's ONNX Runtime environment, never destroyed, so no provider library is unloaded at exit. */
 static Ort::Env &getOrtEnv()
 {
-    static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "noise_canvas");
-    return env;
+    static Ort::Env *env = new Ort::Env(ORT_LOGGING_LEVEL_WARNING, "noise_canvas");
+    return *env;
 }
 
 // ORTCHAR_T is wchar_t on Windows and char elsewhere, so paths cross the API in
@@ -5995,6 +6031,64 @@ static std::wstring toOrtPath(const std::string &path)
 static const std::string &toOrtPath(const std::string &path) { return path; }
 #endif
 
+/** The first WebGPU device ONNX Runtime lists, if any. */
+static std::vector<Ort::ConstEpDevice> firstWebGpuDevice(Ort::Env &env)
+{
+    for (const Ort::ConstEpDevice &device : env.GetEpDevices())
+        if (std::string(device.EpName()) == "WebGpuExecutionProvider") return {device};
+    return {};
+}
+
+/**
+ * The WebGPU device a session can run on. The macOS runtime carries the WebGPU
+ * provider itself; elsewhere it is the plugin library beside the addon,
+ * registered once. Empty when there is neither, when the GPU has no adapter,
+ * or when NOISE_CANVAS_ONNX_CPU asks to stay on the CPU.
+ */
+static const std::vector<Ort::ConstEpDevice> &webGpuDevices()
+{
+    static std::once_flag once;
+    static std::vector<Ort::ConstEpDevice> devices;
+    std::call_once(once, [] {
+        if (std::getenv("NOISE_CANVAS_ONNX_CPU")) return;
+        try
+        {
+            Ort::Env &env = getOrtEnv();
+            devices = firstWebGpuDevice(env);
+            if (!devices.empty()) return;
+            const std::string directory = addonDirectory();
+            if (directory.empty()) return;
+            env.RegisterExecutionProviderLibrary("WebGPU", toOrtPath(directory + WEBGPU_PROVIDER_LIBRARY));
+            devices = firstWebGpuDevice(env);
+        }
+        catch (const Ort::Exception &)
+        {
+            devices.clear();
+        }
+    });
+    return devices;
+}
+
+/** A session on the WebGPU device when there is one, else on four CPU threads. */
+static std::shared_ptr<Ort::Session> openSession(const std::string &modelPath)
+{
+    Ort::SessionOptions opts;
+    opts.SetIntraOpNumThreads(4);
+    opts.SetLogSeverityLevel(ORT_LOGGING_LEVEL_ERROR);
+    const auto &gpu = webGpuDevices();
+    if (!gpu.empty())
+    {
+        opts.AppendExecutionProvider_V2(getOrtEnv(), gpu, std::unordered_map<std::string, std::string>{});
+    }
+    else
+    {
+        opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+        opts.DisableMemPattern();
+        opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+    }
+    return std::make_shared<Ort::Session>(getOrtEnv(), toOrtPath(modelPath).c_str(), opts);
+}
+
 struct CachedSession
 {
     std::shared_ptr<Ort::Session> session;
@@ -6002,7 +6096,9 @@ struct CachedSession
     std::string outputName;
 };
 
-static std::map<std::string, CachedSession> gSessionCache;
+// Sessions live as long as the process: destroying them during exit would run
+// the GPU provider's teardown after its own statics are gone.
+static std::map<std::string, CachedSession> &gSessionCache = *new std::map<std::string, CachedSession>();
 static std::mutex gSessionMutex;
 
 static CachedSession getOrCreateSession(const std::string &modelPath)
@@ -6011,14 +6107,8 @@ static CachedSession getOrCreateSession(const std::string &modelPath)
     auto it = gSessionCache.find(modelPath);
     if (it != gSessionCache.end()) return it->second;
 
-    Ort::SessionOptions opts;
-    opts.SetIntraOpNumThreads(4);
-    opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
-    opts.DisableMemPattern();
-    opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-
     CachedSession cached;
-    cached.session = std::make_shared<Ort::Session>(getOrtEnv(), toOrtPath(modelPath).c_str(), opts);
+    cached.session = openSession(modelPath);
 
     Ort::AllocatorWithDefaultOptions allocator;
     cached.inputName  = cached.session->GetInputNameAllocated(0, allocator).get();
@@ -6239,6 +6329,317 @@ Napi::Value AiSeparateAsync(const Napi::CallbackInfo &info)
         env, std::move(channels), sampleRate, std::move(modelPath), std::move(stemNames));
     worker->Queue();
     return worker->GetPromise();
+}
+
+// ─── Generate: Stable Audio 3 Medium through ONNX Runtime ───────────────────
+
+static const int SA3_SAMPLES_PER_LATENT = 4096;
+static const int SA3_LATENT_CHANNELS = 256;
+static const int SA3_TEXT_TOKENS = 256;
+static const int SA3_TEXT_WIDTH = 768;
+static const double SA3_SAMPLE_RATE = 44100.0;
+/** The decoder's float audio, ahead of the 16-bit clip its `pcm` output applies. */
+static const char *const SA3_DECODER_FLOAT_OUTPUT = "/Cast_output_0";
+
+/** The model files Generate runs: text encoder, audio encoder, diffusion model and audio decoder. */
+struct GenerateModels
+{
+    std::string text, encoder, dit, decoder;
+};
+
+/** Generate's sessions, opened on first use and kept until released; guarded by gGenerateMutex. */
+struct GenerateSessions
+{
+    GenerateModels models;
+    std::shared_ptr<Ort::Session> text, encoder, dit, decoder;
+};
+static GenerateSessions &gGenerateSessions = *new GenerateSessions();
+static std::mutex gGenerateMutex;
+
+static GenerateSessions &generateSessions(const GenerateModels &models)
+{
+    GenerateSessions &sessions = gGenerateSessions;
+    if (sessions.models.dit != models.dit || sessions.models.decoder != models.decoder ||
+        sessions.models.encoder != models.encoder || sessions.models.text != models.text)
+        sessions = GenerateSessions{models, nullptr, nullptr, nullptr, nullptr};
+    if (!sessions.text) sessions.text = openSession(models.text);
+    if (!sessions.encoder) sessions.encoder = openSession(models.encoder);
+    if (!sessions.dit) sessions.dit = openSession(models.dit);
+    if (!sessions.decoder) sessions.decoder = openSession(models.decoder);
+    return sessions;
+}
+
+/**
+ * One Generate over a 44.1 kHz stereo clip. A restyle starts from the clip
+ * itself, noised to the strength; otherwise it starts from noise. An anchored
+ * run keeps the clip outside [spanStart, spanEnd) seconds and regenerates the
+ * span from its surroundings. `sigmas` is the falling noise schedule, its first
+ * entry the strength.
+ */
+struct GenerateRequest
+{
+    GenerateModels models;
+    std::vector<int64_t> tokens;
+    std::vector<std::vector<float>> context;
+    bool restyle = false;
+    std::vector<float> sigmas;
+    bool anchored = false;
+    double spanStart = 0.0;
+    double spanEnd = 0.0;
+    uint64_t seed = 0;
+};
+
+class GenerateWorker : public Napi::AsyncProgressQueueWorker<int>
+{
+public:
+    GenerateWorker(Napi::Env env, GenerateRequest request, Napi::Function onProgress)
+        : Napi::AsyncProgressQueueWorker<int>(env),
+          deferred(Napi::Promise::Deferred::New(env)),
+          request(std::move(request))
+    {
+        if (!onProgress.IsEmpty()) progressRef = Napi::Persistent(onProgress);
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+    void Execute(const ExecutionProgress &progress) override
+    {
+        if (const char *reason = ortUnavailable())
+        {
+            SetError(std::string("ONNX Runtime could not load: ") + reason);
+            return;
+        }
+        std::lock_guard<std::mutex> lock(gGenerateMutex);
+        try { ExecuteImpl(progress); }
+        catch (const Ort::Exception &e) { SetError(std::string("ORT error: ") + e.what()); }
+        catch (const std::exception &e) { SetError(std::string("Error: ") + e.what()); }
+        catch (...)                     { SetError("Unknown error during Generate"); }
+    }
+
+    void OnProgress(const int *data, size_t count) override
+    {
+        if (progressRef.IsEmpty() || count == 0) return;
+        Napi::HandleScope scope(Env());
+        progressRef.Call({Napi::Number::New(Env(), data[count - 1]),
+                          Napi::Number::New(Env(), (double)request.sigmas.size() - 1)});
+    }
+
+    void OnOK() override
+    {
+        Napi::Env env = Env();
+        Napi::Array channels = Napi::Array::New(env, output.size());
+        for (uint32_t c = 0; c < output.size(); c++)
+        {
+            Napi::Float32Array data = Napi::Float32Array::New(env, output[c].size());
+            memcpy(data.Data(), output[c].data(), output[c].size() * sizeof(float));
+            channels[c] = data;
+        }
+        deferred.Resolve(channels);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+private:
+    void ExecuteImpl(const ExecutionProgress &progress)
+    {
+        GenerateSessions &sessions = generateSessions(request.models);
+        const int loaded = -1;
+        progress.Send(&loaded, 1);
+        auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        const size_t length = request.context[0].size();
+        const int latents = std::max(1, (int)std::ceil((double)length / SA3_SAMPLES_PER_LATENT));
+        const size_t padded = (size_t)latents * SA3_SAMPLES_PER_LATENT;
+        const size_t latentSize = (size_t)SA3_LATENT_CHANNELS * latents;
+
+        std::vector<int64_t> ids(SA3_TEXT_TOKENS, 0), idMask(SA3_TEXT_TOKENS, 0);
+        std::vector<float> textMask(SA3_TEXT_TOKENS, 0.0f);
+        for (size_t i = 0; i < request.tokens.size() && i < (size_t)SA3_TEXT_TOKENS; i++)
+        {
+            ids[i] = request.tokens[i];
+            idMask[i] = 1;
+            textMask[i] = 1.0f;
+        }
+        const std::array<int64_t, 2> tokenShape = {1, SA3_TEXT_TOKENS};
+        std::array<Ort::Value, 2> textInputs = {
+            Ort::Value::CreateTensor<int64_t>(memory, ids.data(), ids.size(), tokenShape.data(), 2),
+            Ort::Value::CreateTensor<int64_t>(memory, idMask.data(), idMask.size(), tokenShape.data(), 2)};
+        const char *textIn[] = {"input_ids", "attention_mask"};
+        const char *textOut[] = {"hidden_states"};
+        auto textResult = sessions.text->Run(Ort::RunOptions{nullptr}, textIn, textInputs.data(), 2, textOut, 1);
+        const float *hiddenData = textResult[0].GetTensorData<float>();
+        std::vector<float> hidden(hiddenData, hiddenData + (size_t)SA3_TEXT_TOKENS * SA3_TEXT_WIDTH);
+
+        auto encode = [&](const std::vector<std::vector<float>> &channels) {
+            std::vector<Ort::Float16_t> audio(2 * padded, Ort::Float16_t(0.0f));
+            for (int c = 0; c < 2; c++)
+            {
+                const std::vector<float> &source = channels[std::min<size_t>(c, channels.size() - 1)];
+                for (size_t i = 0; i < source.size() && i < padded; i++) audio[c * padded + i] = Ort::Float16_t(source[i]);
+            }
+            const std::array<int64_t, 3> shape = {1, 2, (int64_t)padded};
+            Ort::Value input = Ort::Value::CreateTensor<Ort::Float16_t>(memory, audio.data(), audio.size(), shape.data(), 3);
+            const char *in[] = {"audio"};
+            const char *out[] = {"latent"};
+            auto result = sessions.encoder->Run(Ort::RunOptions{nullptr}, in, &input, 1, out, 1);
+            const auto outShape = result[0].GetTensorTypeAndShapeInfo().GetShape();
+            const int produced = (int)outShape[2];
+            if (produced < latents) throw std::runtime_error("the encoder returned fewer frames than the clip holds");
+            const Ort::Float16_t *data = result[0].GetTensorData<Ort::Float16_t>();
+            std::vector<float> latent(latentSize);
+            for (int ch = 0; ch < SA3_LATENT_CHANNELS; ch++)
+                for (int t = 0; t < latents; t++) latent[(size_t)ch * latents + t] = data[(size_t)ch * produced + t].ToFloat();
+            return latent;
+        };
+        const std::vector<float> contextLatent = encode(request.context);
+
+        std::vector<float> keep(latents, 1.0f);
+        std::vector<float> localCondition((size_t)(SA3_LATENT_CHANNELS + 1) * latents, 0.0f);
+        if (request.anchored)
+        {
+            const int start = std::max(0, (int)std::floor(request.spanStart * SA3_SAMPLE_RATE / SA3_SAMPLES_PER_LATENT) - 1);
+            const int end = std::min(latents, (int)std::ceil(request.spanEnd * SA3_SAMPLE_RATE / SA3_SAMPLES_PER_LATENT) + 1);
+            for (int t = start; t < end; t++) keep[t] = 0.0f;
+            for (int t = 0; t < latents; t++) localCondition[t] = keep[t];
+            for (int ch = 0; ch < SA3_LATENT_CHANNELS; ch++)
+                for (int t = 0; t < latents; t++)
+                    localCondition[(size_t)(ch + 1) * latents + t] = contextLatent[(size_t)ch * latents + t] * keep[t];
+        }
+
+        std::mt19937_64 random(request.seed);
+        std::normal_distribution<float> gaussian(0.0f, 1.0f);
+        const float strength = request.sigmas[0];
+        std::vector<float> x(latentSize);
+        for (size_t i = 0; i < latentSize; i++)
+        {
+            const float noise = gaussian(random);
+            x[i] = request.restyle ? contextLatent[i] * (1.0f - strength) + noise * strength : noise;
+        }
+
+        const float seconds = (float)((double)length / SA3_SAMPLE_RATE);
+        const std::array<int64_t, 3> latentShape = {1, SA3_LATENT_CHANNELS, latents};
+        const std::array<int64_t, 3> conditionShape = {1, SA3_LATENT_CHANNELS + 1, latents};
+        const std::array<int64_t, 3> hiddenShape = {1, SA3_TEXT_TOKENS, SA3_TEXT_WIDTH};
+        const std::array<int64_t, 1> scalarShape = {1};
+        const char *ditIn[] = {"x", "t", "t5_hidden", "t5_mask", "seconds_total", "local_add_cond"};
+        const char *ditOut[] = {"velocity"};
+        const int steps = (int)request.sigmas.size() - 1;
+        for (int step = 0; step < steps; step++)
+        {
+            float time = request.sigmas[step];
+            const float next = request.sigmas[step + 1];
+            float secondsTotal = seconds;
+            std::array<Ort::Value, 6> inputs = {
+                Ort::Value::CreateTensor<float>(memory, x.data(), x.size(), latentShape.data(), 3),
+                Ort::Value::CreateTensor<float>(memory, &time, 1, scalarShape.data(), 1),
+                Ort::Value::CreateTensor<float>(memory, hidden.data(), hidden.size(), hiddenShape.data(), 3),
+                Ort::Value::CreateTensor<float>(memory, textMask.data(), textMask.size(), tokenShape.data(), 2),
+                Ort::Value::CreateTensor<float>(memory, &secondsTotal, 1, scalarShape.data(), 1),
+                Ort::Value::CreateTensor<float>(memory, localCondition.data(), localCondition.size(), conditionShape.data(), 3)};
+            auto result = sessions.dit->Run(Ort::RunOptions{nullptr}, ditIn, inputs.data(), inputs.size(), ditOut, 1);
+            const float *velocity = result[0].GetTensorData<float>();
+            const bool last = step == steps - 1 || next <= 0.0f;
+            for (size_t i = 0; i < latentSize; i++)
+            {
+                const float denoised = x[i] - time * velocity[i];
+                x[i] = last ? denoised : (1.0f - next) * denoised + next * gaussian(random);
+            }
+            progress.Send(&step, 1);
+            if (last) break;
+        }
+        if (request.anchored)
+            for (int ch = 0; ch < SA3_LATENT_CHANNELS; ch++)
+                for (int t = 0; t < latents; t++)
+                {
+                    const size_t i = (size_t)ch * latents + t;
+                    x[i] = contextLatent[i] * keep[t] + x[i] * (1.0f - keep[t]);
+                }
+
+        std::vector<Ort::Float16_t> latent16(latentSize);
+        for (size_t i = 0; i < latentSize; i++) latent16[i] = Ort::Float16_t(x[i]);
+        Ort::Value decoderInput =
+            Ort::Value::CreateTensor<Ort::Float16_t>(memory, latent16.data(), latent16.size(), latentShape.data(), 3);
+        const char *decIn[] = {"latent"};
+        const char *decOut[] = {SA3_DECODER_FLOAT_OUTPUT};
+        auto decoded = sessions.decoder->Run(Ort::RunOptions{nullptr}, decIn, &decoderInput, 1, decOut, 1);
+        const auto decodedShape = decoded[0].GetTensorTypeAndShapeInfo().GetShape();
+        const size_t decodedLength = (size_t)decodedShape[2];
+        const float *audio = decoded[0].GetTensorData<float>();
+        output.assign(2, std::vector<float>(length, 0.0f));
+        for (int c = 0; c < 2; c++)
+            for (size_t i = 0; i < length && i < decodedLength; i++) output[c][i] = audio[(size_t)c * decodedLength + i];
+    }
+
+    Napi::Promise::Deferred deferred;
+    Napi::FunctionReference progressRef;
+    GenerateRequest request;
+    std::vector<std::vector<float>> output;
+};
+
+static std::vector<std::vector<float>> channelsOf(const Napi::Array &array)
+{
+    std::vector<std::vector<float>> channels;
+    for (uint32_t i = 0; i < array.Length(); i++)
+    {
+        Napi::Float32Array channel = array.Get(i).As<Napi::Float32Array>();
+        channels.emplace_back(channel.Data(), channel.Data() + channel.ElementLength());
+    }
+    return channels;
+}
+
+Napi::Value GenerateAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsObject())
+    {
+        Napi::TypeError::New(env, "Expected ({models, tokens, context, restyle, sigmas, span?, seed}, onProgress?)")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    Napi::Object options = info[0].As<Napi::Object>();
+    Napi::Object models = options.Get("models").As<Napi::Object>();
+    GenerateRequest request;
+    request.models = {models.Get("text").As<Napi::String>().Utf8Value(),
+                      models.Get("encoder").As<Napi::String>().Utf8Value(),
+                      models.Get("dit").As<Napi::String>().Utf8Value(),
+                      models.Get("decoder").As<Napi::String>().Utf8Value()};
+    Napi::Int32Array tokens = options.Get("tokens").As<Napi::Int32Array>();
+    request.tokens.assign(tokens.Data(), tokens.Data() + tokens.ElementLength());
+    request.context = channelsOf(options.Get("context").As<Napi::Array>());
+    request.restyle = options.Get("restyle").ToBoolean().Value();
+    Napi::Float32Array sigmas = options.Get("sigmas").As<Napi::Float32Array>();
+    request.sigmas.assign(sigmas.Data(), sigmas.Data() + sigmas.ElementLength());
+    if (options.Get("span").IsArray())
+    {
+        Napi::Array span = options.Get("span").As<Napi::Array>();
+        request.anchored = true;
+        request.spanStart = span.Get(0u).As<Napi::Number>().DoubleValue();
+        request.spanEnd = span.Get(1u).As<Napi::Number>().DoubleValue();
+    }
+    request.seed = (uint64_t)options.Get("seed").As<Napi::Number>().Int64Value();
+    if (request.context.empty() || request.context[0].empty() || request.sigmas.size() < 2)
+    {
+        Napi::TypeError::New(env, "Generate needs audio and a schedule of at least one step").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    Napi::Function onProgress = info.Length() > 1 && info[1].IsFunction() ? info[1].As<Napi::Function>() : Napi::Function();
+    auto *worker = new GenerateWorker(env, std::move(request), onProgress);
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+/** Frees Generate's sessions; the next Generate opens them again. */
+Napi::Value GenerateRelease(const Napi::CallbackInfo &info)
+{
+    std::lock_guard<std::mutex> lock(gGenerateMutex);
+    gGenerateSessions = GenerateSessions{};
+    return info.Env().Undefined();
+}
+
+/** True when ONNX Runtime opened and will run on a WebGPU device. */
+Napi::Value OnnxUsesGpu(const Napi::CallbackInfo &info)
+{
+    return Napi::Boolean::New(info.Env(), ortUnavailable() == nullptr && !webGpuDevices().empty());
 }
 
 #endif // GABORATOR_ONNX_ENABLED
@@ -7574,6 +7975,9 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
 #ifdef GABORATOR_ONNX_ENABLED
     exports.Set("aiSeparate", Napi::Function::New(env, AiSeparateAsync));
     exports.Set("aiSeparationAvailable", Napi::Function::New(env, AiSeparationAvailable));
+    exports.Set("generate", Napi::Function::New(env, GenerateAsync));
+    exports.Set("generateRelease", Napi::Function::New(env, GenerateRelease));
+    exports.Set("onnxUsesGpu", Napi::Function::New(env, OnnxUsesGpu));
 #endif
     return exports;
 }
