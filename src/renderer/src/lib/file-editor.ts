@@ -242,8 +242,9 @@ export function prepareFileEditor(
   displayMaterial.uniforms.sourceSpectrogramTex.value = previewDisplay.committed;
   displayMaterial.uniforms.previewTex.value = previewDisplay.preview;
   displayMaterial.uniforms.previewBinRangesTex.value = previewDisplay.binRanges;
-  displayMaterial.uniforms.previewActive.value = isPreview && previewDisplay.active;
   const coarsePreview = coarse?.previewDisplay() ?? null;
+  // The canvas's preview stays where it was last painted, so it gives way to one on the coarse canvas.
+  displayMaterial.uniforms.previewActive.value = isPreview && previewDisplay.active && coarsePreview === null;
   const coarseStroke = coarse?.strokeDisplay() ?? null;
   displayMaterial.uniforms.coarseMetaTex.value = coarse?.metadata ?? null;
   displayMaterial.uniforms.coarseCommittedTex.value = coarsePreview?.committed ?? coarseStroke?.committed ?? null;

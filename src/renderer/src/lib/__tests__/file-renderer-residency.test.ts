@@ -634,6 +634,22 @@ describe("the coarse canvas", () => {
     expect(previewed).toBeLessThan(await brightness());
   });
 
+  it("stops showing the canvas's preview once the brush moves past the window", async () => {
+    const rig = await mount(brush(1), 2);
+    await aimAt(rig, 0.5);
+    const material = rig.getMaterial()!;
+    await vi.waitFor(() => {
+      rig.ref.current!.renderStroke(true);
+      rig.frame();
+      expect(material.uniforms.previewActive.value).toBe(true);
+    });
+    await aimAt(rig, 0.9);
+    rig.ref.current!.renderStroke(true);
+    rig.frame();
+    expect(material.uniforms.coarsePreviewActive.value).toBe(true);
+    expect(material.uniforms.previewActive.value).toBe(false);
+  });
+
   it("shows a stroke's dabs from the coarse canvas until the stroke has settled", async () => {
     const rig = await mount(wide(), 2);
     await aimAt(rig, 0.5);
