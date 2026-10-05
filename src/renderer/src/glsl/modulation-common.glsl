@@ -18,7 +18,8 @@ struct Modulator {
   ModulatorParameter modulatorRotation;
   ModulatorParameter modulatorStereoSpread; // read-position offset applied as ∓spread/2 per channel
   float modulatorEnvelopeSmoothing; // file UV half-width of the averaging window
-  float modulatorEnvelopeBeat; // file UV of one beat, the follower's stand-in for a cycle
+  float modulatorBeatUv; // file UV of one beat
+  float modulatorSemitoneUv; // band UV of one semitone
   int modulatorEnvelopeSource; // 0=Amplitude, 1=Phase, 2=Panning
   float modulatorEnvelopeMinDb;
   float modulatorEnvelopeMaxDb;
@@ -164,7 +165,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     // Both widths are in file UV; the canvas may hold a span of the file.
     float canvasPerFile = 1.0 / max(MODULATOR_FILE_UV_DX(1.0), 1e-9);
     float smoothing = modulator.modulatorEnvelopeSmoothing * canvasPerFile;
-    vec2 envUv = vec2(uv.x + stereoPhase * modulator.modulatorEnvelopeBeat * canvasPerFile, uv.y);
+    vec2 envUv = vec2(uv.x + stereoPhase * modulator.modulatorBeatUv * canvasPerFile, uv.y);
     if (smoothing > EPSILON) {
       float total = 0.0;
       for (int i = 0; i < NUM_ENVELOPE_SMOOTH_SAMPLES; i++) {
@@ -232,9 +233,12 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   float c = cos(rot);
   mat2 m = mat2(c, -s, s, c);
   // Rotate about the middle of whatever the pattern is pinned to: the canvas,
-  // or the brush footprint in brush phase mode.
+  // or the brush footprint in brush phase mode. The turn takes place in beats
+  // along time and semitones across pitch, so a quarter turn lays a beat onto
+  // a semitone whatever the file's length.
   vec2 pivot = modulator.modulatorPhaseMode == 1 ? brushSizePatternUv() * 0.5 : vec2(0.5);
-  vec2 rotatedUv = m * (adjustedUv - pivot) + pivot;
+  vec2 musicalPerUv = vec2(1.0 / max(modulator.modulatorBeatUv, 1e-12), 1.0 / max(modulator.modulatorSemitoneUv, 1e-12));
+  vec2 rotatedUv = rot == 0.0 ? adjustedUv : (m * ((adjustedUv - pivot) * musicalPerUv)) / musicalPerUv + pivot;
 
   vec2 pos = rotatedUv * rates;
 

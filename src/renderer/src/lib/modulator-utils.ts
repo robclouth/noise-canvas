@@ -65,7 +65,8 @@ export interface ModulatorUniform {
   modulatorRotation: ModulatableParam;
   modulatorStereoSpread: ModulatableParam;
   modulatorEnvelopeSmoothing: number;
-  modulatorEnvelopeBeat: number;
+  modulatorBeatUv: number;
+  modulatorSemitoneUv: number;
   modulatorEnvelopeSource: number;
   modulatorEnvelopeMinDb: number;
   modulatorEnvelopeMaxDb: number;
@@ -311,7 +312,8 @@ export const buildModulatorUniforms = (
           staticOffset: 0,
         },
         modulatorEnvelopeSmoothing: envelopeSmoothingUv,
-        modulatorEnvelopeBeat: 60 / bpm / totalDuration,
+        modulatorBeatUv: 60 / bpm / totalDuration,
+        modulatorSemitoneUv: bandsPerOctave / 12 / numBands,
         modulatorEnvelopeSource: envelopeSource,
         modulatorEnvelopeMinDb: envelopeMinDb,
         modulatorEnvelopeMaxDb: envelopeMaxDb,

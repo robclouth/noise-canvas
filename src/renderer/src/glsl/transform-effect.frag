@@ -8,7 +8,7 @@ uniform Parameter scaleX;
 uniform Parameter scaleY;
 uniform Parameter speed;
 uniform Parameter rotation;
-uniform float transformBeatsToUv; // file UV per beat
+uniform float transformBeatsToUv; // canvas UV per beat
 uniform int boundaryMode;
 // Where in the brush the pivot sits, as a fraction of the brush size on each axis.
 uniform vec2 transformOrigin;
@@ -73,6 +73,10 @@ void main() {
     // about the same pivot as the rest of it.
     vec2 brushLocalUv = getEffectiveBrushOffset(coords.dest);
 
+    // A turn takes place in beats along time and semitones across pitch, so a
+    // quarter turn lays a beat onto a semitone whatever the file's length.
+    vec2 musicalPerUv = vec2(1.0 / max(transformBeatsToUv, 1e-12), destBandCount / max(bandsPerSemi, 1e-6));
+
     // Computes the transformed source UV and effective scale for one channel
     // given its per-channel source-read offset and scalar params. Returns the
     // sample to write into that channel.
@@ -80,8 +84,7 @@ void main() {
         vec2 relativeUv = brushLocalUv - originUv; \
         float rad = radians(-(rotV)); \
         mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad)); \
-        vec2 turnedUv = rotMat * vec2(destFileUvSpanX(relativeUv.x), relativeUv.y); \
-        vec2 scaledUv = vec2(destCanvasUvSpanX(turnedUv.x), turnedUv.y); \
+        vec2 scaledUv = (rotV) == 0.0 ? relativeUv : (rotMat * (relativeUv * musicalPerUv)) / musicalPerUv; \
         if (abs(sxV) > 1e-5 && abs(syV) > 1e-5) { scaledUv /= vec2(sxV, syV); } \
         vec2 transformedDest = scaledUv + pivot; \
         if ((sxV) < 0.0) transformedDest.x += (1.0 - 2.0 * transformOrigin.x) * brushSizeUv.x; \

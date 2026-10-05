@@ -409,7 +409,7 @@ Slides, stretches and rotates sound through time and pitch, or reverses it. How 
 - **Scale ↔ / ↕** – stretches or squashes in time or pitch. Negative values reverse or mirror.
 - **Speed** – plays the region faster or slower, moving pitch and length together. It multiplies whatever Scale ↔ and Shift ↕ already do.
 - **Origin ↔ / ↕** – the point a Scale or a Rotation turns around. A negative Scale still mirrors inside the brush wherever the origin sits.
-- **Rotation** – turns the painted region, in degrees.
+- **Rotation** – turns the painted region, in degrees. A quarter turn lays one beat of time onto one semitone of pitch.
 - **Edge** – what happens at the brush borders.
 
 **Hints**
@@ -653,7 +653,7 @@ They appear in the shape picker under a "User" group.
 - **Steps** – how many even levels the output is held to, so a smooth shape climbs in stages instead of gliding. The lowest and highest levels are still the ends of the swing, so the average stays where it was. At **Off** the output is continuous.
 - **Rate ↔** – how many beats one cycle of the pattern spans. Bigger is slower. Two linked settings sit below the shortest span: **Grid** covers one cell of the time grid, **Brush** covers the width of the brush, and each follows that size as you change it. At the bottom, **Off**, the pattern stops varying along time.
 - **Rate ↕** – how many semitones one cycle spans, with the same **Grid**, **Brush** and **Off** settings against the pitch grid and the height of the brush.
-- **Rotation** – turns the pattern on the canvas, so it cuts diagonally.
+- **Rotation** – turns the pattern on the canvas, so it cuts diagonally. A quarter turn lays one beat onto one semitone.
 - **Stereo** – reads the modulator at two places at once, one per channel. The gap is measured in the modulator's own cycle, so it works at any rate: at 100% the channels sit half a cycle apart. In Envelope mode the gap is time instead, up to half the file. Negative values swap the channels.
 - **Phase Mode** – **Canvas** pins the pattern to the file, so separate strokes uncover one stationary field. **Brush** carries it along with each stroke.
 - **Phase ↔ / ↕** – offsets the pattern's start position in each axis.

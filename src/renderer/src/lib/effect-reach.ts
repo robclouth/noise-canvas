@@ -192,8 +192,7 @@ function cloneTaps(effect: State, ctx: ReachContext): TimeReach {
 
 /**
  * The warp reads at the pivot plus the brush arm, turned, scaled and shifted. A
- * turn is taken on the file's time axis, so its pitch arm scales with the whole
- * file rather than with the span the canvas holds. A scale that can pass
+ * turn lays a semitone of pitch onto a beat of time. A scale that can pass
  * through zero divides the arm by nothing, which no window can serve.
  */
 function transformReach(effect: State, ctx: ReachContext, brushSeconds: number, brushPitchUv: number): TimeReach {
@@ -221,7 +220,8 @@ function transformReach(effect: State, ctx: ReachContext, brushSeconds: number, 
   const armAfter = (mirrors ? Math.max(pivot, brushSeconds - pivot) : brushSeconds - pivot) / divisor;
 
   const pitchPivot = originFraction(Number(effect.transformOriginPitch)) * brushPitchUv;
-  const turn = (turnAmount * Math.max(pitchPivot, brushPitchUv - pitchPivot) * ctx.fileSeconds) / divisor;
+  const pitchArmSemis = uvToSemitones(Math.max(pitchPivot, brushPitchUv - pitchPivot), ctx);
+  const turn = (turnAmount * pitchArmSemis * (60 / ctx.bpm)) / divisor;
   const flipped = mirrors ? Math.abs(1 - 2 * originTime) * brushSeconds : 0;
   const shift = widest(stateRange(effect, "transformShiftBeats")) * (60 / ctx.bpm);
   const extra = turn + flipped + shift;
@@ -597,8 +597,9 @@ function warpBox(view: State, ctx: ReachContext, box: ReadBox, brush: BrushBox):
   let out: ReadBox | null = null;
   for (const t of [box.start, box.end]) {
     for (const y of [box.low, box.high]) {
-      const relTime = (t - pivotTime) / ctx.fileSeconds;
-      const relPitch = y - pivotPitch;
+      // A turn takes place in beats along time and semitones across pitch.
+      const relTime = (t - pivotTime) / beat;
+      const relPitch = uvToSemitones(y - pivotPitch, ctx);
       // A corner turned by θ lands furthest along an axis where θ plus the
       // corner's own angle is a multiple of 90°, or at an end of the range.
       const angle = (Math.atan2(relPitch, relTime) * 180) / Math.PI;
@@ -615,8 +616,8 @@ function warpBox(view: State, ctx: ReachContext, box: ReadBox, brush: BrushBox):
           scaleTime.hi / speed.hi,
         ]) {
           for (const sy of [scalePitch.lo, scalePitch.hi]) {
-            let time = pivotTime + ((cos * relTime - sin * relPitch) / sx) * ctx.fileSeconds;
-            let pitch = pivotPitch + (sin * relTime + cos * relPitch) / sy;
+            let time = pivotTime + ((cos * relTime - sin * relPitch) / sx) * beat;
+            let pitch = pivotPitch + semitonesToUv((sin * relTime + cos * relPitch) / sy, ctx);
             if (sx < 0) time += (1 - 2 * originTime) * (brush.end - brush.start);
             if (sy < 0) pitch += (1 - 2 * originPitch) * (brush.high - brush.low);
             const read: ReadBox = {
@@ -637,6 +638,10 @@ function warpBox(view: State, ctx: ReachContext, box: ReadBox, brush: BrushBox):
 
 function semitonesToUv(semis: number, ctx: ReachContext): number {
   return (semis * ctx.bandsPerOctave) / 12 / ctx.numBands;
+}
+
+function uvToSemitones(uv: number, ctx: ReachContext): number {
+  return (uv * ctx.numBands * 12) / ctx.bandsPerOctave;
 }
 
 /** The smallest region holding both. */
