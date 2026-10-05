@@ -1125,9 +1125,11 @@ const float XRES_ATTEN_COEFF = 1.0;
 // band-limited noise wanders by >= ~0.03 rad. A fixed-radian tonality cannot
 // separate the two on a coarse grid, where the bin rate oversamples the band.
 const float XRES_D2_SPREAD = 0.012;
-// Float32 phase quantisation grows with the unwrapped magnitude; widening the
-// spread with it fails toward "tonal", the milder treatment.
-const float XRES_D2_ULP = 4e-6;
+// Float steps of the stored phase the spread widens to: the stored phases'
+// own rounding, which grows with the unwrapped magnitude, and the rounding of
+// the second difference taken from them. Widening fails toward "tonal", the
+// milder treatment.
+const float XRES_D2_ULPS = 4.0;
 // Largest source-side attenuation the tonal path may undo, in (src bands)².
 const float XRES_DEV_UNDO_CAP = 1.5;
 // Level makeup for the synthetic noise phase walk's residual self-cancellation.
@@ -1150,10 +1152,11 @@ void xresAnalyzeSource(vec2 sourceUv, float srcFreqHz, out float tonality, out f
   }
   float total = 0.0;
   for (int i = 1; i < 4; i++) {
-    total += abs(unwrapPhase(phases[i - 1] - 2.0 * phases[i] + phases[i + 1]));
+    total += abs(unwrapPhase((phases[i + 1] - phases[i]) - (phases[i] - phases[i - 1])));
   }
   float mean = total / 3.0;
-  float spread = max(XRES_D2_SPREAD, abs(phases[1]) * XRES_D2_ULP);
+  float magnitude = max(abs(phases[1]), 1e-30);
+  float spread = max(XRES_D2_SPREAD, XRES_D2_ULPS * exp2(floor(log2(magnitude)) - 23.0));
   tonality = exp(-(mean * mean) / (spread * spread));
 
   float dev = instFreqDevHz(phases[2], phases[1], phases[0], dtSec);

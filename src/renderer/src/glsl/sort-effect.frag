@@ -14,7 +14,7 @@ uniform int passIndexOffset; // 0=even pairs, 1=odd pairs
 // metric == 4: pan (normalized L-R magnitude, computed from full stereo texel)
 float getMetric(vec2 texelPolar, int metric, float extraMetric) {
   if (metric == 0) return getMag(texelPolar);
-  if (metric == 1) return getPhase(texelPolar);
+  if (metric == 1) return unwrapPhase(getPhase(texelPolar));
   if (metric == 2) return log(getMag(texelPolar) + 1e-9) * 8.68589;
   return extraMetric;
 }

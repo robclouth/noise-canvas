@@ -76,7 +76,7 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
   if (src == 1) { // Phase: normalize [-PI, PI] to [0, 1]
     #ifdef HAS_SPECTROGRAM_SAMPLING
       vec4 s = sampleSourceInterp(sampleUv);
-      return (getPhase(s.rg) + PI) / (2.0 * PI);
+      return (unwrapPhase(getPhase(s.rg)) + PI) / (2.0 * PI);
     #else
       return 0.5;
     #endif
