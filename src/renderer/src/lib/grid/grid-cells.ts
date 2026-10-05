@@ -34,9 +34,6 @@ export interface PitchCellParams {
   minFreq: number;
 }
 
-/** Pitch cells past this many mean the grid is too fine to fill. */
-export const MAX_PITCH_CELLS = 4096;
-
 // A file's lowest band reaches the scale through a log, so a note sitting on it
 // can come back a fraction of a cent below the range. Treat that as inside, or
 // the fill loses its bottom row.
@@ -97,7 +94,7 @@ export function resolvePitchCells(range: CellRange, params: PitchCellParams): Gr
   if (params.gridSizeSemis > 0) {
     const interval = params.gridSizeSemis;
     let start = Math.floor(range.min / interval) * interval;
-    while (start < range.max && cells.length <= MAX_PITCH_CELLS) {
+    while (start < range.max) {
       if (start + interval > range.min) cells.push({ start, size: interval });
       start += interval;
     }
@@ -112,7 +109,7 @@ export function resolvePitchCells(range: CellRange, params: PitchCellParams): Gr
   let noteAbs = snapSemisToScale(lowAbs, offsets);
   if (noteAbs < lowAbs - SCALE_EPSILON_SEMIS) noteAbs = stepScaleSemis(noteAbs, 1, offsets);
 
-  while (noteAbs - bottomAbs < range.max && cells.length <= MAX_PITCH_CELLS) {
+  while (noteAbs - bottomAbs < range.max) {
     const nextAbs = stepScaleSemis(noteAbs, 1, offsets);
     if (!(nextAbs > noteAbs)) break;
     cells.push({ start: noteAbs - bottomAbs, size: nextAbs - noteAbs });

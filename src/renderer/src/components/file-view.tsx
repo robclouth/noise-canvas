@@ -1,7 +1,7 @@
 import { useStore } from "@/store";
 import { useTransientStore, type StrokePosition } from "@renderer/store/transient";
 import { Box, Loader, Text } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
+import { FILE_OPENING, STROKE_LOCKED, showNothingPainted, showWandStop } from "../lib/stroke-notices";
 import { View } from "@react-three/drei";
 import { openFiles, viewSyncTargets } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
@@ -684,6 +684,8 @@ export const FileView = memo((props: FileViewProps) => {
         timeSec,
         pitchUv,
         tolDb,
+        undefined,
+        showWandStop,
       );
     },
     [fileId, rendererRef],
@@ -849,39 +851,43 @@ export const FileView = memo((props: FileViewProps) => {
         state.setActiveFileId(fileId);
       }
 
-      if (rendererRef?.current) {
-        const { spectrogramData } = file;
-        if (!spectrogramData) return;
-        const refusal = rendererRef.current.strokeRefusal(state, aim);
-        if (refusal !== null) {
-          notifications.show({ id: "whole-file-brush", color: "yellow", title: "Nothing painted", message: refusal });
-          return;
-        }
-        const began = rendererRef.current.beginStroke();
-        if (!began && !rendererRef.current.whenStrokeFree(() => startWaitingRef.current())) return;
-        isStrokingRef.current = true;
-        strokeClientRef.current = { x: event.clientX, y: event.clientY };
-        state.setIsStroking(true);
-        const { beats, pitch } = aimToBeatsAndPitch(aim);
-        useTransientStore.getState().setCursorPosition({ beats, pitch });
-
-        const strokeStartSeconds = aimToStrokeStartSeconds(aim, fileId, bpm);
-        strokeTimeRangeRef.current = { min: strokeStartSeconds, max: strokeStartSeconds };
-        if (!began) {
-          waitingStrokesRef.current.push({
-            aim,
-            bpm,
-            points: [{ beats, pitch }],
-            range: strokeTimeRangeRef.current,
-            released: false,
-          });
-          return;
-        }
-        lockSourceOffsets(aim, bpm);
-
-        rendererRef.current.renderStroke(false);
-        startRepeatClock();
+      const renderer = rendererRef?.current;
+      if (!renderer || !file.spectrogramData) {
+        showNothingPainted(FILE_OPENING);
+        return;
       }
+      const refusal = renderer.strokeRefusal(state, aim);
+      if (refusal !== null) {
+        showNothingPainted(refusal);
+        return;
+      }
+      const began = renderer.beginStroke();
+      if (!began && !renderer.whenStrokeFree(() => startWaitingRef.current())) {
+        showNothingPainted(STROKE_LOCKED);
+        return;
+      }
+      isStrokingRef.current = true;
+      strokeClientRef.current = { x: event.clientX, y: event.clientY };
+      state.setIsStroking(true);
+      const { beats, pitch } = aimToBeatsAndPitch(aim);
+      useTransientStore.getState().setCursorPosition({ beats, pitch });
+
+      const strokeStartSeconds = aimToStrokeStartSeconds(aim, fileId, bpm);
+      strokeTimeRangeRef.current = { min: strokeStartSeconds, max: strokeStartSeconds };
+      if (!began) {
+        waitingStrokesRef.current.push({
+          aim,
+          bpm,
+          points: [{ beats, pitch }],
+          range: strokeTimeRangeRef.current,
+          released: false,
+        });
+        return;
+      }
+      lockSourceOffsets(aim, bpm);
+
+      renderer.renderStroke(false);
+      startRepeatClock();
     },
     [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock, runWand, lockSourceOffsets],
   );

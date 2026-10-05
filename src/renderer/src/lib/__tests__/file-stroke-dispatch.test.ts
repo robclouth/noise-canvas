@@ -193,7 +193,7 @@ describe("file-space stroke dispatch", () => {
     const aheadSpan = dabSpan(context, state, new Vector2(ahead[0].aimX, ahead[0].aimY), canvas);
     canvas.beginStroke();
     expect(canvas.holdsWholeFile).toBe(false);
-    expect(prepareStrokeBatch(context, canvas, strokes, ahead)).toBe(2);
+    expect(prepareStrokeBatch(context, canvas, strokes, ahead)).toEqual({ painted: 2, refused: null });
     expect(render).not.toHaveBeenCalled();
     expect(prefetch).toHaveBeenCalledWith(aheadSpan.hover.start, aheadSpan.hover.end);
     expect(prefetch.mock.invocationCallOrder[0]).toBeLessThan(admit.mock.invocationCallOrder[0]);

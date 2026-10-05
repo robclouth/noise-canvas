@@ -15,6 +15,9 @@ export const WAND_CHUNK_SECONDS = 60;
 /** Reads the committed state over [startFrame, endFrame), or null when the store cannot serve it. */
 export type WandReader = (startFrame: number, endFrame: number) => Promise<PackedSpan | null>;
 
+/** Why a grow stopped short: it reached its size limit, or part of the file could not be read. */
+export type WandStop = "size" | "read";
+
 const UNREAD = 0;
 const BELOW = 1;
 const ABOVE = 2;
@@ -77,6 +80,7 @@ const binDb = (span: PackedSpan, band: number, bin: number): number => {
  * through `read` a chunk of `chunkFrames` at a time, only where the region
  * reaches, so it grows over any length of file. Returns the region as a masked
  * selection, or null when the click lands outside the file or a read fails.
+ * `onStop` hears when the grow stops short of the whole region.
  */
 export async function growWandSelection(
   read: WandReader,
@@ -85,6 +89,7 @@ export async function growWandSelection(
   pitchUv: number,
   toleranceDb: number,
   chunkFrames = WAND_CHUNK_SECONDS * spec.sampleRate,
+  onStop?: (why: WandStop) => void,
 ): Promise<Selection | null> {
   const { numBands, sampleRate, numFrames, synthesisMetadata } = spec;
   const { bandStepLog2s, bandLengths } = synthesisMetadata;
@@ -113,7 +118,10 @@ export async function growWandSelection(
   };
   const chunkOf = (band: number, bin: number): number => levels.chunkOf(band, bin);
 
-  if (!(await readChunk(chunkOf(seedBand, seedBin)))) return null;
+  if (!(await readChunk(chunkOf(seedBand, seedBin)))) {
+    onStop?.("read");
+    return null;
+  }
   if (!Number.isFinite(floorDb)) return null;
 
   const visited = new ChunkBytes(numBands, bandStepLog2s, bandLengths, chunkFrames);
@@ -134,7 +142,10 @@ export async function growWandSelection(
   while (count < MAX_GROWN_BINS) {
     if (stack.length === 0) {
       if (unread.length === 0) break;
-      if (!(await readChunk(chunkOf(unread[0], unread[1])))) return null;
+      if (!(await readChunk(chunkOf(unread[0], unread[1])))) {
+        onStop?.("read");
+        return null;
+      }
       stack = unread;
       unread = [];
       continue;
@@ -163,6 +174,7 @@ export async function growWandSelection(
       for (let j = from; j <= to; j++) if (visit(other, j)) stack.push(other, j);
     }
   }
+  if (count >= MAX_GROWN_BINS) onStop?.("size");
   if (count === 0) return null;
 
   let lowBand = numBands;

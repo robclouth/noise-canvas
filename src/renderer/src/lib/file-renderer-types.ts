@@ -25,6 +25,12 @@ export interface StrokeDispatch {
   state: State;
 }
 
+/** How many strokes of a batch were taken, and the first that was not. */
+export interface StrokeBatchResult {
+  painted: number;
+  refused: StrokeDispatch | null;
+}
+
 /** The union of the steps' brush rectangles for one aim, in file UV. */
 export interface BrushUnionUv {
   min: Vector2;
@@ -62,9 +68,10 @@ export interface FileRendererHandle {
    * as part of the stroke already opened with beginStrokePreview(). A stroke
    * on frames the canvas does not hold waits for its window; `settleStroke`
    * lands what is waiting. The blocks under `ahead`, the strokes that follow
-   * this batch, are read towards while it lands. Returns how many were taken.
+   * this batch, are read towards while it lands. Returns how many were taken,
+   * and the first that was not.
    */
-  renderStrokeBatch: (strokes: StrokeDispatch[], ahead?: StrokeDispatch[]) => number;
+  renderStrokeBatch: (strokes: StrokeDispatch[], ahead?: StrokeDispatch[]) => StrokeBatchResult;
   /**
    * Paints one stroke from an explicit state, optionally sampling a spectrogram
    * that is not an open file. A preview goes to the partner buffer and can be

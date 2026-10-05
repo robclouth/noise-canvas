@@ -1,3 +1,4 @@
+import { notifications } from "@mantine/notifications";
 import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { serializeEditCommand, serializeFileTask } from "@renderer/lib/file-task-queue";
 import { getHistoryManager } from "@renderer/lib/history-manager";
@@ -16,6 +17,8 @@ import {
   type RegionStroke,
   type StrokeGeometry,
 } from "@renderer/lib/selection-strokes";
+import { beginStrokeWhenFree } from "@renderer/lib/stroke-begin";
+import { DAB_NOT_TAKEN, STROKE_LOCKED, showNothingPainted, showPiecesSkipped } from "@renderer/lib/stroke-notices";
 import type { SourceFileInfo } from "@renderer/lib/stroke-renderer";
 import { destToSourceBandUv } from "@renderer/lib/utils";
 import { openFiles } from "./files";
@@ -106,8 +109,21 @@ function activeSelectionOf(get: ZustandGet, edit: EditTarget | null): Selection 
   return edit ? (get().filesSelection[edit.fileId] ?? null) : null;
 }
 
-/** Reads `selection` off the canvas into the clipboard. */
+/** Reads `selection` off the canvas into the clipboard, and says so when it cannot. */
 async function copyRegion(edit: EditTarget, selection: Selection): Promise<boolean> {
+  const copied = await readRegion(edit, selection);
+  if (!copied)
+    notifications.show({
+      id: "copy-failed",
+      color: "yellow",
+      title: "Nothing copied",
+      message: "The selection could not be read from the file. Try again.",
+    });
+  return copied;
+}
+
+/** Reads `selection` off the canvas into the clipboard. */
+async function readRegion(edit: EditTarget, selection: Selection): Promise<boolean> {
   const renderer = edit.file.rendererRef?.current;
   if (!renderer) return false;
 
@@ -187,13 +203,19 @@ async function commitRegionStrokes(
   const renderer = edit.file.rendererRef?.current;
   if (!renderer || strokes.length === 0) return;
 
-  if (!renderer.beginStroke()) return;
+  if (!(await beginStrokeWhenFree(renderer))) {
+    showNothingPainted(STROKE_LOCKED);
+    return;
+  }
   try {
     let painted = 0;
+    let reason: string | null = null;
     for (const stroke of strokes) {
       const aim = regionAim(stroke.rect, edit.geometry);
       if (renderer.renderRegionStroke({ ...aim, state: stroke.state, source: source ?? undefined }, false)) painted++;
+      else reason ??= renderer.strokeRefusal(stroke.state, { x: aim.aimX, y: aim.aimY }) ?? DAB_NOT_TAKEN;
     }
+    if (reason) showPiecesSkipped(label, strokes.length - painted, strokes.length, "pieces", reason);
     if (painted === 0) return;
     const settled = await renderer.settleStroke();
     if (settled.status !== "completed") {
@@ -276,7 +298,12 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
         const copied = clipboard;
         if (!copied) return;
         const rect = dropRect(copied, selection.end, selection.pitchLo, edit.geometry.spec);
-        if (rect.start >= edit.geometry.totalDuration) return;
+        if (rect.start >= edit.geometry.totalDuration) {
+          showNothingPainted(
+            "The copy would start past the end of the file. Select earlier, or lengthen the file first.",
+          );
+          return;
+        }
 
         openPlacingSource(edit);
         // The selection moves onto the copy, so pressing again lays the next one.

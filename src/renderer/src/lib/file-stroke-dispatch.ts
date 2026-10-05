@@ -1,7 +1,13 @@
 import { notifications } from "@mantine/notifications";
 import { DataTexture, FloatType, NearestFilter, RGBAFormat, Vector2 } from "three";
 import type { State, OpenFile, SpectrogramData } from "../store/types";
-import type { BrushUnionUv, DabSpan, StrokeDispatch, FileRendererHandle } from "./file-renderer-types";
+import type {
+  BrushUnionUv,
+  DabSpan,
+  StrokeBatchResult,
+  StrokeDispatch,
+  FileRendererHandle,
+} from "./file-renderer-types";
 import {
   canvasViewOf,
   clipToView,
@@ -30,7 +36,8 @@ import {
   type ReachContext,
   type ReadBox,
 } from "./effect-reach";
-import { strokeRefusal as refusalFor, overReachRefusal } from "./whole-file-gate";
+import { strokeRefusal as refusalFor } from "./whole-file-gate";
+import { reachFixes, reachFixMessage } from "./reach-fix";
 import { attractFieldNeeds, impulseNeeds, mergeNeedsByFile, type ImpulseNeed } from "./impulse-need";
 import { GpuMemoryError, type ImpulseFileInfo, type SourceFileInfo, type StrokeRenderer } from "./stroke-renderer";
 import { DEFAULT_ONSET_SENSITIVITY } from "./constants";
@@ -576,30 +583,55 @@ function reachOf(context: FileStrokeContext, state: State): StateReach {
   return entry;
 }
 
-/** The refusal a brush gets while a file it reads still waits for its onsets. */
-export const ONSETS_PENDING_REFUSAL = "This file is still finding its onsets. Paint again in a moment.";
+/** The refusal a brush gets while `name`, a file it reads, still waits for its onsets. */
+export function onsetsPendingRefusal(name: string): string {
+  return `${name} is still finding its onsets. Paint again in a moment.`;
+}
+
+/** The painted file, or a file a step reads, while it still waits for its onsets; null when none does. */
+function fileAwaitingOnsets(context: FileStrokeContext, state: State): FileStrokeFile | null {
+  const painted = context.openFiles[context.fileId];
+  if (painted?.onsetsPending) return painted;
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+  for (const step of steps) {
+    const path = step.sourceFile?.path;
+    const read = path ? context.getOpenFileByPath(path) : undefined;
+    if (read?.onsetsPending) return read;
+  }
+  return null;
+}
 
 /** True while the painted file, or a file a step reads, still waits for its onsets. */
 function onsetsPendingFor(context: FileStrokeContext, state: State): boolean {
-  if (context.openFiles[context.fileId]?.onsetsPending) return true;
-  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-  return steps.some((step) => {
-    const path = step.sourceFile?.path;
-    return path ? Boolean(context.getOpenFileByPath(path)?.onsetsPending) : false;
-  });
+  return fileAwaitingOnsets(context, state) !== null;
 }
 
+/** True when a dab of `state` aimed at `aim` can paint, on the canvas or beside it. */
+export function brushPaintsAt(context: FileStrokeContext, state: State, aim: { x: number; y: number }): boolean {
+  const canvas = context.canvasRef.current;
+  return !canvas || dabPaints(context, state, new Vector2(aim.x, aim.y), canvas);
+}
+
+function dabPaints(context: FileStrokeContext, state: State, cursor: Vector2, canvas: WindowedCanvas): boolean {
+  const span = dabSpan(context, state, cursor, canvas);
+  if (!reachOf(context, state).refusal && canvas.servable(span.extent, span.needs)) return true;
+  return besideFor(context, state, cursor, span, canvas) !== null;
+}
+
+/**
+ * Why the brush cannot paint, or null when it can. Aimed at a spot on a
+ * canvas, a brush that reads too much there is told which settings would let
+ * it paint.
+ */
 export function strokeRefusal(context: FileStrokeContext, state: State, aim?: { x: number; y: number }): string | null {
-  if (onsetsPendingFor(context, state)) return ONSETS_PENDING_REFUSAL;
-  const { canvasRef } = context;
+  const waiting = fileAwaitingOnsets(context, state);
+  if (waiting) return onsetsPendingRefusal(waiting.displayName);
   const reach = reachOf(context, state);
-  const canvas = canvasRef.current;
+  const canvas = context.canvasRef.current;
   if (!canvas || !aim) return reach.refusal;
   const cursor = new Vector2(aim.x, aim.y);
-  const span = dabSpan(context, state, cursor, canvas);
-  if (!reach.refusal && canvas.servable(span.extent, span.needs)) return null;
-  if (besideFor(context, state, cursor, span, canvas)) return null;
-  return reach.refusal ?? overReachRefusal(["The brush"]);
+  if (dabPaints(context, state, cursor, canvas)) return null;
+  return reachFixMessage(reachFixes(state, (moved) => !dabPaints(context, moved, cursor, canvas)));
 }
 
 /** The frames a dab writing `writes` reads, `around` either side. */
@@ -1177,7 +1209,7 @@ export function prepareStrokeBatch(
   canvas: WindowedCanvas,
   strokes: StrokeDispatch[],
   ahead?: StrokeDispatch[],
-): number {
+): StrokeBatchResult {
   if (ahead && ahead.length > 0) {
     const first = ahead[0];
     const last = ahead[ahead.length - 1];
@@ -1186,13 +1218,12 @@ export function prepareStrokeBatch(
     canvas.prefetch(Math.min(from.start, to.start), Math.max(from.end, to.end));
   }
   let painted = 0;
+  let refused: StrokeDispatch | null = null;
   for (const stroke of strokes) {
     const aim = new Vector2(stroke.aimX, stroke.aimY);
     const span = dabSpan(context, stroke.state, aim, canvas);
-    const dabState = stroke.state;
-    if (paintDab(context, canvas, dabState, aim, span)) {
-      painted++;
-    }
+    if (paintDab(context, canvas, stroke.state, aim, span)) painted++;
+    else refused ??= stroke;
   }
-  return painted;
+  return { painted, refused };
 }

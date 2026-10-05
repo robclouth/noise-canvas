@@ -2,6 +2,15 @@ import { notifications } from "@mantine/notifications";
 import { diag } from "@renderer/lib/diag-log";
 import type { FileRendererHandle, StrokeDispatch } from "@renderer/lib/file-renderer-types";
 import { resolveGridFill, type GridFillTarget } from "@renderer/lib/grid/grid-fill";
+import { isOnsetGrid } from "@renderer/lib/constants";
+import { beginStrokeWhenFree } from "@renderer/lib/stroke-begin";
+import {
+  DAB_NOT_TAKEN,
+  FILE_OPENING,
+  STROKE_LOCKED,
+  showNothingPainted,
+  showPiecesSkipped,
+} from "@renderer/lib/stroke-notices";
 import type { JobProgress } from "./edit-progress";
 import { activeLoopRegion, openFiles } from "./files";
 import type { State, ZustandGet, ZustandSet } from "./types";
@@ -27,14 +36,29 @@ let fillAbort: AbortController | null = null;
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-/** Everything a fill needs from the active file, or null when one isn't paintable. */
-function resolveTarget(state: State) {
+/** Why a fill finds no cells on the grid it was given. */
+function noCellsReason(state: State): string {
+  const looped = activeLoopRegion(state) !== null;
+  if (state.snapTime && isOnsetGrid(state.gridSizeBeats))
+    return looped
+      ? "No onsets fall inside the loop region. Move the loop or pick a beat grid."
+      : "This file has no onsets to fill between. Pick a beat grid.";
+  return looped
+    ? "The loop region holds no grid cells. Widen the loop or make the grid finer."
+    : "The grid has no cells on this file.";
+}
+
+/** Everything a fill needs from the active file. */
+type FillTarget = { fileId: string; renderer: FileRendererHandle; target: GridFillTarget };
+
+/** Everything a fill needs from the active file, or why it cannot paint one. */
+function resolveTarget(state: State): FillTarget | { reason: string } {
   const { activeFileId } = state;
-  if (!activeFileId) return null;
+  if (!activeFileId) return { reason: "Open a file first." };
   const file = openFiles[activeFileId];
   const renderer = file?.rendererRef?.current;
   const spectrogramData = file?.spectrogramData;
-  if (!renderer || !spectrogramData) return null;
+  if (!renderer || !spectrogramData) return { reason: FILE_OPENING };
 
   const target: GridFillTarget = {
     fileId: activeFileId,
@@ -76,15 +100,24 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
     let started = false;
     try {
       const resolved = resolveTarget(get());
-      if (!resolved) return;
+      if ("reason" in resolved) {
+        showNothingPainted(resolved.reason);
+        return;
+      }
       renderer = resolved.renderer;
       const { target } = resolved;
 
       const { anchors, state: painted } = resolveGridFill(get(), target);
-      if (anchors.length === 0) return;
+      if (anchors.length === 0) {
+        showNothingPainted(noCellsReason(get()));
+        return;
+      }
 
       // Saves the pixels from before the pass, so cancelling puts them back.
-      if (!renderer.beginStrokePreview()) return;
+      if (!(await beginStrokeWhenFree(renderer))) {
+        showNothingPainted(STROKE_LOCKED);
+        return;
+      }
       started = true;
 
       const total = anchors.length;
@@ -92,6 +125,7 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
       if (showProgress) set({ fillProgress: { done: 0, total } });
 
       let strokesPainted = 0;
+      let refused: StrokeDispatch | null = null;
       let settleMs = 0;
       const paintStart = performance.now();
       for (let start = 0; start < total; start += FILL_CHUNK) {
@@ -99,7 +133,9 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
           anchors.slice(from, to).map((anchor) => ({ aimX: anchor.aimX, aimY: anchor.aimY, state: painted }));
         const chunk = dispatch(start, start + FILL_CHUNK);
         const ahead = dispatch(start + FILL_CHUNK, start + 2 * FILL_CHUNK);
-        strokesPainted += renderer.renderStrokeBatch(chunk, ahead);
+        const batch = renderer.renderStrokeBatch(chunk, ahead);
+        strokesPainted += batch.painted;
+        refused ??= batch.refused;
         // A canvas holding a window of the file takes the chunk's strokes as
         // the window reaches them, so each chunk lands before the next is given.
         const settleStart = performance.now();
@@ -119,6 +155,13 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
         strokes: strokesPainted,
         settleMs: Math.round(settleMs),
       });
+      const skipped = total - strokesPainted;
+      if (skipped > 0) {
+        const reason = refused
+          ? (renderer.strokeRefusal(refused.state, { x: refused.aimX, y: refused.aimY }) ?? DAB_NOT_TAKEN)
+          : DAB_NOT_TAKEN;
+        showPiecesSkipped("Fill Grid", skipped, total, "cells", reason);
+      }
       if (strokesPainted === 0) {
         await renderer.discardStrokePreview();
         return;

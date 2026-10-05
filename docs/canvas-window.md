@@ -362,8 +362,8 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     no onsets and no gate; its first synthesis brings both, and the root node
     stores them then. Until that pass, or the restore that stands in for it,
     is done the file is marked `onsetsPending`, and a stroke reading it is
-    refused (`ONSETS_PENDING_REFUSAL`): every read through the default warp
-    follows onsets. A host that answers whole passes only keeps the
+    refused (`onsetsPendingRefusal`, which names the file): every read
+    through the default warp follows onsets. A host that answers whole passes only keeps the
     whole-run path.
 
     Deriving a file from another is the same rule again. A duplicate seeds its
@@ -424,9 +424,19 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     its warp, or takes its step's whole brush when it may read anywhere in it.
     A tile that reads more than a window holds is halved across bands or
     blocks, whichever reads less, and a tile that cannot read less is refused.
-    A warp that is the brush's first effect, run once, samples the first
-    step's input through a view of its own, so reversing a whole file reads
-    its far end without one view spanning both ends.
+    A transform that is the brush's first effect, run once, and warps or
+    shifts, samples the first step's input through a view of its own, so
+    reversing a whole file reads its far end, and a shift reads the one box it
+    lands on, without one view spanning both.
+    A refusal is never silent, and it says what to change. `reachFixes` moves
+    each control of the brush, one at a time, toward its default or an end,
+    and halves its travel against the real refusal test (`brushPaintsAt`) to
+    find the nearest value that paints at that spot; the notice names the
+    nearest few, and an edge mode that keeps reads inside the brush. A stroke
+    is checked where it starts; a later dab that cannot paint is dropped and
+    the stroke says so once (`reportDroppedDab`). Fill Grid and the region
+    edits count the pieces they could not paint and give the first one's
+    reason.
     Each tile paints on a renderer of its own (`StrokeRenderer.beside`) loaded
     with the file as the stroke found it (`readStart`) and the stroke's paint
     and masks so far (`readStrokePaint`), after the other files' windows hold

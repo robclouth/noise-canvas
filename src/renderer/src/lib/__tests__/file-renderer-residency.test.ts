@@ -480,7 +480,7 @@ describe("anchored dab residency", () => {
     const aimX = gridSize && right ? snapToSwungGridCenter(pointer * 300, 0.5, state.gridSwing / 100) / 300 : pointer;
     const stroke = { state: rig.state, aimX, aimY: 0.5 };
     rig.ref.current!.beginStroke();
-    expect(rig.ref.current!.renderStrokeBatch([stroke])).toBe(1);
+    expect(rig.ref.current!.renderStrokeBatch([stroke]).painted).toBe(1);
     await rig.ref.current!.settleStroke();
     const actual = seed.slice();
     const ranges = rig.ref.current!.getDirtyPixelRanges()!;
@@ -491,7 +491,7 @@ describe("anchored dab residency", () => {
     const whole = await mount(state, Infinity);
     expect(whole.canvas.holdsWholeFile).toBe(true);
     whole.ref.current!.beginStroke();
-    expect(whole.ref.current!.renderStrokeBatch([{ ...stroke, state: whole.state }])).toBe(1);
+    expect(whole.ref.current!.renderStrokeBatch([{ ...stroke, state: whole.state }]).painted).toBe(1);
     await whole.ref.current!.settleStroke();
     const expected = (await whole.ref.current!.getFBOData())!;
     let changed = 0;
@@ -544,7 +544,7 @@ describe("pristine sampling after resume", () => {
     const resumed = (await rig.ref.current!.getFBOData())!;
     expect(resumed[0]).toBeCloseTo(0.8, 6);
     rig.ref.current!.beginStroke();
-    expect(rig.ref.current!.renderStrokeBatch([{ state: rig.state, aimX: 0, aimY: 0 }])).toBe(1);
+    expect(rig.ref.current!.renderStrokeBatch([{ state: rig.state, aimX: 0, aimY: 0 }]).painted).toBe(1);
     await rig.ref.current!.settleStroke();
     const painted = (await rig.ref.current!.getFBOData())!;
     let mismatches = 0;
@@ -684,7 +684,7 @@ it("admits and paints a dab wider than the window", async () => {
   const aim = { x: (grid.blockFrames - 1) / rig.data.numFrames, y: 0.5 };
   expect(rig.ref.current!.strokeRefusal(wide, aim)).toBeNull();
   rig.ref.current!.beginStroke();
-  expect(rig.ref.current!.renderStrokeBatch([{ state: wide, aimX: aim.x, aimY: aim.y }])).toBe(1);
+  expect(rig.ref.current!.renderStrokeBatch([{ state: wide, aimX: aim.x, aimY: aim.y }]).painted).toBe(1);
   expect(await rig.ref.current!.settleStroke()).toEqual({ status: "completed" });
 });
 

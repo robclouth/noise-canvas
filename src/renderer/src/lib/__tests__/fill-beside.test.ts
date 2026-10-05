@@ -27,7 +27,7 @@ describe("a fill dab reading past the window", () => {
       let ranges: Uint32Array | null;
       let values: Float32Array | null = null;
       try {
-        painted = prepareStrokeBatch(windowed.context, windowed.canvas, [{ aimX: aim.x, aimY: aim.y, state }]);
+        painted = prepareStrokeBatch(windowed.context, windowed.canvas, [{ aimX: aim.x, aimY: aim.y, state }]).painted;
         expect((await windowed.canvas.settle()).status).toBe("completed");
         ranges = windowed.canvas.dirtyPixelRanges();
         if (ranges) values = await windowed.canvas.readPixelRanges(ranges);

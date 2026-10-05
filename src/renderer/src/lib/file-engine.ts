@@ -36,6 +36,7 @@ import { brushUnionForAim } from "./brush-anchor";
 import { driveDabLog, recordDab } from "./drive-probe";
 import { unitsToUv } from "./utils";
 import { CoarseCanvas } from "./coarse-canvas";
+import { DAB_NOT_TAKEN, STROKE_LOCKED, showPartlyPainted } from "./stroke-notices";
 import { WindowedCanvas, type UvRegion } from "./windowed-canvas";
 
 type EngineTextures = { packed: DataTexture; inverse: DataTexture; meta: DataTexture };
@@ -544,11 +545,23 @@ export class FileEngine {
         ? brushUnionForAim(state, aim.x, aim.y, bpm, totalDuration, spec.bandsPerOctave, spec.numBands)
         : null;
       const record = union ? recordDab(this.fileId, union.blX, union.blY, union.sizeUvX, union.sizeUvY) : null;
-      layDab(state, aim, canvas, dab, {}, () => {
+      const laid = layDab(state, aim, canvas, dab, {}, () => {
         if (record) record.paintedAt = Date.now();
       });
+      if (!laid) this.reportDroppedDab(state, aim);
     }
   };
+
+  /** Tells the user, once a stroke, that a dab of it did not paint, and why. */
+  private reportDroppedDab(state: State, aim: { x: number; y: number }): void {
+    if (this.droppedDabReported) return;
+    this.droppedDabReported = true;
+    const reason = this.rollbackFailed
+      ? STROKE_LOCKED
+      : (fileStrokeRefusal(this.context.strokeContext, state, aim) ?? DAB_NOT_TAKEN);
+    showPartlyPainted(this.fileId, reason);
+  }
+  private droppedDabReported = false;
   getFBOData = async (): Promise<Float32Array | null> => {
     const { canvasRef } = this;
 
@@ -683,11 +696,7 @@ export class FileEngine {
       return false;
     } finally {
       if (this.rollbackFailed)
-        notifications.show({
-          color: "red",
-          title: "Stroke Not Applied",
-          message: "The stroke could not be restored. Close and reopen the file before painting again.",
-        });
+        notifications.show({ color: "red", title: "Stroke Not Applied", message: STROKE_LOCKED });
       this.restoringStroke = false;
       if (!this.settlingStroke) this.releaseStrokeWaiters();
     }
@@ -716,6 +725,7 @@ export class FileEngine {
     if (this.settlingStroke || this.restoringStroke || this.rollbackFailed || !this.canvasRef.current) return false;
     this.strokeTrail.length = 0;
     this.lastStrokeDab = null;
+    this.droppedDabReported = false;
     this.canvasRef.current.beginStroke();
     const parent = this.strokeRendererRef.current;
     if (
@@ -806,12 +816,13 @@ export class FileEngine {
       renderStrokeBatch: (strokes: StrokeDispatch[], ahead?: StrokeDispatch[]) => {
         const strokeRenderer = strokeRendererRef.current;
         const canvas = canvasRef.current;
-        if (this.rollbackFailed || !strokeRenderer?.getIsInitialized() || !canvas) return 0;
-        const painted = prepareStrokeBatch(strokeContext, canvas, strokes, ahead);
-        if (painted > 0) displayMode.current = "committed";
+        if (this.rollbackFailed || !strokeRenderer?.getIsInitialized() || !canvas)
+          return { painted: 0, refused: strokes[0] ?? null };
+        const result = prepareStrokeBatch(strokeContext, canvas, strokes, ahead);
+        if (result.painted > 0) displayMode.current = "committed";
         invalidateRef.current?.();
         this.notifyContentChanged();
-        return painted;
+        return result;
       },
       queueStrokeDabs: (points: readonly StrokePosition[]) => {
         this.strokeTrail.push(...points);
@@ -870,7 +881,7 @@ export class FileEngine {
             );
             if (aim.x >= 0) {
               this.lastStrokeDab = cursorPosition;
-              layDab(state, aim, canvas, dabSpan(state, aim, canvas));
+              if (!layDab(state, aim, canvas, dabSpan(state, aim, canvas))) this.reportDroppedDab(state, aim);
             }
           }
         }
@@ -892,7 +903,10 @@ export class FileEngine {
               notifications.show({
                 color: "red",
                 title: "Stroke Not Applied",
-                message: "The stroke could not finish. Try painting again.",
+                message:
+                  result.reason === "read-error"
+                    ? "Part of the file could not be read back from disk, so the stroke was taken off. Paint it again."
+                    : "The canvas could not load the part of the file the stroke needs, so the stroke was taken off. Paint it again.",
               });
           }
           return result;
