@@ -400,11 +400,16 @@ vec4 sampleSourceInterp(vec2 sourceUv) {
   return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceFrameCount, sourceBandCount);
 }
 
+// The source canvas UV at the same musical time and frequency as a dest
+// canvas UV, counted from each file's start (defined below).
+vec2 sourceUvAtDestTime(vec2 destUv);
+
 /**
- * Calculate audio level in dB from the spectrogram at a given position.
+ * Calculate audio level in dB from the source at the musical time and
+ * frequency of a dest position.
  */
 float getAudioLevelDb(vec2 uv) {
-  vec4 sourceTexel = sampleSourceInterp(uv);
+  vec4 sourceTexel = sampleSourceInterp(sourceUvAtDestTime(uv));
   float magnitudeL = getMag(sourceTexel.rg);
   float magnitudeR = getMag(sourceTexel.ba);
   float avgMagnitude = max(0.5 * (magnitudeL + magnitudeR), 1e-6);
@@ -441,6 +446,22 @@ float destToSourceBandUv(vec2 destUnpackedUv) {
   float destFreqHz = destLowestFreq * exp2(destBandIdx / max(destBandsPerOctave, 1e-6));
   float sourceBandIdx = sourceBandsPerOctave * log2(max(destFreqHz, 1e-6) / sourceLowestFreq);
   return (sourceBandIdx + 0.5) / max(sourceBandCount, 1.0);
+}
+
+// A source reading the dest file itself through the same span maps a UV to
+// itself; another file maps through the time from its start, converted by
+// the two files' tempos, and the band at the same frequency.
+vec2 sourceUvAtDestTime(vec2 destUv) {
+  bool sameSpan = sourceTempoRatio == vec2(1.0, 0.0) && sourceViewStartFrame == destViewStartFrame &&
+                  sourceFrameCount == destFrameCount && sourceSampleRate == destSampleRate &&
+                  sourceFileFrameCount == destFileFrameCount;
+  bool sameBands = sourceBandCount == destBandCount && sourceBandsPerOctave == destBandsPerOctave &&
+                   sourceMinFreq == destMinFreq;
+  if (sameSpan && sameBands) return destUv;
+  if (sameSpan) return vec2(destUv.x, destToSourceBandUv(destUv));
+  float tempo = max(sourceTempoRatio.x + sourceTempoRatio.y, 1e-9);
+  float sourceFrame = destFileSec(destUv.x) / tempo * sourceSampleRate;
+  return vec2((sourceFrame - float(sourceViewStartFrame)) / max(sourceFrameCount, 1.0), destToSourceBandUv(destUv));
 }
 
 // Inverse of destToSourceBandUv: source UV.y → dest UV.y for the same freq.

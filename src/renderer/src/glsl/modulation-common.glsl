@@ -77,14 +77,14 @@ float getSeqDataValue(int modulatorIndex, int stepX, int stepY) {
 float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb, float maxDb) {
   if (src == 1) { // Phase: normalize [-PI, PI] to [0, 1]
     #ifdef HAS_SPECTROGRAM_SAMPLING
-      vec4 s = sampleSourceInterp(sampleUv);
+      vec4 s = sampleSourceInterp(sourceUvAtDestTime(sampleUv));
       return (unwrapPhase(getPhase(s.rg)) + PI) / (2.0 * PI);
     #else
       return 0.5;
     #endif
   } else if (src == 2) { // Panning: normalize [-1, 1] to [0, 1]
     #ifdef HAS_SPECTROGRAM_SAMPLING
-      vec4 s = sampleSourceInterp(sampleUv);
+      vec4 s = sampleSourceInterp(sourceUvAtDestTime(sampleUv));
       float mL = getMag(s.rg);
       float mR = getMag(s.ba);
       return (mR - mL) / max(mR + mL, EPSILON) * 0.5 + 0.5;
@@ -96,7 +96,7 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
     // equal; the span is floored to keep the division finite.
     float dbSpan = max(maxDb - minDb, EPSILON);
     #ifdef HAS_SPECTROGRAM_SAMPLING
-      vec4 s = sampleSourceInterp(sampleUv);
+      vec4 s = sampleSourceInterp(sourceUvAtDestTime(sampleUv));
       float mL = getMag(s.rg);
       float mR = getMag(s.ba);
       float avgMag = max(0.5 * (mL + mR), 1e-6);
