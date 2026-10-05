@@ -3,7 +3,7 @@ import { BrushPanel } from "@/components/layout/brush-panel";
 import { SidebarPanel } from "@/components/layout/sidebar-panel";
 import { useStore } from "@/store";
 import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
-import { Notifications, notifications } from "@mantine/notifications";
+import { notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -578,7 +578,6 @@ function App(): React.JSX.Element {
           <TransportPanel />
         </Stack>
         <SidebarPanel />
-        <Notifications />
         <UpdateNotification />
         <Walkthrough ready={isReady} />
         <ManualViewer />
