@@ -58,3 +58,82 @@ function tapSpan(effect: State, file: ResponseFile): SourceNeed {
     wantOriginal: false,
   };
 }
+
+/** The key a step's Attract field file is held under. */
+export function attractFieldKey(path: string): string {
+  return `attract:${path}`;
+}
+
+/**
+ * The span of every picked Attract field file a dab reads. The field is laid
+ * over the painted file in proportion, so a dab over `destSpan` of the
+ * painted file's `destFrames` reads the same share of the field, a bin of the
+ * field's coarsest band wider either side for the read between bins. With no
+ * span the whole field is read.
+ */
+export function attractFieldNeeds(
+  state: State,
+  resolve: (path: string) => ResponseFile | null,
+  destSpan: { startFrame: number; endFrame: number } | null,
+  destFrames: number,
+): ImpulseNeed[] {
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+  const byKey = new Map<string, SourceNeed>();
+  for (let index = 0; index < steps.length; index++) {
+    const step = createStepStateView(state, index);
+    for (const item of step.effects) {
+      if (!item.enabled || item.effect !== "attract") continue;
+      const effect = createEffectStateView(state, index, item);
+      const path = effect.attractSourceFile?.path;
+      if (Number(effect.attractMap) !== 0 || !path) continue;
+      const file = resolve(path);
+      if (!file) continue;
+      const { numFrames, synthesisMetadata } = file.spectrogramData;
+      const stride = 1 << Math.max(...synthesisMetadata.bandStepLog2s);
+      const scale = numFrames / Math.max(destFrames, 1);
+      const need: SourceNeed = destSpan
+        ? {
+            fileId: file.id,
+            startFrame: Math.max(0, Math.floor(destSpan.startFrame * scale) - stride),
+            endFrame: Math.min(numFrames, Math.ceil(destSpan.endFrame * scale) + stride),
+            wantOriginal: false,
+          }
+        : { fileId: file.id, startFrame: 0, endFrame: numFrames, wantOriginal: false };
+      const key = attractFieldKey(path);
+      const held = byKey.get(key);
+      byKey.set(
+        key,
+        held
+          ? {
+              ...need,
+              startFrame: Math.min(held.startFrame, need.startFrame),
+              endFrame: Math.max(held.endFrame, need.endFrame),
+            }
+          : need,
+      );
+    }
+  }
+  return [...byKey].map(([key, need]) => ({ key, need }));
+}
+
+/**
+ * The bindings with every need on one file widened to all of them: a file is
+ * read through one window, so each key reading it shares the same span.
+ */
+export function mergeNeedsByFile(bindings: readonly ImpulseNeed[]): ImpulseNeed[] {
+  const byFile = new Map<string, SourceNeed>();
+  for (const { need } of bindings) {
+    const held = byFile.get(need.fileId);
+    byFile.set(
+      need.fileId,
+      held
+        ? {
+            ...held,
+            startFrame: Math.min(held.startFrame, need.startFrame),
+            endFrame: Math.max(held.endFrame, need.endFrame),
+          }
+        : need,
+    );
+  }
+  return bindings.map(({ key, need }) => ({ key, need: byFile.get(need.fileId) ?? need }));
+}

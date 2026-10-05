@@ -75,8 +75,14 @@ export type ParityCanvas = {
   data: ParityData;
   context: FileStrokeContext;
   canvas: WindowedCanvas;
+  /** The file as the dispatch sees it open, and its committed coefficients. */
+  file: FileStrokeContext["openFiles"][string];
+  read: (ranges: Uint32Array) => Promise<Float32Array>;
   dispose: () => void;
 };
+
+/** Which file a parity canvas paints, and the other open files it can read. */
+export type ParityFileOptions = { id?: string; filePath?: string; others?: readonly ParityCanvas[] };
 
 export const PARITY_FILE_PATH = "/parity.wav";
 
@@ -90,7 +96,11 @@ export function parityCanvas(
   gl: WebGLRenderer,
   registry: EffectsRegistry = effects,
   onsets?: Float32Array,
+  options: ParityFileOptions = {},
 ): ParityCanvas {
+  const id = options.id ?? "parity";
+  const filePath = options.filePath ?? PARITY_FILE_PATH;
+  const others = options.others ?? [];
   const textures = createHarnessTextures(data);
   const strokeRendererRef: FileStrokeContext["strokeRendererRef"] = { current: null };
   const read = async (ranges: Uint32Array) => gatherPixelRanges(data.packedData, ranges);
@@ -101,32 +111,40 @@ export function parityCanvas(
     readCurrent: read,
     readRoot: read,
     onChanged: () => {},
-    // The file's own blocks, for a convolve step that filters through it.
-    sourceBlocks: (fileId) =>
-      fileId === "parity" ? { spectrogram: data, readCurrent: read, readRoot: read, revision: () => 0 } : null,
+    // The blocks of this file and the others open beside it, for a step that
+    // reads one of them through a window.
+    sourceBlocks: (fileId) => {
+      if (fileId === id) return { spectrogram: data, readCurrent: read, readRoot: read, revision: () => 0 };
+      const other = others.find((o) => o.file.id === fileId);
+      return other
+        ? { spectrogram: other.data, readCurrent: other.read, readRoot: other.read, revision: () => 0 }
+        : null;
+    },
     windowBlocks,
   });
   const view = canvas.firstView(0, 1);
-  const renderer = new StrokeRenderer(gl, data, toStrokeTextures(textures), "parity", registry, view);
+  const renderer = new StrokeRenderer(gl, data, toStrokeTextures(textures), id, registry, view);
   strokeRendererRef.current = renderer;
   canvas.initialize(null);
   const file = {
-    id: "parity",
-    filePath: PARITY_FILE_PATH,
-    displayName: "parity.wav",
+    id,
+    filePath,
+    displayName: filePath.split("/").pop() ?? id,
     spectrogramData: data,
     onsets,
     rendererRef: {
       current: { getTextures: () => renderer.getTextures(), getCanvasView: () => renderer.committedSource().view },
     },
   };
+  const openFiles: FileStrokeContext["openFiles"] = { [id]: file };
+  for (const other of others) openFiles[other.file.id] = other.file;
   const context: FileStrokeContext = {
-    fileId: "parity",
+    fileId: id,
     spectrogramData: data,
     strokeRendererRef,
     canvasRef: { current: canvas },
-    openFiles: { parity: file },
-    getOpenFileByPath: (path) => (path === PARITY_FILE_PATH ? file : undefined),
+    openFiles,
+    getOpenFileByPath: (path) => Object.values(openFiles).find((open) => open.filePath === path),
     createStepStateView,
     getFileOnsets: () => [],
     closeFile: () => {},
@@ -136,11 +154,13 @@ export function parityCanvas(
     data,
     context,
     canvas,
+    file,
+    read,
     dispose: () => {
       canvas.dispose();
       renderer.dispose();
       disposeHarnessTextures(textures);
-      disposeOnsetTexture("parity");
+      disposeOnsetTexture(id);
     },
   };
 }

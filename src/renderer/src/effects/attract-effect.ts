@@ -1,7 +1,6 @@
 import { buildScaleOffsets } from "@renderer/lib/scale-snap";
 import { ONSETS_GRID_VALUE } from "@renderer/lib/constants";
 import { unitsToUv } from "@renderer/lib/utils";
-import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import {
   getContextualModAmountsNormalized,
   getModAmountValuesNormalized,
@@ -15,7 +14,7 @@ import attractEffectFrag from "../glsl/attract-effect.frag";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
-import { viewCoversFile } from "../lib/canvas-view";
+import { attractFieldKey } from "../lib/impulse-need";
 
 const defaultUniformValue = defaultParameterUniform(0, -100, 100);
 
@@ -59,6 +58,8 @@ class AttractEffect extends BaseEffect {
             attractFieldTex: { value: null },
             attractFieldMetaTex: { value: null },
             attractFieldFrames: { value: 1 },
+            attractFieldViewStartFrame: { value: 0 },
+            attractFieldFileFrames: { value: 1 },
             attractFieldBands: { value: 1 },
             attractFieldMinFreq: { value: 20 },
             attractFieldBpo: { value: 12 },
@@ -100,25 +101,20 @@ class AttractEffect extends BaseEffect {
     material.uniforms.attractGridBeats.value = state.gridSizeBeats > ONSETS_GRID_VALUE ? state.gridSizeBeats : 1;
 
     // Source map field: a picked, loaded file supplies the landscape, matched
-    // by absolute frequency. In self mode the shader reads the canvas
-    // directly; the fallback bindings only keep the samplers valid.
-    const fieldFile = state.attractSourceFile;
-    let fieldOpenFile = fieldFile ? getOpenFileByPath(fieldFile.path) : undefined;
-    if (!fieldOpenFile && fieldFile) {
-      fieldOpenFile = Object.values(openFiles).find((f) => f.filePath === fieldFile.path);
-    }
-    const fieldRenderer = fieldOpenFile?.rendererRef?.current;
-    const fieldTextures = fieldRenderer?.getTextures();
-    const fieldData = fieldOpenFile?.spectrogramData;
-    // The field is read in the file's own layout, which only a canvas over
-    // the whole field file lays out.
-    const fieldView = fieldRenderer?.getCanvasView();
-    const fieldWhole = Boolean(fieldView && fieldData && viewCoversFile(fieldView, fieldData.numFrames));
-    if (fieldFile && fieldTextures && fieldData && fieldWhole) {
+    // by absolute frequency and laid over the painted file in proportion. The
+    // dispatch binds it, or the window of it the dab reads. In self mode the
+    // shader reads the canvas directly; the fallback bindings only keep the
+    // samplers valid.
+    const fieldPath = state.attractSourceFile?.path;
+    const field = fieldPath ? props.impulses?.get(attractFieldKey(fieldPath)) : undefined;
+    if (field) {
+      const { spectrogramData: fieldData, textures, view } = field;
       material.uniforms.attractFieldMode.value = 1;
-      material.uniforms.attractFieldTex.value = fieldTextures.packed.texture;
-      material.uniforms.attractFieldMetaTex.value = fieldTextures.metadata;
-      material.uniforms.attractFieldFrames.value = fieldData.numFrames;
+      material.uniforms.attractFieldTex.value = textures.packed.texture;
+      material.uniforms.attractFieldMetaTex.value = textures.metadata;
+      material.uniforms.attractFieldFrames.value = view ? view.endFrame - view.startFrame : fieldData.numFrames;
+      material.uniforms.attractFieldViewStartFrame.value = view ? view.startFrame : 0;
+      material.uniforms.attractFieldFileFrames.value = fieldData.numFrames;
       material.uniforms.attractFieldBands.value = fieldData.numBands;
       material.uniforms.attractFieldMinFreq.value = fieldData.minFreq;
       material.uniforms.attractFieldBpo.value = fieldData.bandsPerOctave;
@@ -127,6 +123,8 @@ class AttractEffect extends BaseEffect {
       material.uniforms.attractFieldTex.value = material.uniforms.destSpectrogramTex.value;
       material.uniforms.attractFieldMetaTex.value = material.uniforms.destMetadataTex.value;
       material.uniforms.attractFieldFrames.value = material.uniforms.destFrameCount.value;
+      material.uniforms.attractFieldViewStartFrame.value = 0;
+      material.uniforms.attractFieldFileFrames.value = material.uniforms.destFrameCount.value;
       material.uniforms.attractFieldBands.value = material.uniforms.destBandCount.value;
       material.uniforms.attractFieldMinFreq.value = material.uniforms.destMinFreq.value;
       material.uniforms.attractFieldBpo.value = material.uniforms.destBandsPerOctave.value;

@@ -31,7 +31,7 @@ import {
   type ReadBox,
 } from "./effect-reach";
 import { strokeRefusal as refusalFor, overReachRefusal } from "./whole-file-gate";
-import { impulseNeeds, type ImpulseNeed } from "./impulse-need";
+import { attractFieldNeeds, impulseNeeds, mergeNeedsByFile, type ImpulseNeed } from "./impulse-need";
 import { GpuMemoryError, type ImpulseFileInfo, type SourceFileInfo, type StrokeRenderer } from "./stroke-renderer";
 import { DEFAULT_ONSET_SENSITIVITY } from "./constants";
 import { getOnsetTexture, type Onset } from "./onset-map";
@@ -192,11 +192,24 @@ function responseIsWindowed(context: FileStrokeContext, id: string): boolean {
   return !viewCoversFile(view, response.spectrogramData.numFrames);
 }
 
-function impulseNeedsFor(context: FileStrokeContext, state: State): ImpulseNeed[] {
-  return impulseNeeds(state, (path) => {
+/**
+ * The other files a dab's effects read, under the keys the effects look them
+ * up by: convolve responses and Attract fields, the fields over `destSpan` of
+ * this file, or all of each with no span.
+ */
+function impulseNeedsFor(
+  context: FileStrokeContext,
+  state: State,
+  destSpan: { startFrame: number; endFrame: number } | null = null,
+): ImpulseNeed[] {
+  const resolve = (path: string | null) => {
     const response = responseFileFor(context, path);
     return response?.spectrogramData ? { id: response.id, spectrogramData: response.spectrogramData } : null;
-  });
+  };
+  return mergeNeedsByFile([
+    ...impulseNeeds(state, resolve),
+    ...attractFieldNeeds(state, resolve, destSpan, context.spectrogramData.numFrames),
+  ]);
 }
 
 /** One step's brush at a dab: its bottom-left corner and size in file UV, and how it spans or wraps. */
@@ -572,6 +585,22 @@ export function strokeRefusal(context: FileStrokeContext, state: State, aim?: { 
   return reach.refusal ?? overReachRefusal(["The brush"]);
 }
 
+/** The frames a dab writing `writes` reads, `around` either side. */
+function readSpanOfDab(
+  writes: readonly FrameSpan[],
+  around: { before: number; after: number },
+  numFrames: number,
+): { startFrame: number; endFrame: number } | null {
+  if (writes.length === 0) return null;
+  let start = Infinity;
+  let end = -Infinity;
+  for (const write of writes) {
+    start = Math.min(start, write.start);
+    end = Math.max(end, write.end);
+  }
+  return { startFrame: Math.max(0, start - around.before), endFrame: Math.min(numFrames, end + around.after) };
+}
+
 /** What a dab reads while it writes `clip`. */
 function readSpanOf(extent: DabExtent, clip: FrameSpan): FrameSpan {
   const before = Math.max(extent.before, extent.piece?.before ?? 0);
@@ -624,7 +653,6 @@ export function dabSpan(
     ? { refusal: null, frames: none, piece: none }
     : reachOf(context, state);
   const union = resolvedUnion ?? brushUnionAt(context, state, cursorPos, bpm, totalDuration);
-  const impulseBindings = impulseNeedsFor(context, state);
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const readsLive = steps.some(
     (step, index) => step.enabled !== false && context.createStepStateView(state, index).accumulate,
@@ -642,6 +670,7 @@ export function dabSpan(
     ? { before: Math.max(extent.before, extent.piece.before), after: Math.max(extent.after, extent.piece.after) }
     : { before: extent.before, after: extent.after };
   let sources = sourceReadsFor(context, state, cursorPos, around);
+  const impulseBindings = impulseNeedsFor(context, state, readSpanOfDab(extent.writes, around, numFrames));
   const needs: DabNeeds = {
     sources,
     impulses: impulseBindings.map((entry) => entry.need).filter((need) => responseIsWindowed(context, need.fileId)),

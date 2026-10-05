@@ -26,6 +26,9 @@ uniform int attractFieldMode;     // 0 = self (live canvas), 1 = picked file
 uniform sampler2D attractFieldTex;
 uniform sampler2D attractFieldMetaTex;
 uniform float attractFieldFrames;
+// The span of the field file its texture lays out, and the file's length.
+uniform int attractFieldViewStartFrame;
+uniform float attractFieldFileFrames;
 uniform float attractFieldBands;
 uniform float attractFieldMinFreq;
 uniform float attractFieldBpo;
@@ -66,13 +69,21 @@ Frames attractCoeffFrames(float xUv, float stepExp) {
 // Seconds from b to a.
 float attractSecBetween(Frames a, Frames b) { return framesBetween(a, b) / max(destSampleRate, 1e-6); }
 
-// Magnitude of the picked file's spectrogram at an absolute (time UV,
-// frequency Hz) position.
-float attractFileFieldMag(float xUv, float fHz) {
+// The field texture's UV at a dest canvas UV: the field file is laid over the
+// painted file in proportion, and its texture may hold a span of it.
+float attractFieldUv(float destCanvasUvX) {
+  float fileFrame = destFileUvX(destCanvasUvX) * attractFieldFileFrames;
+  return (fileFrame - float(attractFieldViewStartFrame)) / max(attractFieldFrames, 1.0);
+}
+
+// Magnitude of the picked file's spectrogram at a dest canvas UV and an
+// absolute frequency.
+float attractFileFieldMag(float destCanvasUvX, float fHz) {
   float idx = (attractFieldBands - 1.0)
             - attractFieldBpo * log2(max(fHz, 1e-6) / max(attractFieldMinFreq, 1e-6));
-  if (xUv < 0.0 || xUv > 1.0 || idx < 0.0 || idx > attractFieldBands - 1.0) return 0.0;
-  vec4 t = readPackedData(vec2(xUv, 1.0 - (idx + 0.5) / attractFieldBands),
+  float fileUv = destFileUvX(destCanvasUvX);
+  if (fileUv < 0.0 || fileUv > 1.0 || idx < 0.0 || idx > attractFieldBands - 1.0) return 0.0;
+  vec4 t = readPackedData(vec2(attractFieldUv(destCanvasUvX), 1.0 - (idx + 0.5) / attractFieldBands),
                           attractFieldTex, attractFieldMetaTex, attractFieldFrames, attractFieldBands);
   return getMag(t.rg) + getMag(t.ba);
 }
@@ -336,7 +347,7 @@ void main() {
             mag = attractModFieldMag(destMeta, destStart, xn);
           } else if (attractFieldMode == 1) {
             if (fileInRange) {
-              vec4 t = attractPackedRead(attractFieldTex, fieldMeta, fieldStart, xn, attractFieldFrames);
+              vec4 t = attractPackedRead(attractFieldTex, fieldMeta, fieldStart, attractFieldUv(xn), attractFieldFrames);
               mag = getMag(t.rg) + getMag(t.ba);
             }
           } else {
