@@ -1147,12 +1147,50 @@ void xresAnalyzeSource(vec2 sourceUv, float srcFreqHz, out float tonality, out f
   devHz = clamp(dev, -FREQ_DEV_CLAMP * srcFreqHz, FREQ_DEV_CLAMP * srcFreqHz);
 }
 
+// One texel of the onset texture (bakeOnsetTexture), counted along its rows.
+vec4 onsetTexel(int i) {
+  int width = max(textureSize(sourceOnsetTex, 0).x, 1);
+  return texelFetch(sourceOnsetTex, ivec2(i % width, i / width), 0);
+}
+
+// The source's onsets around a time in seconds: R = the nearest onset, G = 1
+// where the file has any, B = the previous onset at or before the time (−1 for
+// none), A = the next onset after it (−1 for none). A tie for nearest goes to
+// the later one.
+vec4 sourceOnsetsAround(float tSec) {
+  vec4 head = onsetTexel(0);
+  int buckets = int(head.x);
+  int count = int(head.y);
+  if (count <= 0 || buckets <= 0) return vec4(0.0);
+  int bucket = clamp(int(floor(tSec / max(head.z, 1e-6) * float(buckets))), 0, buckets - 1);
+  vec4 span = onsetTexel(1 + bucket);
+  int lo = int(span.x);
+  int hi = int(span.y);
+  int times = 1 + buckets;
+  // The first onset past tSec, searched within the bucket, then stepped over
+  // the few a float's bucket edge can put on the wrong side.
+  for (int k = 0; k < 32 && lo < hi; k++) {
+    int mid = (lo + hi) / 2;
+    if (onsetTexel(times + mid).r > tSec) hi = mid;
+    else lo = mid + 1;
+  }
+  int next = lo;
+  for (int k = 0; k < 4 && next > 0 && onsetTexel(times + next - 1).r > tSec; k++) next--;
+  for (int k = 0; k < 4 && next < count && onsetTexel(times + next).r <= tSec; k++) next++;
+  float prevSec = next > 0 ? onsetTexel(times + next - 1).r : -1.0;
+  float nextSec = next < count ? onsetTexel(times + next).r : -1.0;
+  float nearest = prevSec < 0.0 ? nextSec
+                : nextSec < 0.0 ? prevSec
+                : (nextSec - tSec <= tSec - prevSec ? nextSec : prevSec);
+  return vec4(nearest, 1.0, prevSec, nextSec);
+}
+
 // How strongly a source position sits inside an onset, in the SOURCE band's
 // Gabor support — the width of the attack ridge. Effects that only move
 // content in time use this to decide where a re-anchor is worth applying.
 float onsetWeight(vec2 sourceUv) {
   float fSrc = max(getSourceMetadata(sourceUv).a, 1e-6);
-  vec2 onset = texture(sourceOnsetTex, vec2(sourceFileUvX(sourceUv.x), 0.5)).rg;
+  vec2 onset = sourceOnsetsAround(framesValue(sourceFrames(sourceUv.x)) / max(sourceSampleRate, 1e-6)).rg;
   float sigma = max(ONSET_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, ONSET_SIGMA_FLOOR);
   float fromOnset = framesBetween(sourceFrames(sourceUv.x), framesAtSec(onset.x, sourceSampleRate));
   float dt = fromOnset / max(sourceSampleRate, 1e-6) / sigma;
@@ -1178,7 +1216,7 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity,
   // Every time below is taken from the read position, as a frame count off an
   // exact whole, so ten minutes into a file it still resolves a frame.
   Frames tSrc = sourceFrames(sourceUv.x);
-  vec4 onset = texture(sourceOnsetTex, vec2(sourceFileUvX(sourceUv.x), 0.5));
+  vec4 onset = sourceOnsetsAround(framesValue(tSrc) / sampleRate);
   Frames tOnset = framesAtSec(onset.x, sourceSampleRate);
   float toOnsetSec = framesBetween(tOnset, tSrc) / sampleRate;
 

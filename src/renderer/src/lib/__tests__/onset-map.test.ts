@@ -1,11 +1,35 @@
+import {
+  DataTexture,
+  FloatType,
+  GLSL3,
+  Mesh,
+  NearestFilter,
+  OrthographicCamera,
+  PlaneGeometry,
+  RawShaderMaterial,
+  RGBAFormat,
+  Scene,
+  WebGLRenderTarget,
+} from "three";
 import { describe, expect, it } from "vitest";
+import { createDefaultUniforms } from "../../effects/base-effect";
+import passThroughVert from "../../glsl/pass-through.vert";
+import probeFrag from "../../test/onset-probe.frag";
+import { createGL } from "../../test/render-harness";
 
-import { bakeOnsetTexture, filterOnsets, packOnsetState, spliceOnsets, unpackOnsetState } from "../onset-map";
+import {
+  bakeOnsetTexture,
+  filterOnsets,
+  packOnsetState,
+  spliceOnsets,
+  unpackOnsetState,
+  type Onset,
+} from "../onset-map";
 
 // The addon reports every plausible peak with a raw salience and no threshold,
 // so these cover the two things the renderer side is responsible for: turning
 // a file's sensitivity into the set of onsets that count, and baking those into
-// the nearest-onset row the shaders read.
+// the texture the shaders search.
 
 function packed(pairs: [number, number][]): Float32Array {
   const out = new Float32Array(pairs.length * 2);
@@ -195,42 +219,106 @@ describe("packOnsetState", () => {
   });
 });
 
+/** What sourceOnsetsAround returns at each of `times`, read back from the GPU. */
+function onsetsAround(onsets: Onset[], durationSec: number, times: number[]): Float32Array {
+  const gl = createGL();
+  const onsetTexture = bakeOnsetTexture(onsets, durationSec);
+  const probeTex = new DataTexture(
+    new Float32Array(times.flatMap((t) => [t, 0, 0, 0])),
+    times.length,
+    1,
+    RGBAFormat,
+    FloatType,
+  );
+  probeTex.needsUpdate = true;
+  const material = new RawShaderMaterial({
+    uniforms: { ...createDefaultUniforms(), sourceOnsetTex: { value: onsetTexture }, probeTex: { value: probeTex } },
+    vertexShader: passThroughVert,
+    fragmentShader: probeFrag,
+    glslVersion: GLSL3,
+  });
+  const target = new WebGLRenderTarget(times.length, 1, {
+    type: FloatType,
+    format: RGBAFormat,
+    minFilter: NearestFilter,
+    magFilter: NearestFilter,
+  });
+  const scene = new Scene().add(new Mesh(new PlaneGeometry(2, 2), material));
+  gl.setRenderTarget(target);
+  gl.render(scene, new OrthographicCamera(-1, 1, 1, -1, 0, 1));
+  const out = new Float32Array(times.length * 4);
+  gl.readRenderTargetPixels(target, 0, 0, times.length, 1, out);
+  gl.setRenderTarget(null);
+  target.dispose();
+  material.dispose();
+  probeTex.dispose();
+  onsetTexture.dispose();
+  gl.dispose();
+  return out;
+}
+
 describe("bakeOnsetTexture", () => {
   it("maps every position to its nearest, previous, and next onsets", () => {
-    const texture = bakeOnsetTexture(
+    const out = onsetsAround(
       [
         { timeSec: 0.2, strength: 1 },
         { timeSec: 0.8, strength: 0.5 },
       ],
       1,
+      [0.05, 0.45, 0.55, 0.95],
     );
-    const data = texture.image.data as Float32Array;
-    const width = texture.image.width;
-    const at = (t: number): { nearest: number; present: number; prev: number; next: number } => {
-      const x = Math.min(width - 1, Math.floor(t * width));
-      return { nearest: data[x * 4], present: data[x * 4 + 1], prev: data[x * 4 + 2], next: data[x * 4 + 3] };
-    };
+    const at = (i: number) => ({
+      nearest: out[i * 4],
+      present: out[i * 4 + 1],
+      prev: out[i * 4 + 2],
+      next: out[i * 4 + 3],
+    });
 
-    expect(at(0.05).nearest).toBeCloseTo(0.2, 5);
-    expect(at(0.05).prev).toBe(-1);
-    expect(at(0.05).next).toBeCloseTo(0.2, 5);
-    expect(at(0.45).nearest).toBeCloseTo(0.2, 5);
-    expect(at(0.45).prev).toBeCloseTo(0.2, 5);
-    expect(at(0.45).next).toBeCloseTo(0.8, 5);
-    // Halfway between the two, the later one takes over as nearest.
-    expect(at(0.55).nearest).toBeCloseTo(0.8, 5);
-    expect(at(0.55).prev).toBeCloseTo(0.2, 5);
-    expect(at(0.95).nearest).toBeCloseTo(0.8, 5);
-    expect(at(0.95).prev).toBeCloseTo(0.8, 5);
-    expect(at(0.95).next).toBe(-1);
-    expect(at(0.95).present).toBe(1);
-    texture.dispose();
+    expect(at(0).nearest).toBeCloseTo(0.2, 5);
+    expect(at(0).prev).toBe(-1);
+    expect(at(0).next).toBeCloseTo(0.2, 5);
+    expect(at(1).nearest).toBeCloseTo(0.2, 5);
+    expect(at(1).prev).toBeCloseTo(0.2, 5);
+    expect(at(1).next).toBeCloseTo(0.8, 5);
+    // Past halfway between the two, the later one takes over as nearest.
+    expect(at(2).nearest).toBeCloseTo(0.8, 5);
+    expect(at(2).prev).toBeCloseTo(0.2, 5);
+    expect(at(3).nearest).toBeCloseTo(0.8, 5);
+    expect(at(3).prev).toBeCloseTo(0.8, 5);
+    expect(at(3).next).toBe(-1);
+    expect(at(3).present).toBe(1);
   });
 
-  it("bakes an empty map when there are no onsets", () => {
-    const texture = bakeOnsetTexture([], 1);
-    const data = texture.image.data as Float32Array;
-    for (let x = 0; x < texture.image.width; x++) expect(data[x * 4 + 1]).toBe(0);
-    texture.dispose();
+  it("reads no onsets when there are none", () => {
+    const out = onsetsAround([], 1, [0.1, 0.9]);
+    expect(Array.from(out)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it("finds the neighbours as exactly twenty minutes in as at the start", () => {
+    const durationSec = 1200;
+    // Onsets clustered and spread unevenly, some a few milliseconds apart.
+    const onsets: Onset[] = [];
+    for (let k = 0; k < 3000; k++) {
+      const t = Math.fround((durationSec * (k + 0.5 * Math.sin(k * 1.7) ** 2)) / 3000);
+      onsets.push({ timeSec: t, strength: 1 });
+      if (k % 7 === 0) onsets.push({ timeSec: Math.fround(t + 0.004), strength: 1 });
+    }
+    onsets.sort((a, b) => a.timeSec - b.timeSec);
+    const times: number[] = [];
+    for (const { timeSec } of onsets.slice(0, 40).concat(onsets.slice(-40))) {
+      times.push(Math.fround(timeSec - 0.001), timeSec, Math.fround(timeSec + 0.001));
+    }
+    const out = onsetsAround(onsets, durationSec, times);
+    const misses: string[] = [];
+    times.forEach((t, i) => {
+      let next = 0;
+      while (next < onsets.length && onsets[next].timeSec <= t) next++;
+      const prev = next > 0 ? onsets[next - 1].timeSec : -1;
+      const after = next < onsets.length ? onsets[next].timeSec : -1;
+      if (out[i * 4 + 2] !== prev || out[i * 4 + 3] !== after) {
+        misses.push(`${t}: ${out[i * 4 + 2]}, ${out[i * 4 + 3]}, not ${prev}, ${after}`);
+      }
+    });
+    expect(misses.slice(0, 8), `${misses.length} of ${times.length} times`).toEqual([]);
   });
 });

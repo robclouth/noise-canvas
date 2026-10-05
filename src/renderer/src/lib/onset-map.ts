@@ -4,12 +4,11 @@ import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat 
  * Onset map for a file. The addon detects onsets from the packed coefficients
  * and reports every plausible peak with a raw salience and no threshold; this
  * is where the file's sensitivity decides which of them count, and where the
- * survivors are baked into a 1-row float texture mapping any time position to
- * its onset neighbourhood: R = nearest onset time in seconds, G = 1 where an
- * onset exists, B = the previous onset time (at or before the position, −1
- * when none), A = the next onset time (−1 when none). Transient-aware effects
+ * survivors are baked into a float texture the shaders search for any time's
+ * onset neighbourhood (sourceOnsetsAround): the nearest onset, the previous
+ * one at or before the time and the next one after it. Transient-aware effects
  * re-anchor phase at the nearest onset, and the transform's rigid transient
- * re-read spans the stretch between the two neighbours, all from one fetch.
+ * re-read spans the stretch between the two neighbours.
  *
  * The cutoff is hard: an onset either counts or it does not, and one that
  * counts is re-anchored in full whether it is a kick or a ghost note — the
@@ -18,7 +17,6 @@ import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat 
 
 export type Onset = { timeSec: number; strength: number };
 
-const BIN_SEC = 0.001;
 const MAX_TEX_WIDTH = 4096;
 // Percentile of the file's saliences that maps to full strength. Taken high
 // rather than at the maximum so one outlier hit does not scale everything else
@@ -132,33 +130,37 @@ export function spliceOnsets(
 }
 
 /**
- * Bakes the onset-neighbourhood lookup row. Onsets must be sorted by time,
- * which is how the detector reports them.
+ * Bakes the onset texture, read row by row as one run of texels: texel 0 holds
+ * the bucket count, the onset count and the file's duration in seconds; then
+ * one texel per bucket, an equal share of the file each, holding the index of
+ * its first onset and of the first onset past it; then every onset's time.
+ * The buckets only narrow the search, so the answer for a time is the same
+ * whatever the file's length. Onsets must be sorted by time, which is how the
+ * detector reports them.
  */
 export function bakeOnsetTexture(onsets: Onset[], durationSec: number): DataTexture {
-  const width = Math.max(1, Math.min(MAX_TEX_WIDTH, Math.ceil(durationSec / BIN_SEC)));
-  const data = new Float32Array(width * 4);
+  const count = onsets.length;
+  const buckets = count;
+  const texels = 1 + buckets + count;
+  const width = Math.min(MAX_TEX_WIDTH, texels);
+  const height = Math.ceil(texels / width);
+  const data = new Float32Array(width * height * 4);
 
-  if (onsets.length > 0) {
-    let prev = -1;
-    for (let x = 0; x < width; x++) {
-      const t = ((x + 0.5) / width) * durationSec;
-      while (prev < onsets.length - 1 && onsets[prev + 1].timeSec <= t) prev++;
-      const prevTime = prev >= 0 ? onsets[prev].timeSec : -1;
-      const nextTime = prev + 1 < onsets.length ? onsets[prev + 1].timeSec : -1;
-      // Nearest of the two neighbours; a tie goes to the later one.
-      let nearest: number;
-      if (prevTime < 0) nearest = nextTime;
-      else if (nextTime < 0) nearest = prevTime;
-      else nearest = nextTime - t <= t - prevTime ? nextTime : prevTime;
-      data[x * 4] = nearest;
-      data[x * 4 + 1] = 1;
-      data[x * 4 + 2] = prevTime;
-      data[x * 4 + 3] = nextTime;
+  if (count > 0) {
+    data[0] = buckets;
+    data[1] = count;
+    data[2] = durationSec;
+    let first = 0;
+    for (let b = 0; b <= buckets; b++) {
+      const startSec = (b / buckets) * durationSec;
+      while (first < count && onsets[first].timeSec < startSec) first++;
+      if (b < buckets) data[(1 + b) * 4] = first;
+      if (b > 0) data[b * 4 + 1] = b === buckets ? count : first;
     }
+    for (let i = 0; i < count; i++) data[(1 + buckets + i) * 4] = onsets[i].timeSec;
   }
 
-  const texture = new DataTexture(data, width, 1, RGBAFormat, FloatType);
+  const texture = new DataTexture(data, width, height, RGBAFormat, FloatType);
   texture.internalFormat = "RGBA32F";
   texture.minFilter = NearestFilter;
   texture.magFilter = NearestFilter;
