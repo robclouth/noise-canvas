@@ -740,6 +740,15 @@ vec2 modifyPhase(vec2 magPhase, int frame, int band, bool shouldRandomise) {
   return magPhase;
 }
 
+// k times the turns a reversal adds at the dest band's centre: the rate
+// times the read's time plus the write's, the two mirrored about their
+// midpoint.
+Turns reversalTurns(float k, vec2 sourceUv, vec2 destUv) {
+  vec2 rate = destBandRate(destUv);
+  return plusTurns(axisTurnsOver(k * destPerSourceFrame, rate, sourceFrames(sourceUv.x), sourceFileFrameCount),
+                   axisTurnsOver(k, rate, destFrames(destUv.x), destFileFrameCount));
+}
+
 vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float scaleX, vec2 destUv) {
   float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
   vec4 meta = fetchBandMetadata(sourceMetadataTex, bandIndex);
@@ -764,10 +773,11 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
   correctedL = modifyPhase(correctedL, binFrame, int(bandIndex), shouldRandomisePhase);
   correctedR = modifyPhase(correctedR, binFrame, int(bandIndex), shouldRandomisePhase);
 
-  // Time reversal: dest_phase = -src_phase - 2π·f·T
-  // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
+  // Time reversal: dest_phase = -src_phase - 2π·f·(t_src + t_dest)
+  // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) ), with
+  // T the time the read and the write are mirrored about, twice over.
   if (scaleX < 0.0) {
-    float phaseShift = -phaseOfTurns(turnsOver(1.0, destBandRate(destUv), Frames(max(destFileFrameCount - 1, 1), 0.0)));
+    float phaseShift = phaseOfTurns(reversalTurns(-1.0, sourceUv, destUv));
     correctedL.y = -correctedL.y + phaseShift;
     correctedR.y = -correctedR.y + phaseShift;
   }
@@ -804,10 +814,11 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
   vec2 correctedL = fromPolar(magL, originalPhaseL + phaseDiffL);
   vec2 correctedR = fromPolar(magR, originalPhaseR + phaseDiffR);
 
-  // Time reversal: dest_phase = -src_phase - 2π·f·T
-  // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
+  // Time reversal: dest_phase = -src_phase - 2π·f·(t_src + t_dest)
+  // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) ), with
+  // T the time the read and the write are mirrored about, twice over.
   if (scaleX < 0.0) {
-    float phaseShift = -phaseOfTurns(turnsOver(1.0, destBandRate(destUv), Frames(max(destFileFrameCount - 1, 1), 0.0)));
+    float phaseShift = phaseOfTurns(reversalTurns(-1.0, sourceUv, destUv));
     correctedL.y = -correctedL.y + phaseShift;
     correctedR.y = -correctedR.y + phaseShift;
   }
@@ -871,8 +882,7 @@ vec4 getTransformedSampleNeutralish(vec2 sourceUv, vec2 destUv, float scaleX, fl
   }
 
   if (scaleX < 0.0) {
-    Frames duration = Frames(max(sourceFileFrameCount - 1, 1), 0.0);
-    float reversal = phaseOfTurns(turnsOver(-movedWeight, sourceBandRate(sampleUv), duration));
+    float reversal = phaseOfTurns(reversalTurns(-movedWeight, sampleUv, destUv));
     magPhase.y += reversal;
     magPhase.w += reversal;
   }
