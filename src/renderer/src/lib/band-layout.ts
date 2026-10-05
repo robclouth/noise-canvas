@@ -33,7 +33,8 @@ export function bandLayoutOf(
  * metadata as floats. Row 1 holds each band's centre in cycles per frame as a
  * float and the float remainder, so their sum carries the double: a phase
  * that multiplies the centre by a time ten minutes into a file needs more bits
- * than one float holds.
+ * than one float holds. Its third channel is the remainder of the band's
+ * packed offset past its float, which rounds beyond 2^24 texels.
  */
 export function metadataTextureRows(layout: BandLayout, sampleRate: number): Float32Array {
   const { numBands, metadata } = layout;
@@ -44,6 +45,7 @@ export function metadataTextureRows(layout: BandLayout, sampleRate: number): Flo
     const high = Math.fround(rate);
     rows[(numBands + band) * 4] = high;
     rows[(numBands + band) * 4 + 1] = rate - high;
+    rows[(numBands + band) * 4 + 2] = metadata[band * 4] - Math.fround(metadata[band * 4]);
   }
   return rows;
 }

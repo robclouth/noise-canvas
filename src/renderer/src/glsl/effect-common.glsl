@@ -253,6 +253,23 @@ vec4 fetchBandMetadata(sampler2D metaTex, float bandIndexFloat) {
   return texelFetch(metaTex, ivec2(x, y), 0);
 }
 
+// A band's first packed texel, exact past 2^24 texels, where row 0's float
+// rounds: row 1's third channel holds the remainder.
+int bandStartTexel(sampler2D metaTex, float bandIndexFloat) {
+  int bandIndex = int(clamp(floor(bandIndexFloat), 0.0, 1e9));
+  ivec2 metaSize = textureSize(metaTex, 0);
+  int x = clamp(bandIndex, 0, max(metaSize.x - 1, 0));
+  int start = int(texelFetch(metaTex, ivec2(x, 0), 0).r);
+  if (metaSize.y > 1) start += int(texelFetch(metaTex, ivec2(x, 1), 0).b);
+  return start;
+}
+
+/** The texel of a packed texture of `texSize` at a linear pixel index. */
+ivec2 packedTexel(int linearIndex, ivec2 texSize) {
+  int width = max(texSize.x, 1);
+  return clamp(ivec2(linearIndex % width, linearIndex / width), ivec2(0), max(texSize - 1, ivec2(0)));
+}
+
 /**
  * Read a single complex value pair (stereo) from a packed spectrogram at an unpacked UV.
  * Point-sampled, no interpolation. Uses texelFetch for exact reads.
@@ -264,7 +281,6 @@ vec4 readPackedData(vec2 unpackedUv,
                     float bandCount) {
   float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
   vec4 meta = fetchBandMetadata(metaTex, bandIndex);
-  float bandStartOffset   = meta.r;
   float bandLength        = meta.g;
   float bandTimeScaleExp  = meta.b;
 
@@ -273,17 +289,8 @@ vec4 readPackedData(vec2 unpackedUv,
   float timeIndexInBand   = floor(scaledTime);
   timeIndexInBand         = clamp(timeIndexInBand, 0.0, bandLength - 1.0);
 
-  // Map linear pixel index -> integer texel coords
-  ivec2 texSize = textureSize(dataTex, 0);
-  float safeWidthF = float(max(texSize.x, 1));
-  float linearPixelIndex = bandStartOffset + timeIndexInBand;
-
-  int px = int(mod(linearPixelIndex, safeWidthF));
-  int py = int(floor(linearPixelIndex / safeWidthF));
-  px = clamp(px, 0, max(texSize.x - 1, 0));
-  py = clamp(py, 0, max(texSize.y - 1, 0));
-
-  return texelFetch(dataTex, ivec2(px, py), 0);
+  int linearIndex = bandStartTexel(metaTex, bandIndex) + int(timeIndexInBand);
+  return texelFetch(dataTex, packedTexel(linearIndex, textureSize(dataTex, 0)), 0);
 }
 
 // Public sampling helpers
@@ -301,19 +308,7 @@ vec4 getDestMetadata(vec2 uv) {
   float rawIndex = (1.0 - uv.y) * destBandCount;
   return fetchBandMetadata(destMetadataTex, rawIndex);
 }
-
-vec4 readSourceAtTimeIndex(float timeIndex, float bandStartOffset) {
-  ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
-  float safeWidthF = float(max(texSize.x, 1));
-  float linearPixelIndex = bandStartOffset + timeIndex;
-
-  int px = int(mod(linearPixelIndex, safeWidthF));
-  int py = int(floor(linearPixelIndex / safeWidthF));
-  px = clamp(px, 0, max(texSize.x - 1, 0));
-  py = clamp(py, 0, max(texSize.y - 1, 0));
-
-  return texelFetch(sourceSpectrogramTex, ivec2(px, py), 0);
-}
+int destBandStart(vec2 uv) { return bandStartTexel(destMetadataTex, (1.0 - uv.y) * destBandCount); }
 
 // Interpolate between two magnitude/phase pairs. Magnitudes blend in log space
 // and phases take the shortest arc around the unwrapped representation so
@@ -346,14 +341,14 @@ void packedInterpBins(vec2 unpackedUv,
                       float frameCount,
                       float bandCount,
                       out float bandIndex,
-                      out float bandStartOffset,
+                      out int bandStart,
                       out float timeIndex0,
                       out float timeIndex1,
                       out float fraction) {
   bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
 
   vec4 meta = fetchBandMetadata(metaTex, bandIndex);
-  bandStartOffset        = meta.r;
+  bandStart              = bandStartTexel(metaTex, bandIndex);
   float bandLength       = meta.g;
   float bandTimeScaleExp = meta.b;
 
@@ -361,16 +356,6 @@ void packedInterpBins(vec2 unpackedUv,
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
 
   bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, fraction);
-}
-
-/** The texel of a packed texture of `texSize` at a linear pixel index. */
-ivec2 packedTexel(float linearIndex, ivec2 texSize) {
-  float widthFloat = float(max(texSize.x, 1));
-  int px = int(mod(linearIndex, widthFloat));
-  int py = int(floor(linearIndex / widthFloat));
-  px = clamp(px, 0, max(texSize.x - 1, 0));
-  py = clamp(py, 0, max(texSize.y - 1, 0));
-  return ivec2(px, py);
 }
 
 /**
@@ -385,10 +370,11 @@ void packedInterpCoords(vec2 unpackedUv,
                         out ivec2 texel1,
                         out ivec2 texel2,
                         out float fraction) {
-  float bandIndex, bandStartOffset, timeIndex0, timeIndex1;
-  packedInterpBins(unpackedUv, metaTex, frameCount, bandCount, bandIndex, bandStartOffset, timeIndex0, timeIndex1, fraction);
-  texel1 = packedTexel(bandStartOffset + timeIndex0, texSize);
-  texel2 = packedTexel(bandStartOffset + timeIndex1, texSize);
+  float bandIndex, timeIndex0, timeIndex1;
+  int bandStart;
+  packedInterpBins(unpackedUv, metaTex, frameCount, bandCount, bandIndex, bandStart, timeIndex0, timeIndex1, fraction);
+  texel1 = packedTexel(bandStart + int(timeIndex0), texSize);
+  texel2 = packedTexel(bandStart + int(timeIndex1), texSize);
 }
 
 /**
@@ -736,7 +722,7 @@ vec2 modifyPhase(vec2 magPhase, int frame, int band, bool shouldRandomise) {
 vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float scaleX, vec2 destUv) {
   float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
   vec4 meta = fetchBandMetadata(sourceMetadataTex, bandIndex);
-  float bandStartOffset  = meta.r;
+  int bandStart = bandStartTexel(sourceMetadataTex, bandIndex);
   float bandLength       = meta.g;
   float bandTimeScaleExp = meta.b;
 
@@ -747,21 +733,8 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
   bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 
   ivec2 sSize    = textureSize(sourceSpectrogramTex, 0);
-  float widthF   = float(max(sSize.x, 1));
-
-  float linearIndex1 = bandStartOffset + timeIndex0;
-  int px1 = int(mod(linearIndex1, widthF));
-  int py1 = int(floor(linearIndex1 / widthF));
-  px1 = clamp(px1, 0, max(sSize.x - 1, 0));
-  py1 = clamp(py1, 0, max(sSize.y - 1, 0));
-  vec4 sample0 = texelFetch(sourceSpectrogramTex, ivec2(px1, py1), 0);
-
-  float linearIndex2 = bandStartOffset + timeIndex1;
-  int px2 = int(mod(linearIndex2, widthF));
-  int py2 = int(floor(linearIndex2 / widthF));
-  px2 = clamp(px2, 0, max(sSize.x - 1, 0));
-  py2 = clamp(py2, 0, max(sSize.y - 1, 0));
-  vec4 sample1 = texelFetch(sourceSpectrogramTex, ivec2(px2, py2), 0);
+  vec4 sample0 = texelFetch(sourceSpectrogramTex, packedTexel(bandStart + int(timeIndex0), sSize), 0);
+  vec4 sample1 = texelFetch(sourceSpectrogramTex, packedTexel(bandStart + int(timeIndex1), sSize), 0);
 
   vec2 correctedL = interpolateComplex(sample0.rg, sample1.rg, timeFraction);
   vec2 correctedR = interpolateComplex(sample0.ba, sample1.ba, timeFraction);
@@ -788,7 +761,7 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
 
   float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
   vec4 meta = fetchBandMetadata(sourceMetadataTex, bandIndex);
-  float bandStartOffset  = meta.r;
+  int bandStart = bandStartTexel(sourceMetadataTex, bandIndex);
   float bandLength       = meta.g;
   float bandTimeScaleExp = meta.b;
 
@@ -798,21 +771,8 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
   bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 
   ivec2 sSize    = textureSize(sourceSpectrogramTex, 0);
-  float widthF   = float(max(sSize.x, 1));
-
-  float linearIndex1 = bandStartOffset + timeIndex0;
-  int px1 = int(mod(linearIndex1, widthF));
-  int py1 = int(floor(linearIndex1 / widthF));
-  px1 = clamp(px1, 0, max(sSize.x - 1, 0));
-  py1 = clamp(py1, 0, max(sSize.y - 1, 0));
-  vec4 smp0 = texelFetch(sourceSpectrogramTex, ivec2(px1, py1), 0);
-
-  float linearIndex2 = bandStartOffset + timeIndex1;
-  int px2 = int(mod(linearIndex2, widthF));
-  int py2 = int(floor(linearIndex2 / widthF));
-  px2 = clamp(px2, 0, max(sSize.x - 1, 0));
-  py2 = clamp(py2, 0, max(sSize.y - 1, 0));
-  vec4 smp1 = texelFetch(sourceSpectrogramTex, ivec2(px2, py2), 0);
+  vec4 smp0 = texelFetch(sourceSpectrogramTex, packedTexel(bandStart + int(timeIndex0), sSize), 0);
+  vec4 smp1 = texelFetch(sourceSpectrogramTex, packedTexel(bandStart + int(timeIndex1), sSize), 0);
 
   float magL = mix(getMag(smp0.rg), getMag(smp1.rg), timeFraction);
   float magR = mix(getMag(smp0.ba), getMag(smp1.ba), timeFraction);

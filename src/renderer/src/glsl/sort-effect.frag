@@ -180,7 +180,7 @@ void main() {
 
         if (neighborBandIdx >= 0 && neighborBandIdx < int(destBandCount)) {
             vec4 neighborMeta = fetchBandMetadata(destMetadataTex, float(neighborBandIdx));
-            int neighborBandStart = int(round(neighborMeta.r));
+            int neighborBandStart = bandStartTexel(destMetadataTex, float(neighborBandIdx));
             int neighborBandLength = int(round(neighborMeta.g));
 
             float absoluteFrames = float(timeIdx) * timeStep;

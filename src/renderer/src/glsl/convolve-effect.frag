@@ -51,13 +51,10 @@ void main() {
   // a row and get scaled up by their time-scale factor.
   float srcBandIndex = floor((1.0 - coords.source.y) * sourceBandCount);
   vec4  srcMeta = fetchBandMetadata(sourceMetadataTex, srcBandIndex);
-  float srcBandStart     = srcMeta.r;
+  int   srcBandStart     = bandStartTexel(sourceMetadataTex, srcBandIndex);
   float srcBandLength    = srcMeta.g;
   float srcBandTimeScale = exp2(srcMeta.b);
   ivec2 srcTexSize = textureSize(sourceSpectrogramTex, 0);
-  float srcTexWidthF = float(max(srcTexSize.x, 1));
-  int   srcMaxPx = max(srcTexSize.x - 1, 0);
-  int   srcMaxPy = max(srcTexSize.y - 1, 0);
 
   // Map dest Hz -> IR band so IRs analyzed with a different minFreq / bpo still
   // filter at matching absolute frequencies (proportional y lookup gives wrong
@@ -71,13 +68,10 @@ void main() {
   float irBandIndexF = irBandAtFout + (convolveIrBandsPerOctave / 12.0) * irPitchShiftSemi;
   float irBandIndex = clamp(irBandIndexF, 0.0, convolveIrBandCount - 1.0);
   vec4  irMeta = fetchBandMetadata(convolveIrMetadataTex, irBandIndex);
-  float irBandStart     = irMeta.r;
+  int   irBandStart     = bandStartTexel(convolveIrMetadataTex, irBandIndex);
   float irBandLength    = irMeta.g;
   float irBandTimeScale = exp2(irMeta.b);
   ivec2 irTexSize = textureSize(convolveIrTex, 0);
-  float irTexWidthF = float(max(irTexSize.x, 1));
-  int   irMaxPx = max(irTexSize.x - 1, 0);
-  int   irMaxPy = max(irTexSize.y - 1, 0);
 
   // IR base position in band-local units. The source per-tap position is
   // derived inside the loop via the dest-UV formulation so the brush edge mode
@@ -150,15 +144,8 @@ void main() {
 
     if (!srcInBounds || !irInBounds) continue;
 
-    float srcPixel = srcBandStart + srcIdx;
-    int srcPx = clamp(int(mod(srcPixel, srcTexWidthF)), 0, srcMaxPx);
-    int srcPy = clamp(int(floor(srcPixel / srcTexWidthF)), 0, srcMaxPy);
-    vec4 srcTexel = texelFetch(sourceSpectrogramTex, ivec2(srcPx, srcPy), 0);
-
-    float irPixel = irBandStart + irIdxFloor;
-    int irPx = clamp(int(mod(irPixel, irTexWidthF)), 0, irMaxPx);
-    int irPy = clamp(int(floor(irPixel / irTexWidthF)), 0, irMaxPy);
-    vec4 irTexel = texelFetch(convolveIrTex, ivec2(irPx, irPy), 0);
+    vec4 srcTexel = texelFetch(sourceSpectrogramTex, packedTexel(srcBandStart + int(srcIdx), srcTexSize), 0);
+    vec4 irTexel = texelFetch(convolveIrTex, packedTexel(irBandStart + int(irIdxFloor), irTexSize), 0);
 
     float magL = srcTexel.x * irTexel.x;
     float phsL = srcTexel.y + irTexel.y;

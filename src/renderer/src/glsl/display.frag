@@ -114,8 +114,8 @@ uniform float displayTileTexels;
 uniform float displayTileBlend;
 uniform float displayTileLevel;
 
-vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize) {
-    ivec2 texel = packedTexel(bandStartOffset + timeIndex, texSize);
+vec4 fetchDisplayTexel(int bandIndex, int bandStart, float timeIndex, ivec2 texSize) {
+    ivec2 texel = packedTexel(bandStart + int(timeIndex), texSize);
     if (previewActive) {
         vec2 bins = texelFetch(previewBinRangesTex, ivec2(bandIndex, 0), 0).rg;
         if (timeIndex >= bins.x && timeIndex < bins.y) return texelFetch(previewTex, texel, 0);
@@ -126,13 +126,14 @@ vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, iv
 vec4 sampleDisplayInterp(vec2 uv) {
     vec2 viewUv = canvasViewUv(uv);
     if (viewUv.x < 0.0 || viewUv.x > 1.0) return vec4(0.0);
-    float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
+    float bandIndex, timeIndex0, timeIndex1, timeFraction;
+    int bandStart;
     packedInterpBins(viewUv, canvasMetadataTex, canvasFrameCount, sourceBandCount,
-                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+                     bandIndex, bandStart, timeIndex0, timeIndex1, timeFraction);
     ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
     int band = int(bandIndex);
-    vec4 sample1 = fetchDisplayTexel(band, bandStartOffset, timeIndex0, texSize);
-    vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize);
+    vec4 sample1 = fetchDisplayTexel(band, bandStart, timeIndex0, texSize);
+    vec4 sample2 = fetchDisplayTexel(band, bandStart, timeIndex1, texSize);
     return vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
                 interpolateComplex(sample1.ba, sample2.ba, timeFraction));
 }
@@ -140,12 +141,13 @@ vec4 sampleDisplayInterp(vec2 uv) {
 // The dB pair one pyramid level holds, blended along time in its own bins.
 // False where either tap is a bin the level has not been drawn into yet.
 bool sampleLevelDb(vec2 uv, sampler2D levelTex, sampler2D levelMetaTex, out vec2 db) {
-    float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
+    float bandIndex, timeIndex0, timeIndex1, timeFraction;
+    int bandStart;
     packedInterpBins(uv, levelMetaTex, sourceFrameCount, sourceBandCount,
-                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+                     bandIndex, bandStart, timeIndex0, timeIndex1, timeFraction);
     ivec2 texSize = textureSize(levelTex, 0);
-    vec2 sample1 = texelFetch(levelTex, packedTexel(bandStartOffset + timeIndex0, texSize), 0).rg;
-    vec2 sample2 = texelFetch(levelTex, packedTexel(bandStartOffset + timeIndex1, texSize), 0).rg;
+    vec2 sample1 = texelFetch(levelTex, packedTexel(bandStart + int(timeIndex0), texSize), 0).rg;
+    vec2 sample2 = texelFetch(levelTex, packedTexel(bandStart + int(timeIndex1), texSize), 0).rg;
     if (!displayDbKnown(sample1) || !displayDbKnown(sample2)) return false;
     db = mix(sample1, sample2, timeFraction);
     return true;
@@ -164,16 +166,17 @@ bool canvasSpans(vec2 uv) {
 bool paintedDbAt(vec2 viewUv, sampler2D metaTex, float frameCount, sampler2D painted, sampler2D under,
                  sampler2D binRanges, out vec2 db) {
     if (viewUv.x < 0.0 || viewUv.x > 1.0) return false;
-    float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
+    float bandIndex, timeIndex0, timeIndex1, timeFraction;
+    int bandStart;
     packedInterpBins(viewUv, metaTex, frameCount, sourceBandCount,
-                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+                     bandIndex, bandStart, timeIndex0, timeIndex1, timeFraction);
     vec2 bins = texelFetch(binRanges, ivec2(int(bandIndex), 0), 0).rg;
     bool covers0 = timeIndex0 >= bins.x && timeIndex0 < bins.y;
     bool covers1 = timeIndex1 >= bins.x && timeIndex1 < bins.y;
     if (!covers0 && !covers1) return false;
     ivec2 texSize = textureSize(painted, 0);
-    ivec2 texel0 = packedTexel(bandStartOffset + timeIndex0, texSize);
-    ivec2 texel1 = packedTexel(bandStartOffset + timeIndex1, texSize);
+    ivec2 texel0 = packedTexel(bandStart + int(timeIndex0), texSize);
+    ivec2 texel1 = packedTexel(bandStart + int(timeIndex1), texSize);
     vec4 sample1 = covers0 ? texelFetch(painted, texel0, 0) : texelFetch(under, texel0, 0);
     vec4 sample2 = covers1 ? texelFetch(painted, texel1, 0) : texelFetch(under, texel1, 0);
     vec2 left = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
@@ -201,7 +204,7 @@ bool ringBinDb(vec4 meta, float bin, out vec2 db) {
     float tileIndex = floor(bin / binsPerTile);
     if (tileIndex < displayTileFirst || tileIndex >= displayTileFirst + displayTileCount) return false;
     float slot = mod(tileIndex, displayTileSlots);
-    float linear = slot * displayTileTexels + meta.r + (bin - tileIndex * binsPerTile);
+    int linear = int(slot * displayTileTexels + meta.r + (bin - tileIndex * binsPerTile));
     db = texelFetch(displayTileTex, packedTexel(linear, textureSize(displayTileTex, 0)), 0).rg;
     return displayDbKnown(db);
 }
