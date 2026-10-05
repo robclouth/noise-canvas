@@ -78,12 +78,13 @@ class ConvolveEffect extends BaseEffect {
       material.uniforms.convolveIrMinFreq.value = irData.minFreq;
       material.uniforms.convolveIrBandsPerOctave.value = irData.bandsPerOctave;
     } else {
-      const sourceFrames = material.uniforms.sourceFrameCount.value;
+      // The source textures may hold a span of their file, so IR Start is
+      // still measured along the whole file.
       material.uniforms.convolveIrTex.value = material.uniforms.sourceSpectrogramTex.value;
       material.uniforms.convolveIrMetadataTex.value = material.uniforms.sourceMetadataTex.value;
-      material.uniforms.convolveIrFrameCount.value = sourceFrames;
-      material.uniforms.convolveIrViewStartFrame.value = 0;
-      material.uniforms.convolveIrFileFrameCount.value = sourceFrames;
+      material.uniforms.convolveIrFrameCount.value = material.uniforms.sourceFrameCount.value;
+      material.uniforms.convolveIrViewStartFrame.value = material.uniforms.sourceViewStartFrame.value;
+      material.uniforms.convolveIrFileFrameCount.value = material.uniforms.sourceFileFrameCount.value;
       material.uniforms.convolveIrBandCount.value = material.uniforms.sourceBandCount.value;
       material.uniforms.convolveIrMinFreq.value = material.uniforms.sourceMinFreq.value;
       material.uniforms.convolveIrBandsPerOctave.value = material.uniforms.sourceBandsPerOctave.value;
