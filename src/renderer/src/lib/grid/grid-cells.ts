@@ -34,8 +34,8 @@ export interface PitchCellParams {
   minFreq: number;
 }
 
-/** Cells past this many on one axis mean the grid is too fine to fill. */
-export const MAX_CELLS_PER_AXIS = 4096;
+/** Pitch cells past this many mean the grid is too fine to fill. */
+export const MAX_PITCH_CELLS = 4096;
 
 // A file's lowest band reaches the scale through a log, so a note sitting on it
 // can come back a fraction of a cent below the range. Treat that as inside, or
@@ -75,7 +75,7 @@ export function resolveTimeCells(range: CellRange, params: TimeCellParams): Grid
   // Step back off the range's low edge so a line sitting exactly on it is found.
   let start = stepSwungGrid(range.min, interval, swing, -1);
 
-  while (start < range.max && cells.length <= MAX_CELLS_PER_AXIS) {
+  while (start < range.max) {
     const next = stepSwungGrid(start, interval, swing, 1);
     if (!(next > start)) break;
     if (next > range.min) cells.push({ start, size: next - start });
@@ -97,7 +97,7 @@ export function resolvePitchCells(range: CellRange, params: PitchCellParams): Gr
   if (params.gridSizeSemis > 0) {
     const interval = params.gridSizeSemis;
     let start = Math.floor(range.min / interval) * interval;
-    while (start < range.max && cells.length <= MAX_CELLS_PER_AXIS) {
+    while (start < range.max && cells.length <= MAX_PITCH_CELLS) {
       if (start + interval > range.min) cells.push({ start, size: interval });
       start += interval;
     }
@@ -112,7 +112,7 @@ export function resolvePitchCells(range: CellRange, params: PitchCellParams): Gr
   let noteAbs = snapSemisToScale(lowAbs, offsets);
   if (noteAbs < lowAbs - SCALE_EPSILON_SEMIS) noteAbs = stepScaleSemis(noteAbs, 1, offsets);
 
-  while (noteAbs - bottomAbs < range.max && cells.length <= MAX_CELLS_PER_AXIS) {
+  while (noteAbs - bottomAbs < range.max && cells.length <= MAX_PITCH_CELLS) {
     const nextAbs = stepScaleSemis(noteAbs, 1, offsets);
     if (!(nextAbs > noteAbs)) break;
     cells.push({ start: noteAbs - bottomAbs, size: nextAbs - noteAbs });

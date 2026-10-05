@@ -72,6 +72,16 @@ describe("resolveTimeCells", () => {
   });
 });
 
+describe("resolveTimeCells over a long file", () => {
+  it("lays the finest grid across twenty minutes to the end", () => {
+    const cells = resolveTimeCells({ min: 0, max: 1200 }, timeParams({ gridSizeBeats: 1 / 64 }));
+    // 1/64 of a half-second beat over 1200 s.
+    expect(cells.length).toBe(153600);
+    const last = cells[cells.length - 1];
+    expect(last.start + last.size).toBeCloseTo(1200, 6);
+  });
+});
+
 describe("resolvePitchCells", () => {
   it("lays one cell per grid interval", () => {
     const cells = resolvePitchCells({ min: 0, max: 36 }, pitchParams());

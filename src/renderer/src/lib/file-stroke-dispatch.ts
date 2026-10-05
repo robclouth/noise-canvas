@@ -1099,8 +1099,9 @@ function joinPaint(parts: readonly StrokePaint[]): StrokePaint {
 
 /**
  * Paints one dab through the canvas: on it, a block at a time as it holds
- * them, when a window can serve what the dab reads, and beside it otherwise.
- * False when neither can. `painted` is called each time a piece lands.
+ * them, when a window can serve what the dab reads, and beside it otherwise —
+ * the choice strokeRefusal makes for an aimed dab. False when neither can.
+ * `painted` is called each time a piece lands.
  */
 export function paintDab(
   context: FileStrokeContext,
@@ -1111,7 +1112,7 @@ export function paintDab(
   options: DispatchOptions = {},
   painted?: () => void,
 ): boolean {
-  if (canvas.servable(span.extent, span.needs)) {
+  if (!reachOf(context, state).refusal && canvas.servable(span.extent, span.needs)) {
     return canvas.paintWhenHeld(span.extent, span.needs, (clip) => {
       const done = dispatchStroke(context, state, aim, false, { ...options, span, clip });
       if (done) painted?.();
@@ -1139,7 +1140,6 @@ export function prepareStrokeBatch(
   }
   let painted = 0;
   for (const stroke of strokes) {
-    if (strokeRefusal(context, stroke.state) !== null) continue;
     const aim = new Vector2(stroke.aimX, stroke.aimY);
     const span = dabSpan(context, stroke.state, aim, canvas);
     const dabState = stroke.state;
