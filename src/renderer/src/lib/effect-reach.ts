@@ -152,26 +152,22 @@ function tapAt(table: number[], index: number): number {
   return Math.abs(table[i0] + (table[i1] - table[i0]) * Math.min(1, Math.max(0, index - i0)));
 }
 
-/**
- * A smear is an offset added to the source UV, so its beats convert against the
- * span the canvas holds and its modulation sweeps that same UV. Origin makes it
- * one-sided.
- */
+/** A smear reads past the brush only where the edge mode lets it. */
 function blurReach(effect: State, ctx: ReachContext): TimeReach {
   if (!READS_PAST_BRUSH.has(Number(effect.blurEdgeMode))) return NO_REACH;
   return blurSmear(effect, ctx);
 }
 
-/** How far the smear reads either side of a pixel, wherever the edge mode sends it. */
+/**
+ * How far the smear reads either side of a pixel, wherever the edge mode sends
+ * it: a full Blur ↔ is four beats and a full noise a fifth of that, modulated
+ * or not. Origin makes it one-sided.
+ */
 function blurSmear(effect: State, ctx: ReachContext): TimeReach {
-  if (ctx.canvasSeconds <= 0) return NO_REACH;
-  const uvPerBeat = 60 / ctx.bpm / ctx.canvasSeconds;
-  const uvRange = { min: 0, max: 0.1 };
-  const smearUv = ((Number(effect.blurAmountTime) * 4) / 100) * uvPerBeat;
-  const noiseUv = ((Number(effect.blurNoiseTime) * 4) / 100) * uvPerBeat * 0.2;
-  const smear = widest(valueRange(effect, "blurAmountTime", smearUv, uvRange));
-  const noise = widest(valueRange(effect, "blurNoiseTime", noiseUv, uvRange));
-  const span = (smear + noise) * ctx.canvasSeconds;
+  const beat = 60 / ctx.bpm;
+  const smear = (widest(stateRange(effect, "blurAmountTime")) / 100) * 4 * beat;
+  const noise = (widest(stateRange(effect, "blurNoiseTime")) / 100) * 0.8 * beat;
+  const span = smear + noise;
   const origin = Number(effect.blurOrigin);
   return { before: origin === 2 ? 0 : span, after: origin === 0 ? 0 : span };
 }

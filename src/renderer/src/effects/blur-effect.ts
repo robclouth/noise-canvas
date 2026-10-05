@@ -86,43 +86,33 @@ class BlurEffect extends BaseEffect {
     const source = sourceLayout(props.commonUniforms);
     if (!(source.totalDuration > 0) || !(source.numBands > 0)) return;
 
-    const blurSizeUv = unitsToUv(
-      (blurAmountTime * 4) / 100,
-      (blurAmountPitch / 100) * 12,
-      bpm,
-      source.totalDuration,
-      source.bandsPerOctave,
-      source.numBands,
-    );
-
-    const blurNoiseUv = unitsToUv(
-      (blurNoiseTime * 4) / 100,
-      (blurNoisePitch / 100) * 12,
-      bpm,
-      source.totalDuration,
-      source.bandsPerOctave,
-      source.numBands,
-    );
+    // Each control's whole range in the source's UV, so a modulated control
+    // sweeps the beats and semitones its slider names, whatever span the
+    // source textures hold.
+    const toUv = (beats: number, semis: number) =>
+      unitsToUv(beats, semis, bpm, source.totalDuration, source.bandsPerOctave, source.numBands);
+    const fullSize = toUv(4, 12);
+    const fullNoise = toUv(4 / 5, 12 / 5);
 
     material.uniforms.blurSizeX.value = parameterUniform(state, "blurAmountTime", props.modContext, {
-      value: blurSizeUv.x,
+      value: (blurAmountTime / 100) * fullSize.x,
       min: 0,
-      max: 0.1,
+      max: fullSize.x,
     });
     material.uniforms.blurSizeY.value = parameterUniform(state, "blurAmountPitch", props.modContext, {
-      value: blurSizeUv.y,
+      value: (blurAmountPitch / 100) * fullSize.y,
       min: 0,
-      max: 0.1,
+      max: fullSize.y,
     });
     material.uniforms.blurNoiseX.value = parameterUniform(state, "blurNoiseTime", props.modContext, {
-      value: blurNoiseUv.x / 5,
+      value: (blurNoiseTime / 100) * fullNoise.x,
       min: 0,
-      max: 0.1,
+      max: fullNoise.x,
     });
     material.uniforms.blurNoiseY.value = parameterUniform(state, "blurNoisePitch", props.modContext, {
-      value: blurNoiseUv.y / 5,
+      value: (blurNoisePitch / 100) * fullNoise.y,
       min: 0,
-      max: 0.1,
+      max: fullNoise.y,
     });
     material.uniforms.blurEdgeMode.value = blurEdgeMode;
     material.uniforms.blurSampleCount.value = passIndex === 0 ? blurSamplesX : blurSamplesY;
