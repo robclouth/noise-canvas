@@ -638,11 +638,11 @@ uint fractionOver(uvec2 rate, int n) {
   return n < 0 ? ~turns + 1u : turns;
 }
 
-// A number of turns as its exact fraction and a float estimate of the whole.
-struct Turns { float fraction; float approx; };
+// A number of turns as its exact fraction.
+struct Turns { float fraction; };
 
-Turns plusTurns(Turns a, Turns b) { return Turns(fract(a.fraction + b.fraction), a.approx + b.approx); }
-Turns minusTurns(Turns a, Turns b) { return Turns(fract(a.fraction - b.fraction), a.approx - b.approx); }
+Turns plusTurns(Turns a, Turns b) { return Turns(fract(a.fraction + b.fraction)); }
+Turns minusTurns(Turns a, Turns b) { return Turns(fract(a.fraction - b.fraction)); }
 
 // k × rate × t, for k and a rate in cycles per frame each carried as a float
 // and its remainder (fetchBandRate). Whole turns of k × rate drop out of the
@@ -656,8 +656,7 @@ Turns turnsOver(vec2 k, vec2 rate, Frames t) {
   );
   uint wholeTurns = fractionOver(rateFraction, t.whole + int(wholeOffset));
   float scale = (k.x + k.y) * (rate.x + rate.y);
-  float fraction = fract(float(wholeTurns) / 4294967296.0 + scale * part);
-  return Turns(fraction, scale * framesValue(t));
+  return Turns(fract(float(wholeTurns) / 4294967296.0 + scale * part));
 }
 
 Turns turnsOver(float k, vec2 rate, Frames t) { return turnsOver(vec2(k, 0.0), rate, t); }
@@ -667,24 +666,17 @@ Turns turnsOver(float k, vec2 rate, Frames t) { return turnsOver(vec2(k, 0.0), r
 Turns axisTurnsOver(vec2 k, vec2 rate, Frames t, int fileFrames) {
   Turns turns = turnsOver(k, rate, t);
   float shortfall = (k.x + k.y) * rate.x * (framesValue(t) / max(float(fileFrames), 1.0));
-  return Turns(fract(turns.fraction - shortfall), turns.approx - shortfall);
+  return Turns(fract(turns.fraction - shortfall));
 }
 
 Turns axisTurnsOver(float k, vec2 rate, Frames t, int fileFrames) {
   return axisTurnsOver(vec2(k, 0.0), rate, t, fileFrames);
 }
 
-// Whole turns a phase keeps. A later move that scales stored phase (a pitch
-// shift over a reversed stroke) needs them to keep the bands in step. Below
-// this a float holds the phase to within 0.06 rad, as the stored phase always
-// has there; above it the float cannot hold the fraction at all, so the phase
-// keeps only that.
-const float KEPT_TURNS = 131072.0;
-
+// The phase of a number of turns, in [-π, π). Whole turns are dropped, so a
+// term built from a time far into a file is as exact as one near its start.
 float phaseOfTurns(Turns turns) {
-  float fraction = turns.fraction - floor(turns.fraction + 0.5);
-  if (abs(turns.approx) >= KEPT_TURNS) return TWO_PI * fraction;
-  return TWO_PI * floor(turns.approx - fraction + 0.5) + TWO_PI * fraction;
+  return TWO_PI * (turns.fraction - floor(turns.fraction + 0.5));
 }
 
 // A band's centre in cycles per frame, as a float and its remainder.
@@ -992,7 +984,7 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   vec2 rate = destBandRate(destUv);
   Frames tSrc = sourceFrames(sourceUv.x);
   Frames tDest = destFrames(destUv.x);
-  Turns turns = Turns(0.0, 0.0);
+  Turns turns = Turns(0.0);
   float carrierK = (1.0 - stretchAmount) * centreRatio;
   if (carrierK != 0.0) {
     Turns atSrc = axisTurnsOver(carrierK * destPerSourceFrame, rate, tSrc, sourceFileFrameCount);

@@ -16,5 +16,5 @@ void main() {
     return;
   }
   Turns turns = turnsOver(vec2(row0.x, row1.z), row0.yz, Frames(int(row1.x) + int(row1.y), row0.w));
-  outColor = vec4(turns.fraction, turns.approx, phaseOfTurns(turns), 0.0);
+  outColor = vec4(turns.fraction, 0.0, phaseOfTurns(turns), 0.0);
 }

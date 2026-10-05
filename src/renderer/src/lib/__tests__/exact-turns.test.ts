@@ -167,21 +167,15 @@ describe("exact turns", () => {
     expect(misses.slice(0, 8), `${misses.length} of ${ALL.length} cases`).toEqual([]);
   });
 
-  it("keeps whole turns while a float holds the phase, and only the fraction past that", () => {
+  it("takes the phase as the fraction of a turn alone, however many whole turns there are", () => {
     const out = probe();
     const misses: string[] = [];
     ALL.forEach((c, i) => {
       const exact = exactTurns(c);
-      const turns = valueOf(exact);
       const phase = out[i * 4 + 2];
-      if (Math.abs(turns) < 130_000) {
-        const off = Math.abs(phase - 2 * Math.PI * turns);
-        if (!(off < 0.07)) misses.push(`${turns} turns kept as ${phase}: ${off} rad out`);
-      } else if (Math.abs(turns) > 132_000) {
-        const off = turnDistance(phase / (2 * Math.PI), fractionOf(exact));
-        if (!(Math.abs(phase) <= Math.PI + 1e-6 && off < 2e-6))
-          misses.push(`${turns} turns as ${phase}: ${off} turns out`);
-      }
+      const off = turnDistance(phase / (2 * Math.PI), fractionOf(exact));
+      if (!(Math.abs(phase) <= Math.PI + 1e-6 && off < 2e-6))
+        misses.push(`${valueOf(exact)} turns as ${phase}: ${off} turns out`);
     });
     expect(misses.slice(0, 8), `${misses.length} of ${ALL.length} cases`).toEqual([]);
   });
