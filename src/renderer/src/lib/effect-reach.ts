@@ -518,7 +518,7 @@ export function readBoxes(
     first.step === firstEnabledStep(state) &&
     first.repeats === 1 &&
     first.effect === "transform" &&
-    warps(first.view);
+    moves(first.view);
   let region = box;
   const brushOf = (step: number): BrushBox => brushes[step] ?? { ...region, wrapsTime: false, wrapsPitch: false };
   for (let i = chain.length - 1; i >= (apart ? 1 : 0); i--) {
@@ -539,7 +539,7 @@ function effectReadBox(effect: EffectType, view: State, ctx: ReachContext, box: 
     start: inner.start - envelope.before,
     end: inner.end + envelope.after,
   });
-  if (effect === "transform" && warps(view))
+  if (effect === "transform" && moves(view))
     return fitBox(read(unionBox(box, warpBox(view, ctx, box, brush))), brush, ctx);
   const own = pieceReachOf(effect, view, ctx);
   const time = own && withEnvelope(own, view, ctx);
@@ -565,6 +565,15 @@ function warps(view: State): boolean {
     !only(stateRange(view, "transformScalePitch"), 1) ||
     !only(stateRange(view, "transformSpeed"), 1) ||
     !only(stateRange(view, "transformRotation"), 0)
+  );
+}
+
+/** True when a transform reads somewhere other than the pixel it writes: it warps or shifts. */
+function moves(view: State): boolean {
+  return (
+    warps(view) ||
+    !only(stateRange(view, "transformShiftBeats"), 0) ||
+    !only(stateRange(view, "transformShiftSemis"), 0)
   );
 }
 

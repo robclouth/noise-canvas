@@ -155,6 +155,36 @@ const SCENARIOS: { name: string; dabs: (seconds: number) => { x: number; y: numb
     ],
   },
   {
+    name: "a transform shifted as far as it goes in time and pitch",
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.3,
+        state: brushState(
+          "transform",
+          { transformShiftBeats: 32, transformShiftSemis: 96, transformEdgeMode: 1 },
+          4,
+          false,
+        ),
+      },
+    ],
+  },
+  {
+    name: "an accumulating transform shifted back in time and down in pitch",
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.7,
+        state: brushState(
+          "transform",
+          { transformShiftBeats: -32, transformShiftSemis: -48, transformEdgeMode: 1 },
+          4,
+          true,
+        ),
+      },
+    ],
+  },
+  {
     name: "a disabled narrow step before a wide reversal step",
     dabs: () => {
       const state = brushState("transform", REVERSE, 31, false);
