@@ -212,13 +212,30 @@ float destCanvasUvSpanX(float fileSpanX) {
   if (float(destFileFrameCount) == destFrameCount) return fileSpanX;
   return fileSpanX * float(destFileFrameCount) / max(destFrameCount, 1.0);
 }
-// The file texel a canvas UV names, as a UV of the file. Random draws are
-// seeded on it so one coefficient draws one value whatever span the canvas
-// holds; whole frames, because the UV a fragment arrives with lands a hair
-// either side of its frame.
-vec2 destTexelUv(vec2 destUv) {
-  return vec2(floor(destFileFrame(destUv.x) + 0.5) / max(float(destFileFrameCount), 1.0), destUv.y);
+// The whole file frame of the bin a canvas UV names, and its band. Random
+// draws are seeded on these, so one coefficient draws one value whatever span
+// the canvas holds and however far into the file it sits; the frame is rounded
+// because the UV a fragment arrives with lands a hair either side of it.
+int destBinFrame(float uvX) { return destViewStartFrame + int(floor(uvX * destFrameCount + 0.5)); }
+int destBandOf(vec2 destUv) { return int(floor((1.0 - destUv.y) * destBandCount)); }
+
+// A well-mixed hash of a whole number.
+uint mixBits(uint x) {
+  x ^= x >> 16;
+  x *= 0x7feb352du;
+  x ^= x >> 15;
+  x *= 0x846ca68bu;
+  x ^= x >> 16;
+  return x;
 }
+
+// A draw in [0, 1) for a bin of a band, one per salt, with no pattern along
+// either however large the numbers grow.
+float randomAt(int frame, int band, uint salt) {
+  uint h = mixBits(uint(frame) ^ mixBits(uint(band) ^ mixBits(salt)));
+  return float(h >> 8) / 16777216.0;
+}
+float randomAt(vec2 destUv, uint salt) { return randomAt(destBinFrame(destUv.x), destBandOf(destUv), salt); }
 
 // ============================================================================
 // SPECTROGRAM SAMPLING (texelFetch where exact texels are addressed)
@@ -707,15 +724,10 @@ float instFreqDevHz(float pPrev, float pCenter, float pNext, float dtSec) {
   return (unwrapPhase(pCenter - pPrev) + unwrapPhase(pNext - pCenter)) * 0.5 / (TWO_PI * dtSec);
 }
 
-vec2 modifyPhase(vec2 magPhase, vec2 uv, bool shouldRandomise) {
-  float mag = getMag(magPhase);
-  float phase = getPhase(magPhase);
-  if (shouldRandomise) {
-    vec2 seed1 = uv;
-    vec2 seed2 = uv + vec2(12.34, 56.78);
-    phase = random(seed1 + random(seed2)) * TWO_PI;
-    return fromPolar(mag, phase);
-  }
+// The magnitude with a random phase drawn for the source bin at `frame` of
+// `band`, when shouldRandomise is set.
+vec2 modifyPhase(vec2 magPhase, int frame, int band, bool shouldRandomise) {
+  if (shouldRandomise) return fromPolar(getMag(magPhase), randomAt(frame, band, 1u) * TWO_PI);
   return magPhase;
 }
 
@@ -752,8 +764,9 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
   vec2 correctedL = interpolateComplex(sample0.rg, sample1.rg, timeFraction);
   vec2 correctedR = interpolateComplex(sample0.ba, sample1.ba, timeFraction);
 
-  correctedL = modifyPhase(correctedL, vec2(px1, py1), shouldRandomisePhase);
-  correctedR = modifyPhase(correctedR, vec2(px1, py1), shouldRandomisePhase);
+  int binFrame = sourceViewStartFrame + int(timeIndex0) * int(exp2(bandTimeScaleExp));
+  correctedL = modifyPhase(correctedL, binFrame, int(bandIndex), shouldRandomisePhase);
+  correctedR = modifyPhase(correctedR, binFrame, int(bandIndex), shouldRandomisePhase);
 
   // Time reversal: dest_phase = -src_phase - 2π·f·T
   // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
@@ -1373,13 +1386,15 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
       magPhase.x *= magScale;
       magPhase.z *= magScale;
 
+      // Blocks from the file's start, as an exact fraction of a block and the
+      // whole count, so the walk is as smooth far into the file as near it.
+      float blocksPerCycle = 1.0 / (XRES_BLOCK_SUPPORT * destBandsPerOctave);
+      float fb = axisTurnsOver(blocksPerCycle, destBandRate(destUv), destFrames(destUv.x), destFileFrameCount).fraction;
       float blockDur = XRES_BLOCK_SUPPORT * destBandsPerOctave / destFreqHz;
-      float tBlocks = destAxisSec(destUv.x) / blockDur;
-      float b0 = floor(tBlocks);
-      float fb = tBlocks - b0;
-      float bandSeed = floor((1.0 - destUv.y) * destBandCount);
-      float noiseL = TWO_PI * mix(random(vec2(bandSeed, b0)), random(vec2(bandSeed, b0 + 1.0)), fb);
-      float noiseR = TWO_PI * mix(random(vec2(bandSeed + 917.0, b0)), random(vec2(bandSeed + 917.0, b0 + 1.0)), fb);
+      int b0 = int(floor(destAxisSec(destUv.x) / blockDur - fb + 0.5));
+      int band = destBandOf(destUv);
+      float noiseL = TWO_PI * mix(randomAt(b0, band, 2u), randomAt(b0 + 1, band, 2u), fb);
+      float noiseR = TWO_PI * mix(randomAt(b0, band, 3u), randomAt(b0 + 1, band, 3u), fb);
       float noiseW = 1.0 - s;
       baseL += noiseW * unwrapPhase(noiseL - baseL);
       baseR += noiseW * unwrapPhase(noiseR - baseR);
@@ -1429,9 +1444,8 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
   float replace = clamp((abs(phaseGain - 1.0) - NOISE_REPLACE_DEADZONE) * NOISE_REPLACE_RAMP, 0.0, 1.0);
   if (replace > 0.0) {
     float noise = replace * (1.0 - sourceTonality(wrappedSourceUv));
-    vec2 seed = vec2(floor(destFileFrame(destUv.x) + 0.5), floor(destUv.y * destBandCount));
-    float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
-    float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
+    float randL = randomAt(destUv, 4u) * TWO_PI;
+    float randR = randomAt(destUv, 5u) * TWO_PI;
     baseL += noise * unwrapPhase(randL - baseL);
     baseR += noise * unwrapPhase(randR - baseR);
   }
@@ -1714,8 +1728,8 @@ vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 pac
 
   // Dissolve (stochastic)
   if (blendMode == 8) {
-    vec2 finalL = (random(destUv.xy) < effectiveWeight.x) ? pannedModifiedL : blendOriginalL;
-    vec2 finalR = (random(destUv.yx) < effectiveWeight.y) ? pannedModifiedR : blendOriginalR;
+    vec2 finalL = (randomAt(destUv, 6u) < effectiveWeight.x) ? pannedModifiedL : blendOriginalL;
+    vec2 finalR = (randomAt(destUv, 7u) < effectiveWeight.y) ? pannedModifiedR : blendOriginalR;
     finalL = limitMagnitude(finalL);
     finalR = limitMagnitude(finalR);
     return vec4(finalL, finalR);

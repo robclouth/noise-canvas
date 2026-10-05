@@ -8,21 +8,13 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   vec2 polarValueR;
 
   if (synthesizeType == 0) { // Noise
-    // Use a small offset to de-correlate multiple random calls
-    vec2 texel = destTexelUv(coords.dest);
-    vec2 seed1 = texel;
-    vec2 seed2 = texel + vec2(12.34, 56.78);
-    vec2 seed3 = texel + vec2(43.21, 87.65);
-    vec2 seed4 = texel + vec2(21.43, 65.87);
-
-    // Left Channel
-    float amplitudeL = random(seed1 + random(seed2));
-    float phaseL = (random(seed3 + random(seed4)) * 2.0 - 1.0) * PI;
+    // One draw per salt for each channel's amplitude and phase.
+    float amplitudeL = randomAt(coords.dest, 10u);
+    float phaseL = (randomAt(coords.dest, 11u) * 2.0 - 1.0) * PI;
     polarValueL = vec2(amplitudeL, phaseL);
 
-    // Right Channel - use swizzled seeds for stereo separation
-    float amplitudeR = random(seed1.yx + random(seed2.yx));
-    float phaseR = (random(seed3.yx + random(seed4.yx)) * 2.0 - 1.0) * PI;
+    float amplitudeR = randomAt(coords.dest, 12u);
+    float phaseR = (randomAt(coords.dest, 13u) * 2.0 - 1.0) * PI;
     polarValueR = vec2(amplitudeR, phaseR);
   } else if (synthesizeType == 1) { // Sine
     float amplitude = 1.0;

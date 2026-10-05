@@ -82,7 +82,7 @@ void main() {
 
         // Noise direction follows origin mode. Shared seed for L/R so the random
         // draw matches across channels; kernel widths scale the magnitude.
-        float rndN = random(coords.dest);
+        float rndN = randomAt(coords.dest, 8u);
         float rndS = blurOrigin == 1 ? (rndN * 2.0 - 1.0) : (blurOrigin == 0 ? -rndN : rndN);
 
         vec2 offsetL = blurDirection * fi * blurSizeUvL / float(max(radius, 1));
