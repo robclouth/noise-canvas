@@ -19,6 +19,26 @@ export type SynthesiseView = (
   endFrame: number,
 ) => Promise<SynthesisPass>;
 
+/**
+ * The view of the packed state a pass rebuilding [startFrame, endFrame) reads:
+ * the span widened by `readReachSeconds` either side, on the band grid.
+ */
+export function synthesisViewOf(
+  layout: PackedLayout,
+  sampleRate: number,
+  readReachSeconds: number,
+  startFrame: number,
+  endFrame: number,
+): { ranges: Uint32Array; meta: PackedLayout } {
+  const span = alignToBandGrid(
+    layout,
+    startFrame - readReachSeconds * sampleRate,
+    endFrame + readReachSeconds * sampleRate,
+  );
+  const view = packedViewOf(layout, span.startFrame, span.endFrame);
+  return { ranges: view.ranges, meta: { ...layout, viewStartFrame: span.startFrame, viewEndFrame: span.endFrame } };
+}
+
 /** Seconds of the file one pass rebuilds. */
 export const SYNTHESIS_CHUNK_SECONDS = 30;
 
@@ -65,10 +85,8 @@ export async function synthesiseInChunks(
       spans.push([start, end]);
       last = await pass;
     } else {
-      const span = alignToBandGrid(layout, start - readReachSeconds * sampleRate, end + readReachSeconds * sampleRate);
-      const view = packedViewOf(layout, span.startFrame, span.endFrame);
-      const meta: PackedLayout = { ...layout, viewStartFrame: span.startFrame, viewEndFrame: span.endFrame };
-      last = await synthesise(await read(view.ranges), meta, channels, start, end);
+      const view = synthesisViewOf(layout, sampleRate, readReachSeconds, start, end);
+      last = await synthesise(await read(view.ranges), view.meta, channels, start, end);
     }
     channels = last.channels;
   }

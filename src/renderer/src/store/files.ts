@@ -32,6 +32,7 @@ import { viewCoversFile } from "../lib/canvas-view";
 import {
   SYNTHESIS_CHUNK_SECONDS,
   synthesiseInChunks,
+  synthesisViewOf,
   type ChunkOnsetPass,
   type SynthesiseView,
 } from "../../../main/lib/synthesis-chunks";
@@ -567,6 +568,35 @@ function chunkOnsetPass(
 }
 
 /** A range reader that refuses rather than answering with a gap. */
+/**
+ * Rebuilds frames [startFrame, endFrame) of bands [startBand, endBand) from a
+ * view of the store around them and splices them into `existing`, as a whole
+ * run's partial synthesis does.
+ */
+async function synthesiseRegionFromSpans(
+  read: (ranges: Uint32Array) => Promise<Float32Array | null>,
+  layout: PackedLayout,
+  sampleRate: number,
+  params: AnalysisParams,
+  existing: Float32Array[],
+  region: { startFrame: number; endFrame: number; startBand: number; endBand: number },
+) {
+  const reach = await host.analysis.synthesisReadReach(sampleRate, params);
+  const view = synthesisViewOf(layout, sampleRate, reach, region.startFrame, region.endFrame);
+  return host.analysis.synthesize(
+    await spanReader(read)(view.ranges),
+    view.meta,
+    sampleRate,
+    params,
+    false,
+    existing,
+    region.startFrame,
+    region.endFrame,
+    region.startBand,
+    region.endBand,
+  );
+}
+
 function spanReader(read: (ranges: Uint32Array) => Promise<Float32Array | null>) {
   return async (ranges: Uint32Array): Promise<Float32Array> => {
     const values = await read(ranges);
@@ -2639,7 +2669,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const dirtyRegion = renderer.getDirtyRegion();
 
       const existingBuffer = file.audioBuffer;
-      const canDoPartialSynthesis = dirtyRegion && existingBuffer && !readSpans;
+      const canDoPartialSynthesis = dirtyRegion && existingBuffer;
       console.log("[timing] canDoPartialSynthesis:", canDoPartialSynthesis);
 
       let startFrame: number | undefined;
@@ -2701,7 +2731,26 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       let synthesisResult;
       const cppSynthStart = performance.now();
       try {
-        if (readSpans) {
+        if (readSpans && startFrame !== undefined && endFrame !== undefined && existingAudio) {
+          synthesisResult = await synthesiseRegionFromSpans(
+            readSpans,
+            packedLayout,
+            originalAnalysis.sampleRate,
+            analysisParams,
+            existingAudio,
+            { startFrame, endFrame, startBand: startBand ?? 0, endBand: endBand ?? packedLayout.numBands },
+          );
+          if (analysisParams.detectOnsets) {
+            const found = await scanOnsetsFromSpans(
+              readSpans,
+              packedLayout,
+              originalAnalysis.sampleRate,
+              file,
+              analysisParams,
+            );
+            if (found) synthesisResult = { ...synthesisResult, ...found };
+          }
+        } else if (readSpans) {
           // A whole-file onset pass reads each chunk with the synthesis and
           // finishes off the curves once the audio is there; a regional one
           // reads its span on its own afterwards.

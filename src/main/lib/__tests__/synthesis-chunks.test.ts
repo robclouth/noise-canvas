@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { gatherPixelRanges } from "../../../renderer/src/lib/pixel-ranges";
 import { alignToBandGrid, packedViewOf } from "../packed-view";
-import { synthesiseInChunks, type SynthesiseView, type SynthesisPass } from "../synthesis-chunks";
+import { synthesiseInChunks, synthesisViewOf, type SynthesiseView, type SynthesisPass } from "../synthesis-chunks";
 import type { GaboratorAnalysisResult, PackedLayout } from "../types";
 import { SAMPLE_RATE, signal } from "./analysis-fixtures";
 
@@ -82,6 +82,52 @@ function worstSample(a: Float32Array[], b: Float32Array[]): { worst: number; lou
   }
   return { worst, loudest };
 }
+
+describe("a region rebuilt from a view", () => {
+  it("gives the samples a partial pass over the whole run gives", async () => {
+    const { result, layout, read, reach } = await analysed(30, 2);
+    // Audio the region is spliced into: the file's own, with its channels
+    // swapped so the splice shows wherever it lands.
+    const base = await addon.synthesize(result.data, layout, SAMPLE_RATE, PARAMS, false, []);
+    const existing = () => [base.channels[1].slice(), base.channels[0].slice()];
+    const startFrame = Math.round(14.1 * SAMPLE_RATE);
+    const endFrame = Math.round(15.7 * SAMPLE_RATE);
+    const startBand = 10;
+    const endBand = 60;
+
+    const fromRun = await addon.synthesize(
+      result.data,
+      layout,
+      SAMPLE_RATE,
+      PARAMS,
+      false,
+      existing(),
+      startFrame,
+      endFrame,
+      startBand,
+      endBand,
+    );
+    const view = synthesisViewOf(layout, SAMPLE_RATE, reach, startFrame, endFrame);
+    expect(view.meta.viewStartFrame).toBeGreaterThan(0);
+    expect(view.meta.viewEndFrame).toBeLessThan(layout.numFrames);
+    const fromView = await addon.synthesize(
+      await read(view.ranges),
+      view.meta,
+      SAMPLE_RATE,
+      PARAMS,
+      false,
+      existing(),
+      startFrame,
+      endFrame,
+      startBand,
+      endBand,
+    );
+
+    const { worst, loudest } = worstSample(fromRun.channels, fromView.channels);
+    expect(loudest).toBeGreaterThan(0.2);
+    expect(worst, `largest sample difference ${worst}`).toBeLessThan(2e-6);
+  });
+});
 
 describe("audio rebuilt a chunk at a time", () => {
   it("preserves low-frequency audio across the production 30-second boundary", async () => {
