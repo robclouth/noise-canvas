@@ -13,3 +13,8 @@ export function responsePath(state: State): string | null {
 export function impulseKey(state: State): string {
   return responsePath(state) ?? "";
 }
+
+/** The key a step's Attract field file is held under. */
+export function attractFieldKey(path: string): string {
+  return `attract:${path}`;
+}

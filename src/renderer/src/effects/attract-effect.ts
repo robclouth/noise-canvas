@@ -14,7 +14,7 @@ import attractEffectFrag from "../glsl/attract-effect.frag";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
-import { attractFieldKey } from "../lib/impulse-need";
+import { attractFieldKey } from "../lib/impulse-key";
 
 const defaultUniformValue = defaultParameterUniform(0, -100, 100);
 

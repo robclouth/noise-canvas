@@ -1,6 +1,6 @@
 import { createEffectStateView, createStepStateView } from "@renderer/store";
 import type { SpectrogramData, State } from "@renderer/store/types";
-import { impulseKey, responsePath } from "./impulse-key";
+import { attractFieldKey, impulseKey, responsePath } from "./impulse-key";
 import type { SourceNeed } from "./source-window";
 
 /** An open file a convolve step can filter through. */
@@ -57,11 +57,6 @@ function tapSpan(effect: State, file: ResponseFile): SourceNeed {
     endFrame: Math.min(numFrames, Math.ceil(start + taps * stride)),
     wantOriginal: false,
   };
-}
-
-/** The key a step's Attract field file is held under. */
-export function attractFieldKey(path: string): string {
-  return `attract:${path}`;
 }
 
 /**
