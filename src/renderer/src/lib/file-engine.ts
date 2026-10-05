@@ -432,12 +432,25 @@ export class FileEngine {
         if (!packed) void canvasRef.current?.storeReady();
 
         releaseAnalysisData(spectrogramData);
+        // Whatever the first pass finds, a brush stops waiting for onsets once it is done.
+        const onsetsSettled = (): void => {
+          const opened = openFiles[fileId];
+          if (opened) opened.onsetsPending = false;
+        };
         if (nodeId === null) {
-          if (!openFiles[fileId]?.audioBuffer) await historyManager.restoreCurrentAudio();
+          try {
+            if (!openFiles[fileId]?.audioBuffer) await historyManager.restoreCurrentAudio();
+          } finally {
+            onsetsSettled();
+          }
           return;
         }
         const gateBefore = openFiles[fileId]?.onsetReference?.odfMax ?? 0;
-        await state.synthesizeFile(fileId, undefined, packed);
+        try {
+          await state.synthesizeFile(fileId, undefined, packed);
+        } finally {
+          onsetsSettled();
+        }
         if (!current()) return;
         const updated = openFiles[fileId];
         if (nodeId && updated?.audioBuffer) {

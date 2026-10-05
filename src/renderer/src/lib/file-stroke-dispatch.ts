@@ -48,7 +48,10 @@ import {
   swungGridCellWidthUv,
 } from "./utils";
 
-type FileStrokeFile = Pick<OpenFile, "id" | "filePath" | "displayName" | "spectrogramData" | "onsets"> & {
+type FileStrokeFile = Pick<
+  OpenFile,
+  "id" | "filePath" | "displayName" | "spectrogramData" | "onsets" | "onsetsPending"
+> & {
   rendererRef?: { current: Pick<FileRendererHandle, "getTextures" | "getCanvasView"> | null };
 };
 
@@ -573,7 +576,21 @@ function reachOf(context: FileStrokeContext, state: State): StateReach {
   return entry;
 }
 
+/** The refusal a brush gets while a file it reads still waits for its onsets. */
+export const ONSETS_PENDING_REFUSAL = "This file is still finding its onsets. Paint again in a moment.";
+
+/** True while the painted file, or a file a step reads, still waits for its onsets. */
+function onsetsPendingFor(context: FileStrokeContext, state: State): boolean {
+  if (context.openFiles[context.fileId]?.onsetsPending) return true;
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+  return steps.some((step) => {
+    const path = step.sourceFile?.path;
+    return path ? Boolean(context.getOpenFileByPath(path)?.onsetsPending) : false;
+  });
+}
+
 export function strokeRefusal(context: FileStrokeContext, state: State, aim?: { x: number; y: number }): string | null {
+  if (onsetsPendingFor(context, state)) return ONSETS_PENDING_REFUSAL;
   const { canvasRef } = context;
   const reach = reachOf(context, state);
   const canvas = canvasRef.current;
@@ -1141,6 +1158,7 @@ export function paintDab(
   options: DispatchOptions = {},
   painted?: () => void,
 ): boolean {
+  if (onsetsPendingFor(context, state)) return false;
   if (!reachOf(context, state).refusal && canvas.servable(span.extent, span.needs)) {
     return canvas.paintWhenHeld(span.extent, span.needs, (clip) => {
       const done = dispatchStroke(context, state, aim, false, { ...options, span, clip });

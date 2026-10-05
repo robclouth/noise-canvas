@@ -635,6 +635,8 @@ type AnalysedFile = {
   spectrogramData: SpectrogramData;
   onsets: PackedOnsets;
   onsetReference: { odfMax: number; bandMax: Float32Array };
+  /** True when the onsets are left to the first synthesis to find. */
+  onsetsPending?: boolean;
 };
 
 /**
@@ -727,6 +729,7 @@ async function analyseIntoBlocks(
     },
     onsets: detected.onsets,
     onsetReference: { odfMax: detected.odfMax, bandMax: detected.bandMax },
+    onsetsPending: Boolean(alongside),
   };
 }
 
@@ -924,6 +927,7 @@ async function loadRealFileViaGaborator(
     spectrogramData: analysed.spectrogramData,
     onsets: analysed.onsets,
     onsetReference: analysed.onsetReference.bandMax.length > 0 ? analysed.onsetReference : undefined,
+    onsetsPending: analysed.onsetsPending,
   });
 }
 

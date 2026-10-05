@@ -112,6 +112,10 @@ export type OpenFile = {
   // refreshed by synthesis so they follow what has been painted. Raw and
   // unthresholded — lib/onset-map.ts applies the sensitivity control.
   onsets?: Float32Array;
+  // Set while a file whose canvas holds a window waits for the pass after its
+  // open that finds its onsets. Every read through the default warp follows
+  // onsets, so a stroke reading the file waits for them.
+  onsetsPending?: boolean;
   // What the last pass over the whole file found: the level that counts as
   // silence, and each band's loudest moment. Carried so a stroke can re-detect
   // its own span alone and still judge it on the file's terms. Absent until a
