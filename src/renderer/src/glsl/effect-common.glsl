@@ -549,6 +549,15 @@ float framesValue(Frames t) { return float(t.whole) + t.offset; }
 // Frames from b to a, exact while the distance fits a float.
 float framesBetween(Frames a, Frames b) { return float(a.whole - b.whole) + (a.offset - b.offset); }
 
+// Where the brush starts in the file, on the loop of a wrapping time axis that
+// the fragment at destUv belongs to: a fragment the brush reached by running
+// off the file's end takes the start one file length earlier.
+Frames destBrushStartFrames(vec2 destUv) {
+  int loops = 0;
+  if (wrapsTimeAxis()) loops = int(floor((destUv.x - brushBottomLeftUv.x) / max(brushWrapSpanX, 1e-6)));
+  return Frames(destViewStartFrame + loops * destFileFrameCount, brushBottomLeftUv.x * destFrameCount);
+}
+
 // A float's magnitude as an integer significand times 2^exponent.
 uint significandOf(float x, out int exponent) {
   uint bits = floatBitsToUint(x);

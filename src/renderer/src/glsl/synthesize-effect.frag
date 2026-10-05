@@ -37,16 +37,15 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
     float fHz       = max(meta.a, 1e-6);
     // Distance from the brush start measured in brush space, so a brush that
     // wraps the canvas anchors its wrapped half to the same impulse — one loop
-    // earlier in absolute time, which the anchor UV below reflects.
+    // earlier in absolute time.
     float distUv    = getEffectiveBrushOffset(coords.dest).x;
-    // The impulse's phase is set against absolute time, so the anchor is the
-    // file's: a canvas holding one span of it writes the same coefficients.
-    float anchorSec = destFileSec(coords.dest.x - distUv);
     float distSec   = distUv * destFrameCount / destSampleRate;
     float widthSec  = (destBandsPerOctave * 0.7) / fHz;
     float arg       = distSec / widthSec;
     float amplitude = exp(-arg * arg);
-    float phase     = -TWO_PI * fHz * anchorSec;
+    // The impulse's phase is set against the file's absolute time, in exact
+    // turns, so it lands the same however far into the file the brush sits.
+    float phase     = phaseOfTurns(turnsOver(-1.0, destBandRate(coords.dest), destBrushStartFrames(coords.dest)));
     polarValueL = vec2(amplitude, phase);
     polarValueR = vec2(amplitude, phase);
   }

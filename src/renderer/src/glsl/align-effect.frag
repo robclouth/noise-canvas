@@ -15,14 +15,11 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
 
   // Anchor located in brush space, so a brush that wraps the canvas aligns its
   // wrapped half to the same anchor — one loop earlier in absolute time.
-  float anchorDistUv = getEffectiveBrushOffset(coords.dest).x - ALIGN_ANCHOR_01 * brushSizeUv.x;
-  float anchorUvX  = coords.dest.x - anchorDistUv;
-  float anchorSec  = destFileSec(anchorUvX);
+  Frames anchor    = plusFrames(destBrushStartFrames(coords.dest), ALIGN_ANCHOR_01 * brushSizeUv.x * destFrameCount);
   float octaves    = log2(fHz / max(destMinFreq, 1e-6));
-  float bandAnchor = anchorSec + ALIGN_TILT_SPO * octaves;
+  float tiltSec    = ALIGN_TILT_SPO * octaves;
 
-  float pixelSec = destFileSec(coords.dest.x);
-  float distSec  = pixelSec - bandAnchor;
+  float distSec  = framesBetween(destFrames(coords.dest.x), anchor) / max(destSampleRate, 1e-6) - tiltSec;
 
   // Symmetric Gaussian coherence. Sigma combines per-band Gabor support (wide
   // at LF, narrow at HF) with a floor decay so HF still gets a usable window.
@@ -42,11 +39,11 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
 
   float blend = clamp(ALIGN_STRENGTH * coherence, 0.0, 1.0);
 
-  // Gaborator stores phase in the global convention (see effect-common.glsl:484:
-  // shifting the signal by +Δt adds +2π·f·Δt uniformly to every atom's phase).
-  // An impulse at absolute time T has phase -2π·f·T at every atom (t_c, f_c)
-  // within the synthesis support — no pixel-time dependence.
-  float targetPhase = -TWO_PI * fHz * bandAnchor;
+  // Gaborator stores phase in the global convention (shifting the signal by
+  // +Δt adds +2π·f·Δt uniformly to every atom's phase). An impulse at absolute
+  // time T has phase -2π·f·T at every atom (t_c, f_c) within the synthesis
+  // support — no pixel-time dependence. The anchor's part runs in exact turns.
+  float targetPhase = phaseOfTurns(turnsOver(-1.0, destBandRate(coords.dest), anchor)) - TWO_PI * fHz * tiltSec;
 
   float curL = getPhase(sourceTexel.rg);
   float curR = getPhase(sourceTexel.ba);
