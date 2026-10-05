@@ -119,6 +119,15 @@ export interface FileRendererHandle {
   /** The span the canvas textures lay out, or null before the renderer exists. */
   getCanvasView: () => CanvasView | null;
   /**
+   * Values read from the store for `ranges`, with the paint of strokes whose
+   * commits the store does not hold yet laid over them.
+   */
+  withPendingPaint?: (ranges: Uint32Array, values: Float32Array) => Promise<Float32Array>;
+  /** As withPendingPaint, for one block of the file read whole. */
+  blockWithPendingPaint?: (index: number, values: Float32Array) => Promise<Float32Array>;
+  /** Changes whenever the paint withPendingPaint lays over a read changes. */
+  pendingPaintRevision?: () => number;
+  /**
    * Why the brush cannot paint on a canvas holding a window of the file, in the
    * words the user reads. Null when the stroke can paint.
    */

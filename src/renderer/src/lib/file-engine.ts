@@ -220,17 +220,28 @@ export class FileEngine {
           this.notifyResidencyChanged();
           invalidateRef.current?.();
         },
+        // Another file is read as its canvas shows it: the store, with the
+        // paint of strokes whose commits have not landed laid over it.
         sourceBlocks: (sourceId) => {
           const source = openFiles[sourceId];
           const spectrogram = source?.spectrogramData;
           if (!spectrogram) return null;
+          const shown = () => openFiles[sourceId]?.rendererRef?.current;
           return {
             spectrogram,
-            readCurrent: (ranges) => getHistoryManager(sourceId).currentRanges(ranges),
+            readCurrent: async (ranges) => {
+              const values = await getHistoryManager(sourceId).currentRanges(ranges);
+              const handle = shown();
+              return values && handle?.withPendingPaint ? handle.withPendingPaint(ranges, values) : values;
+            },
             readRoot: (ranges) => getHistoryManager(sourceId).rootRanges(ranges),
-            readCurrentBlock: (index) => getHistoryManager(sourceId).currentBlock(index),
+            readCurrentBlock: async (index) => {
+              const values = await getHistoryManager(sourceId).currentBlock(index);
+              const handle = shown();
+              return values && handle?.blockWithPendingPaint ? handle.blockWithPendingPaint(index, values) : values;
+            },
             readRootBlock: (index) => getHistoryManager(sourceId).rootBlock(index),
-            revision: () => getHistoryManager(sourceId).revision,
+            revision: () => getHistoryManager(sourceId).revision + (shown()?.pendingPaintRevision?.() ?? 0),
           };
         },
       });
@@ -810,6 +821,9 @@ export class FileEngine {
       beginStroke,
       endStroke,
       holdPaint: (ranges, values) => canvasRef.current?.holdPaint(ranges, values) ?? (async () => {}),
+      withPendingPaint: async (ranges, values) => canvasRef.current?.withPendingPaint(ranges, values) ?? values,
+      blockWithPendingPaint: async (index, values) => canvasRef.current?.blockWithPendingPaint(index, values) ?? values,
+      pendingPaintRevision: () => canvasRef.current?.pendingPaintRevision ?? 0,
       landUnderStroke: (ranges, values, own) => canvasRef.current?.landUnderStroke(ranges, values, own),
       forgetBlocks: (ranges) => canvasRef.current?.forgetBlocks(ranges),
       settleStroke: async (signal) => {

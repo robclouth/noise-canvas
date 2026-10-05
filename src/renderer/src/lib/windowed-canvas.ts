@@ -661,6 +661,34 @@ export class WindowedCanvas {
   }
 
   /**
+   * `values`, read from the store for the pixels of `ranges` in range order,
+   * with the paint of every stroke whose commit the store does not hold yet
+   * laid over them, as this canvas shows the file. Another file reading this
+   * one through a window takes it so.
+   */
+  async withPendingPaint(ranges: Uint32Array, values: Float32Array): Promise<Float32Array> {
+    const pending = [...this.pending];
+    if (pending.length === 0) return values;
+    await Promise.all(pending.map((paint) => paint.landed));
+    // A store read can hand back its own resident array, so the paint goes on a copy.
+    const shown = values.slice();
+    for (const paint of pending) if (paint.values) copyCompactOverlap(shown, ranges, paint.values, paint.ranges);
+    return shown;
+  }
+
+  /** As withPendingPaint, for block `index` read whole. */
+  async blockWithPendingPaint(index: number, values: Float32Array): Promise<Float32Array> {
+    if (this.pending.length === 0) return values;
+    const list = blockPixelRanges(this.grid, index);
+    return this.withPendingPaint(list.ranges.slice(0, list.count * 2), values);
+  }
+
+  /** Changes whenever the paint withPendingPaint lays over a read changes. */
+  get pendingPaintRevision(): number {
+    return this.pendingKey;
+  }
+
+  /**
    * Puts a stroke's blocks into the block slots at its pen-up, ahead of its
    * commit, so a block the window brings in while the commit stores it needs
    * nothing laid over it: the blocks on the canvas are copied from it, those
