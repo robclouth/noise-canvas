@@ -1,6 +1,6 @@
 import { buildShapeTable, type CloneShapeKey } from "@renderer/effects/clone-shapes";
 import type { EffectType } from "@renderer/effects/types";
-import { EVOLVE_SCALE_FULL_BEATS, EVOLVE_SCALE_FULL_SEMIS } from "@renderer/lib/constants";
+import { EVOLVE_SCALE_FULL_BEATS, EVOLVE_SCALE_FULL_SEMIS, NUM_MODULATORS } from "@renderer/lib/constants";
 import { responsePath } from "@renderer/lib/impulse-key";
 import { modulationWeight } from "@renderer/lib/static-modulation";
 import { originFraction, resolveBrushFootprint } from "@renderer/lib/utils";
@@ -115,6 +115,32 @@ function widest(range: ValueRange): number {
 /** The smallest magnitude the range holds, which is zero when it crosses zero. */
 function narrowest(range: ValueRange): number {
   return range.lo <= 0 && range.hi >= 0 ? 0 : Math.min(Math.abs(range.lo), Math.abs(range.hi));
+}
+
+// The modulator mode that follows the level of the step's input.
+const MODULATOR_ENVELOPE = 1;
+
+/**
+ * Seconds either side of a texel an envelope-following modulator of the step
+ * reads its input: half its smoothing window, and a quarter of a beat for a
+ * full stereo spread. Every pass of the step samples its modulators.
+ */
+function envelopeReach(step: State, ctx: ReachContext): TimeReach {
+  const beat = 60 / ctx.bpm;
+  let reach = 0;
+  for (let i = 1; i <= NUM_MODULATORS; i++) {
+    if (Number(step[`modulator${i}Mode` as ParameterKey]) !== MODULATOR_ENVELOPE) continue;
+    const smoothing = (Number(step[`modulator${i}EnvelopeSmoothingBeats` as ParameterKey] ?? 0) * beat) / 2;
+    const spread = (widest(stateRange(step, `modulator${i}StereoSpread` as ParameterKey)) / 100) * 0.25 * beat;
+    reach = Math.max(reach, smoothing + spread);
+  }
+  return { before: reach, after: reach };
+}
+
+/** `reach` widened by what the step's envelope followers read around each texel. */
+function withEnvelope(reach: TimeReach, step: State, ctx: ReachContext): TimeReach {
+  const envelope = envelopeReach(step, ctx);
+  return { before: reach.before + envelope.before, after: reach.after + envelope.after };
 }
 
 /** Tap position in gap units, as the repeat shader interpolates its shape table. */
@@ -290,6 +316,7 @@ export function brushReaches(state: State, ctx: ReachContext): StepReach[] {
     else if (effect === "attract") reach = attractReach(view, ctx);
     else if (effect === "evolve") reach = evolveReach(view, ctx);
     else if (effect === "convolve") reach = convolveReach(view, ctx);
+    reach = withEnvelope(reach, view, ctx);
     if (reach.before <= 0 && reach.after <= 0) continue;
     out.push({ effect, step, brushSeconds: span.seconds, reach, repeats });
   }
@@ -359,8 +386,9 @@ export function pieceReach(state: State, ctx: ReachContext): TimeReach | null {
   let before = 0;
   let after = 0;
   for (const { effect, view, repeats } of chainedEffects(state)) {
-    const reach = pieceReachOf(effect, view, ctx);
-    if (!reach) return null;
+    const own = pieceReachOf(effect, view, ctx);
+    if (!own) return null;
+    const reach = withEnvelope(own, view, ctx);
     before += reach.before * repeats;
     after += reach.after * repeats;
   }
@@ -509,8 +537,16 @@ export function readBoxes(
 
 /** What one effect reads to paint `box`, within its step's `brush`. */
 function effectReadBox(effect: EffectType, view: State, ctx: ReachContext, box: ReadBox, brush: BrushBox): ReadBox {
-  if (effect === "transform" && warps(view)) return fitBox(unionBox(box, warpBox(view, ctx, box, brush)), brush, ctx);
-  const time = pieceReachOf(effect, view, ctx);
+  const envelope = envelopeReach(view, ctx);
+  const read = (inner: ReadBox): ReadBox => ({
+    ...inner,
+    start: inner.start - envelope.before,
+    end: inner.end + envelope.after,
+  });
+  if (effect === "transform" && warps(view))
+    return fitBox(read(unionBox(box, warpBox(view, ctx, box, brush))), brush, ctx);
+  const own = pieceReachOf(effect, view, ctx);
+  const time = own && withEnvelope(own, view, ctx);
   const semis = pitchReachOf(effect, view, ctx.bandsPerOctave);
   // A read across pitch lands between bands, so it takes one band more.
   const pitch = semis === null ? 1 : semis === 0 ? 0 : semitonesToUv(semis, ctx) + 1 / ctx.numBands;

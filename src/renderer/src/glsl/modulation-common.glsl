@@ -17,7 +17,8 @@ struct Modulator {
   int modulatorSteps; // even output levels; 0 or 1 leaves the output continuous
   ModulatorParameter modulatorRotation;
   ModulatorParameter modulatorStereoSpread; // read-position offset applied as ∓spread/2 per channel
-  float modulatorEnvelopeSmoothing; // UV half-width of the averaging window
+  float modulatorEnvelopeSmoothing; // file UV half-width of the averaging window
+  float modulatorEnvelopeBeat; // file UV of one beat, the follower's stand-in for a cycle
   int modulatorEnvelopeSource; // 0=Amplitude, 1=Phase, 2=Panning
   float modulatorEnvelopeMinDb;
   float modulatorEnvelopeMaxDb;
@@ -144,8 +145,8 @@ float finishModulator(float v, int steps, float strength) {
 
 // Scalar evaluator used by both the stereo wrapper and by nested modulation.
 // stereoPhase shifts this channel's read position: a fraction of a cycle in
-// pattern mode, a fraction of the loop in sequencer mode, and a UV offset along
-// time in envelope-follower mode, which has no cycle. Nested paths pass 0 —
+// pattern mode, a fraction of the loop in sequencer mode, and a fraction of a
+// beat in envelope-follower mode, which has no cycle. Nested paths pass 0 —
 // stereo spread applies only at the outermost evaluation via getModulationBase.
 float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float seqLoopX, float seqLoopY, float seqSwing, float stereoPhase, float audioLevelDb) {
 #ifdef ABLATE_PATTERN_EVAL
@@ -160,8 +161,10 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     int src = modulator.modulatorEnvelopeSource;
     float minDb = modulator.modulatorEnvelopeMinDb;
     float maxDb = modulator.modulatorEnvelopeMaxDb;
-    float smoothing = modulator.modulatorEnvelopeSmoothing;
-    vec2 envUv = vec2(uv.x + stereoPhase, uv.y);
+    // Both widths are in file UV; the canvas may hold a span of the file.
+    float canvasPerFile = 1.0 / max(MODULATOR_FILE_UV_DX(1.0), 1e-9);
+    float smoothing = modulator.modulatorEnvelopeSmoothing * canvasPerFile;
+    vec2 envUv = vec2(uv.x + stereoPhase * modulator.modulatorEnvelopeBeat * canvasPerFile, uv.y);
     if (smoothing > EPSILON) {
       float total = 0.0;
       for (int i = 0; i < NUM_ENVELOPE_SMOOTH_SAMPLES; i++) {
