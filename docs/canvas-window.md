@@ -66,7 +66,7 @@ wider than the canvas too: it paints a block at a time (rule 1).
 | `lib/canvas-window.ts`     | placing the window, filling it, and what the canvas holds                  |
 | `lib/packed-window.ts`     | the same window over the file's original, as one texture                   |
 | `lib/source-window.ts`     | a window over another file, for a brush painting or filtering from it      |
-| `lib/impulse-need.ts`      | the response each convolve step reads, and the frames its taps cover       |
+| `lib/impulse-need.ts`      | the other files a dab's effects read: convolve responses, Attract fields   |
 | `lib/effect-reach.ts`      | how far past the brush each effect reads                                   |
 | `lib/export-window.ts`     | spans of the committed state for an image export                           |
 | `lib/whole-file-gate.ts`   | what a brush asks for that a window cannot serve                           |
@@ -268,11 +268,18 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    it names neither, and that read is a window too. IR Start is a fraction of
    the response file, so it lands against the file before it is measured
    against the window. A response whose own canvas holds all of it is read
-   through that canvas, with no window of ours.
-8. **A phase turn taken over "the whole file" asks the file.** A reversal turns
-   every band by the file's duration. `destFileAxisSec` and `sourceFileAxisSec`
-   read the file's frame count; the canvas's own frame count is the span it
-   holds. A canvas over the whole file returns the value it always did.
+   through that canvas, with no window of ours. An Attract field file is
+   read the same way, laid over the painted file in proportion, so the dab's
+   share of the painted file is the share of the field it reads; a file read
+   by two effects is read through one window over both spans. A window over
+   another file reads that file as its canvas shows it: the store, with the
+   paint of strokes whose commits have not landed laid over it
+   (`withPendingPaint`), and it reads again when that paint changes.
+8. **A phase turn counts the file's time.** A reversal turns every band by its
+   centre times the read's time plus the write's, both counted from the
+   file's start (`destFrames`, `sourceFrames`), in exact turns; the canvas's
+   own frame count is only the span it holds. A canvas over the whole file
+   returns the value it always did.
 9. **A brush is laid out over the file, not the canvas.** A full-length brush
    spans the file's frames, so on a window it paints a block at a time like
    any wide dab. Wrapping in time folds modulo the file's frames
@@ -353,7 +360,10 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     stages for a caller with no synthesis to ride on, and a pass handed no
     band maxima takes a round to find them first. A windowed file opens with
     no onsets and no gate; its first synthesis brings both, and the root node
-    stores them then. A host that answers whole passes only keeps the
+    stores them then. Until that pass, or the restore that stands in for it,
+    is done the file is marked `onsetsPending`, and a stroke reading it is
+    refused (`ONSETS_PENDING_REFUSAL`): every read through the default warp
+    follows onsets. A host that answers whole passes only keeps the
     whole-run path.
 
     Deriving a file from another is the same rule again. A duplicate seeds its
