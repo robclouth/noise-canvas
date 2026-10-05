@@ -39,6 +39,7 @@ export type CommonUniforms = {
   sourceChannelCount: { value: number };
   sourceSampleRate: { value: number };
   destPerSourceFrame: { value: Vector2 };
+  sourceTempoRatio: { value: Vector2 };
   sourceMinFreq: { value: number };
   sourceBandsPerOctave: { value: number };
   sourceOnsetTex: { value: Texture | null };
@@ -150,6 +151,7 @@ export function createDefaultUniforms(): CommonUniforms {
     sourceChannelCount: { value: 1 },
     sourceSampleRate: { value: 44100.0 },
     destPerSourceFrame: { value: new Vector2(1, 0) },
+    sourceTempoRatio: { value: new Vector2(1, 0) },
     sourceMinFreq: { value: 20.0 },
     sourceOnsetTex: { value: null },
     sourceBandsPerOctave: { value: 24.0 },

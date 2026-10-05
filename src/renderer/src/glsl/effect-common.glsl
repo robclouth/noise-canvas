@@ -17,8 +17,10 @@ uniform float     sourceBandsPerOctave;
 uniform float     sourceSampleRate;
 // destSampleRate / sourceSampleRate as a float and its remainder: dest frames per source frame.
 uniform vec2      destPerSourceFrame;
-// Nearest-onset lookup for the source file: R = onset time (sec), G = strength
-// 0..1, sampled by unpacked FILE UV.x. See lib/onset-map.ts.
+// The source's tempo over the dest's as a float and its remainder: the
+// physical stretch a paste between the two files carries at a scale of 1.
+uniform vec2      sourceTempoRatio;
+// The source file's onsets, searched by sourceOnsetsAround. See lib/onset-map.ts.
 uniform sampler2D sourceOnsetTex;
 
 uniform sampler2D destSpectrogramTex;
@@ -933,17 +935,20 @@ vec4 getTransformedSampleNeutralish(vec2 sourceUv, vec2 destUv, float scaleX, fl
 // zero so an aligned read keeps phaseGain = 1 and a zero re-anchor exactly.
 const float BAND_FRAC_DEADZONE = 1e-3;
 
-// Physical time stretch of a move. Callers pass scaleX in the shared map
-// convention (dest→source UV slope = sourceTimeScale / scaleX), and the two
-// files' UV axes can cover different durations, so the read slope in seconds
-// is (sourceTimeScale / scaleX) · T_src / T_dest; this returns its inverse.
-// For a same-file transform it reduces to scaleX exactly; for a paste between
-// files of different lengths at equal tempo it reduces to 1, because such a
-// paste moves content without stretching it.
+// Physical time stretch of a move: the user's scaleX times the tempo ratio
+// the map between the two files carries, so a same-file transform and a paste
+// between files at equal tempo both give exactly scaleX, whatever span either
+// canvas holds.
 float physicalTimeScale(float scaleX) {
-  float T_src  = max(sourceFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6);
-  float T_dest = max(destFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6);
-  return scaleX * T_dest / (max(sourceTimeScale, 1e-6) * T_src);
+  return scaleX * sourceTempoRatio.x + scaleX * sourceTempoRatio.y;
+}
+
+const float LN2 = 0.6931471805599453;
+
+// e^y − 1, to a float's precision for small y, where exp(y) − 1 loses it.
+float expMinusOne(float y) {
+  if (abs(y) > 0.1) return exp(y) - 1.0;
+  return y * (1.0 + y * (0.5 + y * (1.0 / 6.0 + y * (1.0 / 24.0 + y * (1.0 / 120.0 + y / 720.0)))));
 }
 
 // The plain phase rule on its own, so algorithm 6 can blend against it without
@@ -977,10 +982,12 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   if (abs(bandFrac) < BAND_FRAC_DEADZONE) bandFrac = 0.0;
   float idealFreqHz = srcFreqHz * exp2(bandFrac / max(sourceBandsPerOctave, 1e-6));
   float freqRatio = (idealFreqHz > 1e-3) ? destFreqHz / idealFreqHz : 1.0;
-  // The sampled band's centre over the ideal frequency, exactly 1 when bandFrac
-  // snapped to zero. The source centre times freqRatio is the dest centre times
-  // this, so the carrier terms below run on the dest band's exact rate.
-  float centreRatio = (idealFreqHz > 1e-3) ? srcFreqHz / idealFreqHz : 1.0;
+  // The sampled band's centre over the ideal frequency is 1 + centreOff,
+  // exactly 1 when bandFrac snapped to zero. The source centre times freqRatio
+  // is the dest centre times this, so the carrier terms below run on the dest
+  // band's exact rate. centreOff is taken directly, not as a ratio minus one,
+  // because it multiplies times far into the file.
+  float centreOff = (idealFreqHz > 1e-3) ? expMinusOne(-bandFrac / max(sourceBandsPerOctave, 1e-6) * LN2) : 0.0;
 
   // Two approaches, blended by how far |scaleXPhys| is from 1:
   //
@@ -1007,17 +1014,26 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   Frames tSrc = sourceFrames(sourceUv.x);
   Frames tDest = destFrames(destUv.x);
   Turns turns = Turns(0.0);
-  float carrierK = (1.0 - stretchAmount) * centreRatio;
-  if (carrierK != 0.0) {
-    Turns atSrc = axisTurnsOver(carrierK * destPerSourceFrame, rate, tSrc, sourceFileFrameCount);
+  // The carrier's weight, (1 − stretchAmount) · (1 + centreOff), taken as its
+  // two parts so the small one keeps its precision.
+  float carrierW = 1.0 - stretchAmount;
+  float carrierOff = carrierW * centreOff;
+  if (carrierW != 0.0) {
+    Turns atSrc = plusTurns(axisTurnsOver(carrierW * destPerSourceFrame, rate, tSrc, sourceFileFrameCount),
+                            axisTurnsOver(carrierOff * destPerSourceFrame, rate, tSrc, sourceFileFrameCount));
     if (scaleXPhys < 0.0) {
-      turns = minusTurns(turns, plusTurns(atSrc, axisTurnsOver(carrierK, rate, tDest, destFileFrameCount)));
+      Turns atDest = plusTurns(axisTurnsOver(carrierW, rate, tDest, destFileFrameCount),
+                               axisTurnsOver(carrierOff, rate, tDest, destFileFrameCount));
+      turns = minusTurns(turns, plusTurns(atSrc, atDest));
     } else {
-      turns = minusTurns(atSrc, axisTurnsOver(carrierK / max(scaleXPhys, 1e-5), rate, tDest, destFileFrameCount));
+      float perScale = 1.0 / max(scaleXPhys, 1e-5);
+      Turns atDest = plusTurns(axisTurnsOver(carrierW * perScale, rate, tDest, destFileFrameCount),
+                               axisTurnsOver(carrierOff * perScale, rate, tDest, destFileFrameCount));
+      turns = minusTurns(atSrc, atDest);
     }
   }
-  if (centreRatio != 1.0) {
-    turns = plusTurns(turns, axisTurnsOver(centreRatio - 1.0, rate, tDest, destFileFrameCount));
+  if (centreOff != 0.0) {
+    turns = plusTurns(turns, axisTurnsOver(centreOff, rate, tDest, destFileFrameCount));
   }
 
   // Both branches carry the same signX·signY factor, so what is left of the

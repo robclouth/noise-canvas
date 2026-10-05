@@ -947,6 +947,7 @@ export class StrokeRenderer {
     uniforms.sourceChannelCount = uniforms.destChannelCount;
     uniforms.sourceSampleRate = uniforms.destSampleRate;
     uniforms.destPerSourceFrame = { value: new Vector2(1, 0) };
+    uniforms.sourceTempoRatio = { value: new Vector2(1, 0) };
     uniforms.sourceSpectrogramTextureSize = uniforms.destSpectrogramTextureSize;
     uniforms.sourceOnsetTex = { value: destOnsetTexture ?? this.textures.placeholderTexture };
     uniforms.sourceViewStartFrame = uniforms.destViewStartFrame;
@@ -1153,6 +1154,7 @@ export class StrokeRenderer {
       sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
       sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
       destPerSourceFrame: { value: splitRatio(this.spectrogramData.sampleRate, sourceFile.spectrogramData.sampleRate) },
+      sourceTempoRatio: { value: sourceBpm > 0 && bpm > 0 ? splitRatio(sourceBpm, bpm) : new Vector2(1, 0) },
       sourceOnsetTex: { value: sourceFile.onsetTexture ?? placeholderTexture },
       sourceViewStartFrame: { value: sourceFile.view?.startFrame ?? 0 },
       sourceFileFrameCount: { value: sourceFile.spectrogramData.numFrames },
@@ -1648,6 +1650,7 @@ export class StrokeRenderer {
         sourceChannelCount: commonUniforms.destChannelCount,
         sourceSampleRate: commonUniforms.destSampleRate,
         destPerSourceFrame: { value: new Vector2(1, 0) },
+        sourceTempoRatio: { value: new Vector2(1, 0) },
         sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
         sourceOnsetTex: { value: params.destOnsetTexture ?? this.textures.placeholderTexture },
         sourceViewStartFrame: commonUniforms.destViewStartFrame,
