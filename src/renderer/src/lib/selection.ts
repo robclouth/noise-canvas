@@ -1,16 +1,18 @@
 import { pitchUvToBandIndex } from "./utils";
 
 /**
- * An arbitrary-shape membership grid over a selection's bounding rectangle.
- * Row-major `rows × cols`, row 0 at the highest-pitch band, column 0 at the
- * time start; a cell holds 255 inside the shape and 0 outside. Cells are
- * looked up proportionally within the bounding rectangle, so a mask keeps its
- * shape through a translation or a drop into another file's layout.
+ * An arbitrary shape over a selection's bounding rectangle: for each of `rows`
+ * bands, row 0 at the highest-pitch band, the runs of time inside the shape as
+ * fractions [from, to) of the rectangle's span, in order and apart. Row r's
+ * runs are pairs rowStarts[r] to rowStarts[r + 1] of `runs`. Rows spread
+ * proportionally over the rectangle's bands and runs over its time, so a mask
+ * keeps its shape through a translation or a drop into another file's layout,
+ * and resolves to a frame however long the rectangle.
  */
 export type SelectionMask = {
-  cols: number;
   rows: number;
-  cells: Uint8Array;
+  rowStarts: Uint32Array;
+  runs: Float64Array;
 };
 
 /**
@@ -38,31 +40,62 @@ export function isFullHeight(selection: Selection): boolean {
   return !selection.mask && selection.pitchLo <= 0 && selection.pitchHi >= 1;
 }
 
-/**
- * The mask cell a band and time fall in, by the same proportional lookup the
- * shader uses: the row from the band's position in the inclusive band pair,
- * the column from the frame's position in the frame range.
- */
-export function maskCell(
-  mask: SelectionMask,
-  band: number,
-  lowBand: number,
-  highBand: number,
-  frame: number,
-  startFrame: number,
-  endFrame: number,
-): boolean {
+/** A mask from each row's runs, [from, to) fraction pairs, merged where they overlap or touch. */
+export function maskFromRows(rows: readonly (readonly number[])[]): SelectionMask {
+  const rowStarts = new Uint32Array(rows.length + 1);
+  const runs: number[] = [];
+  rows.forEach((row, r) => {
+    rowStarts[r] = runs.length / 2;
+    const pairs: [number, number][] = [];
+    for (let i = 0; i + 1 < row.length; i += 2) if (row[i + 1] > row[i]) pairs.push([row[i], row[i + 1]]);
+    pairs.sort((a, b) => a[0] - b[0]);
+    for (const [from, to] of pairs) {
+      const last = runs.length - 2;
+      if (last >= rowStarts[r] * 2 && from <= runs[last + 1]) runs[last + 1] = Math.max(runs[last + 1], to);
+      else runs.push(from, to);
+    }
+  });
+  rowStarts[rows.length] = runs.length / 2;
+  return { rows: rows.length, rowStarts, runs: Float64Array.from(runs) };
+}
+
+/** A mask from a row-major grid of `rows × cols` cells, nonzero inside. */
+export function maskFromCells(cols: number, rows: number, cells: ArrayLike<number>): SelectionMask {
+  const out: number[][] = [];
+  for (let row = 0; row < rows; row++) {
+    const runs: number[] = [];
+    for (let col = 0; col < cols; col++) if (cells[row * cols + col] > 0) runs.push(col / cols, (col + 1) / cols);
+    out.push(runs);
+  }
+  return maskFromRows(out);
+}
+
+/** Row `row`'s runs, as fraction pairs in order. */
+export function maskRowRuns(mask: SelectionMask, row: number): Float64Array {
+  return mask.runs.subarray(mask.rowStarts[row] * 2, mask.rowStarts[row + 1] * 2);
+}
+
+/** The mask row a band falls in: rows spread over the inclusive band pair by the band's centre. */
+export function maskRow(mask: SelectionMask, band: number, lowBand: number, highBand: number): number {
   const rowFrac = (band - lowBand + 0.5) / (highBand - lowBand + 1);
-  const colFrac = (frame - startFrame) / Math.max(1, endFrame - startFrame);
-  const row = Math.min(mask.rows - 1, Math.max(0, Math.floor(rowFrac * mask.rows)));
-  const col = Math.min(mask.cols - 1, Math.max(0, Math.floor(colFrac * mask.cols)));
-  return mask.cells[row * mask.cols + col] > 0;
+  return Math.min(mask.rows - 1, Math.max(0, Math.floor(rowFrac * mask.rows)));
+}
+
+/**
+ * Every run as whole frames from the rectangle's start, over a span of
+ * `spanFrames`: the shader's copy and the CPU's test round them alike.
+ */
+export function maskFrameRuns(mask: SelectionMask, spanFrames: number): Uint32Array {
+  const frames = new Uint32Array(mask.runs.length);
+  for (let i = 0; i < mask.runs.length; i++) frames[i] = Math.floor(mask.runs[i] * spanFrames + 0.5);
+  return frames;
 }
 
 /**
  * A per-bin membership test for the selection's shape, or null when the
  * selection is a plain rectangle and the caller's own range checks already
- * decide membership. The test takes a band index and a bin's left-edge frame.
+ * decide membership. The test takes a band index and a bin's left-edge frame,
+ * which is inside when it falls in one of its row's runs.
  */
 export function selectionMaskTest(
   selection: Selection,
@@ -73,7 +106,20 @@ export function selectionMaskTest(
   if (!mask) return null;
   const { startFrame, endFrame } = selectionFrameRange(selection, sampleRate);
   const { lowBand, highBand } = selectionBandRange(selection, numBands);
-  return (band, edgeFrame) => maskCell(mask, band, lowBand, highBand, edgeFrame, startFrame, endFrame);
+  const frames = maskFrameRuns(mask, Math.max(1, endFrame - startFrame));
+  return (band, edgeFrame) => {
+    const row = maskRow(mask, band, lowBand, highBand);
+    const at = edgeFrame - startFrame;
+    let lo = mask.rowStarts[row];
+    let hi = mask.rowStarts[row + 1];
+    if (hi <= lo || at < 0) return false;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (frames[mid * 2] <= at) lo = mid;
+      else hi = mid;
+    }
+    return at >= frames[lo * 2] && at < frames[lo * 2 + 1];
+  };
 }
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));

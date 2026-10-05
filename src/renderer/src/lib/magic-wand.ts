@@ -1,9 +1,8 @@
 import type { SpectrogramData } from "../store/types";
 import { FULL_SCALE_DB_OFFSET } from "./constants";
 import type { PackedSpan } from "./packed-span";
-import { maskColsFor } from "./selection-mask";
 import { bandIndexToPitchUv, pitchUvToBandIndex } from "./utils";
-import type { Selection } from "./selection";
+import { maskFromRows, type Selection } from "./selection";
 
 /** The default level window a wand click reaches down from its seed, in dB. */
 export const WAND_DEFAULT_TOLERANCE_DB = 18;
@@ -183,19 +182,18 @@ export async function growWandSelection(
   maxFrame = Math.min(maxFrame, numFrames);
   if (highBand < lowBand || maxFrame <= minFrame) return null;
 
-  const rows = highBand - lowBand + 1;
-  const cols = maskColsFor(spec, minFrame, maxFrame, lowBand, highBand);
-  const cells = new Uint8Array(rows * cols);
-  const framesPerCol = (maxFrame - minFrame) / cols;
+  // Each band's grown bins, merged into runs of the frames they span.
+  const span = maxFrame - minFrame;
+  const rows: number[][] = [];
   for (let band = lowBand; band <= highBand; band++) {
-    const bins = grown[band];
-    if (!bins?.length) continue;
-    const row = band - lowBand;
+    const runs: number[] = [];
+    const bins = (grown[band] ?? []).slice().sort((p, q) => p - q);
     for (const bin of bins) {
-      const from = Math.max(0, Math.floor(((bin << bandStepLog2s[band]) - minFrame) / framesPerCol));
-      const to = Math.min(cols - 1, Math.ceil((((bin + 1) << bandStepLog2s[band]) - minFrame) / framesPerCol) - 1);
-      for (let col = from; col <= to; col++) cells[row * cols + col] = 255;
+      const from = ((bin << bandStepLog2s[band]) - minFrame) / span;
+      const to = (Math.min(numFrames, (bin + 1) << bandStepLog2s[band]) - minFrame) / span;
+      runs.push(Math.max(0, from), Math.min(1, to));
     }
+    rows.push(runs);
   }
 
   return {
@@ -203,6 +201,6 @@ export async function growWandSelection(
     end: maxFrame / sampleRate,
     pitchLo: bandIndexToPitchUv(highBand + 1, numBands),
     pitchHi: bandIndexToPitchUv(lowBand, numBands),
-    mask: { cols, rows, cells },
+    mask: maskFromRows(rows),
   };
 }

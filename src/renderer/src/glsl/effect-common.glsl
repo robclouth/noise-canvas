@@ -49,10 +49,14 @@ uniform float selectionActive;
 uniform vec2  selectionFrames;
 uniform vec2  selectionBands;
 // Set when the selection carries a shape mask over its bounding rectangle:
-// rows span the inclusive band pair, columns the frame range, looked up
-// proportionally so the mask survives translation and cross-file drops.
+// rows spread over the inclusive band pair, each holding runs of whole frames
+// from the selection's start. The rows texture gives each row's first run and
+// the run past its last; the runs texture holds [from, to) for each run, each
+// frame as a multiple of 65536 and the rest, counted along its rows.
 uniform float selectionMaskActive;
-uniform sampler2D selectionMaskTex;
+uniform int selectionStartFrame;
+uniform sampler2D selectionMaskRowsTex;
+uniform sampler2D selectionMaskRunsTex;
 uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float viewZoomPowerY;
@@ -1611,9 +1615,24 @@ bool insideSelection(vec2 unpackedUv, vec4 meta) {
   if (edgeFrame < selectionFrames.x || edgeFrame >= selectionFrames.y) return false;
   if (selectionMaskActive < 0.5) return true;
 
+  int rows = max(textureSize(selectionMaskRowsTex, 0).x, 1);
   float rowUv = (bandIndex - selectionBands.x + 0.5) / (selectionBands.y - selectionBands.x + 1.0);
-  float colUv = (edgeFrame - selectionFrames.x) / max(1.0, selectionFrames.y - selectionFrames.x);
-  return texture(selectionMaskTex, vec2(clamp(colUv, 0.0, 1.0), rowUv)).r > 0.5;
+  int row = clamp(int(floor(rowUv * float(rows))), 0, rows - 1);
+  vec2 rowRuns = texelFetch(selectionMaskRowsTex, ivec2(row, 0), 0).rg;
+  int lo = int(rowRuns.x);
+  int hi = int(rowRuns.y);
+  int at = int(edgeFrame) - selectionStartFrame;
+  if (hi <= lo || at < 0) return false;
+  // The last run starting at or before the bin, then whether it reaches it.
+  int width = max(textureSize(selectionMaskRunsTex, 0).x, 1);
+  for (int k = 0; k < 32 && hi - lo > 1; k++) {
+    int mid = (lo + hi) / 2;
+    vec4 run = texelFetch(selectionMaskRunsTex, ivec2(mid % width, mid / width), 0);
+    if (int(run.x) * 65536 + int(run.y) <= at) lo = mid;
+    else hi = mid;
+  }
+  vec4 run = texelFetch(selectionMaskRunsTex, ivec2(lo % width, lo / width), 0);
+  return at >= int(run.x) * 65536 + int(run.y) && at < int(run.z) * 65536 + int(run.w);
 }
 
 // Returns vec2(weightL, weightR) — brush weight can decorrelate per channel

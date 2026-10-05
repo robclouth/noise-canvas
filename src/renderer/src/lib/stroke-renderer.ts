@@ -22,7 +22,6 @@ import {
   RGFormat,
   Scene,
   Texture,
-  UnsignedByteType,
   Vector2,
   WebGLRenderer,
   WebGLRenderTarget,
@@ -62,7 +61,13 @@ import { footprintAimToBlUv } from "./brush-anchor";
 import { ATTRACT_MODULATOR_MAP_START, padToFold } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { getQuantizeLutTexture } from "./quantize-lut";
-import { selectionBandRange, selectionFrameRange, type Selection } from "./selection";
+import {
+  maskFrameRuns,
+  selectionBandRange,
+  selectionFrameRange,
+  type Selection,
+  type SelectionMask,
+} from "./selection";
 import { buildModulatorUniforms } from "./modulator-utils";
 import {
   brushFootprintRanges,
@@ -325,21 +330,39 @@ export interface StrokeParams {
 }
 
 /** The selection clip as the shader reads it. `active` is 0 when there is none. */
+/** Texels in a row of a selection mask's runs texture. */
+const SELECTION_RUNS_WIDTH = 4096;
+
+/** An RGBA float texture of `data`, read texel by texel. */
+function floatDataTexture(data: Float32Array, width: number, height: number): DataTexture {
+  const texture = new DataTexture(data, width, height, RGBAFormat, FloatType);
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** A selection mask's rows and runs as the shader reads them. */
+type SelectionMaskTextures = { rows: DataTexture; runs: DataTexture };
+
 interface SelectionClip {
   active: number;
   frames: Vector2;
   bands: Vector2;
+  startFrame: number;
   maskActive: number;
-  maskTexture: Texture | null;
+  maskTextures: SelectionMaskTextures | null;
 }
 
 function selectionClipFor(
   selection: Selection | null,
   data: SpectrogramData,
-  maskTexture: Texture | null,
+  maskTextures: SelectionMaskTextures | null,
   viewStartFrame: number,
 ): SelectionClip {
-  if (!selection) return { active: 0, frames: new Vector2(), bands: new Vector2(), maskActive: 0, maskTexture: null };
+  if (!selection) {
+    return { active: 0, frames: new Vector2(), bands: new Vector2(), startFrame: 0, maskActive: 0, maskTextures: null };
+  }
   // The shader counts frames from the start of the span the canvas holds.
   const range = selectionFrameRange(selection, data.sampleRate);
   const startFrame = range.startFrame - viewStartFrame;
@@ -349,8 +372,9 @@ function selectionClipFor(
     active: 1,
     frames: new Vector2(startFrame, endFrame),
     bands: new Vector2(lowBand, highBand),
-    maskActive: maskTexture ? 1 : 0,
-    maskTexture,
+    startFrame,
+    maskActive: maskTextures ? 1 : 0,
+    maskTextures,
   };
 }
 
@@ -438,9 +462,10 @@ export class StrokeRenderer {
   // can be asserted.
   disableScissorCopyBack = false;
 
-  // The current selection mask as a GPU texture, keyed by the mask's cell
-  // array; selections change rarely, so one live texture is enough.
-  private selectionMaskCache: { cells: Uint8Array; texture: DataTexture } | null = null;
+  // The current selection mask as GPU textures, keyed by the mask and the
+  // frames it spans; selections change rarely, so one live pair is enough.
+  private selectionMaskCache: { mask: SelectionMask; spanFrames: number; textures: SelectionMaskTextures } | null =
+    null;
 
   // FBO data cache
   private fboDataCache: Float32Array | null = null;
@@ -1180,7 +1205,9 @@ export class StrokeRenderer {
       selectionFrames: { value: selectionClip.frames },
       selectionBands: { value: selectionClip.bands },
       selectionMaskActive: { value: selectionClip.maskActive },
-      selectionMaskTex: { value: selectionClip.maskTexture || placeholderTexture },
+      selectionStartFrame: { value: selectionClip.startFrame },
+      selectionMaskRowsTex: { value: selectionClip.maskTextures?.rows ?? placeholderTexture },
+      selectionMaskRunsTex: { value: selectionClip.maskTextures?.runs ?? placeholderTexture },
       brushCurveTime: { value: brushParamUniform(stepState, "brushCurveTime", ctx) },
       brushSkewTime: { value: brushParamUniform(stepState, "brushSkewTime", ctx) },
       brushCurvePitch: { value: brushParamUniform(stepState, "brushCurvePitch", ctx) },
@@ -1405,7 +1432,7 @@ export class StrokeRenderer {
     const selectionClip = selectionClipFor(
       selection,
       this.spectrogramData,
-      this.selectionMaskTexture(selection),
+      this.selectionMaskTextures(selection),
       this.view.startFrame,
     );
     if (selection) {
@@ -1954,7 +1981,9 @@ export class StrokeRenderer {
     uniforms.selectionFrames.value = selectionClip.frames;
     uniforms.selectionBands.value = selectionClip.bands;
     uniforms.selectionMaskActive.value = selectionClip.maskActive;
-    uniforms.selectionMaskTex.value = selectionClip.maskTexture || placeholderTexture;
+    uniforms.selectionStartFrame.value = selectionClip.startFrame;
+    uniforms.selectionMaskRowsTex.value = selectionClip.maskTextures?.rows ?? placeholderTexture;
+    uniforms.selectionMaskRunsTex.value = selectionClip.maskTextures?.runs ?? placeholderTexture;
     uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
     uniforms.quantizeLutTex.value = getQuantizeLutTexture();
     uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
@@ -2923,25 +2952,45 @@ export class StrokeRenderer {
   /**
    * Dispose of all WebGL resources.
    */
-  private selectionMaskTexture(selection: Selection | null): Texture | null {
+  private selectionMaskTextures(selection: Selection | null): SelectionMaskTextures | null {
     const mask = selection?.mask;
-    if (!mask) return null;
-    if (this.selectionMaskCache?.cells === mask.cells) return this.selectionMaskCache.texture;
-    this.selectionMaskCache?.texture.dispose();
-    const texture = new DataTexture(mask.cells, mask.cols, mask.rows, RedFormat, UnsignedByteType);
-    texture.minFilter = NearestFilter;
-    texture.magFilter = NearestFilter;
-    texture.needsUpdate = true;
-    this.selectionMaskCache = { cells: mask.cells, texture };
-    return texture;
+    if (!selection || !mask) return null;
+    const { startFrame, endFrame } = selectionFrameRange(selection, this.spectrogramData.sampleRate);
+    const spanFrames = Math.max(1, endFrame - startFrame);
+    const cached = this.selectionMaskCache;
+    if (cached?.mask === mask && cached.spanFrames === spanFrames) return cached.textures;
+    this.disposeSelectionMask();
+    const rowData = new Float32Array(mask.rows * 4);
+    for (let row = 0; row < mask.rows; row++) {
+      rowData[row * 4] = mask.rowStarts[row];
+      rowData[row * 4 + 1] = mask.rowStarts[row + 1];
+    }
+    const frames = maskFrameRuns(mask, spanFrames);
+    const count = Math.max(1, frames.length / 2);
+    const width = Math.min(SELECTION_RUNS_WIDTH, count);
+    const height = Math.ceil(count / width);
+    const runData = new Float32Array(width * height * 4);
+    for (let run = 0; run < frames.length / 2; run++) {
+      const from = frames[run * 2];
+      const to = frames[run * 2 + 1];
+      runData.set([Math.floor(from / 65536), from % 65536, Math.floor(to / 65536), to % 65536], run * 4);
+    }
+    const textures = { rows: floatDataTexture(rowData, mask.rows, 1), runs: floatDataTexture(runData, width, height) };
+    this.selectionMaskCache = { mask, spanFrames, textures };
+    return textures;
+  }
+
+  private disposeSelectionMask(): void {
+    this.selectionMaskCache?.textures.rows.dispose();
+    this.selectionMaskCache?.textures.runs.dispose();
+    this.selectionMaskCache = null;
   }
 
   dispose(): void {
     // Work still in flight checks this before it draws, and would otherwise
     // build new targets on a renderer nothing disposes again.
     this.isInitialized = false;
-    this.selectionMaskCache?.texture.dispose();
-    this.selectionMaskCache = null;
+    this.disposeSelectionMask();
     this.pool.release(this);
     this.scratch = null;
     this.fbo1.dispose();

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
-import { selectionBandRange, selectionFrameRange, selectionMaskTest, type Selection } from "../selection";
+import {
+  maskFromCells,
+  maskRowRuns,
+  selectionBandRange,
+  selectionFrameRange,
+  selectionMaskTest,
+  type Selection,
+} from "../selection";
 import { invertSelection, lassoSelection, maskBoundarySegments, unionSelections } from "../selection-mask";
 
 // 1 s at 100 Hz with 10 bands: frames and pitch UV stay easy to reason about.
@@ -24,7 +31,8 @@ describe("lassoSelection", () => {
     const mask = selection?.mask;
     expect(mask).toBeDefined();
     if (!mask) return;
-    expect(Array.from(mask.cells).every((cell) => cell === 255)).toBe(true);
+    // Every row holds the whole width.
+    for (let row = 0; row < mask.rows; row++) expect(Array.from(maskRowRuns(mask, row))).toEqual([0, 1]);
   });
 
   it("fills a triangle with rows that narrow toward its apex", () => {
@@ -40,9 +48,10 @@ describe("lassoSelection", () => {
     expect(mask).toBeDefined();
     if (!mask) return;
     const rowWidth = (row: number) => {
-      let count = 0;
-      for (let col = 0; col < mask.cols; col++) if (mask.cells[row * mask.cols + col] > 0) count++;
-      return count;
+      const runs = maskRowRuns(mask, row);
+      let width = 0;
+      for (let i = 0; i + 1 < runs.length; i += 2) width += runs[i + 1] - runs[i];
+      return width;
     };
     // Row 0 is the highest pitch: the apex.
     expect(rowWidth(0)).toBeLessThan(rowWidth(mask.rows - 1));
@@ -175,7 +184,7 @@ describe("unionSelections", () => {
 
 describe("maskBoundarySegments", () => {
   it("outlines a lone cell with its four edges", () => {
-    const segments = maskBoundarySegments({ cols: 3, rows: 3, cells: new Uint8Array([0, 0, 0, 0, 255, 0, 0, 0, 0]) });
+    const segments = maskBoundarySegments(maskFromCells(3, 3, [0, 0, 0, 0, 255, 0, 0, 0, 0]));
     expect(segments.length).toBe(16);
   });
 });

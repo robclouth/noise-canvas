@@ -69,7 +69,9 @@ export type CommonUniforms = {
   // Shape mask over the selection's bounding rectangle; 0 when the selection
   // is a plain rectangle.
   selectionMaskActive: { value: number };
-  selectionMaskTex: { value: Texture | null };
+  selectionStartFrame: { value: number };
+  selectionMaskRowsTex: { value: Texture | null };
+  selectionMaskRunsTex: { value: Texture | null };
   viewZoomPower: { value: number };
   viewOffset: { value: number };
   viewZoomPowerY: { value: number };
@@ -176,7 +178,9 @@ export function createDefaultUniforms(): CommonUniforms {
     selectionFrames: { value: new Vector2(0.0, 0.0) },
     selectionBands: { value: new Vector2(0.0, 0.0) },
     selectionMaskActive: { value: 0 },
-    selectionMaskTex: { value: null },
+    selectionStartFrame: { value: 0 },
+    selectionMaskRowsTex: { value: null },
+    selectionMaskRunsTex: { value: null },
     viewZoomPower: { value: 0.0 },
     viewOffset: { value: 0.0 },
     viewZoomPowerY: { value: 0.0 },

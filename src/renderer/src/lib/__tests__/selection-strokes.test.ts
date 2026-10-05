@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NEUTRAL_ALGORITHM } from "../constants";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
-import type { Selection, SelectionMask } from "../selection";
+import { maskFromCells, type Selection, type SelectionMask } from "../selection";
 import { pasteStrokes, regionAim, regionParts, silenceStrokes, type StrokeGeometry } from "../selection-strokes";
 import { BRUSH_SIZE_TIME_FULL } from "../utils";
 
@@ -50,7 +50,7 @@ describe("silenceStrokes", () => {
   });
 
   it("keeps a masked rectangle as the stroke's own clip", () => {
-    const mask: SelectionMask = { cols: 4, rows: 2, cells: new Uint8Array([255, 0, 0, 255, 0, 255, 255, 0]) };
+    const mask: SelectionMask = maskFromCells(4, 2, [255, 0, 0, 255, 0, 255, 255, 0]);
     const masked: Selection = { ...rect, mask };
     const state = only(silenceStrokes(createMockState(), masked, makeGeometry(), "file-1"));
     expect(state.filesSelection).toEqual({ "file-1": masked });
@@ -82,7 +82,7 @@ describe("pasteStrokes", () => {
   });
 
   it("keeps a masked drop rectangle as the paste's own clip", () => {
-    const mask: SelectionMask = { cols: 2, rows: 1, cells: new Uint8Array([255, 0]) };
+    const mask: SelectionMask = maskFromCells(2, 1, [255, 0]);
     const masked: Selection = { ...rect, mask };
     const state = only(pasteStrokes(createMockState(), masked, makeGeometry(), source, "file-1"));
     expect(state.filesSelection).toEqual({ "file-1": masked });
@@ -119,7 +119,7 @@ describe("regionParts", () => {
   });
 
   it("clips every part of a masked region to the whole rectangle, so the mask lands as drawn", () => {
-    const mask: SelectionMask = { cols: 2, rows: 1, cells: new Uint8Array([255, 0]) };
+    const mask: SelectionMask = maskFromCells(2, 1, [255, 0]);
     const long: Selection = { start: 2, end: 42, pitchLo: 0.25, pitchHi: 0.5, mask };
     for (const stroke of silenceStrokes(createMockState(), long, makeGeometry(), "file-1")) {
       expect(stroke.state.filesSelection).toEqual({ "file-1": long });

@@ -1,6 +1,6 @@
 import { pitchUvToViewUvY, zoomedToScreen } from "@/lib/utils";
 import { maskBoundarySegments } from "@/lib/selection-mask";
-import type { Selection } from "@/lib/selection";
+import { maskRowRuns, type Selection, type SelectionMask } from "@/lib/selection";
 import { useStore } from "@/store";
 import { openFiles } from "@renderer/store/files";
 import { useTransientStore } from "@renderer/store/transient";
@@ -44,28 +44,19 @@ function beginOverlayDraw(canvas: HTMLCanvasElement, view: OverlayView): CanvasR
   return ctx;
 }
 
-// Draws a mask's cells and boundary, top row at the top edge, into a canvas
+// Draws a mask's runs and boundary, top row at the top edge, into a canvas
 // covering the selection's bounding rectangle.
-function drawMask(
-  canvas: HTMLCanvasElement,
-  mask: { cols: number; rows: number; cells: Uint8Array },
-  view: OverlayView,
-): void {
+function drawMask(canvas: HTMLCanvasElement, mask: SelectionMask, view: OverlayView): void {
   const ctx = beginOverlayDraw(canvas, view);
   if (!ctx) return;
-  const cellW = (view.fullWidth * view.dpr) / mask.cols;
-  const cellH = (view.fullHeight * view.dpr) / mask.rows;
+  const width = view.fullWidth * view.dpr;
+  const rowH = (view.fullHeight * view.dpr) / mask.rows;
 
   ctx.fillStyle = SELECTION_FILL;
   for (let row = 0; row < mask.rows; row++) {
-    let runStart = -1;
-    for (let col = 0; col <= mask.cols; col++) {
-      const inside = col < mask.cols && mask.cells[row * mask.cols + col] > 0;
-      if (inside && runStart < 0) runStart = col;
-      if (!inside && runStart >= 0) {
-        ctx.fillRect(runStart * cellW, row * cellH, (col - runStart) * cellW, cellH);
-        runStart = -1;
-      }
+    const runs = maskRowRuns(mask, row);
+    for (let i = 0; i + 1 < runs.length; i += 2) {
+      ctx.fillRect(runs[i] * width, row * rowH, (runs[i + 1] - runs[i]) * width, rowH);
     }
   }
 
@@ -75,8 +66,8 @@ function drawMask(
   ctx.beginPath();
   const segments = maskBoundarySegments(mask);
   for (let i = 0; i + 3 < segments.length; i += 4) {
-    ctx.moveTo(segments[i] * cellW, segments[i + 1] * cellH);
-    ctx.lineTo(segments[i + 2] * cellW, segments[i + 3] * cellH);
+    ctx.moveTo(segments[i] * width, segments[i + 1] * rowH);
+    ctx.lineTo(segments[i + 2] * width, segments[i + 3] * rowH);
   }
   ctx.stroke();
 }
