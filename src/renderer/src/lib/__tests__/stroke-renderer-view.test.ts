@@ -838,22 +838,35 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
   });
 
-  // A turn trades a distance in time for a distance in pitch, so it is taken on
-  // the file's time axis. Taken on the canvas's, a shorter canvas turns the
-  // sound by a different amount and the read lands somewhere else entirely.
-  it.each([5, 30, 90])("turns the sound by %i degrees on the file's axis", async (degrees) => {
+  // A turn trades beats along time for semitones across pitch, so a canvas
+  // holding a span of the file turns the sound by the same amount once it
+  // holds what the turn reads.
+  it.each([5, 30, 90])("turns the sound by %i degrees as the whole file does", async (degrees) => {
     const state = createMockStateWithSteps([
       {
         name: "Turned",
         overrides: {
           transformRotation: degrees,
+          brushSizePitch: 2,
           effects: [{ id: "transform", effect: "transform", enabled: true, params: {} }],
         },
       },
     ]);
     state.transformRotation = degrees;
     state.filepathsBpm = { "/parity.wav": 120 };
-    const parity = await parityOf(state);
+    const reach = strokeReach(state, {
+      bpm: 120,
+      fileSeconds: data.numFrames / SAMPLE_RATE,
+      canvasSeconds: viewFrames / SAMPLE_RATE,
+      bandsPerOctave: data.bandsPerOctave,
+      numBands: data.numBands,
+    });
+    const wide = canvasViewOf(
+      grid,
+      blockOfFrame(grid, Math.max(0, view.startFrame - reach.before * SAMPLE_RATE)),
+      blockOfFrame(grid, Math.min(data.numFrames - 1, view.endFrame - 1 + reach.after * SAMPLE_RATE)),
+    );
+    const parity = await parityOf(state, undefined, wide);
     expect(parity.changed).toBeGreaterThan(0);
     expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-4);
     expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
