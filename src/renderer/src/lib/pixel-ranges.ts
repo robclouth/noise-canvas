@@ -185,20 +185,22 @@ export function copyCompactOverlap(
 /**
  * Builds the values of `target`'s pixels as one block in range order, taking
  * each pixel from the first layer whose ranges hold it. Every layer's ranges
- * and values are in range order too. Throws when a pixel is in no layer.
+ * and values are in range order too, `channels` values to a pixel. Throws when
+ * a pixel is in no layer.
  */
 export function composePixelRangeValues(
   target: Uint32Array,
   layers: { ranges: Uint32Array; values: Float32Array }[],
+  channels = 4,
 ): Float32Array {
-  const out = new Float32Array(pixelRangeCount(target) * 4);
+  const out = new Float32Array(pixelRangeCount(target) * channels);
   // Each layer's ranges as [start, end, valueOffset] triples, sorted by start.
   const indexed = layers.map((layer) => {
     const entries: [number, number, number][] = [];
     let at = 0;
     for (let i = 0; i + 1 < layer.ranges.length; i += 2) {
       entries.push([layer.ranges[i], layer.ranges[i] + layer.ranges[i + 1], at]);
-      at += layer.ranges[i + 1] * 4;
+      at += layer.ranges[i + 1] * channels;
     }
     entries.sort((a, b) => a[0] - b[0]);
     return { entries, values: layer.values, cursor: 0 };
@@ -214,7 +216,7 @@ export function composePixelRangeValues(
   let acc = 0;
   for (let i = 0; i + 1 < target.length; i += 2) {
     offsets.set(target[i], acc);
-    acc += target[i + 1] * 4;
+    acc += target[i + 1] * channels;
   }
 
   for (const [start, end] of targets) {
@@ -236,10 +238,10 @@ export function composePixelRangeValues(
       }
       if (!chosen) throw new Error(`pixel ${p} is in no layer`);
       const run = Math.min(limit, chosen.entry[1]) - p;
-      const from = chosen.entry[2] + (p - chosen.entry[0]) * 4;
-      out.set(chosen.values.subarray(from, from + run * 4), outAt);
+      const from = chosen.entry[2] + (p - chosen.entry[0]) * channels;
+      out.set(chosen.values.subarray(from, from + run * channels), outAt);
       p += run;
-      outAt += run * 4;
+      outAt += run * channels;
     }
   }
   return out;

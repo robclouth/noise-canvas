@@ -1066,9 +1066,9 @@ export class WindowedCanvas {
       }
       const layers = sources.map((source) => ({
         ranges: source.ranges,
-        values: weightsAsTexels(source.masks[step], source.ranges),
+        values: source.masks[step] ?? new Float32Array(pixelRangeCount(source.ranges)),
       }));
-      masks.push(firstOfTexels(composePixelRangeValues(painted, layers)));
+      masks.push(composePixelRangeValues(painted, layers, 1));
     }
     return { ranges: painted, values, masks };
   }
@@ -1685,13 +1685,7 @@ export class WindowedCanvas {
     renderer.patchStrokeMasks(
       viewRanges,
       result.masks.map((weights) =>
-        weights
-          ? firstOfTexels(
-              composePixelRangeValues(target, [
-                { ranges: result.ranges, values: weightsAsTexels(weights, result.ranges) },
-              ]),
-            )
-          : null,
+        weights ? composePixelRangeValues(target, [{ ranges: result.ranges, values: weights }], 1) : null,
       ),
     );
     const frames = view.endFrame - view.startFrame;
@@ -1861,18 +1855,4 @@ export class WindowedCanvas {
     this.carried = new CarriedPaint();
     this.strokeSlots?.clear();
   }
-}
-
-/** Mask weights as texels holding each weight in their first channel; zeros for a step with none. */
-function weightsAsTexels(weights: Float32Array | null | undefined, ranges: Uint32Array): Float32Array {
-  const texels = new Float32Array(pixelRangeCount(ranges) * 4);
-  if (weights) for (let i = 0; i < weights.length; i++) texels[i * 4] = weights[i];
-  return texels;
-}
-
-/** The first channel of each texel. */
-function firstOfTexels(texels: Float32Array): Float32Array {
-  const out = new Float32Array(texels.length >> 2);
-  for (let i = 0; i < out.length; i++) out[i] = texels[i * 4];
-  return out;
 }

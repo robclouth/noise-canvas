@@ -25,6 +25,28 @@ describe("composePixelRangeValues", () => {
     expect(Array.from(composed)).toEqual(Array.from(gatherPixelRanges(expected, merged)));
   });
 
+  it("composes one value a pixel as it composes four, in the first channel", () => {
+    const a = state(64, 1);
+    const b = state(64, 2);
+    const first = (texels: Float32Array) => texels.filter((_, i) => i % 4 === 0);
+    const dirty = new Uint32Array([40, 3, 10, 5]);
+    const extent = new Uint32Array([8, 10, 38, 8]);
+    const target = new Uint32Array([12, 6, 39, 5]);
+    const four = composePixelRangeValues(target, [
+      { ranges: dirty, values: gatherPixelRanges(a, dirty) },
+      { ranges: extent, values: gatherPixelRanges(b, extent) },
+    ]);
+    const one = composePixelRangeValues(
+      target,
+      [
+        { ranges: dirty, values: first(gatherPixelRanges(a, dirty)) },
+        { ranges: extent, values: first(gatherPixelRanges(b, extent)) },
+      ],
+      1,
+    );
+    expect(Array.from(one)).toEqual(Array.from(first(four)));
+  });
+
   it("throws when a target pixel is covered by no layer", () => {
     expect(() =>
       composePixelRangeValues(new Uint32Array([0, 4]), [

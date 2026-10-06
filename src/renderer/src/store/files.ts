@@ -3009,12 +3009,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // The whole painted state, read only when a pass needs all of it and
       // the caller did not hand it over: the store's committed pixels with
       // the stroke's footprint over them.
+      let wholeReadMs = 0;
       const readWhole = async (): Promise<Float32Array> => {
         if (data) return data;
+        const readStart = performance.now();
         const whole = await getHistoryManager(fileId).currentBlockState();
         if (whole && source.footprint) {
           scatterCompactPixelRanges(whole, await source.footprint.values, source.footprint.ranges);
         }
+        wholeReadMs = performance.now() - readStart;
         if (!whole) throw new Error("the commit could not read the committed state");
         data = whole;
         return whole;
@@ -3118,6 +3121,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         storeReadMs: Math.round(storeReadMs),
         paintedReadMs: Math.round(paintedReadMs),
         prepareMs: Math.round(prepareMs),
+        wholeReadMs: Math.round(wholeReadMs),
         ...result.phases,
       });
 
