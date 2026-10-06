@@ -82,7 +82,13 @@ export type ParityCanvas = {
 };
 
 /** Which file a parity canvas paints, and the other open files it can read. */
-export type ParityFileOptions = { id?: string; filePath?: string; others?: readonly ParityCanvas[] };
+export type ParityFileOptions = {
+  id?: string;
+  filePath?: string;
+  others?: readonly ParityCanvas[];
+  /** Blocks a window over another file may grow to; the canvas's own window when absent. */
+  otherWindowBlocks?: number;
+};
 
 export const PARITY_FILE_PATH = "/parity.wav";
 
@@ -121,6 +127,7 @@ export function parityCanvas(
         : null;
     },
     windowBlocks,
+    otherWindowBlocks: options.otherWindowBlocks,
   });
   const view = canvas.firstView(0, 1);
   const renderer = new StrokeRenderer(gl, data, toStrokeTextures(textures), id, registry, view);

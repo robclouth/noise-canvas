@@ -159,6 +159,25 @@ export function canvasPaintExtraSlotBlocks(grid: BlockGrid, windowBlocks: number
   return Math.max(0, Math.min(extra, grid.blockCount - windowBlocks - CANVAS_WINDOW_SPARE_BLOCKS));
 }
 
+/** Bytes a window over another file holds a texel in: its block slot and the texture it composes into. */
+export const OTHER_FILE_WINDOW_BYTES_PER_TEXEL = 2 * PACKED_BYTES_PER_TEXEL;
+/** Share of the spectrogram budget one window over another file may grow to. */
+const OTHER_FILE_WINDOW_SHARE = 0.2;
+
+/**
+ * Blocks a window over another file, cut on `grid`, may grow to: what its
+ * share of the budget pays for at its own rate, never fewer than `floor`, and
+ * never more than the file has or one texture holds.
+ */
+export function otherFileWindowBlocks(grid: BlockGrid, floor: number): number {
+  const texelsPerBlock = blockTexels(grid, 0);
+  if (texelsPerBlock <= 0) return grid.blockCount;
+  const most = Math.min(grid.blockCount, Math.floor(MAX_PACKED_TEXTURE_TEXELS / texelsPerBlock));
+  const share = gpuMemoryInfo().bytes * GPU_BUDGET_SHARE * OTHER_FILE_WINDOW_SHARE;
+  const blocks = Math.floor(share / (OTHER_FILE_WINDOW_BYTES_PER_TEXEL * texelsPerBlock));
+  return Math.max(1, Math.min(most, Math.max(floor, blocks)));
+}
+
 /** True when the painting canvas holds every block of a file cut on `grid`, so none of it is paged. */
 export function canvasHoldsWholeFile(grid: BlockGrid): boolean {
   return grid.blockCount <= canvasWindowBlocks(grid);

@@ -378,7 +378,7 @@ export function dispatchStroke(
   const reads = span?.needs.sources ?? sourceReadsFor(context, state, cursorPos);
   const sourceWindows = new Map<string, SourceWindowTextures>();
   for (const need of sourceNeedsOver(reads, beside?.reads ?? clip ?? null)) {
-    const window = windows?.aimSource(need);
+    const window = windows?.aimSource(need, !preview);
     if (!window) return false;
     if (!need.self) sourceWindows.set(need.fileId, window);
   }
@@ -410,7 +410,7 @@ export function dispatchStroke(
     const spectrogram = response?.spectrogramData;
     if (!spectrogram) return false;
     if (responseIsWindowed(context, entry.need.fileId)) {
-      const window = windows?.aimImpulse(entry.need);
+      const window = windows?.aimImpulse(entry.need, !preview);
       if (!window) return false;
       impulses.set(entry.key, {
         spectrogramData: spectrogram,

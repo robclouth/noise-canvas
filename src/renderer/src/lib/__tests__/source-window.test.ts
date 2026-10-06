@@ -16,7 +16,7 @@ import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, type BlockGrid } from "../block-grid";
 import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
 import { gatherPixelRanges } from "../pixel-ranges";
-import { SourceWindow, sourceNeedsOver, sourceReadSpan, type SourceRead } from "../source-window";
+import { SourceWindow, SourceWindowSlot, sourceNeedsOver, sourceReadSpan, type SourceRead } from "../source-window";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { packedFold, padToFold } from "../constants";
 import { bandMetadataTexture } from "../band-metadata-texture";
@@ -234,6 +234,35 @@ describe("SourceWindow", () => {
     expect(window.holdsFrames(0, blockFrames, false)).toBe(true);
     const far = (sourceGrid.blockCount - 1) * blockFrames;
     expect(window.holdsFrames(far, far + blockFrames, false)).toBe(false);
+  });
+
+  it("grows a slot's window to a read wider than its floor, up to the most it may hold, only when asked", async () => {
+    const most = WINDOW_BLOCKS + 2;
+    const slot = new SourceWindowSlot(gl, WINDOW_BLOCKS, () => most);
+    disposers.push(() => slot.dispose());
+    const blocks = {
+      spectrogram: source,
+      readCurrent: async (ranges: Uint32Array) => gatherPixelRanges(source.packedData, ranges),
+      readRoot: async (ranges: Uint32Array) => gatherPixelRanges(source.packedData, ranges),
+      revision: () => 0,
+    };
+    const need = (count: number) => ({
+      fileId: "source",
+      startFrame: 0,
+      endFrame: count * sourceGrid.blockFrames,
+      wantOriginal: false,
+    });
+    slot.aim(need(WINDOW_BLOCKS + 1), blocks, false);
+    await slot.settled();
+    expect(slot.holds(need(WINDOW_BLOCKS + 1)), "a hover's aim keeps the floor").toBe(false);
+    for (const count of [WINDOW_BLOCKS + 1, most]) {
+      slot.aim(need(count), blocks);
+      await slot.settled();
+      expect(slot.aim(need(count), blocks), `${count} blocks`).not.toBeNull();
+    }
+    slot.aim(need(most + 1), blocks);
+    await slot.settled();
+    expect(slot.holds(need(most + 1))).toBe(false);
   });
 
   it("composes the source file's own pixels", async () => {

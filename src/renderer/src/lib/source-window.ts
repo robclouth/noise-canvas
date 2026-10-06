@@ -4,6 +4,7 @@ import { blockGrid, blockOfFrame, type BlockGrid } from "./block-grid";
 import type { CanvasView } from "./canvas-view";
 import { needsCanvasWindow, type BlockReader, type BlockValueReader } from "./canvas-window";
 import { canvasWindowBlocks } from "./gpu-budget";
+import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
 import { bandMetadataTexture } from "./band-metadata-texture";
 import type { SelfState } from "./self-window";
@@ -138,6 +139,12 @@ export function sourceNeedsOver(
   return [...needs.values()];
 }
 
+/** The block grid a file is cut on. */
+function gridOf(spectrogram: SpectrogramData): BlockGrid {
+  const { numBands, metadata, numFrames, sampleRate } = spectrogram;
+  return blockGrid({ numBands, metadata }, numFrames, sampleRate);
+}
+
 /**
  * A window over a file a brush paints FROM.
  *
@@ -153,8 +160,9 @@ export class SourceWindow {
   readonly fileId: string;
   private readonly gl: WebGLRenderer;
   private readonly blocks: SourceFileBlocks;
-  private readonly grid: BlockGrid;
-  private readonly windowBlocks: number;
+  readonly grid: BlockGrid;
+  /** Blocks the window holds at once. */
+  readonly windowBlocks: number;
   private readonly current: PackedWindow;
   private original: PackedWindow | null = null;
   private metadataTex: DataTexture | null = null;
@@ -164,11 +172,10 @@ export class SourceWindow {
   private disposed = false;
 
   constructor(gl: WebGLRenderer, fileId: string, blocks: SourceFileBlocks, windowBlocks?: number) {
-    const { numBands, metadata, numFrames, sampleRate } = blocks.spectrogram;
     this.gl = gl;
     this.fileId = fileId;
     this.blocks = blocks;
-    this.grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
+    this.grid = gridOf(blocks.spectrogram);
     this.windowBlocks = Math.min(windowBlocks ?? canvasWindowBlocks(this.grid), this.grid.blockCount);
     this.current = new PackedWindow(gl, this.grid, {
       windowBlocks: this.windowBlocks,
@@ -179,8 +186,7 @@ export class SourceWindow {
 
   /** True when a window over the file serves less than all of it. */
   static isNeeded(spectrogram: SpectrogramData, windowBlocks?: number): boolean {
-    const { numBands, metadata, numFrames, sampleRate } = spectrogram;
-    const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
+    const grid = gridOf(spectrogram);
     return needsCanvasWindow(grid, windowBlocks ?? canvasWindowBlocks(grid));
   }
 
@@ -292,32 +298,52 @@ export class SourceWindow {
 /**
  * One window over another file, kept pointed at whichever file the brush names
  * for it. A canvas keeps one of these per role: the file a step paints from,
- * and the file a convolve step takes its impulse response from.
+ * and the file a convolve step takes its impulse response from. The window
+ * holds `floor` blocks, and grows when a read spans more, up to what `most`
+ * allows for that file.
  */
 export class SourceWindowSlot {
   private readonly gl: WebGLRenderer;
-  private readonly windowBlocks: number;
+  private readonly floor: number;
+  private readonly most: (grid: BlockGrid) => number;
   private window: SourceWindow | null = null;
   private revision = 0;
 
-  constructor(gl: WebGLRenderer, windowBlocks: number) {
+  constructor(gl: WebGLRenderer, floor: number, most: (grid: BlockGrid) => number = () => floor) {
     this.gl = gl;
-    this.windowBlocks = windowBlocks;
+    this.floor = floor;
+    this.most = most;
   }
 
   /**
    * Points the window at the frames the need asks for, building it on first
-   * use and re-reading it once that file's committed state moves. Returns the
+   * use, growing it when `grow` and the need spans more blocks than it holds,
+   * and re-reading it once that file's committed state moves. Returns the
    * textures to sample through, or null while the window cannot serve them.
    */
-  aim(need: SourceNeed, blocks: SourceFileBlocks): SourceWindowTextures | null {
+  aim(need: SourceNeed, blocks: SourceFileBlocks, grow = true): SourceWindowTextures | null {
     if (this.window && this.window.fileId !== need.fileId) {
       this.window.dispose();
       this.window = null;
     }
+    const grid = this.window?.grid ?? gridOf(blocks.spectrogram);
+    const spans =
+      blockOfFrame(grid, Math.max(need.startFrame, need.endFrame - 1)) - blockOfFrame(grid, need.startFrame) + 1;
+    const most = this.most(grid);
+    let size = grow ? Math.max(this.floor, spans) : this.floor;
+    if (grow && this.window && spans > this.window.windowBlocks && this.window.windowBlocks < most) {
+      size = Math.max(size, 2 * this.window.windowBlocks);
+      this.window.dispose();
+      this.window = null;
+    }
     if (!this.window) {
-      this.window = new SourceWindow(this.gl, need.fileId, blocks, this.windowBlocks);
+      this.window = new SourceWindow(this.gl, need.fileId, blocks, Math.min(most, size));
       this.revision = blocks.revision();
+      diag.info("canvas", "other-file window", {
+        blocks: this.window.windowBlocks,
+        most,
+        bytes: this.window.allocatedBytes,
+      });
     }
     const revision = blocks.revision();
     if (revision !== this.revision) {

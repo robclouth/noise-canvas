@@ -119,6 +119,7 @@ const SMALL_WINDOW_BLOCKS = 4;
 const SCENARIOS: {
   name: string;
   windowBlocks?: number;
+  otherWindowBlocks?: number;
   dabs: (seconds: number) => { x: number; y: number; state: State }[];
 }[] = [
   {
@@ -273,6 +274,18 @@ const SCENARIOS: {
     ],
   },
   {
+    name: "a long backward convolve whose response window outgrows the canvas's",
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    otherWindowBlocks: 3 * SMALL_WINDOW_BLOCKS,
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.5,
+        state: brushState("convolve", { convolveIrSize: 256, convolveIrRate: -2, brushSizePitch: 24 }, 4, false),
+      },
+    ],
+  },
+  {
     name: "a blur at its widest at 60 bpm, on a small window",
     windowBlocks: SMALL_WINDOW_BLOCKS,
     dabs: () => [
@@ -306,9 +319,11 @@ afterAll(() => {
   renderer = null;
 });
 
-function canvas(windowBlocks: number, seconds = 60): ParityCanvas {
+function canvas(windowBlocks: number, seconds = 60, otherWindowBlocks?: number): ParityCanvas {
   if (!renderer) throw new Error("no renderer");
-  const made = parityCanvas(parityData({ durationSeconds: seconds }), windowBlocks, renderer.gl);
+  const made = parityCanvas(parityData({ durationSeconds: seconds }), windowBlocks, renderer.gl, undefined, undefined, {
+    otherWindowBlocks,
+  });
   disposers.push(made.dispose);
   return made;
 }
@@ -339,7 +354,7 @@ describe("a windowed canvas paints what a whole-file canvas paints", () => {
     async ({ seconds, scenario }) => {
       const dabs = scenario.dabs(seconds);
       const whole = canvas(Infinity, seconds);
-      const windowed = canvas(scenario.windowBlocks ?? WINDOW_BLOCKS, seconds);
+      const windowed = canvas(scenario.windowBlocks ?? WINDOW_BLOCKS, seconds, scenario.otherWindowBlocks);
       const expected = await paintStroke(whole, dabs);
       const got = await paintStroke(windowed, dabs);
       expect(await expectSameStroke(whole, expected, got)).toBeGreaterThan(0);

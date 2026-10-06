@@ -28,6 +28,7 @@ import { CanvasWindow, type BlockReader, type BlockValueReader, type TapValueRea
 import {
   canvasExtraSlotBlocks,
   canvasPaintExtraSlotBlocks,
+  otherFileWindowBlocks,
   canvasWindowBlocks,
   CANVAS_WINDOW_SPARE_BLOCKS,
 } from "./gpu-budget";
@@ -192,6 +193,8 @@ export type WindowedCanvasDeps = {
   revision?: () => number;
   /** Blocks the canvas holds at once. Defaults to the build's setting. */
   windowBlocks?: number;
+  /** Blocks a window over another file may grow to. Defaults to its share of the graphics budget. */
+  otherWindowBlocks?: number;
 };
 
 /**
@@ -1080,15 +1083,16 @@ export class WindowedCanvas {
    * first use and re-reading it once that file's committed state moves.
    * Returns the textures to sample that file through, or null while the window
    * cannot serve the frames. Each file painted from gets a window of its own,
-   * because every step names its own source.
+   * because every step names its own source. Without `grow` the window keeps
+   * the blocks it holds, as a hover aims it for a dab that may never paint.
    */
-  aimSource(need: SourceNeed): SourceWindowTextures | null {
+  aimSource(need: SourceNeed, grow = true): SourceWindowTextures | null {
     if (need.self) {
       const window = this.selfWindowFor();
       window.aim(need.startFrame, need.endFrame, need.wantOriginal);
       return window.holdsFrames(need.startFrame, need.endFrame, need.wantOriginal) ? window.textures("start") : null;
     }
-    return this.aimIn(this.sources, need);
+    return this.aimIn(this.sources, need, grow);
   }
 
   /**
@@ -1105,8 +1109,8 @@ export class WindowedCanvas {
    * such file gets a window of its own, because a step can paint from one file
    * and filter through another, and two steps can filter through two.
    */
-  aimImpulse(need: SourceNeed): SourceWindowTextures | null {
-    return this.aimIn(this.impulses, need);
+  aimImpulse(need: SourceNeed, grow = true): SourceWindowTextures | null {
+    return this.aimIn(this.impulses, need, grow);
   }
 
   /** Drops the windows over files the brush no longer paints from. */
@@ -1551,7 +1555,13 @@ export class WindowedCanvas {
     if (!grid) return true;
     const first = blockOfFrame(grid, need.startFrame);
     const last = blockOfFrame(grid, Math.max(need.startFrame, need.endFrame - 1));
-    return last - first + 1 <= Math.min(this.windowBlocks, grid.blockCount);
+    const most = need.self ? this.windowBlocks : this.otherWindowBlocks(grid);
+    return last - first + 1 <= Math.min(most, grid.blockCount);
+  }
+
+  /** Blocks a window over another file cut on `grid` may grow to. */
+  private otherWindowBlocks(grid: BlockGrid): number {
+    return Math.min(this.deps.otherWindowBlocks ?? otherFileWindowBlocks(grid, this.windowBlocks), grid.blockCount);
   }
 
   private readonly sourceGrids = new Map<string, BlockGrid>();
@@ -1691,15 +1701,15 @@ export class WindowedCanvas {
   }
 
   /** The slot in `slots` for the need's file, building one on first use. */
-  private aimIn(slots: Map<string, SourceWindowSlot>, need: SourceNeed): SourceWindowTextures | null {
+  private aimIn(slots: Map<string, SourceWindowSlot>, need: SourceNeed, grow: boolean): SourceWindowTextures | null {
     const blocks = this.deps.sourceBlocks(need.fileId);
     if (!blocks) return null;
     let slot = slots.get(need.fileId);
     if (!slot) {
-      slot = new SourceWindowSlot(this.deps.gl, this.windowBlocks);
+      slot = new SourceWindowSlot(this.deps.gl, this.windowBlocks, (grid) => this.otherWindowBlocks(grid));
       slots.set(need.fileId, slot);
     }
-    return slot.aim(need, blocks);
+    return slot.aim(need, blocks, grow);
   }
 
   private expectRenderer(): StrokeRenderer {

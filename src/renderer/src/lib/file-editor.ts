@@ -196,8 +196,8 @@ export function prepareFileEditor(
   if (applyStroke.current && cursorPos.x >= 0) {
     const preview = strokePreview.current;
     const sources = sourceNeedsOver(needs.sources, hover);
-    for (const need of sources) canvas.aimSource(need);
-    for (const need of needs.impulses) canvas.aimImpulse(need);
+    for (const need of sources) canvas.aimSource(need, false);
+    for (const need of needs.impulses) canvas.aimImpulse(need, false);
     canvas.dropSourcesExcept(sources);
     canvas.dropImpulsesExcept(needs.impulses);
     if (preview) {

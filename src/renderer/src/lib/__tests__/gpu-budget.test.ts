@@ -9,6 +9,7 @@ import {
   canvasWindowBudgetBytes,
   canvasWindowBytes,
   CPU_BYTES_PER_TEXEL_FILE,
+  otherFileWindowBlocks,
   GPU_BYTES_PER_TEXEL_FILE,
   GPU_BYTES_PER_TEXEL_SCRATCH,
   historyCacheBytes,
@@ -339,6 +340,23 @@ describe("the window the budget sets", () => {
     const extra = canvasExtraSlotBlocks(grid, 4);
     expect(extra).toBe(grid.blockCount - 4 - CANVAS_WINDOW_SPARE_BLOCKS);
     expect(canvasExtraSlotBlocks(grid, Infinity)).toBe(0);
+  });
+
+  it("lets a window over another file grow past the painting canvas's window, to the same blocks for any length", () => {
+    const grid = gridOf(600);
+    const canvas = canvasWindowBlocks(grid);
+    const other = otherFileWindowBlocks(grid, canvas);
+    expect(other).toBeGreaterThan(canvas);
+    expect(other).toBeLessThan(grid.blockCount);
+    expect(otherFileWindowBlocks(gridOf(1200), canvas)).toBe(other);
+  });
+
+  it("keeps a window over another file to its floor and to the file's blocks", () => {
+    const grid = gridOf(600);
+    const share = otherFileWindowBlocks(grid, 1);
+    expect(otherFileWindowBlocks(grid, share + 1)).toBe(share + 1);
+    const short = gridOf(30);
+    expect(otherFileWindowBlocks(short, 4)).toBe(short.blockCount);
   });
 
   it("gives a longer file the same window", () => {

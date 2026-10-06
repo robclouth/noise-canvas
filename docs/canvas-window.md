@@ -264,7 +264,11 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    takes the edge's values. The window's texture takes a newly read view a
    step before the window does, and it serves nothing while the two differ. The
    canvas keeps one window for the file a step paints from, and one for each
-   file a convolve step filters through. A convolve that names no response file
+   file a convolve step filters through. Such a window holds as many blocks
+   as the canvas's own, and grows when a read spans more, up to what its
+   share of the graphics budget pays for at its own rate, a block slot and a
+   composed texel (`otherFileWindowBlocks`); it is built only that large when
+   a read asks for it, because its texture is allocated whole. A convolve that names no response file
    filters through the file it paints from, which is the file it paints on when
    it names neither, and that read is a window too. IR Start is a fraction of
    the response file, so it lands against the file before it is measured
@@ -537,8 +541,10 @@ Per open file, windowed, at K blocks:
   mask per step beside it. Pages are allocated as a stroke leaves blocks.
 - the original window, once a step in Original mode asks for it: one window
   plus four spare, plus its composed texture
-- a source window per windowed file a step paints from, and its
-  original once a step reads that
+- a source window per windowed file a step paints from or filters
+  through, and its original once a step reads that: the canvas's blocks,
+  or more when a read spans more, up to a fifth of the spectrogram budget
+  each
 - the display pyramid and tile ring, which are bounded by the viewport
 
 The file-sized pristine texture and inverse map are gone. A 60-second file at
