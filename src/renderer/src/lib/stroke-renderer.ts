@@ -336,17 +336,20 @@ export interface StrokeParams {
 }
 
 /**
- * One part of a first pass's input: the input over the part's view, and the
- * file frames [start, end) and bands [first, last] whose reads it serves. An
- * unbounded edge serves every read past it.
+ * One part of a first pass's input: the input over the part's view, and which
+ * of the pass's reads it serves. A pass that reads one point a pixel names
+ * the file frames [start, end) and bands [first, last] of its `core`, an
+ * unbounded edge serving every read past it; a pass that sums copies names
+ * the copies [first, last] it reads as `taps`.
  */
 export type InputPart = {
-  core: { start: number; end: number; first: number; last: number };
+  core?: { start: number; end: number; first: number; last: number };
+  taps?: { first: number; last: number };
   source: () => { source: SourceFileInfo; dispose: () => void };
 };
 
-/** The gate uniforms a part draw sets. */
-type PartGate = Pick<CommonUniforms, "sourcePartOn" | "sourcePartCore" | "sourcePartChannel">;
+/** The uniforms a part draw sets over the pass's own. */
+type PartGate = Partial<CommonUniforms>;
 
 // A core edge this far out takes every read past it.
 const PART_EDGE = 1e30;
@@ -714,8 +717,13 @@ export class StrokeRenderer {
     target: WebGLRenderTarget,
     list: PixelRangeList,
   ): void {
+    if (parts.some((part) => part.taps)) {
+      this.drawTapsInParts(parts, load, material, target, list);
+      return;
+    }
     const gl = this.gl.getContext();
     for (const part of parts) {
+      if (!part.core) throw new Error("A part of a one-read pass names no core.");
       const { source, dispose } = part.source();
       try {
         const start = source.view?.startFrame ?? 0;
@@ -743,6 +751,63 @@ export class StrokeRenderer {
       } finally {
         dispose();
       }
+    }
+  }
+
+  /**
+   * Draws a pass that sums copies once per group of copies, each through its
+   * part's view, adding each group's sum to the totals the ones before left in
+   * one of two targets in turn; then once more to turn the totals into the
+   * pass's output. The totals ride on the dest texture while a group adds to
+   * them and on the source texture while they are finished, which neither
+   * draw otherwise reads.
+   */
+  private drawTapsInParts(
+    parts: readonly InputPart[],
+    load: (source: SourceFileInfo, gate: PartGate) => void,
+    material: RawShaderMaterial,
+    target: WebGLRenderTarget,
+    list: PixelRangeList,
+  ): void {
+    const totals = [0, 1].map(
+      () =>
+        new WebGLRenderTarget(this.view.textureWidth, this.view.textureHeight, {
+          format: RGBAFormat,
+          type: FloatType,
+          minFilter: NearestFilter,
+          magFilter: NearestFilter,
+          depthBuffer: false,
+          stencilBuffer: false,
+        }),
+    );
+    try {
+      let held: WebGLRenderTarget | null = null;
+      for (const [index, part] of parts.entries()) {
+        if (!part.taps) throw new Error("A part of a pass that sums copies names no copies.");
+        const { source, dispose } = part.source();
+        try {
+          load(source, {
+            sourcePartAccum: { value: 1 },
+            sourcePartTaps: { value: new Vector2(part.taps.first, part.taps.last) },
+            destSpectrogramTex: { value: held?.texture ?? this.textures.placeholderTexture },
+          });
+          const next = totals[index % 2];
+          this.drawRanges(material, next, list);
+          held = next;
+        } finally {
+          dispose();
+        }
+      }
+      if (!held) return;
+      const { source, dispose } = parts[0].source();
+      try {
+        load(source, { sourcePartAccum: { value: 2 }, sourceSpectrogramTex: { value: held.texture } });
+        this.drawRanges(material, target, list);
+      } finally {
+        dispose();
+      }
+    } finally {
+      for (const total of totals) total.dispose();
     }
   }
 
@@ -1341,6 +1406,8 @@ export class StrokeRenderer {
       sourcePartOn: { value: false },
       sourcePartCore: { value: new Vector4() },
       sourcePartChannel: { value: 0 },
+      sourcePartTaps: { value: new Vector2() },
+      sourcePartAccum: { value: 0 },
       blendMode: { value: stepState.blendMode },
       algorithm: { value: stepState.algorithm },
       magnitudeLimit: { value: magnitudeLimit },

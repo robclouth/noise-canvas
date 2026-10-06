@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, it } from "vitest";
 import type { EffectType } from "../../effects";
 import { getNumberParameterDef } from "../../parameters";
-import type { ParameterKey } from "../../store/types";
-import { parityCanvas, parityData, parityRenderer } from "../../test/canvas-parity";
+import type { ParameterKey, State } from "../../store/types";
+import { parityCanvas, parityData, parityRenderer, PARITY_FILE_PATH } from "../../test/canvas-parity";
 import { fixtureBrush } from "../../test/transform-fixture";
 import { brushPaintsAt, prepareStrokeBatch, strokeRefusal } from "../file-stroke-dispatch";
 import { reachFixes } from "../reach-fix";
@@ -16,17 +16,18 @@ afterAll(() => renderer?.dispose());
 
 const max = (key: ParameterKey): number => getNumberParameterDef(key).max;
 
-const CASES: { name: string; effect: EffectType; blocks: number; step: Record<string, unknown> }[] = [
+const CASES: { name: string; effect: EffectType; blocks: number; bpm?: number; step: Record<string, unknown> }[] = [
   {
-    name: "Repeat at its widest",
-    effect: "clone",
+    name: "Attract at its widest on a slow file",
+    effect: "attract",
     blocks: 16,
+    bpm: 60,
     step: {
-      cloneCountX: max("cloneCountX"),
-      cloneSpaceBeats: max("cloneSpaceBeats"),
-      cloneCountY: max("cloneCountY"),
-      cloneSpaceSemis: max("cloneSpaceSemis"),
-      cloneEdgeMode: 1,
+      attractMap: 0,
+      attractAmountX: max("attractAmountX"),
+      attractAmountY: max("attractAmountY"),
+      attractSmoothX: max("attractSmoothX"),
+      attractSmoothY: max("attractSmoothY"),
     },
   },
   {
@@ -55,14 +56,22 @@ const CASES: { name: string; effect: EffectType; blocks: number; step: Record<st
   },
 ];
 
+/** `state` on a file at `bpm`, or as it is when none is given. */
+function atBpm(state: State, bpm: number | undefined): State {
+  return bpm ? { ...state, filepathsBpm: { [PARITY_FILE_PATH]: bpm } } : state;
+}
+
 describe("settings that let a refused brush paint", () => {
   it.each(CASES)(
     "names settings that paint for $name",
-    ({ effect, blocks, step }) => {
+    ({ effect, blocks, bpm, step }) => {
       renderer ??= parityRenderer();
       const target = parityCanvas(parityData({ durationSeconds: 300 }), blocks, renderer.gl);
       try {
-        const state = fixtureBrush(effect, { ...step, effects: [{ id: effect, effect, enabled: true, params: step }] });
+        const state = atBpm(
+          fixtureBrush(effect, { ...step, effects: [{ id: effect, effect, enabled: true, params: step }] }),
+          bpm,
+        );
         const aim = { x: 0.5, y: 0.5 };
         expect(strokeRefusal(target.context, state, aim)).not.toBeNull();
 
@@ -81,9 +90,12 @@ describe("settings that let a refused brush paint", () => {
     renderer ??= parityRenderer();
     const target = parityCanvas(parityData({ durationSeconds: 300 }), 16, renderer.gl);
     try {
-      const { effect, step } = CASES[0];
-      const wide = fixtureBrush(effect, { ...step, effects: [{ id: effect, effect, enabled: true, params: step }] });
-      const plain = fixtureBrush("dynamics", { dynamicsGainDb: -6 });
+      const { effect, step, bpm } = CASES[0];
+      const wide = atBpm(
+        fixtureBrush(effect, { ...step, effects: [{ id: effect, effect, enabled: true, params: step }] }),
+        bpm,
+      );
+      const plain = atBpm(fixtureBrush("dynamics", { dynamicsGainDb: -6 }), bpm);
       const refused = { state: wide, aimX: 0.5, aimY: 0.5 };
       target.canvas.beginStroke();
       try {

@@ -458,6 +458,17 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     parts, Bleed zero-pads a read past the file, not past the part. Snappy
     also reads under the pixel it writes, and a wrapped read folds across the
     whole axis, so neither is read in parts.
+    A repeat that is the brush's first effect, run once, reads its copies
+    along time where each lands, so `readBoxes` hands back each copy's region
+    (`taps`) apart from what its pitch copies and the rest of the brush read.
+    When no one view holds them all, the copies are taken in order, as many
+    to a group as one view fits, and the time pass is drawn once per group,
+    adding the group's complex sum to the totals the groups before it left in
+    one of two targets in turn; a last draw turns the totals into the pass's
+    output, with the weight behind them counted from the copies' decay. The
+    totals ride on the dest texture while a group adds to them and on the
+    source texture while they are finished, because the pass already samples
+    all the textures a fragment shader may.
     A refusal is never silent, and it says what to change. `reachFixes` moves
     each control of the brush, one at a time, toward its default or an end,
     and halves its travel against the real refusal test (`brushPaintsAt`) to

@@ -342,6 +342,32 @@ const SCENARIOS: {
       },
     ],
   },
+  ...[
+    { name: "eight copies four beats apart", step: { cloneCountX: 8, cloneSpaceBeats: 4 } },
+    {
+      name: "copies both ways in time and pitch, decaying",
+      step: {
+        cloneCountX: 8,
+        cloneSpaceBeats: 4,
+        cloneDirectionX: 1,
+        cloneCountY: 4,
+        cloneSpaceSemis: 7,
+        cloneDecay: 40,
+      },
+    },
+    { name: "copies a pattern spaces", step: { cloneCountX: 6, cloneSpaceBeats: 4, ...sweeping("cloneSpaceBeats") } },
+    { name: "the widest copies", step: { cloneCountX: 63, cloneSpaceBeats: 32, cloneCountY: 63, cloneSpaceSemis: 96 } },
+  ].map(({ name, step }) => ({
+    name: `a repeat of ${name}, its copies read in groups`,
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.5,
+        state: brushState("clone", { ...step, cloneEdgeMode: 1, brushSizePitch: 24 }, 4, false),
+      },
+    ],
+  })),
   {
     name: "a blur at its widest at 60 bpm, on a small window",
     windowBlocks: SMALL_WINDOW_BLOCKS,

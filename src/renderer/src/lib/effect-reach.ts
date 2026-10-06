@@ -552,31 +552,76 @@ const SNAP_SEMIS = 6;
  * where it samples the first step's input, so that read is set apart:
  * `input` is where it samples, and `own` what the rest of the brush reads.
  * `input` is null when the first effect is no such warp.
+ *
+ * A repeat that is the brush's first effect, run once, reads that input only
+ * where its copies along time land, so those reads are set apart too: `taps`
+ * holds the region each copy reads, and `own` what its pitch copies and the
+ * rest of the brush read. `taps` is null when the first effect is no such
+ * repeat.
  */
 export function readBoxes(
   state: State,
   ctx: ReachContext,
   box: ReadBox,
   brushes: readonly BrushBox[],
-): { own: ReadBox; input: ReadBox | null } {
+): { own: ReadBox; input: ReadBox | null; taps: ReadBox[] | null } {
   const chain = chainedEffects(state);
   const [first] = chain;
-  const apart =
-    !!first &&
-    first.step === firstEnabledStep(state) &&
-    first.repeats === 1 &&
-    first.effect === "transform" &&
-    moves(first.view);
+  const leads = !!first && first.step === firstEnabledStep(state) && first.repeats === 1;
+  const apart = leads && first.effect === "transform" && moves(first.view);
+  const copies =
+    leads &&
+    first.effect === "clone" &&
+    Number(first.view.cloneCountX) > 0 &&
+    READS_PAST_BRUSH.has(Number(first.view.cloneEdgeMode));
   let region = box;
   const brushOf = (step: number): BrushBox => brushes[step] ?? { ...region, wrapsTime: false, wrapsPitch: false };
-  for (let i = chain.length - 1; i >= (apart ? 1 : 0); i--) {
+  for (let i = chain.length - 1; i >= (apart || copies ? 1 : 0); i--) {
     const { effect, view, step, repeats } = chain[i];
     const brush = brushOf(step);
     for (let r = 0; r < repeats; r++) region = effectReadBox(effect, view, ctx, region, brush);
   }
-  if (!apart) return { own: region, input: null };
+  if (copies) {
+    const brush = brushOf(first.step);
+    const own = repeatOwnBox(first.view, ctx, region, brush);
+    return { own, input: null, taps: repeatTapBoxes(first.view, ctx, own, brush) };
+  }
+  if (!apart) return { own: region, input: null, taps: null };
   const brush = brushOf(first.step);
-  return { own: region, input: fitBox(warpBox(first.view, ctx, region, brush), brush, ctx) };
+  return { own: region, input: fitBox(warpBox(first.view, ctx, region, brush), brush, ctx), taps: null };
+}
+
+/**
+ * What a repeat reads to paint `box` besides its copies along time: its
+ * copies across pitch, which read the time copies' sum, and what the envelope
+ * follower reads around each pixel.
+ */
+function repeatOwnBox(view: State, ctx: ReachContext, box: ReadBox, brush: BrushBox): ReadBox {
+  const envelope = envelopeReach(view, ctx);
+  const semis = cloneTapSemis(view);
+  const pitch = semis === 0 ? 0 : semitonesToUv(semis, ctx) + 1 / ctx.numBands;
+  return fitBox(
+    {
+      start: box.start - envelope.before,
+      end: box.end + envelope.after,
+      low: box.low - pitch,
+      high: box.high + pitch,
+    },
+    brush,
+    ctx,
+  );
+}
+
+/** The region each copy along time reads to paint `own`: `own` moved by every gap it can take. */
+function repeatTapBoxes(view: State, ctx: ReachContext, own: ReadBox, brush: BrushBox): ReadBox[] {
+  const gap = stateRange(view, "cloneSpaceBeats");
+  const beat = 60 / ctx.bpm;
+  return cloneTapSteps(view.cloneShapeX as CloneShapeKey, Number(view.cloneCountX), Number(view.cloneDirectionX)).map(
+    (step) => {
+      const reads = [gap.lo, gap.hi].map((g) => -step * g * beat);
+      return fitBox({ ...own, start: own.start + Math.min(...reads), end: own.end + Math.max(...reads) }, brush, ctx);
+    },
+  );
 }
 
 /** What one effect reads to paint `box`, within its step's `brush`. */

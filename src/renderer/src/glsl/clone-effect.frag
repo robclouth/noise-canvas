@@ -47,6 +47,15 @@ float snappedPitchStepUv(float rawSemis) {
     return semisToUv(snapToScale(target) - brushBasePitchAbsSemis);
 }
 
+// Seconds a copy read at source UV `sourceX` is displaced to land at dest UV
+// `destX`. A source read a group at a time lays out its own span, so the two
+// are counted from their own views' starts.
+float copyDisplacementSec(float destX, float sourceX, float uvToSec) {
+    if (sourcePartAccum == 0) return (destX - sourceX) * uvToSec;
+    float frames = float(destViewStartFrame - sourceViewStartFrame) + destX * destFrameCount - sourceX * sourceFrameCount;
+    return frames / max(destSampleRate, 1e-6);
+}
+
 void main() {
     vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
     if (brushWeightIsZero(destUv)) {
@@ -107,11 +116,32 @@ void main() {
     vec2 sumR = vec2(0.0);
     float totalWeightL = 0.0;
     float totalWeightR = 0.0;
+    // A group adds to the totals the groups before it left; the finish takes
+    // them whole, and the weight behind them from the copies' decay alone,
+    // since a copy read a group at a time is never dropped.
+    if (sourcePartAccum != 0) {
+        vec4 sums = sourcePartAccum == 1 ? texture(destSpectrogramTex, vUv) : texture(sourceSpectrogramTex, vUv);
+        sumL = sums.rg;
+        sumR = sums.ba;
+    }
+    if (sourcePartAccum == 2) {
+        for (int s = 0; s < count; s++) {
+            float offsetIdx = cloneDirectionMode == 0 ? float(s)
+                : (cloneDirectionMode == 2 ? -float(s) : float(s) - float(count - 1) * 0.5);
+            float normDist = abs(offsetIdx) / maxAbsOffset;
+            totalWeightL += tapWeight(decayFactor.x, normDist);
+            totalWeightR += tapWeight(decayFactor.y, normDist);
+        }
+    }
+    // The copies this draw reads: all of them, or one group.
+    int firstTap = sourcePartAccum == 1 ? int(sourcePartTaps.x) : 0;
+    int lastTap = sourcePartAccum == 1 ? int(sourcePartTaps.y) : (sourcePartAccum == 2 ? -1 : count - 1);
 
     // The bound must stay uniform-derived. A literal bound gives the loop a
     // constant trip count, which ANGLE's D3D backend fully unrolls, multiplying
     // this program's link time several times over.
     for (int s = 0; s < count; s++) {
+        if (s < firstTap || s > lastTap) continue;
         float offsetIdx;
         if (cloneDirectionMode == 0) {
             offsetIdx = float(s);
@@ -139,7 +169,7 @@ void main() {
             float w = tapWeight(decayFactor.x, normDist);
             vec2 totalShift = vec2(sourceOffsetX, sourceOffsetY) + offsetL;
             vec4 sampleTexel = sampleWithEdgeMode(sampleUvL, coords.dest, totalShift.x, totalShift.y, cloneEdgeMode);
-            float dtSec = (coords.dest.x - sampleUvL.x) * uvToSec;
+            float dtSec = copyDisplacementSec(coords.dest.x, sampleUvL.x, uvToSec);
             sampleTexel.g = reanchorTimeShift(sampleUvL, sampleTexel.g, destFreqHz, dtSec);
             sampleTexel.a = reanchorTimeShift(sampleUvL, sampleTexel.a, destFreqHz, dtSec);
             sumL += toComplex(sampleTexel.rg) * w;
@@ -156,7 +186,7 @@ void main() {
                 float wL = tapWeight(decayFactor.x, normDist);
                 vec2 totalShiftL = vec2(sourceOffsetX, sourceOffsetY) + offsetL;
                 vec4 sampleTexelL = sampleWithEdgeMode(sampleUvL, coords.dest, totalShiftL.x, totalShiftL.y, cloneEdgeMode);
-                float dtSecL = (coords.dest.x - sampleUvL.x) * uvToSec;
+                float dtSecL = copyDisplacementSec(coords.dest.x, sampleUvL.x, uvToSec);
                 sampleTexelL.g = reanchorTimeShift(sampleUvL, sampleTexelL.g, destFreqHz, dtSecL);
                 sumL += toComplex(sampleTexelL.rg) * wL;
                 totalWeightL += wL;
@@ -165,12 +195,17 @@ void main() {
                 float wR = tapWeight(decayFactor.y, normDist);
                 vec2 totalShiftR = vec2(sourceOffsetX, sourceOffsetY) + offsetR;
                 vec4 sampleTexelR = sampleWithEdgeMode(sampleUvR, coords.dest, totalShiftR.x, totalShiftR.y, cloneEdgeMode);
-                float dtSecR = (coords.dest.x - sampleUvR.x) * uvToSec;
+                float dtSecR = copyDisplacementSec(coords.dest.x, sampleUvR.x, uvToSec);
                 sampleTexelR.a = reanchorTimeShift(sampleUvR, sampleTexelR.a, destFreqHz, dtSecR);
                 sumR += toComplex(sampleTexelR.ba) * wR;
                 totalWeightR += wR;
             }
         }
+    }
+
+    if (sourcePartAccum == 1) {
+        outColor = vec4(sumL, sumR);
+        return;
     }
 
     vec4 resultTexel;

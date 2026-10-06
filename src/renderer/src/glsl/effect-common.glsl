@@ -84,6 +84,13 @@ uniform vec4  sourcePartCore;
 // The channel pair a part draw writes: 0 for the left, 1 for the right.
 uniform int   sourcePartChannel;
 bool sourcePartMiss = false;
+// A pass whose copies are read a group at a time: the copies [x, y] this
+// draw reads, and whether it adds their sum to the totals so far (1) or turns
+// the totals into the pass's output (2). The totals hold each channel's
+// complex sum; they arrive as destSpectrogramTex while a group adds to them,
+// and as sourceSpectrogramTex while they are finished.
+uniform vec2  sourcePartTaps;
+uniform int   sourcePartAccum;
 
 void gateSourcePart(vec2 sourceUv) {
   if (!sourcePartOn) return;

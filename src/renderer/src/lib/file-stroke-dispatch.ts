@@ -850,16 +850,21 @@ type BesideTile = {
   others: ReadPart;
   /** The frames and bands the first step reads apart, when it does. */
   inputBox: { frames: FrameSpan; bands: BandSpan } | null;
+  /**
+   * For a first step that sums copies along time: the view of what it reads
+   * besides those copies, and the frames and bands each copy reads.
+   */
+  copies: { own: CanvasView; taps: { frames: FrameSpan; bands: BandSpan }[] } | null;
   /** The input read a part at a time, when one view of it holds more than a window. */
   parts?: InputPartPlan[];
 };
 
 /**
- * One part of a tile's input: the view it is read through, and the file
- * frames and bands whose reads it serves, unbounded where it takes every read
- * past the input's edge.
+ * One part of a tile's input: the view it is read through, and which reads it
+ * serves: the file frames and bands of its `core`, unbounded where it takes
+ * every read past the input's edge, or the copies of its `taps`.
  */
-type InputPartPlan = { view: CanvasView; core: InputPart["core"] };
+type InputPartPlan = { view: CanvasView; core?: InputPart["core"]; taps?: InputPart["taps"] };
 
 /**
  * A step's brush as the region it covers, past the file's ends where it runs
@@ -895,6 +900,7 @@ type BesideTiling = {
   tileOf: (bands: BandSpan, frames: FrameSpan) => BesideTile;
   halves: (tile: BesideTile) => [BesideTile, BesideTile][];
   partsOf: (tile: BesideTile, budget: number, most: number) => InputPartPlan[] | null;
+  copyGroupsOf: (tile: BesideTile, budget: number, most: number) => InputPartPlan[] | null;
 };
 
 function besideTiling(
@@ -956,7 +962,7 @@ function besideTiling(
     return canvasViewOfFrames(grid, frames.start, frames.end, bandsOfBox(box, numBands));
   };
   const tileOf = (bands: BandSpan, frames: FrameSpan): BesideTile => {
-    const { own, input } = readBoxes(
+    const { own, input, taps } = readBoxes(
       state,
       ctx,
       {
@@ -967,7 +973,9 @@ function besideTiling(
       },
       brushes,
     );
-    const read = input ? unionBox(own, input) : own;
+    // What the brush reads with its copies along time on the tile's own view.
+    const whole = taps ? taps.reduce(unionBox, own) : own;
+    const read = input ? unionBox(own, input) : whole;
     const reads = framesOfBox(read);
     const readBands = bandsOfBox(read, numBands);
     // The first step reads its input where the warp puts it; other files it
@@ -975,8 +983,15 @@ function besideTiling(
     const others: ReadPart = input ? { first: framesOfBox(input), rest: framesOfBox(own) } : reads;
     if (!input || inputApart) {
       const inputBox = input && { frames: framesOfBox(input), bands: bandsOfBox(input, numBands) };
+      const copies =
+        taps && inputApart
+          ? {
+              own: viewOfBox(own),
+              taps: taps.map((box) => ({ frames: framesOfBox(box), bands: bandsOfBox(box, numBands) })),
+            }
+          : null;
       return {
-        view: viewOfBox(own),
+        view: viewOfBox(whole),
         input: input && viewOfBox(input),
         bands,
         frames,
@@ -984,6 +999,7 @@ function besideTiling(
         readBands,
         others,
         inputBox,
+        copies,
       };
     }
     return {
@@ -995,6 +1011,7 @@ function besideTiling(
       readBands,
       others,
       inputBox: null,
+      copies: null,
     };
   };
   const framesOf = (from: number, to: number): FrameSpan => ({
@@ -1034,14 +1051,15 @@ function besideTiling(
   const partable =
     Number(context.createStepStateView(state, firstStep).algorithm) !== SNAPPY_ALGORITHM &&
     !(firstBrush?.wrapsTime || firstBrush?.wrapsPitch);
+  // The view a part reads its reads of `frames` and `bands` through.
+  const viewOfCore = (frames: FrameSpan, bands: BandSpan): CanvasView =>
+    canvasViewOfFrames(grid, Math.max(0, frames.start - partBefore), Math.min(numFrames, frames.end + partAfter), {
+      first: Math.max(0, bands.first - 1),
+      last: Math.min(numBands - 1, bands.last + 1),
+    });
   const partsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const box = tile.inputBox;
     if (!partable || !box) return null;
-    const viewOfCore = (frames: FrameSpan, bands: BandSpan): CanvasView =>
-      canvasViewOfFrames(grid, Math.max(0, frames.start - partBefore), Math.min(numFrames, frames.end + partAfter), {
-        first: Math.max(0, bands.first - 1),
-        last: Math.min(numBands - 1, bands.last + 1),
-      });
     const parts: { frames: FrameSpan; bands: BandSpan; view: CanvasView }[] = [];
     const pending = [{ ...box, view: viewOfCore(box.frames, box.bands) }];
     for (let part = pending.pop(); part; part = pending.pop()) {
@@ -1079,7 +1097,36 @@ function besideTiling(
       },
     }));
   };
-  return { renderer, start, end, union, whole, written, tileOf, halves, partsOf };
+  // Copies are taken in order, as many to a group as one view of them fits.
+  const copyGroupsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
+    const taps = tile.copies?.taps;
+    if (!partable || !taps) return null;
+    const groups: InputPartPlan[] = [];
+    for (let first = 0; first < taps.length; ) {
+      let last = first;
+      let frames = taps[first].frames;
+      let bands = taps[first].bands;
+      let view = viewOfCore(frames, bands);
+      if (view.texels > budget || groups.length >= most) return null;
+      for (let next = first + 1; next < taps.length; next++) {
+        const wider = {
+          start: Math.min(frames.start, taps[next].frames.start),
+          end: Math.max(frames.end, taps[next].frames.end),
+        };
+        const across = {
+          first: Math.min(bands.first, taps[next].bands.first),
+          last: Math.max(bands.last, taps[next].bands.last),
+        };
+        const merged = viewOfCore(wider, across);
+        if (merged.texels > budget) break;
+        [last, frames, bands, view] = [next, wider, across, merged];
+      }
+      groups.push({ view, taps: { first, last } });
+      first = last + 1;
+    }
+    return groups;
+  };
+  return { renderer, start, end, union, whole, written, tileOf, halves, partsOf, copyGroupsOf };
 }
 
 /**
@@ -1142,27 +1189,31 @@ function besideFor(
 ): PaintBeside | null {
   const tiling = besideTiling(context, state, cursorPos, span, canvas);
   if (!tiling) return null;
-  const { renderer, start, end, union, whole, written, tileOf, halves, partsOf } = tiling;
+  const { renderer, start, end, union, whole, written, tileOf, halves, partsOf, copyGroupsOf } = tiling;
 
   const budget = canvas.texelBudget;
   const cost = (tile: BesideTile): number => Math.max(tile.view.texels, tile.input?.texels ?? 0);
   let partCount = 0;
-  // A tile whose own view fits reads an input too wide for one view a part at a time.
+  // A tile whose own view fits reads an input too wide for one view a part at
+  // a time, and one whose copies along time no one view holds reads them a
+  // group at a time.
   const fits = (tile: BesideTile): boolean => {
-    if (tile.view.texels > budget || !canvas.othersFit(span.needs, tile.others)) return false;
-    if ((tile.input?.texels ?? 0) <= budget) return true;
-    const parts = partsOf(tile, budget, MAX_BESIDE_TILES - partCount);
-    if (!parts) return false;
-    tile.parts = parts;
-    partCount += parts.length;
-    console.log(
-      "PARTPLAN",
-      JSON.stringify({
-        tile: { bands: tile.bands, frames: tile.frames },
-        box: tile.inputBox,
-        parts: parts.map((p) => ({ core: p.core, view: [p.view.startFrame, p.view.endFrame, p.view.texels] })),
-      }),
-    );
+    if (!canvas.othersFit(span.needs, tile.others)) return false;
+    if (tile.view.texels <= budget) {
+      if ((tile.input?.texels ?? 0) <= budget) return true;
+      const parts = partsOf(tile, budget, MAX_BESIDE_TILES - partCount);
+      if (!parts) return false;
+      tile.parts = parts;
+      partCount += parts.length;
+      return true;
+    }
+    const own = tile.copies?.own;
+    if (!own || own.texels > budget) return false;
+    const groups = copyGroupsOf(tile, budget, MAX_BESIDE_TILES - partCount);
+    if (!groups) return false;
+    tile.view = own;
+    tile.parts = groups;
+    partCount += groups.length;
     return true;
   };
   const larger = ([a, b]: [BesideTile, BesideTile]): number => Math.max(cost(a), cost(b));
@@ -1301,6 +1352,7 @@ async function readParts(
   const parts = plans.map(
     (plan, index): InputPart => ({
       core: plan.core,
+      taps: plan.taps,
       source: () => {
         if (index === 0) return { source: first.source, dispose: () => {} };
         const made = inputOver(context, state, plan.view, values[index]);

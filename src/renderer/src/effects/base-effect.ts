@@ -101,6 +101,10 @@ export type CommonUniforms = {
   sourcePartOn: { value: boolean };
   sourcePartCore: { value: Vector4 };
   sourcePartChannel: { value: number };
+  // A pass whose copies are read a group at a time: the copies [x, y] a draw
+  // reads, and whether it adds to the totals (1) or finishes them (2).
+  sourcePartTaps: { value: Vector2 };
+  sourcePartAccum: { value: number };
 
   brushPan: {
     value: ParameterUniform;
@@ -208,6 +212,8 @@ export function createDefaultUniforms(): CommonUniforms {
     sourcePartOn: { value: false },
     sourcePartCore: { value: new Vector4() },
     sourcePartChannel: { value: 0 },
+    sourcePartTaps: { value: new Vector2() },
+    sourcePartAccum: { value: 0 },
     brushPan: { value: defaultParameterUniform(0.0, 0.0, 1.0) },
     bpm: { value: 120.0 },
     blendMode: { value: 0 },
