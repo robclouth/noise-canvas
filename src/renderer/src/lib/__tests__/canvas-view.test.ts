@@ -103,6 +103,13 @@ describe("canvasViewOfFrames", () => {
     expect([frames.firstBlock, frames.lastBlock]).toEqual([1, 2]);
   });
 
+  it("keeps a span wholly past the file's end inside the file", () => {
+    const view = canvasViewOfFrames(grid, small.numFrames + quantum * 3, small.numFrames + quantum * 5);
+    expect(view.startFrame).toBeLessThan(view.endFrame);
+    expect(view.endFrame).toBe(small.numFrames);
+    expect(view.texels).toBeGreaterThan(0);
+  });
+
   it("ends at the file's end", () => {
     const view = canvasViewOfFrames(grid, small.numFrames - 1, small.numFrames + quantum);
     expect(view.endFrame).toBe(small.numFrames);

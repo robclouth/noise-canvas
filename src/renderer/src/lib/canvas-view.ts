@@ -46,12 +46,13 @@ export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: num
 
 /**
  * The view over the frames [start, end) of `grid`, its edges moved out to the
- * grid's quantum, over every band or only those of `bands`. `firstBlock` and
- * `lastBlock` are the blocks it touches.
+ * grid's quantum and kept inside the file, over every band or only those of
+ * `bands`. `firstBlock` and `lastBlock` are the blocks it touches.
  */
 export function canvasViewOfFrames(grid: BlockGrid, start: number, end: number, bands?: BandSpan): CanvasView {
   const quantum = gridQuantumFrames(grid);
-  const startFrame = Math.max(0, Math.floor(start / quantum) * quantum);
+  // A span wholly past the file's end keeps the file's last quantum.
+  const startFrame = Math.max(0, Math.floor(Math.min(start, grid.numFrames - 1) / quantum) * quantum);
   const endFrame = Math.min(grid.numFrames, Math.max(startFrame + quantum, Math.ceil(end / quantum) * quantum));
   return viewOver(grid, startFrame, endFrame, blockOfFrame(grid, startFrame), blockOfFrame(grid, endFrame - 1), bands);
 }
