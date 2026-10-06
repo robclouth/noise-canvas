@@ -48,10 +48,10 @@ const CASES: { name: string; effect: EffectType; blocks: number; step: Record<st
     },
   },
   {
-    name: "Transform stretching time 100 times",
+    name: "Transform stretching time and pitch 100 times",
     effect: "transform",
     blocks: 4,
-    step: { transformScaleTime: 0.01, transformEdgeMode: 1 },
+    step: { transformScaleTime: 0.01, transformScalePitch: 0.01, transformEdgeMode: 1 },
   },
 ];
 

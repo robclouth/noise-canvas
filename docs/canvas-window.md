@@ -430,12 +430,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     the levels fill in one block at a time.
 
 16. **A dab the window cannot hold is painted beside the canvas, in tiles.**
-    `besideFor` cuts it into tiles of bands over runs of blocks. `readBoxes`
+    `besideFor` cuts it into tiles of bands over spans of frames. `readBoxes`
     says what region a tile reads: from the brush's last effect back, each
     effect widens the region by what it reads around a pixel, maps it through
     its warp, or takes its step's whole brush when it may read anywhere in it.
-    A tile that reads more than a window holds is halved across bands or
-    blocks, whichever reads less, and a tile that cannot read less is refused.
+    A tile reads through a view of that region alone, its edges moved out to
+    two bins of the coarsest band (`canvasViewOfFrames`), so a bin keeps its
+    parity and no view is a block wider than its reads. A tile that reads
+    more than a window holds is halved across bands or blocks, whichever
+    reads less; one inside a block halves in time at two coarsest bins. A
+    tile that cannot read less is refused.
     A transform that is the brush's first effect, run once, and warps or
     shifts, samples the first step's input through a view of its own, so
     reversing a whole file reads its far end, and a shift reads the one box it

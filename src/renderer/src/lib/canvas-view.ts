@@ -1,18 +1,18 @@
 import { Vector2 } from "three";
 import { bandAtPixel, type BandLayout } from "./band-layout";
-import { blockGrid, frameRangeOfBlock, type BlockGrid } from "./block-grid";
+import { blockGrid, blockOfFrame, frameRangeOfBlock, gridQuantumFrames, type BlockGrid } from "./block-grid";
 import { packedFold } from "./constants";
 
 /**
- * A block-aligned span of a file as its own packed layout. The view's
- * metadata has the same shape a file's has, so the stroke shaders render
- * over a view exactly as they render over a whole file; only the frame
- * origin moves.
+ * A span of a file as its own packed layout. The view's metadata has the
+ * same shape a file's has, so the stroke shaders render over a view exactly
+ * as they render over a whole file; only the frame origin moves.
  */
 export type CanvasView = {
+  /** The blocks the view touches. */
   firstBlock: number;
   lastBlock: number;
-  /** Absolute frame span the view holds; both edges sit on every band's bin grid. */
+  /** Absolute frame span the view holds; both edges sit on every band's bin grid, at an even bin. */
   startFrame: number;
   endFrame: number;
   /** The view's packed pixels in the file, as [absolute start, count] per band. */
@@ -40,9 +40,31 @@ export type BandSpan = { first: number; last: number };
  * band or only those of `bands`; the others hold no bins.
  */
 export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: number, bands?: BandSpan): CanvasView {
-  const { layout, numFrames } = grid;
   const startFrame = frameRangeOfBlock(grid, firstBlock).start;
-  const endFrame = frameRangeOfBlock(grid, lastBlock).end;
+  return viewOver(grid, startFrame, frameRangeOfBlock(grid, lastBlock).end, firstBlock, lastBlock, bands);
+}
+
+/**
+ * The view over the frames [start, end) of `grid`, its edges moved out to the
+ * grid's quantum, over every band or only those of `bands`. `firstBlock` and
+ * `lastBlock` are the blocks it touches.
+ */
+export function canvasViewOfFrames(grid: BlockGrid, start: number, end: number, bands?: BandSpan): CanvasView {
+  const quantum = gridQuantumFrames(grid);
+  const startFrame = Math.max(0, Math.floor(start / quantum) * quantum);
+  const endFrame = Math.min(grid.numFrames, Math.max(startFrame + quantum, Math.ceil(end / quantum) * quantum));
+  return viewOver(grid, startFrame, endFrame, blockOfFrame(grid, startFrame), blockOfFrame(grid, endFrame - 1), bands);
+}
+
+function viewOver(
+  grid: BlockGrid,
+  startFrame: number,
+  endFrame: number,
+  firstBlock: number,
+  lastBlock: number,
+  bands?: BandSpan,
+): CanvasView {
+  const { layout, numFrames } = grid;
   const ranges = new Uint32Array(layout.numBands * 2);
   const metadata = new Float64Array(layout.numBands * 4);
   const bandK0 = new Uint32Array(layout.numBands);

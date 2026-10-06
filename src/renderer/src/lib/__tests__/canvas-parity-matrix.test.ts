@@ -64,8 +64,13 @@ const WIDTHS = [
   { name: "the whole file", beats: 32 },
 ];
 
-function brushState(effect: EffectType, step: Record<string, unknown>, beats: number, accumulate: boolean): State {
-  return createStateForEffects([effect], {
+function brushState(
+  effect: EffectType | EffectType[],
+  step: Record<string, unknown>,
+  beats: number,
+  accumulate: boolean,
+): State {
+  return createStateForEffects(Array.isArray(effect) ? effect : [effect], {
     brushSizeTime: beats,
     brushSizePitch: 12,
     stepOverrides: { ...step, accumulate },
@@ -98,8 +103,24 @@ const CASES = LENGTHS.flatMap((seconds) =>
 
 const REVERSE = { transformScaleTime: -1, transformEdgeMode: 0 };
 
-/** A stroke that is more than one dab, or a brush more than one step. */
-const SCENARIOS: { name: string; dabs: (seconds: number) => { x: number; y: number; state: State }[] }[] = [
+/** `state` on a file at `bpm`. */
+function atBpm(bpm: number, state: State): State {
+  return { ...state, filepathsBpm: { [PARITY_FILE_PATH]: bpm } };
+}
+
+// Blocks a window holds that a tile of one block reads more than, for a brush
+// that reads a few seconds around itself.
+const SMALL_WINDOW_BLOCKS = 4;
+
+/**
+ * A stroke that is more than one dab, or a brush more than one step, and the
+ * window it paints through when not `WINDOW_BLOCKS`.
+ */
+const SCENARIOS: {
+  name: string;
+  windowBlocks?: number;
+  dabs: (seconds: number) => { x: number; y: number; state: State }[];
+}[] = [
   {
     name: "a wide reversal over overlapping dabs, without Accumulate",
     dabs: () => {
@@ -204,6 +225,72 @@ const SCENARIOS: { name: string; dabs: (seconds: number) => { x: number; y: numb
       return [{ x: 0.5, y: 0.5, state }];
     },
   },
+  {
+    name: "an evolve wide in time, cut into tiles of half a block",
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: () => [
+      { x: 0.5, y: 0.5, state: atBpm(60, brushState("evolve", { evolveScaleX: 40, brushSizePitch: 24 }, 4, false)) },
+    ],
+  },
+  {
+    name: "an evolve wide in pitch, cut into tiles of a sixteenth of a block",
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: () => [
+      { x: 0.5, y: 0.5, state: atBpm(60, brushState("evolve", { evolveScaleY: 60, brushSizePitch: 24 }, 4, false)) },
+    ],
+  },
+  {
+    name: "an evolve then a sort both ways, cut into tiles of half a block",
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: () => [
+      {
+        x: 0.37,
+        y: 0.5,
+        state: atBpm(
+          60,
+          brushState(["evolve", "sort"], { evolveScaleY: 40, sortDirection: 2, brushSizePitch: 24 }, 4, false),
+        ),
+      },
+    ],
+  },
+  {
+    name: "a transform stretching time 100 times, on a small window",
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    // A whole-file canvas places a read through one float over the file, so
+    // a 100-times stretch, which reads between bins everywhere, is compared
+    // near the start, where that float is fine enough.
+    dabs: (seconds) => [
+      {
+        x: 6 / seconds,
+        y: 0.5,
+        state: brushState(
+          "transform",
+          { transformScaleTime: 0.01, transformEdgeMode: 1, brushSizePitch: 24 },
+          4,
+          false,
+        ),
+      },
+    ],
+  },
+  {
+    name: "a blur at its widest at 60 bpm, on a small window",
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.5,
+        state: atBpm(
+          60,
+          brushState(
+            "blur",
+            { blurAmountTime: 100, blurNoiseTime: 100, blurAmountPitch: 100, blurNoisePitch: 100, blurEdgeMode: 1 },
+            2,
+            false,
+          ),
+        ),
+      },
+    ],
+  },
 ];
 
 // One renderer for the whole run, as the app has: the effects are shared and
@@ -252,7 +339,7 @@ describe("a windowed canvas paints what a whole-file canvas paints", () => {
     async ({ seconds, scenario }) => {
       const dabs = scenario.dabs(seconds);
       const whole = canvas(Infinity, seconds);
-      const windowed = canvas(WINDOW_BLOCKS, seconds);
+      const windowed = canvas(scenario.windowBlocks ?? WINDOW_BLOCKS, seconds);
       const expected = await paintStroke(whole, dabs);
       const got = await paintStroke(windowed, dabs);
       expect(await expectSameStroke(whole, expected, got)).toBeGreaterThan(0);

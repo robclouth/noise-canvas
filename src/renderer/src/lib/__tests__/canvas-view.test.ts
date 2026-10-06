@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { constantQBandLayout, constantQMetadata } from "../../test/mock-spectrogram";
 import { layoutTexels, type BandLayout } from "../band-layout";
 import { ANALYSIS_MAX_TEXTURE_SIZE, packedFold, padToFold } from "../constants";
-import { blockGrid, blockPixelRanges, blockTexels } from "../block-grid";
+import { blockGrid, blockPixelRanges, blockTexels, gridQuantumFrames } from "../block-grid";
 import {
   canvasViewOf,
+  canvasViewOfFrames,
   clipRangesToView,
   fileRangesToView,
   fileUvToViewUv,
@@ -75,6 +76,37 @@ describe("canvasViewOf", () => {
     const view = canvasViewOf(grid, 0, 0);
     expect(view.textureWidth * view.textureHeight).toBeGreaterThanOrEqual(view.texels);
     expect(view.textureWidth * (view.textureHeight - 1)).toBeLessThan(view.texels);
+  });
+});
+
+describe("canvasViewOfFrames", () => {
+  const quantum = gridQuantumFrames(grid);
+
+  it("moves its edges out to an even bin of every band", () => {
+    const view = canvasViewOfFrames(grid, grid.blockFrames + quantum * 1.5, grid.blockFrames + quantum * 3.25);
+    expect(view.startFrame).toBe(grid.blockFrames + quantum);
+    expect(view.endFrame).toBe(grid.blockFrames + quantum * 4);
+    for (let band = 0; band < small.numBands; band++) {
+      const k0 = view.startFrame / 2 ** small.metadata[band * 4 + 2];
+      expect(view.bandK0[band]).toBe(k0);
+      expect(k0 % 2).toBe(0);
+    }
+    expect(view.firstBlock).toBe(1);
+    expect(view.lastBlock).toBe(1);
+  });
+
+  it("holds what the view of the same blocks holds when its edges are block edges", () => {
+    const frames = canvasViewOfFrames(grid, grid.blockFrames, grid.blockFrames * 3);
+    const blocks = canvasViewOf(grid, 1, 2);
+    expect(Array.from(frames.ranges)).toEqual(Array.from(blocks.ranges));
+    expect(Array.from(frames.layout.metadata)).toEqual(Array.from(blocks.layout.metadata));
+    expect([frames.firstBlock, frames.lastBlock]).toEqual([1, 2]);
+  });
+
+  it("ends at the file's end", () => {
+    const view = canvasViewOfFrames(grid, small.numFrames - 1, small.numFrames + quantum);
+    expect(view.endFrame).toBe(small.numFrames);
+    expect(view.texels).toBeGreaterThan(0);
   });
 });
 

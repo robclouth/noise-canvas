@@ -10,6 +10,7 @@ import type {
 } from "./file-renderer-types";
 import {
   canvasViewOf,
+  canvasViewOfFrames,
   clipToView,
   fileRangesToView,
   fileUvToViewUv,
@@ -24,7 +25,7 @@ import { composePixelRangeValues, intersectPixelRanges, pixelRangeCount } from "
 import { sourceNeedsOver, sourceReadSpan, type SourceRead, type SourceWindowTextures } from "./source-window";
 import type { DabNeeds, PaintBeside, StrokePaint, WindowedCanvas } from "./windowed-canvas";
 import type { SelfState } from "./self-window";
-import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock } from "./block-grid";
+import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock, gridQuantumFrames } from "./block-grid";
 import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
 import {
   firstEnabledStep,
@@ -905,12 +906,7 @@ function besideTiling(
   };
   const viewOfBox = (box: ReadBox): CanvasView => {
     const frames = framesOfBox(box);
-    return canvasViewOf(
-      grid,
-      blockOfFrame(grid, frames.start),
-      blockOfFrame(grid, frames.end - 1),
-      bandsOfBox(box, numBands),
-    );
+    return canvasViewOfFrames(grid, frames.start, frames.end, bandsOfBox(box, numBands));
   };
   const tileOf = (bands: BandSpan, frames: FrameSpan): BesideTile => {
     const { own, input } = readBoxes(
@@ -942,13 +938,20 @@ function besideTiling(
     start: Math.max(start, frameRangeOfBlock(grid, from).start),
     end: Math.min(end, frameRangeOfBlock(grid, to).end),
   });
+  const quantum = gridQuantumFrames(grid);
   const halves = (tile: BesideTile): [BesideTile, BesideTile][] => {
     const out: [BesideTile, BesideTile][] = [];
     const from = blockOfFrame(grid, tile.frames.start);
     const to = blockOfFrame(grid, tile.frames.end - 1);
+    const cut = Math.round((tile.frames.start + tile.frames.end) / 2 / quantum) * quantum;
     if (to > from) {
       const mid = Math.floor((from + to) / 2);
       out.push([tileOf(tile.bands, framesOf(from, mid)), tileOf(tile.bands, framesOf(mid + 1, to))]);
+    } else if (cut > tile.frames.start && cut < tile.frames.end) {
+      out.push([
+        tileOf(tile.bands, { start: tile.frames.start, end: cut }),
+        tileOf(tile.bands, { start: cut, end: tile.frames.end }),
+      ]);
     }
     const { first, last } = tile.bands;
     if (last > first) {
@@ -1002,9 +1005,9 @@ export function dabReadRegion(
 
 /**
  * How to paint a dab the canvas window cannot hold: beside the canvas, in
- * tiles of bands over runs of blocks. Each tile is read through a view of the
+ * tiles of bands over spans of frames. Each tile is read through a view of the
  * region its effects read to paint it, and a tile whose view holds more than
- * a window is halved, across bands or blocks, whichever reads less. Every tile
+ * a window is halved, across bands or in time, whichever reads less. Every tile
  * reads the file as it was before the dab, so the tiles never read each
  * other's paint, and a dab that reads the canvas as it paints is cut as any
  * other. Null when a tile that cannot shrink its read still reads more than a

@@ -51,6 +51,14 @@ export function coarsestBinFrames(grid: BlockGrid): number {
   return grid.blockFrames / Math.min(...grid.binsPerBlock);
 }
 
+/**
+ * Frames in two bins of the coarsest band: the finest step a view's edge can
+ * take and still sit on every band's bin grid at an even bin.
+ */
+export function gridQuantumFrames(grid: BlockGrid): number {
+  return 2 * coarsestBinFrames(grid);
+}
+
 /** The block holding a frame, clamped to the file. */
 export function blockOfFrame(grid: BlockGrid, frame: number): number {
   const index = Math.floor(frame / grid.blockFrames);
