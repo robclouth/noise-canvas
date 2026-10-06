@@ -269,7 +269,7 @@ export class FileEngine {
     if (!coarse.sync(parent, this.context.spectrogramData.numFrames)) return false;
     const target = coarse.target;
     if (!target) return false;
-    return paint(state, aim, preview, { span, beside: { ...target, reads: span.hover } });
+    return paint(state, aim, preview, { span, beside: { ...target, reads: span.hover, sketch: true } });
   };
   dispose = (): void => {
     if (this.disposed) return;

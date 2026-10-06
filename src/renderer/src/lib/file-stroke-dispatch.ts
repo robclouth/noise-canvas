@@ -337,8 +337,10 @@ export type DispatchOptions = {
    * A renderer beside the canvas to paint on, the view it holds, what the
    * first step reads the painted file through when that is not the view, and
    * the frames the dab reads there, which the windows over other files hold.
+   * `sketch` marks a picture that shows the dab without painting it, which
+   * reads through the windows over other files only as large as they are.
    */
-  beside?: { renderer: StrokeRenderer; view: CanvasView; input?: SourceFileInfo; reads: ReadPart };
+  beside?: { renderer: StrokeRenderer; view: CanvasView; input?: SourceFileInfo; reads: ReadPart; sketch?: boolean };
 };
 
 export function dispatchStroke(
@@ -360,6 +362,8 @@ export function dispatchStroke(
   const canvas = beside ? null : canvasRef.current;
   // The windows over other files: a dab painted beside the canvas reads them too.
   const windows = canvasRef.current;
+  // Only a dab that paints grows a window: its texture is allocated whole.
+  const grows = !preview && !beside?.sketch;
   const span = preparedSpan ?? (canvasRef.current ? dabSpan(context, state, cursorPos, canvasRef.current) : null);
   if (canvas && span) {
     // A preview draws what the canvas holds of a dab wider than a window.
@@ -385,7 +389,7 @@ export function dispatchStroke(
   const reads = span?.needs.sources ?? sourceReadsFor(context, state, cursorPos);
   const sourceWindows = new Map<string, SourceWindowTextures>();
   for (const need of sourceNeedsOver(reads, beside?.reads ?? clip ?? null)) {
-    const window = windows?.aimSource(need, !preview);
+    const window = windows?.aimSource(need, grows);
     if (!window) return false;
     if (!need.self) sourceWindows.set(need.fileId, window);
   }
@@ -417,7 +421,7 @@ export function dispatchStroke(
     const spectrogram = response?.spectrogramData;
     if (!spectrogram) return false;
     if (responseIsWindowed(context, entry.need.fileId)) {
-      const window = windows?.aimImpulse(entry.need, !preview);
+      const window = windows?.aimImpulse(entry.need, grows);
       if (!window) return false;
       impulses.set(entry.key, {
         spectrogramData: spectrogram,
