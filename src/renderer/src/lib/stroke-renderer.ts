@@ -23,6 +23,7 @@ import {
   Scene,
   Texture,
   Vector2,
+  Vector4,
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
@@ -327,6 +328,65 @@ export interface StrokeParams {
    * edge falls in.
    */
   clip?: { frameStart: number; frameEnd: number } | null;
+  /**
+   * The first step's input read a part at a time, for a first pass whose read
+   * spans more than one texture of it holds.
+   */
+  inputParts?: readonly InputPart[];
+}
+
+/**
+ * One part of a first pass's input: the input over the part's view, and the
+ * file frames [start, end) and bands [first, last] whose reads it serves. An
+ * unbounded edge serves every read past it.
+ */
+export type InputPart = {
+  core: { start: number; end: number; first: number; last: number };
+  source: () => { source: SourceFileInfo; dispose: () => void };
+};
+
+/** The gate uniforms a part draw sets. */
+type PartGate = Pick<CommonUniforms, "sourcePartOn" | "sourcePartCore" | "sourcePartChannel">;
+
+// A core edge this far out takes every read past it.
+const PART_EDGE = 1e30;
+// Frames a part's core reaches past its cut.
+const PART_SEAM_FRAMES = 0.5;
+
+/** The uniforms that describe the file a pass samples, as `uniformsReading` lays them out. */
+const SOURCE_UNIFORM_KEYS = [
+  "sourceSpectrogramTex",
+  "sourceSpectrogramTextureSize",
+  "sourceInverseMapTex",
+  "sourceMetadataTex",
+  "sourceMinFreq",
+  "sourceBandsPerOctave",
+  "sourceFrameCount",
+  "sourceBandCount",
+  "sourceChannelCount",
+  "sourceSampleRate",
+  "destPerSourceFrame",
+  "sourceTempoRatio",
+  "sourceOnsetTex",
+  "sourceViewStartFrame",
+  "sourceFileFrameCount",
+  "sourceOffsetX",
+  "sourceOffsetY",
+  "sourceTimeScale",
+  "sourceBandScale",
+  "sourceTimeOffset",
+  "sourcePitchOffset",
+] as const satisfies readonly (keyof CommonUniforms)[];
+
+/** `base` with the source half of `reading`. */
+function withSourceUniforms(base: CommonUniforms, reading: CommonUniforms): CommonUniforms {
+  const out = { ...base };
+  for (const key of SOURCE_UNIFORM_KEYS) copyUniform(out, reading, key);
+  return out;
+}
+
+function copyUniform<K extends keyof CommonUniforms>(to: CommonUniforms, from: CommonUniforms, key: K): void {
+  to[key] = from[key];
 }
 
 /** The selection clip as the shader reads it. `active` is 0 when there is none. */
@@ -642,6 +702,50 @@ export class StrokeRenderer {
    * Draws `material` over the packed pixel ranges of `list` into `target`,
    * leaving every other pixel of the target as it was.
    */
+  /**
+   * Draws a first pass once per part of its input, each through the part's
+   * own view and each channel pair on its own, so every channel of a pixel
+   * takes the read of the part whose core holds its read point.
+   */
+  private drawInParts(
+    parts: readonly InputPart[],
+    load: (source: SourceFileInfo, gate: PartGate) => void,
+    material: RawShaderMaterial,
+    target: WebGLRenderTarget,
+    list: PixelRangeList,
+  ): void {
+    const gl = this.gl.getContext();
+    for (const part of parts) {
+      const { source, dispose } = part.source();
+      try {
+        const start = source.view?.startFrame ?? 0;
+        // Each core reaches a little past its cut, so a read on the cut that
+        // two parts round to either side of is still taken by one.
+        const core = new Vector4(
+          Math.max(-PART_EDGE, part.core.start - start - PART_SEAM_FRAMES),
+          Math.min(PART_EDGE, part.core.end - start + PART_SEAM_FRAMES),
+          Math.max(-PART_EDGE, part.core.first),
+          Math.min(PART_EDGE, part.core.last),
+        );
+        for (const channel of [0, 1]) {
+          load(source, {
+            sourcePartOn: { value: true },
+            sourcePartCore: { value: core },
+            sourcePartChannel: { value: channel },
+          });
+          gl.colorMask(channel === 0, channel === 0, channel === 1, channel === 1);
+          try {
+            this.drawRanges(material, target, list);
+          } finally {
+            gl.colorMask(true, true, true, true);
+          }
+        }
+      } finally {
+        dispose();
+      }
+    }
+  }
+
   private drawRanges(material: RawShaderMaterial, target: WebGLRenderTarget, list: PixelRangeList): void {
     if (list.count === 0) return;
     this.rangeGeometry.setRanges(list);
@@ -1234,6 +1338,9 @@ export class StrokeRenderer {
       },
       sourceTimeOffset: { value: sourceOffsetUniform(stepState, "sourceTimeOffset", ctx) },
       sourcePitchOffset: { value: sourceOffsetUniform(stepState, "sourcePitchOffset", ctx) },
+      sourcePartOn: { value: false },
+      sourcePartCore: { value: new Vector4() },
+      sourcePartChannel: { value: 0 },
       blendMode: { value: stepState.blendMode },
       algorithm: { value: stepState.algorithm },
       magnitudeLimit: { value: magnitudeLimit },
@@ -1565,8 +1672,6 @@ export class StrokeRenderer {
       // Tracking is per step too, so the clone offset is measured against this
       // step's own origin and its own source file's timeline. A step reading the
       // running result stays in this file's space, where both scales are 1.
-      const sourceBpm = state.filepathsBpm?.[stepSource.filePath] || bpm;
-      const stepSourceDuration = sourceViewFrames(stepSource) / stepSource.spectrogramData.sampleRate;
       const stepLockedOffset = state.isStroking ? steps[geometry.index]?.lockedOffset : null;
       const stepPositionMode = stepState.sourcePositionMode as string;
       // A step reading this file reads the canvas, which is a window of it
@@ -1574,51 +1679,58 @@ export class StrokeRenderer {
       const stepPositionUv = stepPositionMode === "follow" ? 0 : Number(stepState.sourceTimeOffset ?? 0) / 100;
       const stepWrapMode = stepState.brushWrapMode as number;
       const stepWrapsTime = stepWrapMode === 1 || stepWrapMode === 3;
-      const sourceOffsetUv = readsSourceFile
-        ? this.sourceOffsetForViews(
-            stepSource.spectrogramData,
-            stepSource.view,
-            stepLockedOffset,
-            stepPositionMode,
-            stepAnchor,
-            (bpm * totalDuration) / (sourceBpm * stepSourceDuration),
-            sourceBandUvSlope(this.spectrogramData, stepSource.spectrogramData),
-            bpm / sourceBpm,
-            stepPositionUv,
-            stepWrapsTime,
-          )
-        : this.sourceOffsetForViews(
-            this.spectrogramData,
-            viewCoversFile(this.view, this.spectrogramData.numFrames) ? undefined : this.view,
-            stepLockedOffset,
-            stepPositionMode,
-            stepAnchor,
-            1,
-            1,
-            1,
-            stepPositionUv,
-            stepWrapsTime,
-          );
+      // The step's uniforms with `source` as the file it reads, laid out as
+      // that source's view: a part of the input reads through its own.
+      const uniformsReading = (source: SourceFileInfo): CommonUniforms => {
+        const sourceBpm = state.filepathsBpm?.[source.filePath] || bpm;
+        const sourceDuration = sourceViewFrames(source) / source.spectrogramData.sampleRate;
+        const sourceOffsetUv = readsSourceFile
+          ? this.sourceOffsetForViews(
+              source.spectrogramData,
+              source.view,
+              stepLockedOffset,
+              stepPositionMode,
+              stepAnchor,
+              (bpm * totalDuration) / (sourceBpm * sourceDuration),
+              sourceBandUvSlope(this.spectrogramData, source.spectrogramData),
+              bpm / sourceBpm,
+              stepPositionUv,
+              stepWrapsTime,
+            )
+          : this.sourceOffsetForViews(
+              this.spectrogramData,
+              viewCoversFile(this.view, this.spectrogramData.numFrames) ? undefined : this.view,
+              stepLockedOffset,
+              stepPositionMode,
+              stepAnchor,
+              1,
+              1,
+              1,
+              stepPositionUv,
+              stepWrapsTime,
+            );
+        return this.buildStepUniforms(
+          stepState,
+          stepModContext,
+          stepBrushSizeUv,
+          sourceOffsetUv,
+          blendDestFbo,
+          stepAnchor,
+          source,
+          bpm,
+          totalDuration,
+          sourceBpm,
+          viewZoomPower,
+          viewOffset,
+          viewZoomPowerY,
+          viewOffsetY,
+          state.magnitudeLimit,
+          selectionClip,
+        );
+      };
 
       // Build common uniforms for this step
-      const commonUniforms = this.buildStepUniforms(
-        stepState,
-        stepModContext,
-        stepBrushSizeUv,
-        sourceOffsetUv,
-        blendDestFbo,
-        stepAnchor,
-        stepSource,
-        bpm,
-        totalDuration,
-        sourceBpm,
-        viewZoomPower,
-        viewOffset,
-        viewZoomPowerY,
-        viewOffsetY,
-        state.magnitudeLimit,
-        selectionClip,
-      );
+      const commonUniforms = uniformsReading(stepSource);
 
       // The source half of the uniforms has to describe whatever texture the
       // step reads, or the shader samples this file's layout as another file's.
@@ -1830,16 +1942,39 @@ export class StrokeRenderer {
               : chainFbo.texture,
         };
 
-        effect.updateEffectUniforms({
-          commonUniforms: uniformsForThisIteration,
-          passIndex: p,
-          file: stepSource,
-          state: effectState,
-          modContext: iterationContext,
-          impulses: params.impulses,
-        });
-
-        this.drawRanges(material, currentWriteFbo, isFinalPass ? finalRanges : passRanges);
+        const ranges = isFinalPass ? finalRanges : passRanges;
+        if (isFirstOfStep && stepIndex === 0 && readsNamedFile && params.inputParts) {
+          let read: { source: SourceFileInfo; uniforms: CommonUniforms } | null = null;
+          this.drawInParts(
+            params.inputParts,
+            (source, gate) => {
+              if (read?.source !== source) {
+                read = { source, uniforms: withSourceUniforms(uniformsForThisIteration, uniformsReading(source)) };
+              }
+              effect.updateEffectUniforms({
+                commonUniforms: { ...read.uniforms, ...gate },
+                passIndex: p,
+                file: source,
+                state: effectState,
+                modContext: iterationContext,
+                impulses: params.impulses,
+              });
+            },
+            material,
+            currentWriteFbo,
+            ranges,
+          );
+        } else {
+          effect.updateEffectUniforms({
+            commonUniforms: uniformsForThisIteration,
+            passIndex: p,
+            file: stepSource,
+            state: effectState,
+            modContext: iterationContext,
+            impulses: params.impulses,
+          });
+          this.drawRanges(material, currentWriteFbo, ranges);
+        }
 
         currentReadFbo = currentWriteFbo;
       }

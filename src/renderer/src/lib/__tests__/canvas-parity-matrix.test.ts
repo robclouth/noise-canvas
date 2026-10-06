@@ -103,6 +103,11 @@ const CASES = LENGTHS.flatMap((seconds) =>
 
 const REVERSE = { transformScaleTime: -1, transformEdgeMode: 0 };
 
+/** A sine pattern on modulator 1 driving `key` at full amount. */
+function sweeping(key: string): Record<string, unknown> {
+  return { modulator1Mode: 0, modulator1PatternShape: 0, [`${key}Mod1Amount`]: 100 };
+}
+
 /** `state` on a file at `bpm`. */
 function atBpm(bpm: number, state: State): State {
   return { ...state, filepathsBpm: { [PARITY_FILE_PATH]: bpm } };
@@ -296,6 +301,44 @@ const SCENARIOS: {
         x: 0.5,
         y: 0.5,
         state: brushState("transform", { ...REVERSE, sourceFile: { path: OTHER_FILE_PATH } }, 32, false),
+      },
+    ],
+  },
+  // A swept scale reaches stretches a whole-file canvas places through one
+  // float over the file, so those are compared near the start.
+  ...[
+    { name: "scale", near: true, step: { transformScaleTime: 0.5, ...sweeping("transformScaleTime") } },
+    { name: "speed", near: false, step: { transformSpeed: 1.5, ...sweeping("transformSpeed") } },
+    { name: "turn", near: false, step: { transformRotation: 20, ...sweeping("transformRotation") } },
+    {
+      name: "scale with the channels apart",
+      near: true,
+      step: { transformScaleTime: 0.5, ...sweeping("transformScaleTime"), modulator1StereoSpread: 50 },
+    },
+  ].map(({ name, near, step }) => ({
+    name: `a transform whose ${name} a pattern sweeps fully, its input read in parts`,
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: (seconds: number) => [
+      {
+        x: near ? 6 / seconds : 0.5,
+        y: 0.5,
+        state: brushState("transform", { ...step, transformEdgeMode: 1, brushSizePitch: 24 }, 4, false),
+      },
+    ],
+  })),
+  {
+    name: "a transform shrinking time and pitch 100 times, its input read in parts",
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: (seconds) => [
+      {
+        x: 6 / seconds,
+        y: 0.5,
+        state: brushState(
+          "transform",
+          { transformScaleTime: 0.01, transformScalePitch: 0.01, transformEdgeMode: 1, brushSizePitch: 24 },
+          4,
+          false,
+        ),
       },
     ],
   },

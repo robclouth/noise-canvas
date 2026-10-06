@@ -120,15 +120,24 @@ void main() {
     }
 
     vec4 transformedTexel;
+    bool missL;
+    bool missR;
     if (sameParams) {
         COMPUTE_CHANNEL(transformedTexel, modOffsetL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftSemis.x)
+        missL = sourcePartMiss;
+        missR = sourcePartMiss;
     } else {
         vec4 texL;
         vec4 texR;
         COMPUTE_CHANNEL(texL, modOffsetL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftSemis.x)
+        missL = sourcePartMiss;
+        sourcePartMiss = false;
         COMPUTE_CHANNEL(texR, modOffsetR, rotationValue.y, scaleXValue.y, scaleYValue.y, rawShiftX.y, rawShiftSemis.y)
+        missR = sourcePartMiss;
         transformedTexel = vec4(texL.rg, texR.ba);
     }
+    // Another part of the input serves this channel's read.
+    if (sourcePartOn && (sourcePartChannel == 0 ? missL : missR)) discard;
 
     outColor = applyBrush(originalTexel, transformedTexel, weight, coords.dest, vUv);
 }

@@ -74,7 +74,13 @@ vec2 applyEdgeMode(vec2 sourceUv, int edgeMode, out bool useZero, out bool inver
     // An axis the canvas wraps on has no file bound — the read continues from
     // the opposite edge — so only the non-wrapping axes zero-pad.
     if (edgeMode == 1) {
-        bool outX = !wrapsTimeAxis()  && (sourceUv.x < 0.0 || sourceUv.x > 1.0);
+        // A pass drawn in parts holds one part of the file: past its view but
+        // inside the file is another part's read, which the gate turns away.
+        float fileFrame = float(sourceViewStartFrame) + sourceUv.x * sourceFrameCount;
+        bool outsideX = sourcePartOn
+            ? (fileFrame < 0.0 || fileFrame > float(sourceFileFrameCount))
+            : (sourceUv.x < 0.0 || sourceUv.x > 1.0);
+        bool outX = !wrapsTimeAxis()  && outsideX;
         bool outY = !wrapsPitchAxis() && (sourceUv.y < 0.0 || sourceUv.y > 1.0);
         if (outX || outY) {
             useZero = true;

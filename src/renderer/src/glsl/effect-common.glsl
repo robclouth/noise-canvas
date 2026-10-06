@@ -75,6 +75,24 @@ uniform Parameter brushPan;
 uniform Parameter brushIntensity;
 uniform int   blendMode;
 uniform int   algorithm;
+
+// A pass drawn once per part of its input reads only the part's core with its
+// own sample: frames [x, y) of the input view and bands [z, w]. A read whose
+// point lies outside the core is another part's, and sets sourcePartMiss.
+uniform bool  sourcePartOn;
+uniform vec4  sourcePartCore;
+// The channel pair a part draw writes: 0 for the left, 1 for the right.
+uniform int   sourcePartChannel;
+bool sourcePartMiss = false;
+
+void gateSourcePart(vec2 sourceUv) {
+  if (!sourcePartOn) return;
+  float frame = sourceUv.x * sourceFrameCount;
+  float band = floor((1.0 - sourceUv.y) * sourceBandCount);
+  if (frame < sourcePartCore.x || frame >= sourcePartCore.y || band < sourcePartCore.z || band > sourcePartCore.w) {
+    sourcePartMiss = true;
+  }
+}
 // Safety valve for effects (transmute swap, sort) whose output intentionally
 // places non-magnitude values in the magnitude slot. Phase-aware interpolation
 // would log-blend negative "magnitudes" and produce NaN for those cases.
@@ -754,6 +772,7 @@ Turns reversalTurns(float k, vec2 sourceUv, vec2 destUv) {
 }
 
 vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float scaleX, vec2 destUv) {
+  gateSourcePart(sourceUv);
   float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
   vec4 meta = fetchBandMetadata(sourceMetadataTex, bandIndex);
   int bandStart = bandStartTexel(sourceMetadataTex, bandIndex);
@@ -790,6 +809,8 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
 }
 
 vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
+  // It reads the source under the dest pixel too, which no part promises to hold.
+  if (sourcePartOn) sourcePartMiss = true;
   vec4 original = sampleSourceNoInterp(destUv);
   float originalPhaseL = getPhase(original.rg);
   float originalPhaseR = getPhase(original.ba);
@@ -834,6 +855,7 @@ vec4 getTransformedSampleNeutralish(vec2 sourceUv, vec2 destUv, float scaleX, fl
   vec2 sampleUv = sourceUv;
   bool needsWrap = (wrapMode != 0) && (sampleUv.x < 0.0 || sampleUv.x > 1.0 || sampleUv.y < 0.0 || sampleUv.y > 1.0);
   if (needsWrap) sampleUv = wrapUv(sampleUv);
+  gateSourcePart(sampleUv);
 
   vec4 magPhase = sampleSourceInterp(sampleUv);
 
@@ -1041,6 +1063,7 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
 }
 
 vec4 getTransformedSampleNeutralPlain(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
+  gateSourcePart(wrapUv(sourceUv));
   vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
   float phaseGain;
   vec2 phase = neutralPhase(sourceUv, destUv, scaleX, scaleY, magPhase, phaseGain);
@@ -1349,6 +1372,7 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
   sourceUv.x += warpDeltaUvX;
 
   vec2 wrappedSourceUv = wrapUv(sourceUv);
+  gateSourcePart(wrappedSourceUv);
   vec4 magPhase = sampleSourceInterp(wrappedSourceUv);
 
   float phaseGain;

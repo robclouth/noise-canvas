@@ -4,7 +4,7 @@ import { ModulatorParameterUniform, ParameterUniform } from "@renderer/types";
 import type { ModContext } from "@renderer/lib/static-modulation";
 import type { ImpulseFileInfo } from "@renderer/lib/stroke-renderer";
 import * as THREE from "three";
-import { Texture, Vector2 } from "three";
+import { Texture, Vector2, Vector4 } from "three";
 
 export type Modulator = {
   modulatorMode: number;
@@ -96,6 +96,11 @@ export type CommonUniforms = {
   sourceBandScale: { value: number };
   sourceTimeOffset: { value: ParameterUniform };
   sourcePitchOffset: { value: ParameterUniform };
+  // A pass drawn once per part of its input: on, the part's core as input-view
+  // frames [x, y) and bands [z, w], and the channel pair the draw writes.
+  sourcePartOn: { value: boolean };
+  sourcePartCore: { value: Vector4 };
+  sourcePartChannel: { value: number };
 
   brushPan: {
     value: ParameterUniform;
@@ -200,6 +205,9 @@ export function createDefaultUniforms(): CommonUniforms {
     sourceBandScale: { value: 1 },
     sourceTimeOffset: { value: defaultParameterUniform(0, -1, 1) },
     sourcePitchOffset: { value: defaultParameterUniform(0, -1, 1) },
+    sourcePartOn: { value: false },
+    sourcePartCore: { value: new Vector4() },
+    sourcePartChannel: { value: 0 },
     brushPan: { value: defaultParameterUniform(0.0, 0.0, 1.0) },
     bpm: { value: 120.0 },
     blendMode: { value: 0 },

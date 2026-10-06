@@ -448,6 +448,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     shifts, samples the first step's input through a view of its own, so
     reversing a whole file reads its far end, and a shift reads the one box it
     lands on, without one view spanning both.
+    When that input holds more than a window, it is read in parts
+    (`InputPart`): the input box is halved across time or bands until each
+    part, with the bins a read touches around its point, fits a window, and
+    the transform's pass is drawn once per part, each channel pair on its own.
+    A part keeps a channel whose read point lies in its core and discards the
+    rest (`gateSourcePart`), so every pixel takes one part's read, and the
+    parts at the box's edges take every read past it. While a pass is drawn in
+    parts, Bleed zero-pads a read past the file, not past the part. Snappy
+    also reads under the pixel it writes, and a wrapped read folds across the
+    whole axis, so neither is read in parts.
     A refusal is never silent, and it says what to change. `reachFixes` moves
     each control of the brush, one at a time, toward its default or an end,
     and halves its travel against the real refusal test (`brushPaintsAt`) to
