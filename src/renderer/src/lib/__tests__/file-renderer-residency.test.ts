@@ -15,7 +15,7 @@ import type { FileRendererHandle } from "../file-renderer-types";
 import type { State } from "../../store/types";
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
-import { blockGrid, blockPixelRanges } from "../block-grid";
+import { blockGrid, blockPixelRanges, coarsestBinFrames } from "../block-grid";
 import { gatherPixelRanges, gatherTaps, scatterCompactPixelRanges } from "../pixel-ranges";
 import { strokeReach } from "../effect-reach";
 import { StrokeRenderer } from "../stroke-renderer";
@@ -390,8 +390,10 @@ describe("anchored dab residency", () => {
       responseSpan: () => null,
     });
     expect(reach.before > 0).toBe(withReach);
-    const start = origin.x * rig.data.numFrames - reach.before * rig.data.sampleRate;
-    const end = (origin.x + size.x) * rig.data.numFrames + reach.after * rig.data.sampleRate;
+    // A pixel at either end interpolates over the next bin, a coarsest bin past it.
+    const seam = coarsestBinFrames(canvas.grid);
+    const start = origin.x * rig.data.numFrames - reach.before * rig.data.sampleRate - seam;
+    const end = (origin.x + size.x) * rig.data.numFrames + reach.after * rig.data.sampleRate + seam;
     expect(aimed.mock.calls[0][0]).toBeCloseTo(start, 6);
     expect(aimed.mock.calls[0][1]).toBeCloseTo(end, 6);
     const extent = held.mock.calls[0][0];

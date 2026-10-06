@@ -21,7 +21,7 @@ import {
 import { bandAtPixel } from "./band-layout";
 import { bandMetadataTexture } from "./band-metadata-texture";
 import { composePixelRangeValues, intersectPixelRanges, pixelRangeCount } from "./pixel-ranges";
-import { sourceNeedsOver, type SourceRead, type SourceWindowTextures } from "./source-window";
+import { sourceNeedsOver, sourceReadSpan, type SourceRead, type SourceWindowTextures } from "./source-window";
 import type { DabNeeds, PaintBeside, StrokePaint, WindowedCanvas } from "./windowed-canvas";
 import type { SelfState } from "./self-window";
 import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock } from "./block-grid";
@@ -650,11 +650,19 @@ function readSpanOfDab(
   return { startFrame: Math.max(0, start - around.before), endFrame: Math.min(numFrames, end + around.after) };
 }
 
-/** What a dab reads while it writes `clip`. */
+/** What a dab reads while it writes the part of itself inside `clip`. */
 function readSpanOf(extent: DabExtent, clip: FrameSpan): FrameSpan {
   const before = Math.max(extent.before, extent.piece?.before ?? 0);
   const after = Math.max(extent.after, extent.piece?.after ?? 0);
-  return { start: Math.max(0, clip.start - before), end: clip.end + after };
+  let start = clip.end;
+  let end = clip.start;
+  for (const write of extent.writes) {
+    if (write.end <= clip.start || write.start >= clip.end) continue;
+    start = Math.min(start, Math.max(clip.start, write.start));
+    end = Math.max(end, Math.min(clip.end, write.end));
+  }
+  if (end <= start) return { start: clip.start, end: clip.start };
+  return { start: Math.max(0, start - before), end: end + after };
 }
 
 /** What a dab that writes one span reads; null for one that wraps past the end of the file. */
@@ -706,14 +714,20 @@ export function dabSpan(
   const readsLive = steps.some(
     (step, index) => step.enabled !== false && context.createStepStateView(state, index).accumulate,
   );
+  // A pixel at either end of what the dab writes interpolates over the next
+  // bin of its band, which in the coarsest band lies a whole bin past it.
+  const seam = canvas.holdsWholeFile ? 0 : coarsestBinFrames(canvas.grid);
   // A dab that reads the canvas as it leaves it would read, across a cut,
   // what its own earlier piece painted, so it is painted whole.
   let extent: DabExtent = {
     writes: dabWrites(union, cursorPos.x, numFrames),
-    before: reach.frames.before,
-    after: reach.frames.after,
+    before: reach.frames.before + seam,
+    after: reach.frames.after + seam,
     readsLive,
-    piece: readsLive && !canvas.holdsWholeFile ? null : reach.piece,
+    piece:
+      readsLive && !canvas.holdsWholeFile
+        ? null
+        : reach.piece && { before: reach.piece.before + seam, after: reach.piece.after + seam },
   };
   const around = extent.piece
     ? { before: Math.max(extent.before, extent.piece.before), after: Math.max(extent.after, extent.piece.after) }
@@ -791,7 +805,14 @@ function bandsOfBox(box: ReadBox, numBands: number): BandSpan {
  * and frames it keeps, and the frames it reads, which windows over other
  * files it reads are placed by.
  */
-type BesideTile = { view: CanvasView; input: CanvasView | null; bands: BandSpan; frames: FrameSpan; reads: FrameSpan };
+type BesideTile = {
+  view: CanvasView;
+  input: CanvasView | null;
+  bands: BandSpan;
+  frames: FrameSpan;
+  reads: FrameSpan;
+  readBands: BandSpan;
+};
 
 /**
  * A step's brush as the region it covers, past the file's ends where it runs
@@ -814,23 +835,27 @@ function brushBox(brush: StepBrush, fileSeconds: number): BrushBox {
 }
 
 /**
- * How to paint a dab the canvas window cannot hold: beside the canvas, in
- * tiles of bands over runs of blocks. Each tile is read through a view of the
- * region its effects read to paint it, and a tile whose view holds more than
- * a window is halved, across bands or blocks, whichever reads less. Every tile
- * reads the file as it was before the dab, so the tiles never read each
- * other's paint, and a dab that reads the canvas as it paints is cut as any
- * other. Null when a tile that cannot shrink its read still reads more than a
- * view holds.
+ * How a dab is cut into tiles beside the canvas: the frames and bands it
+ * writes, the tile over any part of them, and the ways a tile halves.
  */
-function besideFor(
+type BesideTiling = {
+  renderer: StrokeRenderer;
+  start: number;
+  end: number;
+  union: BrushUnionUv;
+  whole: boolean;
+  written: BandSpan;
+  tileOf: (bands: BandSpan, frames: FrameSpan) => BesideTile;
+  halves: (tile: BesideTile) => [BesideTile, BesideTile][];
+};
+
+function besideTiling(
   context: FileStrokeContext,
   state: State,
   cursorPos: Vector2,
   span: DabSpan,
   canvas: WindowedCanvas,
-  options: DispatchOptions = {},
-): PaintBeside | null {
+): BesideTiling | null {
   const renderer = context.strokeRendererRef.current;
   const file = context.openFiles[context.fileId];
   const ctx = reachContext(context, state);
@@ -899,9 +924,19 @@ function besideFor(
       },
       brushes,
     );
-    const reads = framesOfBox(input ? unionBox(own, input) : own);
-    if (!input || inputApart) return { view: viewOfBox(own), input: input && viewOfBox(input), bands, frames, reads };
-    return { view: viewOfBox(firstReadsHere ? unionBox(own, input) : own), input: null, bands, frames, reads };
+    const read = input ? unionBox(own, input) : own;
+    const reads = framesOfBox(read);
+    const readBands = bandsOfBox(read, numBands);
+    if (!input || inputApart)
+      return { view: viewOfBox(own), input: input && viewOfBox(input), bands, frames, reads, readBands };
+    return {
+      view: viewOfBox(firstReadsHere ? unionBox(own, input) : own),
+      input: null,
+      bands,
+      frames,
+      reads,
+      readBands,
+    };
   };
   const framesOf = (from: number, to: number): FrameSpan => ({
     start: Math.max(start, frameRangeOfBlock(grid, from).start),
@@ -922,6 +957,70 @@ function besideFor(
     }
     return out;
   };
+  return { renderer, start, end, union, whole, written, tileOf, halves };
+}
+
+/**
+ * The region of the file a dab aimed at `aim` reads: beside the canvas, the
+ * bands and frames of the one tile that would paint all of it; on the canvas,
+ * the frames around what it writes, over every band; and the frames of this
+ * file it reads through windows of their own, a response or a far read.
+ * Null when the dab writes nothing.
+ */
+export function dabReadRegion(
+  context: FileStrokeContext,
+  state: State,
+  aim: { x: number; y: number },
+): { beside: { bands: BandSpan; frames: FrameSpan }; canvas: FrameSpan; apart: FrameSpan[] } | null {
+  const canvas = context.canvasRef.current;
+  if (!canvas) return null;
+  const cursor = new Vector2(aim.x, aim.y);
+  const span = dabSpan(context, state, cursor, canvas);
+  const tiling = besideTiling(context, state, cursor, span, canvas);
+  if (!tiling) return null;
+  const root = tiling.tileOf(tiling.written, { start: tiling.start, end: tiling.end });
+  const { extent } = span;
+  const before = Math.max(extent.before, extent.piece?.before ?? 0);
+  const after = Math.max(extent.after, extent.piece?.after ?? 0);
+  const apart = [
+    ...span.impulseBindings.map((entry) => entry.need),
+    ...span.needs.sources
+      .filter((read) => read.self)
+      .map((read) => ({ fileId: read.fileId, ...sourceReadSpan(read.read, read.numFrames, read.pad) })),
+  ]
+    .filter((need) => need.fileId === context.fileId)
+    .map((need) => ({ start: need.startFrame, end: need.endFrame }));
+  return {
+    beside: { bands: root.readBands, frames: root.reads },
+    canvas: {
+      start: Math.max(0, tiling.start - before),
+      end: Math.min(context.spectrogramData.numFrames, tiling.end + after),
+    },
+    apart,
+  };
+}
+
+/**
+ * How to paint a dab the canvas window cannot hold: beside the canvas, in
+ * tiles of bands over runs of blocks. Each tile is read through a view of the
+ * region its effects read to paint it, and a tile whose view holds more than
+ * a window is halved, across bands or blocks, whichever reads less. Every tile
+ * reads the file as it was before the dab, so the tiles never read each
+ * other's paint, and a dab that reads the canvas as it paints is cut as any
+ * other. Null when a tile that cannot shrink its read still reads more than a
+ * view holds.
+ */
+function besideFor(
+  context: FileStrokeContext,
+  state: State,
+  cursorPos: Vector2,
+  span: DabSpan,
+  canvas: WindowedCanvas,
+  options: DispatchOptions = {},
+): PaintBeside | null {
+  const tiling = besideTiling(context, state, cursorPos, span, canvas);
+  if (!tiling) return null;
+  const { renderer, start, end, union, whole, written, tileOf, halves } = tiling;
 
   const budget = canvas.texelBudget;
   const cost = (tile: BesideTile): number => Math.max(tile.view.texels, tile.input?.texels ?? 0);

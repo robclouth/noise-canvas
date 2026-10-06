@@ -129,8 +129,9 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    paints once the canvas holds that block plus what the dab reads from each
    pixel of it (`pieceReach` in `effect-reach.ts`, which is more than the
    reach past the brush: a blur with Cut edges still smears inside it), and
-   one bin of the coarsest band past each cut the dab continues across,
-   because a pixel next to a cut interpolates over it. Neighbouring blocks
+   one bin of the coarsest band past each cut the dab continues across, and
+   past each end of what it writes, because a pixel next to a cut or an end
+   interpolates over it. Neighbouring blocks
    that are ready paint as one run under a write clip (`StrokeParams.clip`),
    with the brush laid out over the file, not the canvas, so every piece
    paints the same pixels a whole-file canvas would. A dab that fits and finds
@@ -312,8 +313,19 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     band along time reads where it lands, an attract reads the field it places
     bands against, an evolve reads the neighbourhood it flows through, and a
     convolve steps the read one response bin per tap, the way Rate's sign
-    points. `effect-reach.ts` says how far, in seconds of the file, and the aim
-    and the dab's own wait widen by it.
+    points, up to the tap before IR Size and no further than the response holds
+    after IR Start. `effect-reach.ts` says how far, in seconds of the file, and
+    the aim and the dab's own wait widen by it.
+    A modulated control reaches as far as its sources can sweep it, worked
+    out the way the shader resolves it (`modulatedRange`): every source
+    blended by its weight, a log slider in knob position, macros at the
+    values they hold. A repeat reads each copy where its shape table and
+    direction put it, one way for Forward or Backward; an evolve reads eight
+    neighbourhoods while Flow can move it and one when it cannot. A reach that
+    is too small is a wrong picture, not only a missed read: the stroke's own
+    passes write only the rows its pitch reach says later passes read.
+    `read-probe.test.ts` replaces the file outside each brush's planned region
+    and checks the dab paints the same.
     Effects run one after another, and a step runs its effects
     `brushIterations` times over, each reading what the one before wrote, so
     their reaches add up along the chain. A sort reads a few bins and two
