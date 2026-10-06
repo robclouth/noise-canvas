@@ -120,6 +120,7 @@ const SCENARIOS: {
   name: string;
   windowBlocks?: number;
   otherWindowBlocks?: number;
+  readsOther?: boolean;
   dabs: (seconds: number) => { x: number; y: number; state: State }[];
 }[] = [
   {
@@ -286,6 +287,19 @@ const SCENARIOS: {
     ],
   },
   {
+    name: "a reversal of the whole file read from another file, on a small window",
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    otherWindowBlocks: 3 * SMALL_WINDOW_BLOCKS,
+    readsOther: true,
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.5,
+        state: brushState("transform", { ...REVERSE, sourceFile: { path: OTHER_FILE_PATH } }, 32, false),
+      },
+    ],
+  },
+  {
     name: "a blur at its widest at 60 bpm, on a small window",
     windowBlocks: SMALL_WINDOW_BLOCKS,
     dabs: () => [
@@ -319,10 +333,30 @@ afterAll(() => {
   renderer = null;
 });
 
-function canvas(windowBlocks: number, seconds = 60, otherWindowBlocks?: number): ParityCanvas {
+// The file a scenario paints from when it reads another file.
+const OTHER_FILE_PATH = "/other.wav";
+
+/**
+ * The painted file at `windowBlocks`, with the other file beside it at the
+ * same window when `readsOther`, its magnitudes turned over so a read of the
+ * wrong file shows.
+ */
+function canvas(windowBlocks: number, seconds = 60, otherWindowBlocks?: number, readsOther = false): ParityCanvas {
   if (!renderer) throw new Error("no renderer");
+  const others: ParityCanvas[] = [];
+  if (readsOther) {
+    const data = parityData({ durationSeconds: seconds });
+    for (let i = 0; i < data.packedData.length; i += 2) data.packedData[i] = 1 - data.packedData[i];
+    const other = parityCanvas(data, windowBlocks, renderer.gl, undefined, undefined, {
+      id: "other",
+      filePath: OTHER_FILE_PATH,
+    });
+    disposers.push(other.dispose);
+    others.push(other);
+  }
   const made = parityCanvas(parityData({ durationSeconds: seconds }), windowBlocks, renderer.gl, undefined, undefined, {
     otherWindowBlocks,
+    others,
   });
   disposers.push(made.dispose);
   return made;
@@ -353,8 +387,13 @@ describe("a windowed canvas paints what a whole-file canvas paints", () => {
     "$seconds s: $scenario.name",
     async ({ seconds, scenario }) => {
       const dabs = scenario.dabs(seconds);
-      const whole = canvas(Infinity, seconds);
-      const windowed = canvas(scenario.windowBlocks ?? WINDOW_BLOCKS, seconds, scenario.otherWindowBlocks);
+      const whole = canvas(Infinity, seconds, undefined, scenario.readsOther);
+      const windowed = canvas(
+        scenario.windowBlocks ?? WINDOW_BLOCKS,
+        seconds,
+        scenario.otherWindowBlocks,
+        scenario.readsOther,
+      );
       const expected = await paintStroke(whole, dabs);
       const got = await paintStroke(windowed, dabs);
       expect(await expectSameStroke(whole, expected, got)).toBeGreaterThan(0);

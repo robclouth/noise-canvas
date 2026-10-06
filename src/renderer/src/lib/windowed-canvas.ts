@@ -62,6 +62,7 @@ import {
 } from "./pixel-ranges";
 import {
   sourceNeedsOver,
+  type ReadPart,
   SourceWindowSlot,
   type SourceFileBlocks,
   type SourceNeed,
@@ -883,7 +884,7 @@ export class WindowedCanvas {
   }
 
   /** True when one window over each other file a dab reads can hold what it reads while it writes `part`, or all of it for null. */
-  othersFit(needs: DabNeeds, part: FrameSpan | null): boolean {
+  othersFit(needs: DabNeeds, part: ReadPart | null): boolean {
     return (
       sourceNeedsOver(needs.sources, part).every((need) => this.sourceFits(need)) &&
       needs.impulses.every((need) => this.sourceFits(need))
@@ -895,7 +896,7 @@ export class WindowedCanvas {
    * while it writes `part`, and resolves true once they hold it; false when
    * they cannot.
    */
-  async holdOthers(needs: DabNeeds, part: FrameSpan | null): Promise<boolean> {
+  async holdOthers(needs: DabNeeds, part: ReadPart | null): Promise<boolean> {
     const sources = sourceNeedsOver(needs.sources, part);
     for (let fills = 0; fills < HELD_PAINT_FILLS; fills++) {
       for (const need of sources) this.aimSource(need);
@@ -1539,7 +1540,7 @@ export class WindowedCanvas {
   }
 
   /** True while every other window holds what the dab reads while it writes `part`, or all of it for null. */
-  private othersHold(needs: DabNeeds, part: FrameSpan | null): boolean {
+  private othersHold(needs: DabNeeds, part: ReadPart | null): boolean {
     const sources = sourceNeedsOver(needs.sources, part);
     const holds = (need: SourceNeed): boolean =>
       need.self

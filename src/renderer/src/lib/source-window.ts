@@ -79,6 +79,8 @@ export type SourceRead = {
    * which state of the file it takes.
    */
   self?: { step: number; state: SelfState };
+  /** True for the brush's first enabled step, whose input a warp may read apart from the rest. */
+  first?: boolean;
   /** Source frames the dab's effects read around what it reads, when known. */
   pad?: { before: number; after: number };
   read: { start: number; end: number };
@@ -110,17 +112,24 @@ function readOfPart(read: SourceRead, part: { start: number; end: number }): { s
 }
 
 /**
- * The windows a dab's `reads` ask for while it writes `part` of the
+ * The destination frames a dab's reads are taken at: one span for every step,
+ * or the first step's apart from the rest's, where a warp moves the first
+ * step's input away from what the dab writes.
+ */
+export type ReadPart =
+  | { start: number; end: number }
+  | { first: { start: number; end: number }; rest: { start: number; end: number } };
+
+/**
+ * The windows a dab's `reads` ask for while it reads `part` of the
  * destination, or all of it when `part` is null: one per file, over what
  * every step reading that file needs.
  */
-export function sourceNeedsOver(
-  reads: readonly SourceRead[],
-  part: { start: number; end: number } | null,
-): SourceNeed[] {
+export function sourceNeedsOver(reads: readonly SourceRead[], part: ReadPart | null): SourceNeed[] {
   const needs = new Map<string, SourceNeed>();
   for (const read of reads) {
-    const span = sourceReadSpan(part ? readOfPart(read, part) : read.read, read.numFrames, read.pad);
+    const at = part && "first" in part ? (read.first ? part.first : part.rest) : part;
+    const span = sourceReadSpan(at ? readOfPart(read, at) : read.read, read.numFrames, read.pad);
     const held = needs.get(read.fileId);
     const self = read.self ? { self: true } : {};
     needs.set(

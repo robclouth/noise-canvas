@@ -22,7 +22,13 @@ import {
 import { bandAtPixel } from "./band-layout";
 import { bandMetadataTexture } from "./band-metadata-texture";
 import { composePixelRangeValues, intersectPixelRanges, pixelRangeCount } from "./pixel-ranges";
-import { sourceNeedsOver, sourceReadSpan, type SourceRead, type SourceWindowTextures } from "./source-window";
+import {
+  sourceNeedsOver,
+  sourceReadSpan,
+  type ReadPart,
+  type SourceRead,
+  type SourceWindowTextures,
+} from "./source-window";
 import type { DabNeeds, PaintBeside, StrokePaint, WindowedCanvas } from "./windowed-canvas";
 import type { SelfState } from "./self-window";
 import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock, gridQuantumFrames } from "./block-grid";
@@ -148,6 +154,7 @@ function sourceReadsFor(
       fileId: source.id,
       wantOriginal: step.sourceDataMode === "original",
       ...(self ? { self: { step: index, state: selfStateOf(step, isFirst) } } : {}),
+      ...(isFirst ? { first: true } : {}),
       pad: { before: reach.before * scale + margin, after: reach.after * scale + margin },
       read: { start: read.start, end: read.end },
       dest: read.dest,
@@ -331,7 +338,7 @@ export type DispatchOptions = {
    * first step reads the painted file through when that is not the view, and
    * the frames the dab reads there, which the windows over other files hold.
    */
-  beside?: { renderer: StrokeRenderer; view: CanvasView; input?: SourceFileInfo; reads: FrameSpan };
+  beside?: { renderer: StrokeRenderer; view: CanvasView; input?: SourceFileInfo; reads: ReadPart };
 };
 
 export function dispatchStroke(
@@ -803,8 +810,8 @@ function bandsOfBox(box: ReadBox, numBands: number): BandSpan {
 /**
  * One piece of a dab painted beside the canvas: the view it paints on, the
  * view its first step reads its input through when that is apart, the bands
- * and frames it keeps, and the frames it reads, which windows over other
- * files it reads are placed by.
+ * and frames it keeps, the frames and bands it reads, and where it reads
+ * other files, which windows over them are placed by.
  */
 type BesideTile = {
   view: CanvasView;
@@ -813,6 +820,7 @@ type BesideTile = {
   frames: FrameSpan;
   reads: FrameSpan;
   readBands: BandSpan;
+  others: ReadPart;
 };
 
 /**
@@ -923,8 +931,11 @@ function besideTiling(
     const read = input ? unionBox(own, input) : own;
     const reads = framesOfBox(read);
     const readBands = bandsOfBox(read, numBands);
+    // The first step reads its input where the warp puts it; other files it
+    // reads there are read only there, not over the span to the dab.
+    const others: ReadPart = input ? { first: framesOfBox(input), rest: framesOfBox(own) } : reads;
     if (!input || inputApart)
-      return { view: viewOfBox(own), input: input && viewOfBox(input), bands, frames, reads, readBands };
+      return { view: viewOfBox(own), input: input && viewOfBox(input), bands, frames, reads, readBands, others };
     return {
       view: viewOfBox(firstReadsHere ? unionBox(own, input) : own),
       input: null,
@@ -932,6 +943,7 @@ function besideTiling(
       frames,
       reads,
       readBands,
+      others,
     };
   };
   const framesOf = (from: number, to: number): FrameSpan => ({
@@ -1027,7 +1039,7 @@ function besideFor(
 
   const budget = canvas.texelBudget;
   const cost = (tile: BesideTile): number => Math.max(tile.view.texels, tile.input?.texels ?? 0);
-  const fits = (tile: BesideTile): boolean => cost(tile) <= budget && canvas.othersFit(span.needs, tile.reads);
+  const fits = (tile: BesideTile): boolean => cost(tile) <= budget && canvas.othersFit(span.needs, tile.others);
   const larger = ([a, b]: [BesideTile, BesideTile]): number => Math.max(cost(a), cost(b));
   const tiles: BesideTile[] = [];
   const pending = [tileOf(written, { start, end })];
@@ -1098,7 +1110,7 @@ async function paintTileBeside(
     span.needs.original ? canvas.readOriginal(fileRanges) : Promise.resolve(null),
   ]);
   if (!start || (span.needs.original && !original)) return null;
-  if (!(await canvas.holdOthers(span.needs, tile.reads))) return null;
+  if (!(await canvas.holdOthers(span.needs, tile.others))) return null;
   const input = tile.input ? await inputSource(context, state, canvas, tile.input) : null;
   if (tile.input && !input) return null;
   lap("readMs");
@@ -1121,7 +1133,7 @@ async function paintTileBeside(
       ...options,
       span,
       clip: frames,
-      beside: { renderer: beside, view, input: input?.source, reads: tile.reads },
+      beside: { renderer: beside, view, input: input?.source, reads: tile.others },
     };
     if (!dispatchStroke(context, state, cursorPos, false, painting)) return null;
     lap("paintMs");
