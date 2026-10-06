@@ -1194,33 +1194,31 @@ function besideFor(
   const budget = canvas.texelBudget;
   const cost = (tile: BesideTile): number => Math.max(tile.view.texels, tile.input?.texels ?? 0);
   let partCount = 0;
+  // A tile whose views all fit paints in one go.
+  const fitsWhole = (tile: BesideTile): boolean =>
+    tile.view.texels <= budget && (tile.input?.texels ?? 0) <= budget && canvas.othersFit(span.needs, tile.others);
   // A tile whose own view fits reads an input too wide for one view a part at
   // a time, and one whose copies along time no one view holds reads them a
-  // group at a time.
-  const fits = (tile: BesideTile): boolean => {
-    if (!canvas.othersFit(span.needs, tile.others)) return false;
-    if (tile.view.texels <= budget) {
-      if ((tile.input?.texels ?? 0) <= budget) return true;
-      const parts = partsOf(tile, budget, MAX_BESIDE_TILES - partCount);
-      if (!parts) return false;
-      tile.parts = parts;
-      partCount += parts.length;
-      return true;
+  // group at a time: the view it then paints on, and its parts.
+  const inParts = (tile: BesideTile): { view: CanvasView; parts: InputPartPlan[] } | null => {
+    if (!canvas.othersFit(span.needs, tile.others)) return null;
+    const own = tile.view.texels <= budget ? null : tile.copies?.own;
+    if (own) {
+      if (own.texels > budget) return null;
+      const groups = copyGroupsOf(tile, budget, MAX_BESIDE_TILES - partCount);
+      return groups && { view: own, parts: groups };
     }
-    const own = tile.copies?.own;
-    if (!own || own.texels > budget) return false;
-    const groups = copyGroupsOf(tile, budget, MAX_BESIDE_TILES - partCount);
-    if (!groups) return false;
-    tile.view = own;
-    tile.parts = groups;
-    partCount += groups.length;
-    return true;
+    if (tile.view.texels > budget) return null;
+    const parts = partsOf(tile, budget, MAX_BESIDE_TILES - partCount);
+    return parts && { view: tile.view, parts };
   };
+  // Texels a tile reads: its view, and its input when apart.
+  const reads = (tile: BesideTile): number => tile.view.texels + (tile.input?.texels ?? 0);
   const larger = ([a, b]: [BesideTile, BesideTile]): number => Math.max(cost(a), cost(b));
   const tiles: BesideTile[] = [];
   const pending = [tileOf(written, { start, end })];
   for (let tile = pending.pop(); tile; tile = pending.pop()) {
-    if (fits(tile)) {
+    if (fitsWhole(tile)) {
       tiles.push(tile);
       continue;
     }
@@ -1228,6 +1226,17 @@ function besideFor(
     const split = halves(tile)
       .filter((pair) => larger(pair) <= cost(tile))
       .sort((a, b) => larger(a) - larger(b))[0];
+    // Reading in parts is taken over halving when it reads less than even the
+    // two halves would, since halving again only reads their overlap again.
+    const plan = inParts(tile);
+    const partReads = plan && plan.view.texels + plan.parts.reduce((sum, part) => sum + part.view.texels, 0);
+    if (plan && partReads !== null && (!split || partReads <= reads(split[0]) + reads(split[1]))) {
+      tile.view = plan.view;
+      tile.parts = plan.parts;
+      partCount += plan.parts.length;
+      tiles.push(tile);
+      continue;
+    }
     if (!split || tiles.length + pending.length >= MAX_BESIDE_TILES) return null;
     pending.push(...split);
   }
