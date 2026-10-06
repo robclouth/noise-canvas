@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { createMockStateWithSteps, type TestBrushStep } from "../../test/mock-state";
 import { brushReaches, pieceReach, pitchReach, strokeReach, type ReachContext, type TimeReach } from "../effect-reach";
+import { denormalizeParameterValue, normalizeParameterValue } from "../../store/utils";
 
 // A 60-second file at 120 bpm, on a canvas holding 16 seconds of it. The mock
 // brush is one beat wide, so its own span is half a second.
@@ -52,12 +53,23 @@ describe("blur reach", () => {
 });
 
 describe("repeat reach", () => {
-  it("reaches the furthest copy", () => {
+  it("reads the furthest copy before the pixel when the copies run forward", () => {
     const reach = reachOf(
       withEffect("clone", { cloneCountX: 3, cloneSpaceBeats: 0.25, cloneDirectionX: 0, cloneEdgeMode: 1 }),
     );
     expect(reach.before).toBeCloseTo(0.375, 10);
-    expect(reach.after).toBeCloseTo(0.375, 10);
+    expect(reach.after).toBe(0);
+  });
+
+  it("reads after the pixel when the copies run backward or the gap is negative", () => {
+    const backward = reachOf(
+      withEffect("clone", { cloneCountX: 3, cloneSpaceBeats: 0.25, cloneDirectionX: 2, cloneEdgeMode: 1 }),
+    );
+    expect(backward).toEqual({ before: 0, after: expect.closeTo(0.375, 10) });
+    const negative = reachOf(
+      withEffect("clone", { cloneCountX: 3, cloneSpaceBeats: -0.25, cloneDirectionX: 0, cloneEdgeMode: 1 }),
+    );
+    expect(negative).toEqual({ before: 0, after: expect.closeTo(0.375, 10) });
   });
 
   it("halves the reach when the copies spread both ways", () => {
@@ -135,14 +147,24 @@ describe("warp reach", () => {
     expect(reach.after).toBe(Infinity);
   });
 
+  it("keeps a modulated scale on its own side of zero, as its knob sweeps", () => {
+    const reach = reachOf(
+      withEffect("transform", { transformScaleTime: 1, transformScaleTimeMod1Amount: 10, transformEdgeMode: 1 }),
+    );
+    expect(Number.isFinite(reach.before)).toBe(true);
+    expect(Number.isFinite(reach.after)).toBe(true);
+  });
+
   it("widens a shift by as much as its modulation can move it", () => {
     const plain = reachOf(withEffect("transform", { transformShiftBeats: 1, transformEdgeMode: 1 }));
     const modulated = reachOf(
       withEffect("transform", { transformShiftBeats: 1, transformShiftBeatsMod1Amount: 10, transformEdgeMode: 1 }),
     );
     expect(modulated.before).toBeGreaterThan(plain.before);
-    // Ten per cent of the way to the far end, which is 33 beats from a shift of one.
-    expect(modulated.before).toBeCloseTo(plain.before + 0.1 * 33 * 0.5, 8);
+    // Ten per cent of the knob's travel toward the far end, in knob position.
+    const position = normalizeParameterValue("transformShiftBeats", 1);
+    const furthest = denormalizeParameterValue("transformShiftBeats", position + 0.1 * (1 - position));
+    expect(modulated.before).toBeCloseTo(plain.before + (furthest - 1) * 0.5, 8);
   });
 });
 
@@ -199,10 +221,18 @@ describe("attract reach", () => {
 });
 
 describe("evolve reach", () => {
-  it("reads nine neighbourhoods, and the neighbourhood is beats", () => {
+  it("reads eight neighbourhoods, and the neighbourhood is beats", () => {
     // Full Scale is a beat, so half of it is a quarter of a second here, and
-    // the gradient taps plus the flow step cover nine of those.
-    expect(reachOf(withEffect("evolve", { evolveScaleX: 50 }))).toEqual({ before: 2.25, after: 2.25 });
+    // the flow step is held to eight of those.
+    expect(reachOf(withEffect("evolve", { evolveScaleX: 50 }))).toEqual({ before: 2, after: 2 });
+  });
+
+  it("reads one neighbourhood, for its gradient, with no flow", () => {
+    expect(reachOf(withEffect("evolve", { evolveScaleX: 50, evolveFlow: 0 }))).toEqual({ before: 0.25, after: 0.25 });
+  });
+
+  it("reads nothing past the brush where the edge mode keeps reads inside it", () => {
+    expect(reachOf(withEffect("evolve", { evolveScaleX: 50, evolveEdgeMode: 0 }))).toEqual({ before: 0, after: 0 });
   });
 
   it("reads nothing along time with no neighbourhood to flow through", () => {
@@ -210,7 +240,7 @@ describe("evolve reach", () => {
   });
 
   it("takes the scale's sign off, since the neighbourhood is a width", () => {
-    expect(reachOf(withEffect("evolve", { evolveScaleX: -50 }))).toEqual({ before: 2.25, after: 2.25 });
+    expect(reachOf(withEffect("evolve", { evolveScaleX: -50 }))).toEqual({ before: 2, after: 2 });
   });
 });
 
@@ -238,11 +268,11 @@ describe("convolve reach", () => {
     asked.length = 0;
   });
 
-  it("steps back one response bin per tap, scaled by the rate", () => {
+  it("steps back one response bin per tap after the first, scaled by the rate", () => {
     const state = createMockStateWithSteps([
       { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrSize: 64, convolveIrRate: 2 }) },
     ]);
-    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.28, after: 0 });
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.26, after: 0 });
   });
 
   it("stops at the response's own length, however many taps are asked for", () => {
@@ -252,11 +282,26 @@ describe("convolve reach", () => {
     expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 6, after: 0 });
   });
 
+  it("stops where the response ends after IR Start", () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Step",
+        overrides: withResponse({
+          convolveIrFile: RESPONSE,
+          convolveIrSize: 512,
+          convolveIrRate: 2,
+          convolveIrTimeOffset: 50,
+        }),
+      },
+    ]);
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 3, after: 0 });
+  });
+
   it("filters through the file it paints from when no response is named", () => {
     const state = createMockStateWithSteps([
       { name: "Step", overrides: withResponse({ convolveIrSize: 64, convolveIrRate: 2 }, { sourceFile: SOURCE }) },
     ]);
-    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.28, after: 0 });
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.26, after: 0 });
     expect(asked).toEqual([SOURCE.path]);
   });
 
@@ -264,7 +309,7 @@ describe("convolve reach", () => {
     const state = createMockStateWithSteps([
       { name: "Step", overrides: withResponse({ convolveIrSize: 64, convolveIrRate: 2 }) },
     ]);
-    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.28, after: 0 });
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 1.26, after: 0 });
     expect(asked).toEqual([null]);
   });
 
@@ -279,7 +324,7 @@ describe("convolve reach", () => {
     const state = createMockStateWithSteps([
       { name: "Step", overrides: withResponse({ convolveIrFile: RESPONSE, convolveIrSize: 64, convolveIrRate: -2 }) },
     ]);
-    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 0, after: 1.28 });
+    expect(strokeReach(state, CTX_WITH_RESPONSE)).toEqual({ before: 0, after: 1.26 });
   });
 
   it("reaches both ways once modulation can turn the rate around", () => {
@@ -399,6 +444,21 @@ describe("pitch reach", () => {
     const shift = withEffect("transform", { transformShiftSemis: 3 });
     const repeated = withEffect("transform", { transformShiftSemis: 2, brushIterations: 2 });
     expect(pitchOf(shift, repeated)).toBe(7);
+  });
+
+  it("follows the pitch shape table, so accelerating copies reach further", () => {
+    const step = { cloneCountY: 3, cloneSpaceSemis: 2, cloneDirectionY: 0, cloneEdgeMode: 1 };
+    expect(pitchOf(withEffect("clone", { ...step, cloneShapeY: "even" }))).toBe(6);
+    expect(pitchOf(withEffect("clone", { ...step, cloneShapeY: "geometric" }))).toBe(14);
+  });
+
+  it("reads no other band for a convolve, whose pitch shift picks the response band", () => {
+    expect(pitchOf(withEffect("convolve", { convolveIrPitchShift: 12 }))).toBe(0);
+  });
+
+  it("smears a fifth as far in pitch for blur noise as for blur size", () => {
+    expect(pitchOf(withEffect("blur", { blurAmountPitch: 100 }))).toBe(12);
+    expect(pitchOf(withEffect("blur", { blurNoisePitch: 100 }))).toBeCloseTo(2.4, 10);
   });
 
   it("may read any band for a transmute to pitch", () => {

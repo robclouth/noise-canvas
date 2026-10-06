@@ -2,9 +2,8 @@ import { buildShapeTable, type CloneShapeKey } from "@renderer/effects/clone-sha
 import type { EffectType } from "@renderer/effects/types";
 import { EVOLVE_SCALE_FULL_BEATS, EVOLVE_SCALE_FULL_SEMIS, NUM_MODULATORS } from "@renderer/lib/constants";
 import { responsePath } from "@renderer/lib/impulse-key";
-import { modulationWeight } from "@renderer/lib/static-modulation";
+import { modulatedRange, type ValueRange } from "@renderer/lib/modulation-range";
 import { originFraction, resolveBrushFootprint } from "@renderer/lib/utils";
-import { getNumberParameterDef } from "@renderer/parameters";
 import { createEffectStateView, createStepStateView } from "@renderer/store";
 import type { ParameterKey, State } from "@renderer/store/types";
 
@@ -84,22 +83,13 @@ const ATTRACT_MAP_FIRST_MODULATOR = 3;
 // quarter of the smoothing, so the read passes the smoothing by a little.
 const ATTRACT_KERNEL_TAPS = 2;
 
-// The gradient taps read one neighbourhood out, and the shader holds the flow
-// step to eight more.
-const EVOLVE_REACH_NEIGHBOURHOODS = 9;
-
-type ValueRange = { lo: number; hi: number };
+// Neighbourhoods the flow step may carry a read, which the shader caps it at.
+// Its gradient taps read one neighbourhood out, inside that.
+const EVOLVE_FLOW_NEIGHBOURHOODS = 8;
 
 /** The range a parameter's value can take once every source that drives it moves it. */
 function valueRange(state: State, key: ParameterKey, value: number, range?: { min: number; max: number }): ValueRange {
-  const bounds = range ?? getNumberParameterDef(key);
-  const weight = modulationWeight(state, key);
-  if (weight === 0) return { lo: value, hi: value };
-  const swing = weight * Math.max(Math.abs(bounds.min - value), Math.abs(bounds.max - value));
-  return {
-    lo: Math.max(Math.min(bounds.min, bounds.max, value), value - swing),
-    hi: Math.min(Math.max(bounds.min, bounds.max, value), value + swing),
-  };
+  return modulatedRange(state, key, value, range);
 }
 
 /** The range of a parameter the effect reads straight out of the state. */
@@ -152,6 +142,10 @@ function tapAt(table: number[], index: number): number {
   return Math.abs(table[i0] + (table[i1] - table[i0]) * Math.min(1, Math.max(0, index - i0)));
 }
 
+// Semitones a full Blur ↕ smears, and a full noise moves a read: a fifth of that.
+const BLUR_FULL_SEMIS = 12;
+const BLUR_NOISE_FULL_SEMIS = BLUR_FULL_SEMIS / 5;
+
 /** A smear reads past the brush only where the edge mode lets it. */
 function blurReach(effect: State, ctx: ReachContext): TimeReach {
   if (!READS_PAST_BRUSH.has(Number(effect.blurEdgeMode))) return NO_REACH;
@@ -178,16 +172,50 @@ function cloneReach(effect: State, ctx: ReachContext): TimeReach {
   return cloneTaps(effect, ctx);
 }
 
-/** How far the furthest copy is read from a pixel. */
+/**
+ * Every tap's step from the original, in Gap units, as the shader walks one
+ * axis's copies: Forward steps out one way, Backward the other, and Middle
+ * spreads half each way, at half indices of the shape table.
+ */
+function cloneTapSteps(shape: CloneShapeKey, copies: number, direction: number): number[] {
+  const count = Math.min(64, Math.max(1, copies + 1));
+  const table = buildShapeTable(shape, count);
+  return Array.from({ length: count }, (_, s) => {
+    const index = direction === 0 ? s : direction === 2 ? -s : s - (count - 1) / 2;
+    return tapAt(table, Math.abs(index)) * Math.sign(index);
+  });
+}
+
+/**
+ * How far the furthest copy along time is read from a pixel, each way. A tap
+ * `k` Gap steps out reads the gap times `k` before the pixel, so a negative
+ * gap or a backward step reads after it.
+ */
 function cloneTaps(effect: State, ctx: ReachContext): TimeReach {
   const copies = Number(effect.cloneCountX);
   if (copies <= 0) return NO_REACH;
-  const taps = copies + 1;
-  const gap = widest(stateRange(effect, "cloneSpaceBeats"));
-  const table = buildShapeTable(effect.cloneShapeX as CloneShapeKey, taps);
-  const furthest = Number(effect.cloneDirectionX) === 1 ? (taps - 1) / 2 : taps - 1;
-  const span = tapAt(table, furthest) * gap * (60 / ctx.bpm);
-  return { before: span, after: span };
+  const gap = stateRange(effect, "cloneSpaceBeats");
+  const beat = 60 / ctx.bpm;
+  let before = 0;
+  let after = 0;
+  for (const step of cloneTapSteps(effect.cloneShapeX as CloneShapeKey, copies, Number(effect.cloneDirectionX))) {
+    for (const g of [gap.lo, gap.hi]) {
+      const read = -step * g * beat;
+      before = Math.max(before, -read);
+      after = Math.max(after, read);
+    }
+  }
+  return { before, after };
+}
+
+/** Semitones the furthest copy across pitch is read from a pixel, either way. */
+function cloneTapSemis(effect: State): number {
+  const copies = Number(effect.cloneCountY);
+  if (copies <= 0) return 0;
+  const shape = effect.cloneShapeY as CloneShapeKey;
+  const steps = cloneTapSteps(shape, copies, Number(effect.cloneDirectionY));
+  const furthest = Math.max(...steps.map(Math.abs));
+  return furthest * widest(stateRange(effect, "cloneSpaceSemis")) + (shape === "scale" ? SNAP_SEMIS : 0);
 }
 
 /**
@@ -255,28 +283,42 @@ function attractReach(effect: State, ctx: ReachContext): TimeReach {
   return { before: span, after: span };
 }
 
-/**
- * Evolve reads a neighbourhood around each point and flows it upstream, both
- * measured against the neighbourhood Scale sets.
- */
+/** Neighbourhoods Evolve reads from a point: one for its gradient taps, and the flow step's cap while Flow can move it. */
+function evolveNeighbourhoods(effect: State): number {
+  return only(stateRange(effect, "evolveFlow"), 0) ? 1 : EVOLVE_FLOW_NEIGHBOURHOODS;
+}
+
+/** Evolve reads past the brush only where the edge mode lets it. */
 function evolveReach(effect: State, ctx: ReachContext): TimeReach {
+  if (!READS_PAST_BRUSH.has(Number(effect.evolveEdgeMode))) return NO_REACH;
+  return evolveSmear(effect, ctx);
+}
+
+/**
+ * How far Evolve reads around a point, wherever the edge mode sends it: its
+ * neighbourhood, measured by Scale, times the neighbourhoods it reads.
+ */
+function evolveSmear(effect: State, ctx: ReachContext): TimeReach {
   const beats = (widest(stateRange(effect, "evolveScaleX")) / 100) * EVOLVE_SCALE_FULL_BEATS;
-  const span = EVOLVE_REACH_NEIGHBOURHOODS * beats * (60 / ctx.bpm);
+  const span = evolveNeighbourhoods(effect) * beats * (60 / ctx.bpm);
   return { before: span, after: span };
 }
 
 /**
- * Convolve walks the response one bin per tap, and each tap steps the read
- * through the file it filters by that bin's own length of real time, scaled by
- * Rate. The taps cannot outrun the response either, so its length bounds them
- * as well. Rate's sign decides which way they run, so a rate that cannot change
- * sign reaches one way only.
+ * Convolve walks the response one bin per tap from IR Start, and each tap
+ * steps the read through the file it filters by that bin's own length of real
+ * time, scaled by Rate. Tap 0 reads the pixel itself, and a tap past the end of
+ * the response is skipped, so the last tap that reads sits one tap short of
+ * IR Size and inside what the response holds after IR Start. Rate's sign
+ * decides which way they run, so a rate that cannot change sign reaches one
+ * way only.
  */
 function convolveReach(effect: State, ctx: ReachContext): TimeReach {
   const response = ctx.responseSpan?.(responsePath(effect)) ?? null;
   if (!response) return NO_REACH;
   const taps = Math.max(1, Math.floor(Number(effect.convolveIrSize)));
-  const span = Math.min(taps * response.binSeconds, response.seconds);
+  const start = stateRange(effect, "convolveIrTimeOffset").lo / 100;
+  const span = Math.min((taps - 1) * response.binSeconds, response.seconds * Math.max(0, 1 - start));
   const rate = stateRange(effect, "convolveIrRate");
   return { before: Math.max(0, rate.hi) * span, after: Math.max(0, -rate.lo) * span };
 }
@@ -363,8 +405,11 @@ function pieceReachOf(effect: EffectType, state: State, ctx: ReachContext): Time
     }
     case "transmute":
       return transmuteReach(state, ctx);
-    case "evolve":
-      return evolveReach(state, ctx);
+    case "evolve": {
+      const smear = evolveSmear(state, ctx);
+      const wraps = Number(state.evolveEdgeMode) === WRAP_EDGE && smear.before > 0;
+      return wraps ? null : smear;
+    }
     case "convolve":
       return convolveReach(state, ctx);
     default:
@@ -437,11 +482,14 @@ function pitchReachOf(effect: EffectType, state: State, bandsPerOctave: number):
       return shift + widest(stateRange(state, "brushSizePitch")) * Math.max(1, 1 / scale);
     }
     case "blur":
-      return ((widest(stateRange(state, "blurAmountPitch")) + widest(stateRange(state, "blurNoisePitch"))) / 100) * 12;
+      return (
+        (widest(stateRange(state, "blurAmountPitch")) / 100) * BLUR_FULL_SEMIS +
+        (widest(stateRange(state, "blurNoisePitch")) / 100) * BLUR_NOISE_FULL_SEMIS
+      );
     case "clone":
-      return Number(state.cloneCountY) * widest(stateRange(state, "cloneSpaceSemis"));
+      return cloneTapSemis(state);
     case "evolve":
-      return (EVOLVE_REACH_NEIGHBOURHOODS * widest(stateRange(state, "evolveScaleY")) * EVOLVE_SCALE_FULL_SEMIS) / 100;
+      return (evolveNeighbourhoods(state) * widest(stateRange(state, "evolveScaleY")) * EVOLVE_SCALE_FULL_SEMIS) / 100;
     case "attract":
       return widest(stateRange(state, "attractAmountY")) === 0
         ? 0
@@ -449,7 +497,7 @@ function pitchReachOf(effect: EffectType, state: State, bandsPerOctave: number):
     case "transmute":
       return Number(state.transmuteTo) === TRANSMUTE_TO_PITCH ? null : 0;
     case "convolve":
-      return widest(stateRange(state, "convolveIrPitchShift"));
+      return 0;
     case "sort":
       return SORTS_ALONG_PITCH.has(Number(state.sortDirection)) ? (SORT_PITCH_BANDS * 12) / bandsPerOctave : 0;
     default:

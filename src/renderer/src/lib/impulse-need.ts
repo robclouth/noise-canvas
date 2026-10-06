@@ -1,6 +1,7 @@
 import { createEffectStateView, createStepStateView } from "@renderer/store";
 import type { SpectrogramData, State } from "@renderer/store/types";
 import { attractFieldKey, impulseKey, responsePath } from "./impulse-key";
+import { modulatedRange } from "./modulation-range";
 import type { SourceNeed } from "./source-window";
 
 /** An open file a convolve step can filter through. */
@@ -46,15 +47,16 @@ export function impulseNeeds(state: State, resolve: (path: string | null) => Res
   return [...byKey].map(([key, need]) => ({ key, need }));
 }
 
+/** The frames of the response the taps read, from the earliest IR Start modulation can reach to the latest. */
 function tapSpan(effect: State, file: ResponseFile): SourceNeed {
   const { numFrames, synthesisMetadata } = file.spectrogramData;
   const stride = 1 << Math.max(...synthesisMetadata.bandStepLog2s);
   const taps = Math.max(1, Math.floor(Number(effect.convolveIrSize)));
-  const start = (Number(effect.convolveIrTimeOffset) / 100) * numFrames;
+  const start = modulatedRange(effect, "convolveIrTimeOffset", Number(effect.convolveIrTimeOffset));
   return {
     fileId: file.id,
-    startFrame: Math.max(0, Math.floor(start)),
-    endFrame: Math.min(numFrames, Math.ceil(start + taps * stride)),
+    startFrame: Math.max(0, Math.floor((start.lo / 100) * numFrames)),
+    endFrame: Math.min(numFrames, Math.ceil((start.hi / 100) * numFrames + taps * stride)),
     wantOriginal: false,
   };
 }
