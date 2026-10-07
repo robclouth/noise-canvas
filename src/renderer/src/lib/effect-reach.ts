@@ -42,6 +42,8 @@ export type ReachContext = {
   minFreq?: number;
   /** One bin of the file's coarsest band, in seconds. */
   binSeconds?: number;
+  /** One bin of the file's band at a pitch UV, in seconds. */
+  binSecondsAtPitch?: (pitchUv: number) => number;
 };
 
 /** One effect's reach in one step, with the brush span it is measured around and how many times it runs. */
@@ -94,6 +96,14 @@ const ATTRACT_MAP_FIRST_MODULATOR = 3;
 // The field lattice rounds the kernel up to its next tap, and a tap is a
 // quarter of the smoothing, so the read passes the smoothing by a little.
 const ATTRACT_KERNEL_TAPS = 2;
+
+// The Attract map that pulls toward a beat grid, which reads no field.
+const ATTRACT_MAP_GRID = 2;
+
+// Gather taps either side of a bin in the time pass, for a field map and for
+// the grid, and the most lattice taps a field map reads around each.
+const ATTRACT_FIELD_HALF = 12;
+const ATTRACT_TIME_MAX = 64;
 
 // Neighbourhoods the flow step may carry a read, which the shader caps it at.
 // Its gradient taps read one neighbourhood out, inside that.
@@ -410,6 +420,13 @@ export type FarRead =
       own: ReadBox;
       taps: ReadBox[];
       response?: { key: string; reads: TimeSpan[]; bands: { first: number; last: number } };
+      /**
+       * What the taps read: the step's input, or the canvas as the dab finds
+       * it, which an effect gathering from what it paints over reads.
+       */
+      from?: "input" | "canvas";
+      /** Sets of four running totals the effect sums into: one, or two. */
+      totals?: 1 | 2;
     };
 
 /** Seconds [start, end) of a file. */
@@ -513,6 +530,58 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
       widest(stateRange(view, "attractAmountY")) === 0
         ? 0
         : ATTRACT_PIECE_KERNELS * widest(stateRange(view, "attractSmoothY")),
+    // While the pitch pull is off, the time pass is the only pass: each pixel
+    // sums what lands on it from bins of its band a whole number of taps away,
+    // and the field map weighs each by the sound around it. It gathers from
+    // the canvas it paints over. A field from another file or a modulator lies
+    // past what parts hold.
+    apart: (view, ctx, region, brush) => {
+      if (!only(stateRange(view, "attractAmountY"), 0) || widest(stateRange(view, "attractAmountX")) === 0) return null;
+      const map = Number(view.attractMap);
+      const field = map === ATTRACT_MAP_SOURCE && !view.attractSourceFile?.path;
+      if (!field && map !== ATTRACT_MAP_GRID) return null;
+      const binAt = ctx.binSecondsAtPitch;
+      if (!binAt) return null;
+      const strides = [binAt(region.low), binAt(region.high)];
+      const beat = 60 / ctx.bpm;
+      const smooth = stateRange(view, "attractSmoothX");
+      const half = field ? ATTRACT_FIELD_HALF : ATTRACT_TIME_MAX;
+      // As the shader spaces its taps: a band's stride, times the strides one
+      // tap of the window spans.
+      const tapOf = (stride: number, smoothBeats: number): number =>
+        stride * Math.max(1, Math.ceil((3 * Math.max(smoothBeats * beat, stride)) / (stride * half)));
+      const tapsAt = strides.flatMap((stride) => [smooth.lo, smooth.hi].map((s) => tapOf(stride, s)));
+      const tapMin = Math.min(...tapsAt);
+      const tapMax = Math.max(...tapsAt);
+      const strideMax = Math.max(...strides);
+      const smoothMax = Math.max(widest(smooth) * beat, strideMax);
+      // A pixel's lattice reaches a smoothing, rounded up to its next tap, past
+      // each tap; its taps reach the window and a stride.
+      const lattice = field ? smoothMax + tapMax : 0;
+      const furthest = 3 * smoothMax + strideMax;
+      const reach = Math.min(half + 1, Math.floor(furthest / tapMin));
+      const own = fitBox(withEnvelopeBox(region, view, ctx), brush, ctx);
+      const taps: ReadBox[] = [];
+      for (let tap = -(half + 1); tap <= half + 1; tap++) {
+        if (Math.abs(tap) > reach) {
+          taps.push(own);
+          continue;
+        }
+        // A bin gathers only from bins its brush covers; the field it is
+        // weighed by lies a lattice either side.
+        const moves = [tap * tapMin, Math.sign(tap) * Math.min(Math.abs(tap) * tapMax, furthest)];
+        const from = intersectBox(
+          {
+            ...region,
+            start: region.start + Math.min(...moves) - strideMax,
+            end: region.end + Math.max(...moves) + strideMax,
+          },
+          brush,
+        );
+        taps.push(from ? fitBox({ ...from, start: from.start - lattice, end: from.end + lattice }, brush, ctx) : own);
+      }
+      return { kind: "sum", own, taps, from: "canvas", totals: 2 };
+    },
   },
   transmute: {
     pastBrush: transmuteReach,

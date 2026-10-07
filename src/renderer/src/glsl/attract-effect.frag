@@ -57,6 +57,25 @@ vec4 attractPackedRead(sampler2D dataTex, vec4 meta, int bandStart, float xUv, f
   return texelFetch(dataTex, packedTexel(bandStart + int(timeIndex), textureSize(dataTex, 0)), 0);
 }
 
+// The canvas the time pass gathers from, in the band at `yUv`, at a dest
+// position: the canvas itself, or the part of it a group of taps is read
+// through, laid out as that part.
+vec4 attractGatherRead(vec4 meta, int bandStart, float yUv, float xUv) {
+  if (sourcePartAccum == 0) return attractPackedRead(destSpectrogramTex, meta, bandStart, xUv, destFrameCount);
+  float band = (1.0 - yUv) * sourceBandCount;
+  float partUv = (destFileFrame(xUv) - float(sourceViewStartFrame)) / max(sourceFrameCount, 1.0);
+  return attractPackedRead(sourceSpectrogramTex, fetchBandMetadata(sourceMetadataTex, band),
+                           bandStartTexel(sourceMetadataTex, band), partUv, sourceFrameCount);
+}
+
+// True where the time pass may read at a dest position: inside the canvas,
+// or inside the file while a group of taps is read through a part of it.
+bool attractInReach(float xUv) {
+  if (sourcePartAccum == 0) return xUv >= 0.0 && xUv <= 1.0;
+  float frame = destFileFrame(xUv);
+  return frame >= 0.0 && frame <= float(destFileFrameCount);
+}
+
 // Coefficient time in seconds at a dest position: dyadic bands store one
 // coefficient per 2^step frames, anchored at the bin's left edge.
 Frames attractCoeffFrames(float xUv, float stepExp) {
@@ -328,6 +347,23 @@ void main() {
     Frames tDCoeff = attractCoeffFrames(destUv.x, destMeta.b);
     vec2 rateDest = destBandRate(destUv);
 
+    // The taps this draw gathers: all of them, a group of them, or none while
+    // the totals the groups left are finished. Tap k of a group sits k minus
+    // the most taps either side, plus one, from the bin it lands on.
+    int tapBase = halfTaps + 1;
+    int firstI = sourcePartAccum == 1 ? max(-iMax, int(sourcePartTaps.x) - tapBase) : -iMax;
+    int lastI = sourcePartAccum == 1 ? min(iMax, int(sourcePartTaps.y) - tapBase) : (sourcePartAccum == 2 ? -iMax - 1 : iMax);
+    if (sourcePartAccum == 1) {
+      vec4 prior = texture(destSpectrogramTex, vUv);
+      if (sourcePartSlot == 0) {
+        accL = prior.rg;
+        accR = prior.ba;
+      } else {
+        energyL = prior.r;
+        energyR = prior.g;
+      }
+    }
+
     float fieldMag[ATTRACT_LATTICE];
     int mHalf = 0;
     float uPerTapX = tapUv / max(smoothXUv, 1e-6);
@@ -340,9 +376,10 @@ void main() {
       int fieldStart = bandStartTexel(attractFieldMetaTex, fileIdx + 0.5);
       int nMax = iMax + mHalf;
       for (int n = -nMax; n <= nMax; n++) {
+        if (n < firstI - mHalf || n > lastI + mHalf) continue;
         float xn = destUv.x + float(n) * tapUv;
         float mag = 0.0;
-        if (xn >= 0.0 && xn <= 1.0) {
+        if (attractInReach(xn)) {
           if (attractMap >= 3) {
             mag = attractModFieldMag(destMeta, destStart, xn);
           } else if (attractFieldMode == 1) {
@@ -351,7 +388,7 @@ void main() {
               mag = getMag(t.rg) + getMag(t.ba);
             }
           } else {
-            vec4 t = attractPackedRead(destSpectrogramTex, destMeta, destStart, xn, destFrameCount);
+            vec4 t = attractGatherRead(destMeta, destStart, destUv.y, xn);
             mag = getMag(t.rg) + getMag(t.ba);
           }
         }
@@ -360,9 +397,10 @@ void main() {
     }
 
     for (int i = -iMax; i <= iMax; i++) {
+      if (i < firstI || i > lastI) continue;
       float dxUv = float(i) * tapUv;
       vec2 jUv = vec2(destUv.x + dxUv, destUv.y);
-      if (jUv.x < 0.0 || jUv.x > 1.0) continue;
+      if (!attractInReach(jUv.x)) continue;
 
       // Both time pulls are texture-free — the field pull reads the shared
       // lattice — so taps that miss this output bin cost only ALU.
@@ -389,7 +427,7 @@ void main() {
 
       float localX;
       if (getBrushTimeCoverage(jUv, destMeta, localX) <= 0.0) continue;
-      vec4 jTexel = attractPackedRead(destSpectrogramTex, destMeta, destStart, jUv.x, destFrameCount);
+      vec4 jTexel = attractGatherRead(destMeta, destStart, destUv.y, jUv.x);
       if (getMag(jTexel.rg) + getMag(jTexel.ba) < 1e-7) continue;
 
       // Time-move carrier correction at exact coefficient times: the moved
@@ -408,6 +446,19 @@ void main() {
       accR += toComplex(vec2(wMagR, jTexel.a + phaseAdd));
       energyL += wMagL * wMagL;
       energyR += wMagR * wMagR;
+    }
+
+    if (sourcePartAccum == 1) {
+      outColor = sourcePartSlot == 0 ? vec4(accL, accR) : vec4(energyL, energyR, 0.0, 0.0);
+      return;
+    }
+    if (sourcePartAccum == 2) {
+      vec4 sums = texture(sourceSpectrogramTex, vUv);
+      vec4 energies = texture(sourcePartTotals1, vUv);
+      accL = sums.rg;
+      accR = sums.ba;
+      energyL = energies.r;
+      energyR = energies.g;
     }
   }
 

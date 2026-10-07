@@ -126,6 +126,8 @@ const SCENARIOS: {
   windowBlocks?: number;
   otherWindowBlocks?: number;
   readsOther?: boolean;
+  /** Bands per octave of the file, when not the parity file's own. */
+  bandsPerOctave?: number;
   dabs: (seconds: number) => { x: number; y: number; state: State }[];
 }[] = [
   {
@@ -447,6 +449,32 @@ const SCENARIOS: {
       },
     ],
   })),
+  // At a round tempo every grid tooth of this file lands on a bin edge, where
+  // either canvas may round a read to either side.
+  ...[
+    { name: "toward its own sound", step: { attractMap: 0, attractSmoothX: 4 } },
+    { name: "toward the grid", step: { attractMap: 2, attractSmoothX: 4 } },
+    {
+      name: "smoothed a little by a pattern",
+      step: { attractMap: 0, attractSmoothX: 2, ...sweeping("attractSmoothX"), attractSmoothXMod1Amount: 5 },
+    },
+  ].map(({ name, step }) => ({
+    name: `an attract along time only ${name} on a slow file, its taps read in groups`,
+    windowBlocks: 1,
+    // Few bands an octave, so a tile of one band over the dab's read still
+    // holds more than a window.
+    bandsPerOctave: 6,
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.5,
+        state: atBpm(
+          61,
+          brushState("attract", { ...step, attractAmountX: 100, attractAmountY: 0, brushSizePitch: 24 }, 4, false),
+        ),
+      },
+    ],
+  })),
   ...[
     { name: "eight copies four beats apart", step: { cloneCountX: 8, cloneSpaceBeats: 4 } },
     {
@@ -515,11 +543,17 @@ const OTHER_FILE_PATH = "/other.wav";
  * same window when `readsOther`, its magnitudes turned over so a read of the
  * wrong file shows.
  */
-function canvas(windowBlocks: number, seconds = 60, otherWindowBlocks?: number, readsOther = false): ParityCanvas {
+function canvas(
+  windowBlocks: number,
+  seconds = 60,
+  otherWindowBlocks?: number,
+  readsOther = false,
+  bandsPerOctave?: number,
+): ParityCanvas {
   if (!renderer) throw new Error("no renderer");
   const others: ParityCanvas[] = [];
   if (readsOther) {
-    const data = parityData({ durationSeconds: seconds });
+    const data = parityData({ durationSeconds: seconds, bandsPerOctave });
     for (let i = 0; i < data.packedData.length; i += 2) data.packedData[i] = 1 - data.packedData[i];
     const other = parityCanvas(data, windowBlocks, renderer.gl, undefined, undefined, {
       id: "other",
@@ -528,10 +562,17 @@ function canvas(windowBlocks: number, seconds = 60, otherWindowBlocks?: number, 
     disposers.push(other.dispose);
     others.push(other);
   }
-  const made = parityCanvas(parityData({ durationSeconds: seconds }), windowBlocks, renderer.gl, undefined, undefined, {
-    otherWindowBlocks,
-    others,
-  });
+  const made = parityCanvas(
+    parityData({ durationSeconds: seconds, bandsPerOctave }),
+    windowBlocks,
+    renderer.gl,
+    undefined,
+    undefined,
+    {
+      otherWindowBlocks,
+      others,
+    },
+  );
   disposers.push(made.dispose);
   return made;
 }
@@ -561,12 +602,13 @@ describe("a windowed canvas paints what a whole-file canvas paints", () => {
     "$seconds s: $scenario.name",
     async ({ seconds, scenario }) => {
       const dabs = scenario.dabs(seconds);
-      const whole = canvas(Infinity, seconds, undefined, scenario.readsOther);
+      const whole = canvas(Infinity, seconds, undefined, scenario.readsOther, scenario.bandsPerOctave);
       const windowed = canvas(
         scenario.windowBlocks ?? WINDOW_BLOCKS,
         seconds,
         scenario.otherWindowBlocks,
         scenario.readsOther,
+        scenario.bandsPerOctave,
       );
       const expected = await paintStroke(whole, dabs);
       const got = await paintStroke(windowed, dabs);

@@ -91,6 +91,10 @@ bool sourcePartMiss = false;
 // and as sourceSpectrogramTex while they are finished.
 uniform vec2  sourcePartTaps;
 uniform int   sourcePartAccum;
+// A pass that keeps two sets of totals: the set a group adds to (0 or 1), and
+// the second set while the totals are finished.
+uniform int   sourcePartSlot;
+uniform sampler2D sourcePartTotals1;
 
 void gateSourcePart(vec2 sourceUv) {
   if (!sourcePartOn) return;

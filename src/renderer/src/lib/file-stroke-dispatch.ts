@@ -569,6 +569,10 @@ function reachContext(context: FileStrokeContext, state: State): ReachContext | 
     canvasSeconds: canvas.windowSeconds(),
     blockSeconds: canvas.grid.blockFrames / spectrogram.sampleRate,
     binSeconds: coarsestBinFrames(canvas.grid) / spectrogram.sampleRate,
+    binSecondsAtPitch: (pitchUv) => {
+      const band = Math.min(spectrogram.numBands - 1, Math.max(0, Math.floor((1 - pitchUv) * spectrogram.numBands)));
+      return 2 ** spectrogram.metadata[band * 4 + 2] / spectrogram.sampleRate;
+    },
     bandsPerOctave: spectrogram.bandsPerOctave,
     numBands: spectrogram.numBands,
     minFreq: spectrogram.minFreq,
@@ -879,6 +883,9 @@ type BesideTile = {
     own: CanvasView;
     taps: { frames: FrameSpan; bands: BandSpan }[];
     response: TapResponse | null;
+    /** What the taps read: the step's input, or the canvas as the dab finds it. */
+    from: "input" | "canvas";
+    totals: 1 | 2;
   } | null;
   /** The input read a part at a time, when one view of it holds more than a window. */
   parts?: InputPartPlan[];
@@ -1051,6 +1058,8 @@ function besideTiling(
               own: viewOfBox(own),
               taps: taps.map(spanOf),
               response: far?.kind === "sum" && far.response ? tapResponse(far.response) : null,
+              from: far?.kind === "sum" ? (far.from ?? "input") : "input",
+              totals: far?.kind === "sum" ? (far.totals ?? 1) : 1,
             }
           : null;
       return {
@@ -1406,7 +1415,7 @@ async function paintTileBeside(
   const response = tile.parts && tile.copies?.response ? tile.copies.response : null;
   const needs = response && tile.copies ? needsInGroups(span.needs, tile.copies) : span.needs;
   if (!(await canvas.holdOthers(needs, tile.others))) return null;
-  const parts = tile.parts ? await readParts(context, state, canvas, tile.parts, response) : null;
+  const parts = tile.parts ? await readParts(context, state, canvas, tile.parts, tile.copies) : null;
   if (tile.parts && !parts) return null;
   const input = parts ? parts.first : tile.input ? await inputSource(context, state, canvas, tile.input) : null;
   if (tile.input && !input) return null;
@@ -1466,10 +1475,12 @@ async function readParts(
   state: State,
   canvas: WindowedCanvas,
   plans: readonly InputPartPlan[],
-  response: TapResponse | null,
+  copies: BesideTile["copies"],
 ): Promise<{ first: { source: SourceFileInfo; dispose: () => void }; parts: InputPart[] } | null> {
+  const response = copies?.response ?? null;
+  const live = copies?.from === "canvas" ? true : undefined;
   const [inputs, heard] = await Promise.all([
-    Promise.all(plans.map((plan) => inputValues(state, canvas, plan.view, context))),
+    Promise.all(plans.map((plan) => inputValues(state, canvas, plan.view, context, live))),
     Promise.all(
       plans.map((plan) =>
         response && plan.response ? canvas.readFile(response.fileId, heldRanges(plan.response.ranges)) : null,
@@ -1492,6 +1503,7 @@ async function readParts(
     return {
       core: plan.core,
       taps: plan.taps,
+      totals: copies?.totals,
       source: () => {
         if (index === 0) return { source: first.source, dispose: () => {} };
         const made = inputOver(context, state, plan.view, values[index]);
@@ -1539,16 +1551,20 @@ async function inputSource(
   return values ? inputOver(context, state, view, values) : null;
 }
 
-/** The values `inputSource` lays over `view`, compact over its held bands. */
+/**
+ * The values `inputSource` lays over `view`, compact over its held bands; with
+ * `canvas`, the canvas as the dab finds it, with the stroke's paint so far.
+ */
 async function inputValues(
   state: State,
   canvas: WindowedCanvas,
   view: CanvasView,
   context: FileStrokeContext,
+  canvasAsFound?: boolean,
 ): Promise<Float32Array | null> {
   const ranges = heldRanges(view.ranges);
   const first = context.createStepStateView(state, firstEnabledStep(state));
-  const live = first.accumulate && first.sourceDataMode !== "start";
+  const live = canvasAsFound || (first.accumulate && first.sourceDataMode !== "start");
   const [start, paint] = await Promise.all([
     canvas.readStart(ranges),
     live ? canvas.readStrokePaint(ranges) : Promise.resolve(null),

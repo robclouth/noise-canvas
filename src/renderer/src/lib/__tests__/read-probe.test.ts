@@ -115,7 +115,18 @@ const CASES: Record<EffectType, Case[]> = {
       step: { convolveIrSize: 128, convolveIrTimeOffset: 40, ...sweeping("convolveIrTimeOffset") },
     },
   ],
-  attract: [{ name: "Attract", step: { attractMap: 0, attractAmountX: 100, attractAmountY: 100 } }],
+  attract: [
+    { name: "Attract", step: { attractMap: 0, attractAmountX: 100, attractAmountY: 100 } },
+    {
+      name: "Attract along time only, at its widest",
+      step: { attractMap: 0, attractAmountX: 100, attractAmountY: 0, attractSmoothX: 4 },
+      bpm: 60,
+    },
+    {
+      name: "Attract along time only, toward the grid",
+      step: { attractMap: 2, attractAmountX: 100, attractAmountY: 0, attractSmoothX: 4 },
+    },
+  ],
   sort: [{ name: "Sort both ways", step: { sortDirection: 2 } }],
   transmute: [{ name: "Transmute to time", step: { transmuteTo: 2, transmuteAmount: 4 } }],
   dynamics: [

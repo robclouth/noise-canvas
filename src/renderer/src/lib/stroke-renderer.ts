@@ -350,6 +350,8 @@ export type InputPart = {
   source: () => { source: SourceFileInfo; dispose: () => void };
   /** The part of the response the taps read, under the key the effect looks it up by. */
   response?: { key: string; open: () => { info: ImpulseFileInfo; dispose: () => void } };
+  /** Sets of four running totals the pass sums its taps into. */
+  totals?: 1 | 2;
 };
 
 /** The uniforms a part draw sets over the pass's own. */
@@ -776,7 +778,9 @@ export class StrokeRenderer {
     target: WebGLRenderTarget,
     list: PixelRangeList,
   ): void {
-    const totals = [0, 1].map(
+    const slots = parts[0]?.totals ?? 1;
+    const totals = Array.from(
+      { length: 2 * slots },
       () =>
         new WebGLRenderTarget(this.view.textureWidth, this.view.textureHeight, {
           format: RGBAFormat,
@@ -788,36 +792,44 @@ export class StrokeRenderer {
         }),
     );
     try {
-      let held: WebGLRenderTarget | null = null;
+      const held: (WebGLRenderTarget | null)[] = new Array(slots).fill(null);
       for (const [index, part] of parts.entries()) {
         if (!part.taps) throw new Error("A part of a pass that sums taps names no taps.");
         const { source, dispose } = part.source();
         const response = part.response?.open();
         try {
-          load(
-            source,
-            {
-              sourcePartAccum: { value: 1 },
-              sourcePartTaps: { value: new Vector2(part.taps.first, part.taps.last) },
-              destSpectrogramTex: { value: held?.texture ?? this.textures.placeholderTexture },
-            },
-            part.response && response && { key: part.response.key, info: response.info },
-          );
-          const next = totals[index % 2];
-          this.drawRanges(material, next, list);
-          held = next;
+          for (let slot = 0; slot < slots; slot++) {
+            load(
+              source,
+              {
+                sourcePartAccum: { value: 1 },
+                sourcePartSlot: { value: slot },
+                sourcePartTaps: { value: new Vector2(part.taps.first, part.taps.last) },
+                destSpectrogramTex: { value: held[slot]?.texture ?? this.textures.placeholderTexture },
+              },
+              part.response && response && { key: part.response.key, info: response.info },
+            );
+            const next = totals[slot * 2 + (index % 2)];
+            this.drawRanges(material, next, list);
+            held[slot] = next;
+          }
         } finally {
           response?.dispose();
           dispose();
         }
       }
-      if (!held) return;
+      const [first, second] = held;
+      if (!first) return;
       const { source, dispose } = parts[0].source();
       const response = parts[0].response?.open();
       try {
         load(
           source,
-          { sourcePartAccum: { value: 2 }, sourceSpectrogramTex: { value: held.texture } },
+          {
+            sourcePartAccum: { value: 2 },
+            sourceSpectrogramTex: { value: first.texture },
+            sourcePartTotals1: { value: second?.texture ?? this.textures.placeholderTexture },
+          },
           parts[0].response && response && { key: parts[0].response.key, info: response.info },
         );
         this.drawRanges(material, target, list);
@@ -1427,6 +1439,8 @@ export class StrokeRenderer {
       sourcePartChannel: { value: 0 },
       sourcePartTaps: { value: new Vector2() },
       sourcePartAccum: { value: 0 },
+      sourcePartSlot: { value: 0 },
+      sourcePartTotals1: { value: this.textures.placeholderTexture },
       sourceUnderOn: { value: false },
       sourceUnderTex: { value: this.textures.placeholderTexture },
       blendMode: { value: stepState.blendMode },

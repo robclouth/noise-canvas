@@ -497,7 +497,16 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
       and its last tap is found by halving, since the views only grow as taps
       join. A tile whose reads of other files no window holds counts as
       reading without end, so the planner reads it in groups rather than
-      halving it in search of a size at which it fits. An IR Start a pattern
+      halving it in search of a size at which it fits. An attract whose pitch
+      pull is off runs only its time pass, which gathers into each bin what
+      lands on it from bins of its band a whole number of taps away, weighed
+      by the sound around each (`from: "canvas"`: it gathers from the canvas
+      it paints over, so its parts hold the canvas as the dab finds it). It
+      keeps a complex sum and an energy for each channel, two sets of four
+      totals (`totals: 2`): a group draws once for each set, and the finish
+      takes the second set through `sourcePartTotals1`. A field from another
+      file or a modulator lies past what parts hold, so those maps keep the
+      whole read. An IR Start a pattern
       sweeps widely moves every tap's response read across the sweep, which no
       group of taps shrinks, so such a dab still refuses on a small window.
       A wrapped read folds across the whole axis, so a brush that wraps is never
