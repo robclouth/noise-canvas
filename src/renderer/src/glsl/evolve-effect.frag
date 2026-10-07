@@ -112,8 +112,15 @@ void main() {
     vec2 stepR = evolveFlowStep(flowDirectionR, flow.y, neighbourR);
     vec2 advectedUvL = coords.sourceL - stepL;
     vec2 advectedUvR = coords.sourceR - stepR;
+    // Every part of the input holds the neighbourhood reads; an advected read
+    // is the one part's whose core holds its point.
+    sourcePartMiss = false;
     vec4 advectedL = sampleWithEdgeMode(advectedUvL, coords.dest, sourceOffsetX - stepL.x, sourceOffsetY - stepL.y, evolveEdgeMode);
+    bool missL = sourcePartMiss;
+    sourcePartMiss = false;
     vec4 advectedR = sampleWithEdgeMode(advectedUvR, coords.dest, sourceOffsetX - stepR.x, sourceOffsetY - stepR.y, evolveEdgeMode);
+    bool missR = sourcePartMiss;
+    if (sourcePartOn && (sourcePartChannel == 0 ? missL : missR)) discard;
 
     // Diffuse: Laplacian (neighbor average - center)
     float neighborAvgL = (getMag(leftL.rg) + getMag(rightL.rg) + getMag(upL.rg) + getMag(downL.rg)) / 4.0;

@@ -491,6 +491,35 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
     },
     acrossPitch: (view) =>
       (evolveNeighbourhoods(view) * widest(stateRange(view, "evolveScaleY")) * EVOLVE_SCALE_FULL_SEMIS) / 100,
+    // While Flow can move it, each channel of a pixel takes its value from one
+    // advected read; its gradient taps read one neighbourhood around the pixel.
+    apart: (view, ctx, region, brush) => {
+      if (only(stateRange(view, "evolveFlow"), 0)) return null;
+      const edge = Number(view.evolveEdgeMode);
+      if (FOLDS_INTO_BRUSH.has(edge)) return null;
+      const seconds = (widest(stateRange(view, "evolveScaleX")) / 100) * EVOLVE_SCALE_FULL_BEATS * (60 / ctx.bpm);
+      const semis = (widest(stateRange(view, "evolveScaleY")) / 100) * EVOLVE_SCALE_FULL_SEMIS;
+      const around = (neighbourhoods: number): ReadBox => {
+        const pitch = semis === 0 ? 0 : semitonesToUv(neighbourhoods * semis, ctx) + 1 / ctx.numBands;
+        const read = fitBox(
+          {
+            start: region.start - neighbourhoods * seconds,
+            end: region.end + neighbourhoods * seconds,
+            low: region.low - pitch,
+            high: region.high + pitch,
+          },
+          brush,
+          ctx,
+        );
+        return READS_PAST_BRUSH.has(edge) ? read : (intersectBox(read, brush) ?? region);
+      };
+      return {
+        kind: "point",
+        own: fitBox(withEnvelopeBox(region, view, ctx), brush, ctx),
+        near: around(1),
+        far: around(EVOLVE_FLOW_NEIGHBOURHOODS),
+      };
+    },
   },
   convolve: { pastBrush: convolveReach, aroundPixel: convolveReach, acrossPitch: () => 0 },
 };

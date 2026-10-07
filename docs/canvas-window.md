@@ -454,9 +454,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     through the view it paints on. No code outside the reach table names an
     effect. A `FarRead` is one of two kinds:
     - **point**: each channel of a pixel takes its value from one read point
-      of the input (a transform that warps or shifts). `far` holds every such
-      point and `near` what else the effect reads of the input, which every
-      part must hold. The input is read through a view of its own, so
+      of the input: a transform that warps or shifts, or an evolve whose Flow
+      can move its read. `far` holds every such point and `near` what else
+      the effect reads of the input, which every part must hold: an evolve's
+      gradient taps, a neighbourhood around the pixel. A shader marks its
+      read point by clearing `sourcePartMiss` before the read and taking it
+      after; the neighbourhood reads before it set nothing that counts. The input is read through a view of its own, so
       reversing a whole file reads its far end, and a shift reads the one box
       it lands on, without one view spanning both. When that view holds more
       than a window, the input is read in parts (`InputPart`): the far box is
@@ -466,7 +469,11 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
       channel whose read point lies in its core and discards the rest
       (`gateSourcePart`), so every pixel takes one part's read, and the parts
       at the box's edges take every read past it. While a pass is drawn in
-      parts, Bleed zero-pads a read past the file, not past the part.
+      parts, Bleed zero-pads a read past the file, not past the part. A
+      part's view is one span holding its core and `near` both, so a core far
+      along both axes at once makes the view large: an evolve at its widest
+      in time and in pitch together on a slow file still refuses on a small
+      window.
     - **sum**: the effect sums reads of the input tap by tap (a repeat's
       copies along time). `taps` holds each tap's region. When no one view
       holds them all, the taps are taken in order, as many to a group as one

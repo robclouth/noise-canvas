@@ -386,6 +386,31 @@ const SCENARIOS: {
       },
     ],
   })),
+  // Flow moves a read by the gradient of the sound times ten times Flow, so a
+  // whole-file canvas's float over the file moves its reads more the further
+  // in they land and the stronger the flow: these are compared near the
+  // start, at a flow that still reads across parts.
+  ...[
+    { name: "wide in time and pitch", step: { evolveScaleX: 97, evolveScaleY: 75, evolveFlow: 40 } },
+    { name: "wide in time and pitch, flowing back", step: { evolveScaleX: 97, evolveScaleY: 75, evolveFlow: -40 } },
+    { name: "wide in time, cut at the brush", step: { evolveScaleX: 97, evolveFlow: 40, evolveEdgeMode: 0 } },
+    {
+      name: "whose flow a pattern sweeps, the channels apart",
+      step: {
+        evolveScaleX: 97,
+        evolveFlow: 0,
+        ...sweeping("evolveFlow"),
+        evolveFlowMod1Amount: 40,
+        modulator1StereoSpread: 50,
+      },
+    },
+  ].map(({ name, step }) => ({
+    name: `an evolve ${name}, its input read in parts`,
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: (seconds: number) => [
+      { x: 10 / seconds, y: 0.5, state: atBpm(61, brushState("evolve", { ...step, brushSizePitch: 24 }, 4, false)) },
+    ],
+  })),
   ...[
     { name: "eight copies four beats apart", step: { cloneCountX: 8, cloneSpaceBeats: 4 } },
     {

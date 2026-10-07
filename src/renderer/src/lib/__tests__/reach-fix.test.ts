@@ -31,10 +31,11 @@ const CASES: { name: string; effect: EffectType; blocks: number; bpm?: number; s
     },
   },
   {
-    name: "Evolve at its widest",
+    name: "Evolve at its widest on a slow file",
     effect: "evolve",
     blocks: 4,
-    step: { evolveScaleX: max("evolveScaleX"), evolveScaleY: max("evolveScaleY") },
+    bpm: 60,
+    step: { evolveScaleX: max("evolveScaleX"), evolveScaleY: max("evolveScaleY"), evolveFlow: max("evolveFlow") },
   },
   {
     name: "Attract at its widest",
