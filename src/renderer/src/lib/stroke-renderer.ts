@@ -335,6 +335,13 @@ export interface StrokeParams {
    * spans more than one texture of it holds.
    */
   inputParts?: readonly InputPart[];
+  /**
+   * The pass of the brush's first effect that reads `inputParts`, by its
+   * material index: the first pass the step runs when absent.
+   */
+  inputPartsPass?: number;
+  /** Runs only the first step's passes before that pass, for the input of a part it reads. */
+  stopBeforePartsPass?: boolean;
 }
 
 /**
@@ -1717,7 +1724,8 @@ export class StrokeRenderer {
     // Generate random value seeded by position using Perlin noise
     const strokeRandom = this.randomAt(new Vector2(this.fileUvX(cursorPos.x), cursorPos.y));
 
-    for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
+    const stepsRun = params.stopBeforePartsPass ? 1 : numSteps;
+    for (let stepIndex = 0; stepIndex < stepsRun; stepIndex++) {
       const geometry = stepGeometries[stepIndex];
       const stepState = geometry.state;
       const stepBrushSizeUv = geometry.sizeUv;
@@ -1914,7 +1922,7 @@ export class StrokeRenderer {
       // Reset currentReadFbo to the step's input for effect processing
       let currentReadFbo: WebGLRenderTarget | { texture: Texture } = stepInputFbo;
 
-      const isLastStep = stepIndex === numSteps - 1;
+      const isLastStep = stepIndex === stepsRun - 1;
 
       const brushIterations = stepState.brushIterations as number;
 
@@ -1944,6 +1952,17 @@ export class StrokeRenderer {
           }
         }
       }
+
+      // The pass that reads the first step's input a part at a time.
+      let partsAt = 0;
+      if (stepIndex === 0 && params.inputPartsPass !== undefined) {
+        const first = enabledEffectItems[0] && this.effects[enabledEffectItems[0].effect];
+        partsAt = plannedPasses.findIndex(
+          (pass) => pass.iteration === 0 && pass.effect === first && pass.passIndex === params.inputPartsPass,
+        );
+        if (partsAt < 0) throw new Error("The pass that reads the input in parts does not run.");
+      }
+      if (stepIndex === 0 && params.stopBeforePartsPass) plannedPasses.splice(partsAt);
 
       // Every pass dropped out. One passthrough still has to run: it carries the
       // source offset, the brush blend, and the write into destinationFbo.
@@ -2052,7 +2071,12 @@ export class StrokeRenderer {
         };
 
         const ranges = isFinalPass ? finalRanges : passRanges;
-        if (isFirstOfStep && stepIndex === 0 && readsNamedFile && params.inputParts) {
+        if (stepIndex === 0 && passOrdinal === partsAt && params.inputParts && (partsAt > 0 || readsNamedFile)) {
+          // A later pass reads at a pixel's own place what the pass before it wrote there.
+          if (partsAt > 0) {
+            uniformsForThisIteration.sourceUnderOn = { value: true };
+            uniformsForThisIteration.sourceUnderTex = { value: inputTexture };
+          }
           let read: { source: SourceFileInfo; uniforms: CommonUniforms } | null = null;
           this.drawInParts(
             params.inputParts,

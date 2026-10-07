@@ -18,12 +18,12 @@ const max = (key: ParameterKey): number => getNumberParameterDef(key).max;
 
 const CASES: { name: string; effect: EffectType; blocks: number; bpm?: number; step: Record<string, unknown> }[] = [
   {
-    name: "Attract at its widest on a slow file",
+    name: "Attract toward a modulator at its widest on a slow file",
     effect: "attract",
     blocks: 16,
     bpm: 60,
     step: {
-      attractMap: 0,
+      attractMap: 3,
       attractAmountX: max("attractAmountX"),
       attractAmountY: max("attractAmountY"),
       attractSmoothX: max("attractSmoothX"),
@@ -38,11 +38,11 @@ const CASES: { name: string; effect: EffectType; blocks: number; bpm?: number; s
     step: { evolveScaleX: max("evolveScaleX"), evolveScaleY: max("evolveScaleY"), evolveFlow: max("evolveFlow") },
   },
   {
-    name: "Attract at its widest",
+    name: "Attract toward a modulator at its widest",
     effect: "attract",
     blocks: 4,
     step: {
-      attractMap: 0,
+      attractMap: 3,
       attractAmountX: max("attractAmountX"),
       attractAmountY: max("attractAmountY"),
       attractSmoothX: max("attractSmoothX"),

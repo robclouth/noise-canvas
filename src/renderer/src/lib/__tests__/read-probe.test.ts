@@ -118,6 +118,14 @@ const CASES: Record<EffectType, Case[]> = {
   attract: [
     { name: "Attract", step: { attractMap: 0, attractAmountX: 100, attractAmountY: 100 } },
     {
+      name: "Attract smoothed widely across pitch",
+      step: { attractMap: 0, attractAmountX: 100, attractAmountY: 100, attractSmoothY: 24 },
+    },
+    {
+      name: "Attract toward the grid, smoothed across pitch",
+      step: { attractMap: 2, attractAmountX: 0, attractAmountY: 100, attractSmoothY: 6, gridSizeSemis: 1 },
+    },
+    {
       name: "Attract along time only, at its widest",
       step: { attractMap: 0, attractAmountX: 100, attractAmountY: 0, attractSmoothX: 4 },
       bpm: 60,

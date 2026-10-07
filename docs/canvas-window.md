@@ -506,7 +506,19 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
       totals (`totals: 2`): a group draws once for each set, and the finish
       takes the second set through `sourcePartTotals1`. A field from another
       file or a modulator lies past what parts hold, so those maps keep the
-      whole read. An IR Start a pattern
+      whole read. With the pitch pull on, the time pass comes second and
+      gathers what the pitch pass wrote: the read names its pass by material
+      index (`pass`) and is `prefixed`, and every tap box widens by what the
+      pitch pass reads. Each part is then painted first: the dab, stopped
+      before that pass (`stopBeforePartsPass`), on a renderer over the part's
+      view, whose whole view the time pass then reads (`besideOver`). The
+      renderer finds the pass among those it plans (`inputPartsPass`) and
+      throws when it does not run; while it reads the parts, its reads at a
+      pixel's own place take what the pass before it wrote. Each tap's part still
+      holds its whole field lattice, about two smoothings along time, over
+      every band the pitch pass reads: an attract at its widest along both
+      axes on a slow file can still need more than a small window holds, and
+      refuses there. An IR Start a pattern
       sweeps widely moves every tap's response read across the sweep, which no
       group of taps shrinks, so such a dab still refuses on a small window.
       A wrapped read folds across the whole axis, so a brush that wraps is never

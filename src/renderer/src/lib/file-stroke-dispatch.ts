@@ -20,7 +20,7 @@ import {
   type BandSpan,
   type CanvasView,
 } from "./canvas-view";
-import { bandAtPixel } from "./band-layout";
+import { bandAtPixel, type BandLayout } from "./band-layout";
 import { bandMetadataTexture } from "./band-metadata-texture";
 import { composePixelRangeValues, intersectPixelRanges, pixelRangeCount } from "./pixel-ranges";
 import {
@@ -356,6 +356,10 @@ export type DispatchOptions = {
     inputParts?: readonly InputPart[];
     /** The key of a response each part binds its own share of, which no window holds. */
     partResponse?: string;
+    /** The pass of the brush's first effect that reads `inputParts`, by its material index. */
+    inputPartsPass?: number;
+    /** Paints only the first step's passes before that pass. */
+    stopBeforePartsPass?: boolean;
     reads: ReadPart;
     sketch?: boolean;
   };
@@ -534,6 +538,8 @@ export function dispatchStroke(
           selection: state.filesSelection[fileId] ?? null,
           clip: beside && clip ? clipToView(beside.view, clip) : (canvas?.clipToCanvas(clip ?? null) ?? null),
           inputParts: beside?.inputParts,
+          inputPartsPass: beside?.inputPartsPass,
+          stopBeforePartsPass: beside?.stopBeforePartsPass,
         },
         state,
         sourceFileInfo,
@@ -886,6 +892,9 @@ type BesideTile = {
     /** What the taps read: the step's input, or the canvas as the dab finds it. */
     from: "input" | "canvas";
     totals: 1 | 2;
+    /** The first effect's pass that sums the taps, by its material index, and whether passes run before it. */
+    pass: number | undefined;
+    prefixed: boolean;
   } | null;
   /** The input read a part at a time, when one view of it holds more than a window. */
   parts?: InputPartPlan[];
@@ -1060,6 +1069,8 @@ function besideTiling(
               response: far?.kind === "sum" && far.response ? tapResponse(far.response) : null,
               from: far?.kind === "sum" ? (far.from ?? "input") : "input",
               totals: far?.kind === "sum" ? (far.totals ?? 1) : 1,
+              pass: far?.kind === "sum" ? far.pass : undefined,
+              prefixed: far?.kind === "sum" && far.prefixed === true,
             }
           : null;
       return {
@@ -1398,42 +1409,62 @@ async function paintTileBeside(
   options: DispatchOptions,
   timing: BesideTiming,
 ): Promise<StrokePaint | null> {
-  const { view, bands, frames } = tile;
+  const { view, bands, frames, copies } = tile;
   let at = performance.now();
   const lap = (phase: keyof BesideTiming): void => {
     const now = performance.now();
     timing[phase] += now - at;
     at = now;
   };
-  const fileRanges = heldRanges(view.ranges);
-  const [start, paint, original] = await Promise.all([
-    canvas.readStart(fileRanges),
-    canvas.readStrokePaint(fileRanges),
-    span.needs.original ? canvas.readOriginal(fileRanges) : Promise.resolve(null),
-  ]);
-  if (!start || (span.needs.original && !original)) return null;
-  const response = tile.parts && tile.copies?.response ? tile.copies.response : null;
-  const needs = response && tile.copies ? needsInGroups(span.needs, tile.copies) : span.needs;
+  const response = tile.parts && copies?.response ? copies.response : null;
+  const needs = response && copies ? needsInGroups(span.needs, copies) : span.needs;
   if (!(await canvas.holdOthers(needs, tile.others))) return null;
-  const parts = tile.parts ? await readParts(context, state, canvas, tile.parts, tile.copies) : null;
+  const prefixed = tile.parts && copies?.prefixed ? copies : null;
+  // A part a later pass reads holds what the passes before it paint there.
+  const before = prefixed
+    ? async (part: CanvasView): Promise<Float32Array | null> => {
+        const set = await besideOver(context, span, canvas, renderer, part);
+        if (!set) return null;
+        try {
+          const painting = {
+            ...options,
+            span,
+            clip: { start: part.startFrame, end: part.endFrame },
+            beside: {
+              renderer: set.beside,
+              view: part,
+              inputPartsPass: prefixed.pass,
+              stopBeforePartsPass: true,
+              reads: tile.others,
+            },
+          };
+          if (!dispatchStroke(context, state, cursorPos, false, painting)) return null;
+          const whole = fileRangesToView(part, set.layout, heldRanges(part.ranges));
+          return whole ? await set.beside.readPixelRanges(whole) : new Float32Array(0);
+        } finally {
+          set.dispose();
+        }
+      }
+    : null;
+  const parts = tile.parts ? await readParts(context, state, canvas, tile.parts, copies, before) : null;
   if (tile.parts && !parts) return null;
-  const input = parts ? parts.first : tile.input ? await inputSource(context, state, canvas, tile.input) : null;
+  const input = parts
+    ? prefixed
+      ? null
+      : parts.first
+    : tile.input
+      ? await inputSource(context, state, canvas, tile.input)
+      : null;
   if (tile.input && !input) return null;
+  const set = await besideOver(context, span, canvas, renderer, view);
+  if (!set) {
+    input?.dispose();
+    if (prefixed) parts?.first.dispose();
+    return null;
+  }
   lap("readMs");
-  const layout = { numBands: context.spectrogramData.numBands, metadata: context.spectrogramData.metadata };
-  const beside = renderer.beside(view);
-  const originalTexture = original ? viewTexture(view, original) : null;
+  const { beside, layout } = set;
   try {
-    beside.initialize();
-    beside.setFBOData(viewTexels(view, start));
-    beside.holdStrokeScratch();
-    const painted = pixelRangeCount(paint.ranges) > 0 ? fileRangesToView(view, layout, paint.ranges) : null;
-    if (painted) {
-      beside.patchCanvasCompact(paint.values, painted);
-      beside.patchStrokeMasks(painted, paint.masks);
-    }
-    if (originalTexture) beside.setOriginalTexture(originalTexture);
-    beside.beginStroke();
     lap("setupMs");
     const painting = {
       ...options,
@@ -1444,6 +1475,7 @@ async function paintTileBeside(
         view,
         input: input?.source,
         inputParts: parts?.parts,
+        inputPartsPass: copies?.pass,
         partResponse: response?.key,
         reads: tile.others,
       },
@@ -1459,10 +1491,52 @@ async function paintTileBeside(
     lap("readbackMs");
     return { ranges: keptFile, values, masks };
   } finally {
-    beside.dispose();
-    originalTexture?.dispose();
+    set.dispose();
     input?.dispose();
+    if (prefixed) parts?.first.dispose();
   }
+}
+
+/**
+ * A renderer beside the canvas over `view`, loaded with the file as the
+ * stroke found it, the stroke's paint and masks so far, and the original
+ * where the dab reads it. Null when a read fails.
+ */
+async function besideOver(
+  context: FileStrokeContext,
+  span: DabSpan,
+  canvas: WindowedCanvas,
+  renderer: StrokeRenderer,
+  view: CanvasView,
+): Promise<{ beside: StrokeRenderer; layout: BandLayout; dispose: () => void } | null> {
+  const fileRanges = heldRanges(view.ranges);
+  const [start, paint, original] = await Promise.all([
+    canvas.readStart(fileRanges),
+    canvas.readStrokePaint(fileRanges),
+    span.needs.original ? canvas.readOriginal(fileRanges) : Promise.resolve(null),
+  ]);
+  if (!start || (span.needs.original && !original)) return null;
+  const layout = { numBands: context.spectrogramData.numBands, metadata: context.spectrogramData.metadata };
+  const beside = renderer.beside(view);
+  const originalTexture = original ? viewTexture(view, original) : null;
+  beside.initialize();
+  beside.setFBOData(viewTexels(view, start));
+  beside.holdStrokeScratch();
+  const painted = pixelRangeCount(paint.ranges) > 0 ? fileRangesToView(view, layout, paint.ranges) : null;
+  if (painted) {
+    beside.patchCanvasCompact(paint.values, painted);
+    beside.patchStrokeMasks(painted, paint.masks);
+  }
+  if (originalTexture) beside.setOriginalTexture(originalTexture);
+  beside.beginStroke();
+  return {
+    beside,
+    layout,
+    dispose: () => {
+      beside.dispose();
+      originalTexture?.dispose();
+    },
+  };
 }
 
 /**
@@ -1476,11 +1550,18 @@ async function readParts(
   canvas: WindowedCanvas,
   plans: readonly InputPartPlan[],
   copies: BesideTile["copies"],
+  before: ((view: CanvasView) => Promise<Float32Array | null>) | null,
 ): Promise<{ first: { source: SourceFileInfo; dispose: () => void }; parts: InputPart[] } | null> {
   const response = copies?.response ?? null;
   const live = copies?.from === "canvas" ? true : undefined;
   const [inputs, heard] = await Promise.all([
-    Promise.all(plans.map((plan) => inputValues(state, canvas, plan.view, context, live))),
+    before
+      ? (async () => {
+          const out: (Float32Array | null)[] = [];
+          for (const plan of plans) out.push(await before(plan.view));
+          return out;
+        })()
+      : Promise.all(plans.map((plan) => inputValues(state, canvas, plan.view, context, live))),
     Promise.all(
       plans.map((plan) =>
         response && plan.response ? canvas.readFile(response.fileId, heldRanges(plan.response.ranges)) : null,

@@ -97,6 +97,9 @@ const ATTRACT_MAP_FIRST_MODULATOR = 3;
 // quarter of the smoothing, so the read passes the smoothing by a little.
 const ATTRACT_KERNEL_TAPS = 2;
 
+// The material index of Attract's time pass.
+const ATTRACT_TIME_PASS = 1;
+
 // The Attract map that pulls toward a beat grid, which reads no field.
 const ATTRACT_MAP_GRID = 2;
 
@@ -305,6 +308,27 @@ function attractReach(effect: State, ctx: ReachContext): TimeReach {
   return { before: span, after: span };
 }
 
+// Gather taps either side of a band in the pitch pass for the scale and grid
+// maps, which read no field.
+const ATTRACT_BANDS_MAX = 32;
+
+/**
+ * Semitones Attract's pitch pass reads either side of a band, as the shader
+ * spaces its taps: the gather window, a stride past it, and for a field map
+ * the field a smoothing and a stride past that.
+ */
+function attractPitchSemis(view: State, bandsPerOctave: number): number {
+  if (widest(stateRange(view, "attractAmountY")) === 0) return 0;
+  const bandsPerSemi = bandsPerOctave / 12;
+  const smooth = Math.max(widest(stateRange(view, "attractSmoothY")), 1e-4);
+  const map = Number(view.attractMap);
+  const field = map === ATTRACT_MAP_SOURCE || map >= ATTRACT_MAP_FIRST_MODULATOR;
+  const windowBands = Math.min(3 * smooth, 24) * bandsPerSemi;
+  const stride = Math.max(1, Math.ceil(windowBands / (field ? ATTRACT_FIELD_HALF : ATTRACT_BANDS_MAX)));
+  const lattice = field ? smooth * bandsPerSemi + stride : 0;
+  return (windowBands + stride + lattice) / bandsPerSemi;
+}
+
 /** Neighbourhoods Evolve reads from a point: one for its gradient taps, and the flow step's cap while Flow can move it. */
 function evolveNeighbourhoods(effect: State): number {
   return only(stateRange(effect, "evolveFlow"), 0) ? 1 : EVOLVE_FLOW_NEIGHBOURHOODS;
@@ -427,6 +451,13 @@ export type FarRead =
       from?: "input" | "canvas";
       /** Sets of four running totals the effect sums into: one, or two. */
       totals?: 1 | 2;
+      /**
+       * The effect's pass that sums the taps, by its material index, when it
+       * is not the effect's first; `prefixed` when passes of the effect run
+       * before it, which every tap box already widens by what they read.
+       */
+      pass?: number;
+      prefixed?: boolean;
     };
 
 /** Seconds [start, end) of a file. */
@@ -526,17 +557,16 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
       const span = ATTRACT_PIECE_KERNELS * widest(stateRange(view, "attractSmoothX")) * (60 / ctx.bpm);
       return { before: span, after: span };
     },
-    acrossPitch: (view) =>
-      widest(stateRange(view, "attractAmountY")) === 0
-        ? 0
-        : ATTRACT_PIECE_KERNELS * widest(stateRange(view, "attractSmoothY")),
-    // While the pitch pull is off, the time pass is the only pass: each pixel
-    // sums what lands on it from bins of its band a whole number of taps away,
-    // and the field map weighs each by the sound around it. It gathers from
-    // the canvas it paints over. A field from another file or a modulator lies
-    // past what parts hold.
+    acrossPitch: (view, bandsPerOctave) => attractPitchSemis(view, bandsPerOctave),
+    // The time pass sums into each pixel what lands on it from bins of its
+    // band a whole number of taps away, and the field map weighs each by the
+    // sound around it. It gathers from the canvas it paints over, or from what
+    // the pitch pass before it wrote, which reads a few bands either side and
+    // a bin along time. A field from another file or a modulator lies past
+    // what parts hold.
     apart: (view, ctx, region, brush) => {
-      if (!only(stateRange(view, "attractAmountY"), 0) || widest(stateRange(view, "attractAmountX")) === 0) return null;
+      if (widest(stateRange(view, "attractAmountX")) === 0) return null;
+      const prefixed = !only(stateRange(view, "attractAmountY"), 0);
       const map = Number(view.attractMap);
       const field = map === ATTRACT_MAP_SOURCE && !view.attractSourceFile?.path;
       if (!field && map !== ATTRACT_MAP_GRID) return null;
@@ -560,7 +590,24 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
       const lattice = field ? smoothMax + tapMax : 0;
       const furthest = 3 * smoothMax + strideMax;
       const reach = Math.min(half + 1, Math.floor(furthest / tapMin));
-      const own = fitBox(withEnvelopeBox(region, view, ctx), brush, ctx);
+      const pitchReach = prefixed
+        ? semitonesToUv(attractPitchSemis(view, ctx.bandsPerOctave), ctx) + 1 / ctx.numBands
+        : 0;
+      // What the pitch pass reads to write `box`, when it runs first.
+      const before = (box: ReadBox): ReadBox =>
+        prefixed
+          ? fitBox(
+              {
+                start: box.start - strideMax,
+                end: box.end + strideMax,
+                low: box.low - pitchReach,
+                high: box.high + pitchReach,
+              },
+              brush,
+              ctx,
+            )
+          : box;
+      const own = before(fitBox(withEnvelopeBox(region, view, ctx), brush, ctx));
       const taps: ReadBox[] = [];
       for (let tap = -(half + 1); tap <= half + 1; tap++) {
         if (Math.abs(tap) > reach) {
@@ -578,9 +625,11 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
           },
           brush,
         );
-        taps.push(from ? fitBox({ ...from, start: from.start - lattice, end: from.end + lattice }, brush, ctx) : own);
+        taps.push(
+          from ? before(fitBox({ ...from, start: from.start - lattice, end: from.end + lattice }, brush, ctx)) : own,
+        );
       }
-      return { kind: "sum", own, taps, from: "canvas", totals: 2 };
+      return { kind: "sum", own, taps, from: "canvas", totals: 2, pass: ATTRACT_TIME_PASS, prefixed };
     },
   },
   transmute: {

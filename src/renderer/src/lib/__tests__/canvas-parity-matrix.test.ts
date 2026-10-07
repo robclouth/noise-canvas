@@ -476,6 +476,35 @@ const SCENARIOS: {
     ],
   })),
   ...[
+    { name: "on a slow file", bpm: 61, windowBlocks: 16 },
+    { name: "on a small window", bpm: 121, windowBlocks: SMALL_WINDOW_BLOCKS },
+  ].map(({ name, bpm, windowBlocks }) => ({
+    name: `an attract at its widest in time and pitch ${name}, its time pass read in groups`,
+    windowBlocks,
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.5,
+        state: atBpm(
+          bpm,
+          brushState(
+            "attract",
+            {
+              attractMap: 0,
+              attractAmountX: 100,
+              attractAmountY: 100,
+              attractSmoothX: 4,
+              attractSmoothY: 24,
+              brushSizePitch: 24,
+            },
+            4,
+            false,
+          ),
+        ),
+      },
+    ],
+  })),
+  ...[
     { name: "eight copies four beats apart", step: { cloneCountX: 8, cloneSpaceBeats: 4 } },
     {
       name: "copies both ways in time and pitch, decaying",
