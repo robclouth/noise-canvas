@@ -343,6 +343,50 @@ const SCENARIOS: {
     ],
   },
   ...[
+    { name: "shifts by four beats", step: { transformShiftBeats: 4 } },
+    { name: "stretches time twice", step: { transformScaleTime: 0.5 } },
+    { name: "shrinks time 100 times", step: { transformScaleTime: 0.01 } },
+  ].map(({ name, step }) => ({
+    name: `a Snappy transform that ${name}, on a small window`,
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: (seconds: number) => [
+      {
+        x: 6 / seconds,
+        y: 0.5,
+        state: brushState("transform", { ...step, algorithm: 2, transformEdgeMode: 1, brushSizePitch: 24 }, 4, false),
+      },
+    ],
+  })),
+  ...[
+    { name: "shifted four beats", step: { transformShiftBeats: 4 } },
+    {
+      name: "whose scale a pattern sweeps fully",
+      step: { transformScaleTime: 0.5, ...sweeping("transformScaleTime") },
+    },
+  ].map(({ name, step }) => ({
+    name: `a transform ${name}, an envelope follower moving its pitch, on a small window`,
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: (seconds: number) => [
+      {
+        x: 6 / seconds,
+        y: 0.5,
+        state: brushState(
+          "transform",
+          {
+            ...step,
+            transformEdgeMode: 1,
+            brushSizePitch: 24,
+            modulator2Mode: 1,
+            modulator2EnvelopeSmoothingBeats: 1,
+            transformShiftSemisMod2Amount: 50,
+          },
+          4,
+          false,
+        ),
+      },
+    ],
+  })),
+  ...[
     { name: "eight copies four beats apart", step: { cloneCountX: 8, cloneSpaceBeats: 4 } },
     {
       name: "copies both ways in time and pitch, decaying",

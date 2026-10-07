@@ -203,6 +203,11 @@ float destFileFrame(float uvX) { return float(destViewStartFrame) + uvX * destFr
 // The bin a position `bins` bins along a band falls in. Reads land on bin
 // edges; a hundredth of a bin keeps rounding on one side of them.
 float binAt(float bins) { return floor(bins + 0.01); }
+// A position within a hundredth of a bin of a bin edge, moved onto that edge.
+float onBinEdge(float bins) {
+  float edge = floor(bins + 0.5);
+  return abs(bins - edge) < 0.01 ? edge : bins;
+}
 float sourceFileFrame(float uvX) { return float(sourceViewStartFrame) + uvX * sourceFrameCount; }
 float destFileSec(float uvX) { return destFileFrame(uvX) / max(destSampleRate, 1e-6); }
 float sourceFileSec(float uvX) { return sourceFileFrame(uvX) / max(sourceSampleRate, 1e-6); }
@@ -322,6 +327,25 @@ vec4 readPackedData(vec2 unpackedUv,
   return texelFetch(dataTex, packedTexel(linearIndex, textureSize(dataTex, 0)), 0);
 }
 
+// Set while the step's input is read through a view of its own: the input
+// laid out as the dest canvas, which holds every pixel the pass writes.
+uniform bool sourceUnderOn;
+uniform sampler2D sourceUnderTex;
+
+// The input in the band of a dest pixel, at the same place in its file that
+// the pixel names in its own, so the pixel's own bin.
+vec4 sampleSourceUnderDest(vec2 destUv) {
+  if (sourceUnderOn) return texelFetch(sourceUnderTex, ivec2(gl_FragCoord.xy), 0);
+  float fileFrame = sourceFileFrameCount == destFileFrameCount
+      ? destFileFrame(destUv.x)
+      : destFileUvX(destUv.x) * float(sourceFileFrameCount);
+  float bandIndex = floor((1.0 - destUv.y) * sourceBandCount);
+  vec4 meta = fetchBandMetadata(sourceMetadataTex, bandIndex);
+  float bin = clamp(binAt((fileFrame - float(sourceViewStartFrame)) / exp2(meta.b)), 0.0, meta.g - 1.0);
+  int index = bandStartTexel(sourceMetadataTex, bandIndex) + int(bin);
+  return texelFetch(sourceSpectrogramTex, packedTexel(index, textureSize(sourceSpectrogramTex, 0)), 0);
+}
+
 // Public sampling helpers
 vec4 sampleSourceNoInterp(vec2 sourceUv) {
   vec2 wrappedUv = wrapUv(sourceUv);
@@ -433,12 +457,18 @@ vec4 sampleSourceInterp(vec2 sourceUv) {
 // canvas UV, counted from each file's start (defined below).
 vec2 sourceUvAtDestTime(vec2 destUv);
 
+// The step's input at the musical time and frequency of a dest position.
+vec4 sampleInputAtDest(vec2 destUv) {
+  if (sourceUnderOn) return readPackedDataInterpolated(destUv, sourceUnderTex, destMetadataTex, destFrameCount, destBandCount);
+  return sampleSourceInterp(sourceUvAtDestTime(destUv));
+}
+
 /**
  * Calculate audio level in dB from the source at the musical time and
  * frequency of a dest position.
  */
 float getAudioLevelDb(vec2 uv) {
-  vec4 sourceTexel = sampleSourceInterp(sourceUvAtDestTime(uv));
+  vec4 sourceTexel = sampleInputAtDest(uv);
   float magnitudeL = getMag(sourceTexel.rg);
   float magnitudeR = getMag(sourceTexel.ba);
   float avgMagnitude = max(0.5 * (magnitudeL + magnitudeR), 1e-6);
@@ -816,9 +846,9 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
 }
 
 vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
-  // It reads the source under the dest pixel too, which no part promises to hold.
-  if (sourcePartOn) sourcePartMiss = true;
-  vec4 original = sampleSourceNoInterp(destUv);
+  // The input under the dest pixel is held by every part of the input.
+  vec4 original = sampleSourceUnderDest(destUv);
+  gateSourcePart(sourceUv);
   float originalPhaseL = getPhase(original.rg);
   float originalPhaseR = getPhase(original.ba);
 
@@ -829,7 +859,7 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
   float bandTimeScaleExp = meta.b;
 
   float timeInFrames   = sourceUv.x * sourceFrameCount;
-  float scaledTime     = timeInFrames / exp2(bandTimeScaleExp);
+  float scaledTime     = onBinEdge(timeInFrames / exp2(bandTimeScaleExp));
   float timeIndex0, timeIndex1, timeFraction;
   bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 

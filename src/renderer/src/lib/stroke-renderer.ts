@@ -260,6 +260,8 @@ export interface SourceFileInfo {
   // Nearest-onset lookup row for this file at the current sensitivity, baked by
   // lib/onset-map.ts. Null when the file has no onsets yet.
   onsetTexture?: Texture | null;
+  /** True for the painted file's own first-step input, read through a view of its own. */
+  ownInput?: boolean;
 }
 
 /**
@@ -1408,6 +1410,8 @@ export class StrokeRenderer {
       sourcePartChannel: { value: 0 },
       sourcePartTaps: { value: new Vector2() },
       sourcePartAccum: { value: 0 },
+      sourceUnderOn: { value: false },
+      sourceUnderTex: { value: this.textures.placeholderTexture },
       blendMode: { value: stepState.blendMode },
       algorithm: { value: stepState.algorithm },
       magnitudeLimit: { value: magnitudeLimit },
@@ -1803,6 +1807,12 @@ export class StrokeRenderer {
       // step reads, or the shader samples this file's layout as another file's.
       if (!readsSourceFile) this.pointSourceAtDest(commonUniforms, params.destOnsetTexture);
       commonUniforms.sourceSpectrogramTex.value = stepInputFbo.texture;
+      if (stepIndex === 0 && stepSource.ownInput) {
+        commonUniforms.sourceUnderOn.value = true;
+        commonUniforms.sourceUnderTex.value = (
+          stepState.sourceDataMode === "start" ? scratch.strokeStartFbo : selfInputFbo
+        ).texture;
+      }
 
       // Get enabled effects in order for this step
       const stepEffects = stepState.effects as {
@@ -1867,6 +1877,7 @@ export class StrokeRenderer {
         sourceBandScale: { value: 1.0 },
         sourceTimeOffset: { value: defaultParameterUniform(0, -1, 1) },
         sourcePitchOffset: { value: defaultParameterUniform(0, -1, 1) },
+        sourceUnderOn: { value: false },
       };
 
       // Reset currentReadFbo to the step's input for effect processing

@@ -823,8 +823,6 @@ const MAX_BESIDE_TILES = 4096;
 // back over from where the onset transport moves the read.
 const PART_BINS_BEFORE = 6;
 const PART_BINS_AFTER = 2;
-// The transform algorithm that reads under the pixel it writes as well.
-const SNAPPY_ALGORITHM = 2;
 
 /** The bands a region of the file covers any of. */
 function bandsOfBox(box: ReadBox, numBands: number): BandSpan {
@@ -848,8 +846,11 @@ type BesideTile = {
   reads: FrameSpan;
   readBands: BandSpan;
   others: ReadPart;
-  /** The frames and bands the first step reads apart, when it does. */
-  inputBox: { frames: FrameSpan; bands: BandSpan } | null;
+  /**
+   * The frames and bands the first step reads apart, when it does: where its
+   * read points land, and what it reads besides that every part must hold.
+   */
+  inputBox: { frames: FrameSpan; bands: BandSpan; near: { frames: FrameSpan; bands: BandSpan } | null } | null;
   /**
    * For a first step that sums copies along time: the view of what it reads
    * besides those copies, and the frames and bands each copy reads.
@@ -962,7 +963,7 @@ function besideTiling(
     return canvasViewOfFrames(grid, frames.start, frames.end, bandsOfBox(box, numBands));
   };
   const tileOf = (bands: BandSpan, frames: FrameSpan): BesideTile => {
-    const { own, input, taps } = readBoxes(
+    const { own, far } = readBoxes(
       state,
       ctx,
       {
@@ -973,6 +974,9 @@ function besideTiling(
       },
       brushes,
     );
+    const taps = far?.kind === "sum" ? far.taps : null;
+    const point = far?.kind === "point" ? far : null;
+    const input = point && (point.near ? unionBox(point.near, point.far) : point.far);
     // What the brush reads with its copies along time on the tile's own view.
     const whole = taps ? taps.reduce(unionBox, own) : own;
     const read = input ? unionBox(own, input) : whole;
@@ -982,12 +986,16 @@ function besideTiling(
     // reads there are read only there, not over the span to the dab.
     const others: ReadPart = input ? { first: framesOfBox(input), rest: framesOfBox(own) } : reads;
     if (!input || inputApart) {
-      const inputBox = input && { frames: framesOfBox(input), bands: bandsOfBox(input, numBands) };
+      const spanOf = (box: ReadBox): { frames: FrameSpan; bands: BandSpan } => ({
+        frames: framesOfBox(box),
+        bands: bandsOfBox(box, numBands),
+      });
+      const inputBox = point && { ...spanOf(point.far), near: point.near && spanOf(point.near) };
       const copies =
         taps && inputApart
           ? {
               own: viewOfBox(own),
-              taps: taps.map((box) => ({ frames: framesOfBox(box), bands: bandsOfBox(box, numBands) })),
+              taps: taps.map(spanOf),
             }
           : null;
       return {
@@ -1046,11 +1054,8 @@ function besideTiling(
   const partAfter = PART_BINS_AFTER * seam;
   const firstStep = firstEnabledStep(state);
   const firstBrush = brushes[firstStep];
-  // One read point a pixel: Snappy also reads under the pixel it writes, and a
-  // wrapped read folds back across the whole axis.
-  const partable =
-    Number(context.createStepStateView(state, firstStep).algorithm) !== SNAPPY_ALGORITHM &&
-    !(firstBrush?.wrapsTime || firstBrush?.wrapsPitch);
+  // A wrapped read folds back across the whole axis.
+  const partable = !(firstBrush?.wrapsTime || firstBrush?.wrapsPitch);
   // The view a part reads its reads of `frames` and `bands` through.
   const viewOfCore = (frames: FrameSpan, bands: BandSpan): CanvasView =>
     canvasViewOfFrames(grid, Math.max(0, frames.start - partBefore), Math.min(numFrames, frames.end + partAfter), {
@@ -1060,8 +1065,17 @@ function besideTiling(
   const partsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const box = tile.inputBox;
     if (!partable || !box) return null;
+    const { near } = box;
+    // A part's view holds what the pass reads besides its read points too.
+    const viewOfPart = (frames: FrameSpan, bands: BandSpan): CanvasView =>
+      near
+        ? viewOfCore(
+            { start: Math.min(frames.start, near.frames.start), end: Math.max(frames.end, near.frames.end) },
+            { first: Math.min(bands.first, near.bands.first), last: Math.max(bands.last, near.bands.last) },
+          )
+        : viewOfCore(frames, bands);
     const parts: { frames: FrameSpan; bands: BandSpan; view: CanvasView }[] = [];
-    const pending = [{ ...box, view: viewOfCore(box.frames, box.bands) }];
+    const pending = [{ frames: box.frames, bands: box.bands, view: viewOfPart(box.frames, box.bands) }];
     for (let part = pending.pop(); part; part = pending.pop()) {
       if (part.view.texels <= budget) {
         parts.push(part);
@@ -1078,8 +1092,8 @@ function besideTiling(
         splits.push([frames, { first: bands.first, last: mid }, frames, { first: mid + 1, last: bands.last }]);
       const halved = splits
         .map(([fa, ba, fb, bb]) => [
-          { frames: fa, bands: ba, view: viewOfCore(fa, ba) },
-          { frames: fb, bands: bb, view: viewOfCore(fb, bb) },
+          { frames: fa, bands: ba, view: viewOfPart(fa, ba) },
+          { frames: fb, bands: bb, view: viewOfPart(fb, bb) },
         ])
         .filter(([a, b]) => Math.max(a.view.texels, b.view.texels) < part.view.texels)
         .sort(([a, b], [c, d]) => Math.max(a.view.texels, b.view.texels) - Math.max(c.view.texels, d.view.texels))[0];
@@ -1422,6 +1436,7 @@ function inputOver(
   const metadata = bandMetadataTexture(view.layout, spectrogramData.sampleRate);
   const source: SourceFileInfo = {
     id: `${context.fileId}:input`,
+    ownInput: true,
     filePath: file.filePath,
     displayName: file.displayName,
     spectrogramData,

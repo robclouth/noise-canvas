@@ -355,7 +355,28 @@ type EffectReach = {
   aroundPixel: (view: State, ctx: ReachContext) => TimeReach | null;
   /** Semitones it reads either side of each band, or null when it may read any band. */
   acrossPitch: (view: State, bandsPerOctave: number) => number | null;
+  /**
+   * Its reads of the input set apart, to paint `region` within `brush`, when
+   * they may need more than one view; absent or null when it reads as any
+   * other effect does.
+   */
+  apart?: (view: State, ctx: ReachContext, region: ReadBox, brush: BrushBox) => FarRead | null;
 };
+
+/**
+ * How an effect that may read further than one window holds is read in parts,
+ * when it is the brush's first effect and runs once: `own` is what the brush
+ * reads besides those reads, through the view it paints on.
+ */
+export type FarRead =
+  /**
+   * Each channel of a pixel takes its value from one read point of the input,
+   * which `far` holds every one of; `near` is what else it reads of the input,
+   * which every part must hold.
+   */
+  | { kind: "point"; own: ReadBox; near: ReadBox | null; far: ReadBox }
+  /** The effect sums reads of the input tap by tap, and `taps` holds each tap's. */
+  | { kind: "sum"; own: ReadBox; taps: ReadBox[] };
 
 /** An effect that reads only the pixel it writes. */
 const OWN_PIXEL: EffectReach = { pastBrush: () => NO_REACH, aroundPixel: () => NO_REACH, acrossPitch: () => 0 };
@@ -391,6 +412,12 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
       return wraps ? null : taps;
     },
     acrossPitch: cloneTapSemis,
+    // A repeat reads its input only where its copies along time land.
+    apart: (view, ctx, region, brush) => {
+      if (Number(view.cloneCountX) <= 0 || !READS_PAST_BRUSH.has(Number(view.cloneEdgeMode))) return null;
+      const own = repeatOwnBox(view, ctx, region, brush);
+      return { kind: "sum", own, taps: repeatTapBoxes(view, ctx, own, brush) };
+    },
   },
   transform: {
     pastBrush: (view, ctx, brush) => transformReach(view, ctx, brush.seconds, brush.pitchUv),
@@ -415,6 +442,17 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
       if (only(stateRange(view, "transformScalePitch"), 1)) return shift;
       if (scale <= NO_SCALE_BELOW) return null;
       return shift + widest(stateRange(view, "brushSizePitch")) * Math.max(1, 1 / scale);
+    },
+    // A warp reads its input only where it samples. Locked also reads it under
+    // the pixel it writes, which the view it paints on holds.
+    apart: (view, ctx, region, brush) => {
+      if (!moves(view)) return null;
+      return {
+        kind: "point",
+        own: fitBox(withEnvelopeBox(region, view, ctx), brush, ctx),
+        near: null,
+        far: fitBox(warpBox(view, ctx, region, brush), brush, ctx),
+      };
     },
   },
   sort: {
@@ -564,47 +602,33 @@ const SNAP_SEMIS = 6;
  * is worked out from the last effect back: each widens what the one after it
  * reads by what it reads around each pixel, or maps it through its warp.
  *
- * A warp that is the brush's first effect, run once, reads the file only
- * where it samples the first step's input, so that read is set apart:
- * `input` is where it samples, and `own` what the rest of the brush reads.
- * `input` is null when the first effect is no such warp.
- *
- * A repeat that is the brush's first effect, run once, reads that input only
- * where its copies along time land, so those reads are set apart too: `taps`
- * holds the region each copy reads, and `own` what its pitch copies and the
- * rest of the brush read. `taps` is null when the first effect is no such
- * repeat.
+ * The brush's first effect, run once, reads the file as the first step's
+ * input. One that sets those reads apart (`EffectReach.apart`) returns them
+ * as `far`, and `own` is what the brush reads besides. `far` is null when the
+ * first effect reads as any other does.
  */
 export function readBoxes(
   state: State,
   ctx: ReachContext,
   box: ReadBox,
   brushes: readonly BrushBox[],
-): { own: ReadBox; input: ReadBox | null; taps: ReadBox[] | null } {
+): { own: ReadBox; far: FarRead | null } {
   const chain = chainedEffects(state);
   const [first] = chain;
-  const leads = !!first && first.step === firstEnabledStep(state) && first.repeats === 1;
-  const apart = leads && first.effect === "transform" && moves(first.view);
-  const copies =
-    leads &&
-    first.effect === "clone" &&
-    Number(first.view.cloneCountX) > 0 &&
-    READS_PAST_BRUSH.has(Number(first.view.cloneEdgeMode));
   let region = box;
   const brushOf = (step: number): BrushBox => brushes[step] ?? { ...region, wrapsTime: false, wrapsPitch: false };
-  for (let i = chain.length - 1; i >= (apart || copies ? 1 : 0); i--) {
+  for (let i = chain.length - 1; i >= 1; i--) {
     const { effect, view, step, repeats } = chain[i];
     const brush = brushOf(step);
     for (let r = 0; r < repeats; r++) region = effectReadBox(effect, view, ctx, region, brush);
   }
-  if (copies) {
-    const brush = brushOf(first.step);
-    const own = repeatOwnBox(first.view, ctx, region, brush);
-    return { own, input: null, taps: repeatTapBoxes(first.view, ctx, own, brush) };
-  }
-  if (!apart) return { own: region, input: null, taps: null };
+  if (!first) return { own: region, far: null };
+  const leads = first.step === firstEnabledStep(state) && first.repeats === 1;
+  const far = leads ? (EFFECT_REACH[first.effect].apart?.(first.view, ctx, region, brushOf(first.step)) ?? null) : null;
+  if (far) return { own: far.own, far };
   const brush = brushOf(first.step);
-  return { own: region, input: fitBox(warpBox(first.view, ctx, region, brush), brush, ctx), taps: null };
+  for (let r = 0; r < first.repeats; r++) region = effectReadBox(first.effect, first.view, ctx, region, brush);
+  return { own: region, far: null };
 }
 
 /**
@@ -638,6 +662,12 @@ function repeatTapBoxes(view: State, ctx: ReachContext, own: ReadBox, brush: Bru
       return fitBox({ ...own, start: own.start + Math.min(...reads), end: own.end + Math.max(...reads) }, brush, ctx);
     },
   );
+}
+
+/** `box` widened along time by what the step's envelope followers read around each pixel. */
+function withEnvelopeBox(box: ReadBox, view: State, ctx: ReachContext): ReadBox {
+  const envelope = envelopeReach(view, ctx);
+  return { ...box, start: box.start - envelope.before, end: box.end + envelope.after };
 }
 
 /** What one effect reads to paint `box`, within its step's `brush`. */

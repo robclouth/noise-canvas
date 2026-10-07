@@ -448,54 +448,64 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     more than a window holds is halved across bands or blocks, whichever
     reads less; one inside a block halves in time at two coarsest bins. A
     tile that cannot read less is refused.
-    A transform that is the brush's first effect, run once, and warps or
-    shifts, samples the first step's input through a view of its own, so
-    reversing a whole file reads its far end, and a shift reads the one box it
-    lands on, without one view spanning both.
-    When that input holds more than a window, it is read in parts
-    (`InputPart`): the input box is halved across time or bands until each
-    part, with the bins a read touches around its point, fits a window, and
-    the transform's pass is drawn once per part, each channel pair on its own.
-    A part keeps a channel whose read point lies in its core and discards the
-    rest (`gateSourcePart`), so every pixel takes one part's read, and the
-    parts at the box's edges take every read past it. While a pass is drawn in
-    parts, Bleed zero-pads a read past the file, not past the part. Snappy
-    also reads under the pixel it writes, and a wrapped read folds across the
-    whole axis, so neither is read in parts.
-    A repeat that is the brush's first effect, run once, reads its copies
-    along time where each lands, so `readBoxes` hands back each copy's region
-    (`taps`) apart from what its pitch copies and the rest of the brush read.
-    When no one view holds them all, the copies are taken in order, as many
-    to a group as one view fits, and the time pass is drawn once per group,
-    adding the group's complex sum to the totals the groups before it left in
-    one of two targets in turn; a last draw turns the totals into the pass's
-    output, with the weight behind them counted from the copies' decay. The
-    totals ride on the dest texture while a group adds to them and on the
-    source texture while they are finished, because the pass already samples
-    all the textures a fragment shader may.
-    A refusal is never silent, and it says what to change. `reachFixes` moves
-    each control of the brush, one at a time, toward its default or an end,
-    and halves its travel against the real refusal test (`brushPaintsAt`) to
-    find the nearest value that paints at that spot; the notice names the
-    nearest few, and an edge mode that keeps reads inside the brush. A stroke
-    is checked where it starts; a later dab that cannot paint is dropped and
-    the stroke says so once (`reportDroppedDab`). Fill Grid and the region
-    edits count the pieces they could not paint and give the first one's
-    reason.
-    Each tile paints on a renderer of its own (`StrokeRenderer.beside`) loaded
-    with the file as the stroke found it (`readStart`) and the stroke's paint
-    and masks so far (`readStrokePaint`), after the other files' windows hold
-    what it reads there (`holdOthers`). The paint goes back on the canvas a
-    block at a time as the window holds each (`layPaint`), each block held on
-    its own, because laying reads nothing past it. Every tile reads the
-    file as it was before the dab, so tiles never read one another's paint and
-    an Accumulate dab cuts like any other. The dab starts once every earlier
-    dab has painted, and holds every later one back until it has laid all its
-    paint (`HoldOptions.holdsBack`).
-    The same rule holds on the canvas: every pass of a step but the last
-    writes the packed rows of the brush's bands and of the bands the passes
-    after it read (`calculateScissorRows` with `pitchReachBands`). With fewer
-    rows the next pass reads stale texels, which differ with the layout.
+    The brush's first effect, run once, may set its reads of the first step's
+    input apart: `EFFECT_REACH[effect].apart` returns them as a `FarRead`, and
+    `readBoxes` hands them back beside `own`, what the brush reads besides
+    through the view it paints on. No code outside the reach table names an
+    effect. A `FarRead` is one of two kinds:
+    - **point**: each channel of a pixel takes its value from one read point
+      of the input (a transform that warps or shifts). `far` holds every such
+      point and `near` what else the effect reads of the input, which every
+      part must hold. The input is read through a view of its own, so
+      reversing a whole file reads its far end, and a shift reads the one box
+      it lands on, without one view spanning both. When that view holds more
+      than a window, the input is read in parts (`InputPart`): the far box is
+      halved across time or bands until each part, with the bins a read
+      touches around its point and with `near`, fits a window, and the pass is
+      drawn once per part, each channel pair on its own. A part keeps a
+      channel whose read point lies in its core and discards the rest
+      (`gateSourcePart`), so every pixel takes one part's read, and the parts
+      at the box's edges take every read past it. While a pass is drawn in
+      parts, Bleed zero-pads a read past the file, not past the part.
+    - **sum**: the effect sums reads of the input tap by tap (a repeat's
+      copies along time). `taps` holds each tap's region. When no one view
+      holds them all, the taps are taken in order, as many to a group as one
+      view fits, and the pass is drawn once per group, adding the group's sum
+      to the totals the groups before it left in one of two targets in turn;
+      a last draw turns the totals into the pass's output. The totals ride on
+      the dest texture while a group adds to them and on the source texture
+      while they are finished, because the repeat pass already samples all
+      the textures a fragment shader may.
+      A wrapped read folds across the whole axis, so a brush that wraps is never
+      read in parts. While the input is apart, every read of it at a pixel's own
+      place reads the input laid over the view the dab paints on
+      (`sourceUnderTex`): the audio level the brush weight follows, the
+      envelope followers, and Locked's phase under the pixel. That view holds
+      the pixels the tile writes and what the envelope reads around them, so
+      those reads never depend on where the far reads land.
+      A refusal is never silent, and it says what to change. `reachFixes` moves
+      each control of the brush, one at a time, toward its default or an end,
+      and halves its travel against the real refusal test (`brushPaintsAt`) to
+      find the nearest value that paints at that spot; the notice names the
+      nearest few, and an edge mode that keeps reads inside the brush. A stroke
+      is checked where it starts; a later dab that cannot paint is dropped and
+      the stroke says so once (`reportDroppedDab`). Fill Grid and the region
+      edits count the pieces they could not paint and give the first one's
+      reason.
+      Each tile paints on a renderer of its own (`StrokeRenderer.beside`) loaded
+      with the file as the stroke found it (`readStart`) and the stroke's paint
+      and masks so far (`readStrokePaint`), after the other files' windows hold
+      what it reads there (`holdOthers`). The paint goes back on the canvas a
+      block at a time as the window holds each (`layPaint`), each block held on
+      its own, because laying reads nothing past it. Every tile reads the
+      file as it was before the dab, so tiles never read one another's paint and
+      an Accumulate dab cuts like any other. The dab starts once every earlier
+      dab has painted, and holds every later one back until it has laid all its
+      paint (`HoldOptions.holdsBack`).
+      The same rule holds on the canvas: every pass of a step but the last
+      writes the packed rows of the brush's bands and of the bands the passes
+      after it read (`calculateScissorRows` with `pitchReachBands`). With fewer
+      rows the next pass reads stale texels, which differ with the layout.
 
 17. **Every dab of a stroke goes through `paintDab`.** The pointer's trail,
     the dab under the cursor, a region edit and a grid fill all ask it, and

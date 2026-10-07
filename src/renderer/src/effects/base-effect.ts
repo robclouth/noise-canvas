@@ -105,6 +105,10 @@ export type CommonUniforms = {
   // reads, and whether it adds to the totals (1) or finishes them (2).
   sourcePartTaps: { value: Vector2 };
   sourcePartAccum: { value: number };
+  // Set while the step's input is read through a view of its own: the input
+  // laid out as the dest canvas, which holds every pixel the pass writes.
+  sourceUnderOn: { value: boolean };
+  sourceUnderTex: { value: Texture | null };
 
   brushPan: {
     value: ParameterUniform;
@@ -214,6 +218,8 @@ export function createDefaultUniforms(): CommonUniforms {
     sourcePartChannel: { value: 0 },
     sourcePartTaps: { value: new Vector2() },
     sourcePartAccum: { value: 0 },
+    sourceUnderOn: { value: false },
+    sourceUnderTex: { value: null },
     brushPan: { value: defaultParameterUniform(0.0, 0.0, 1.0) },
     bpm: { value: 120.0 },
     blendMode: { value: 0 },
