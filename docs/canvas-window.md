@@ -328,8 +328,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     neighbourhoods while Flow can move it and one when it cannot. A reach that
     is too small is a wrong picture, not only a missed read: the stroke's own
     passes write only the rows its pitch reach says later passes read.
+    Every effect has an entry in `EFFECT_REACH`, a table keyed by every
+    effect type, so a new effect does not compile until it says what it
+    reads; one that reads only the pixel it writes is `OWN_PIXEL`.
     `read-probe.test.ts` replaces the file outside each brush's planned region
-    and checks the dab paints the same.
+    and checks the dab paints the same. Its cases are keyed by every effect
+    type too, so each effect is probed.
     Effects run one after another, and a step runs its effects
     `brushIterations` times over, each reading what the one before wrote, so
     their reaches add up along the chain. A sort reads a few bins and two

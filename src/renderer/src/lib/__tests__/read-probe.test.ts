@@ -26,97 +26,117 @@ const sweeping = (...keys: string[]): Record<string, unknown> => ({
   ...Object.fromEntries(keys.map((key) => [`${key}Mod1Amount`, 100])),
 });
 
-const CASES: { name: string; effect: EffectType; step: Record<string, unknown>; bpm?: number; y?: number }[] = [
-  {
-    name: "Blur at its widest",
-    effect: "blur",
-    step: { blurAmountTime: 100, blurNoiseTime: 100, blurAmountPitch: 100, blurNoisePitch: 100, blurEdgeMode: 1 },
-    bpm: 60,
-  },
-  {
-    name: "Repeat forward, accelerating, both axes",
-    effect: "clone",
-    step: {
-      cloneCountX: 5,
-      cloneSpaceBeats: 1,
-      cloneShapeX: "geometric",
-      cloneCountY: 4,
-      cloneSpaceSemis: 2,
-      cloneShapeY: "geometric",
-      cloneEdgeMode: 1,
+type Case = { name: string; step: Record<string, unknown>; bpm?: number; y?: number };
+
+/** At least one case for every effect, each set to read as far as it can. */
+const CASES: Record<EffectType, Case[]> = {
+  blur: [
+    {
+      name: "Blur at its widest",
+      step: { blurAmountTime: 100, blurNoiseTime: 100, blurAmountPitch: 100, blurNoisePitch: 100, blurEdgeMode: 1 },
+      bpm: 60,
     },
-  },
-  {
-    name: "Repeat up in pitch, accelerating",
-    effect: "clone",
-    step: {
-      brushSizePitch: 6,
-      cloneCountY: 3,
-      cloneSpaceSemis: 3,
-      cloneShapeY: "geometric",
-      cloneDirectionY: 2,
-      cloneDecay: 0,
-      cloneEdgeMode: 1,
+  ],
+  clone: [
+    {
+      name: "Repeat forward, accelerating, both axes",
+      step: {
+        cloneCountX: 5,
+        cloneSpaceBeats: 1,
+        cloneShapeX: "geometric",
+        cloneCountY: 4,
+        cloneSpaceSemis: 2,
+        cloneShapeY: "geometric",
+        cloneEdgeMode: 1,
+      },
     },
-    y: 0.2,
-  },
-  {
-    name: "Repeat backward with a negative gap",
-    effect: "clone",
-    step: { cloneCountX: 6, cloneSpaceBeats: -2, cloneDirectionX: 2, cloneEdgeMode: 1 },
-  },
-  {
-    name: "Repeat from the middle, harmonic in pitch",
-    effect: "clone",
-    step: {
-      cloneCountX: 7,
-      cloneSpaceBeats: 1.5,
-      cloneDirectionX: 1,
-      cloneCountY: 6,
-      cloneSpaceSemis: 5,
-      cloneShapeY: "harmonic",
-      cloneDirectionY: 1,
-      cloneEdgeMode: 1,
+    {
+      name: "Repeat up in pitch, accelerating",
+      step: {
+        brushSizePitch: 6,
+        cloneCountY: 3,
+        cloneSpaceSemis: 3,
+        cloneShapeY: "geometric",
+        cloneDirectionY: 2,
+        cloneDecay: 0,
+        cloneEdgeMode: 1,
+      },
+      y: 0.2,
     },
-  },
-  {
-    name: "Repeat with a modulated gap",
-    effect: "clone",
-    step: { cloneCountX: 4, cloneSpaceBeats: 1, cloneEdgeMode: 1, ...sweeping("cloneSpaceBeats") },
-  },
-  { name: "Evolve at its defaults", effect: "evolve", step: {} },
-  { name: "Evolve at its widest", effect: "evolve", step: { evolveScaleX: 100, evolveScaleY: 100, evolveFlow: 100 } },
-  { name: "Evolve without flow", effect: "evolve", step: { evolveFlow: 0, evolveScaleX: 100, evolveScaleY: 100 } },
-  {
-    name: "Transform scale swept by a pattern",
-    effect: "transform",
-    step: { transformScaleTime: 0.5, transformEdgeMode: 1, ...sweeping("transformScaleTime") },
-  },
-  {
-    name: "Transform speed swept by a pattern",
-    effect: "transform",
-    step: { transformSpeed: 1.5, transformEdgeMode: 1, ...sweeping("transformSpeed") },
-  },
-  {
-    name: "Transform rotation swept by a pattern",
-    effect: "transform",
-    step: { transformRotation: 20, transformEdgeMode: 1, ...sweeping("transformRotation") },
-  },
-  {
-    name: "Transform shifted far",
-    effect: "transform",
-    step: { transformShiftBeats: -6, transformShiftSemis: 30, transformEdgeMode: 1 },
-  },
-  { name: "Convolve, long and backward", effect: "convolve", step: { convolveIrSize: 256, convolveIrRate: -2 } },
-  {
-    name: "Convolve with IR Start swept",
-    effect: "convolve",
-    step: { convolveIrSize: 128, convolveIrTimeOffset: 40, ...sweeping("convolveIrTimeOffset") },
-  },
-  { name: "Attract", effect: "attract", step: { attractMap: 0, attractAmountX: 100, attractAmountY: 100 } },
-  { name: "Sort both ways", effect: "sort", step: { sortDirection: 2 } },
-  { name: "Transmute to time", effect: "transmute", step: { transmuteTo: 2, transmuteAmount: 4 } },
-];
+    {
+      name: "Repeat backward with a negative gap",
+      step: { cloneCountX: 6, cloneSpaceBeats: -2, cloneDirectionX: 2, cloneEdgeMode: 1 },
+    },
+    {
+      name: "Repeat from the middle, harmonic in pitch",
+      step: {
+        cloneCountX: 7,
+        cloneSpaceBeats: 1.5,
+        cloneDirectionX: 1,
+        cloneCountY: 6,
+        cloneSpaceSemis: 5,
+        cloneShapeY: "harmonic",
+        cloneDirectionY: 1,
+        cloneEdgeMode: 1,
+      },
+    },
+    {
+      name: "Repeat with a modulated gap",
+      step: { cloneCountX: 4, cloneSpaceBeats: 1, cloneEdgeMode: 1, ...sweeping("cloneSpaceBeats") },
+    },
+  ],
+  evolve: [
+    { name: "Evolve at its defaults", step: {} },
+    { name: "Evolve at its widest", step: { evolveScaleX: 100, evolveScaleY: 100, evolveFlow: 100 } },
+    { name: "Evolve without flow", step: { evolveFlow: 0, evolveScaleX: 100, evolveScaleY: 100 } },
+  ],
+  transform: [
+    {
+      name: "Transform scale swept by a pattern",
+      step: { transformScaleTime: 0.5, transformEdgeMode: 1, ...sweeping("transformScaleTime") },
+    },
+    {
+      name: "Transform speed swept by a pattern",
+      step: { transformSpeed: 1.5, transformEdgeMode: 1, ...sweeping("transformSpeed") },
+    },
+    {
+      name: "Transform rotation swept by a pattern",
+      step: { transformRotation: 20, transformEdgeMode: 1, ...sweeping("transformRotation") },
+    },
+    {
+      name: "Transform shifted far",
+      step: { transformShiftBeats: -6, transformShiftSemis: 30, transformEdgeMode: 1 },
+    },
+  ],
+  convolve: [
+    { name: "Convolve, long and backward", step: { convolveIrSize: 256, convolveIrRate: -2 } },
+    {
+      name: "Convolve with IR Start swept",
+      step: { convolveIrSize: 128, convolveIrTimeOffset: 40, ...sweeping("convolveIrTimeOffset") },
+    },
+  ],
+  attract: [{ name: "Attract", step: { attractMap: 0, attractAmountX: 100, attractAmountY: 100 } }],
+  sort: [{ name: "Sort both ways", step: { sortDirection: 2 } }],
+  transmute: [{ name: "Transmute to time", step: { transmuteTo: 2, transmuteAmount: 4 } }],
+  dynamics: [
+    { name: "Dynamics at its defaults", step: {} },
+    {
+      name: "Dynamics following the envelope",
+      step: {
+        dynamicsGainDb: 0,
+        dynamicsGainDbMod1Amount: 100,
+        modulator1Mode: 1,
+        modulator1EnvelopeSmoothingBeats: 4,
+        modulator1StereoSpread: 100,
+      },
+    },
+  ],
+  synthesize: [{ name: "Synthesize at its defaults", step: {} }],
+  passthrough: [{ name: "Passthrough", step: {} }],
+  binaural: [{ name: "Binaural at its defaults", step: {} }],
+  waveshape: [{ name: "Waveshape at its defaults", step: {} }],
+  align: [{ name: "Align at its defaults", step: {} }],
+};
 
 /** A copy of the file with every bin outside `inside` given other values. */
 function outsideReplaced(
@@ -185,7 +205,11 @@ async function paintedOver(
 }
 
 describe("what a brush reads", () => {
-  it.each(CASES.flatMap((c) => [0.3, 0.7].map((x) => ({ ...c, x }))))(
+  it.each(
+    (Object.entries(CASES) as [EffectType, Case[]][]).flatMap(([effect, cases]) =>
+      cases.flatMap((c) => [0.3, 0.7].map((x) => ({ ...c, effect, x }))),
+    ),
+  )(
     "$name at $x stays inside its planned region",
     async ({ effect, step, bpm, x, y }) => {
       renderer ??= parityRenderer();

@@ -73,6 +73,9 @@ const NO_SCALE_BELOW = 1e-5;
 // the bin it read.
 const TRANSMUTE_TO_TIME = 2;
 
+// The Transmute route that moves a band across pitch.
+const TRANSMUTE_TO_PITCH = 3;
+
 // Attract maps whose pull follows a field the shader reads off a spectrogram:
 // Source, and the three modulators. Scale and Grid pull toward a lattice the
 // shader works out, and read nothing.
@@ -324,7 +327,7 @@ function convolveReach(effect: State, ctx: ReachContext): TimeReach {
 }
 
 /** The brush's own span on each axis, in file seconds and in pitch UV. */
-function brushSpan(step: State, ctx: ReachContext): { seconds: number; pitchUv: number } {
+function brushSpan(step: State, ctx: ReachContext): BrushSpan {
   const footprint = resolveBrushFootprint({
     brushSizeTime: Number(step.brushSizeTime),
     brushSizePitch: Number(step.brushSizePitch),
@@ -338,6 +341,122 @@ function brushSpan(step: State, ctx: ReachContext): { seconds: number; pitchUv: 
   return { seconds: footprint.sizeUv.x * ctx.fileSeconds, pitchUv: footprint.sizeUv.y };
 }
 
+/** The brush's own span on one step: seconds of the file along time, pitch UV across it. */
+type BrushSpan = { seconds: number; pitchUv: number };
+
+/**
+ * What one effect reads around the pixels it writes. Every pass of the effect
+ * counts, and what its modulators' envelope followers read is added on top.
+ */
+type EffectReach = {
+  /** Seconds it reads past the brush's own span, either side. */
+  pastBrush: (view: State, ctx: ReachContext, brush: BrushSpan) => TimeReach;
+  /** Seconds it reads either side of each pixel, or null when it may read anywhere in the brush. */
+  aroundPixel: (view: State, ctx: ReachContext) => TimeReach | null;
+  /** Semitones it reads either side of each band, or null when it may read any band. */
+  acrossPitch: (view: State, bandsPerOctave: number) => number | null;
+};
+
+/** An effect that reads only the pixel it writes. */
+const OWN_PIXEL: EffectReach = { pastBrush: () => NO_REACH, aroundPixel: () => NO_REACH, acrossPitch: () => 0 };
+
+/**
+ * Every effect's reach. A long file is painted in tiles that hold only what
+ * this says a dab reads, so a reach set too small paints wrong values there
+ * and nowhere else.
+ */
+const EFFECT_REACH: Record<EffectType, EffectReach> = {
+  dynamics: OWN_PIXEL,
+  synthesize: OWN_PIXEL,
+  passthrough: OWN_PIXEL,
+  binaural: OWN_PIXEL,
+  waveshape: OWN_PIXEL,
+  align: OWN_PIXEL,
+  blur: {
+    pastBrush: blurReach,
+    aroundPixel: (view, ctx) => {
+      const smear = blurSmear(view, ctx);
+      const wraps = Number(view.blurEdgeMode) === WRAP_EDGE && (smear.before > 0 || smear.after > 0);
+      return wraps ? null : smear;
+    },
+    acrossPitch: (view) =>
+      (widest(stateRange(view, "blurAmountPitch")) / 100) * BLUR_FULL_SEMIS +
+      (widest(stateRange(view, "blurNoisePitch")) / 100) * BLUR_NOISE_FULL_SEMIS,
+  },
+  clone: {
+    pastBrush: cloneReach,
+    aroundPixel: (view, ctx) => {
+      const taps = cloneTaps(view, ctx);
+      const wraps = Number(view.cloneEdgeMode) === WRAP_EDGE && (taps.before > 0 || taps.after > 0);
+      return wraps ? null : taps;
+    },
+    acrossPitch: cloneTapSemis,
+  },
+  transform: {
+    pastBrush: (view, ctx, brush) => transformReach(view, ctx, brush.seconds, brush.pitchUv),
+    // Only a shift reads a fixed distance away; a warp that scales, turns or
+    // mirrors may read anywhere in the brush.
+    aroundPixel: (view, ctx) => {
+      const warps =
+        !only(stateRange(view, "transformScaleTime"), 1) ||
+        !only(stateRange(view, "transformSpeed"), 1) ||
+        !only(stateRange(view, "transformRotation"), 0);
+      const shift = widest(stateRange(view, "transformShiftBeats")) * (60 / ctx.bpm);
+      if (warps || (shift > 0 && Number(view.transformEdgeMode) === WRAP_EDGE)) return null;
+      return { before: shift, after: shift };
+    },
+    // A pitch scale reads about the pivot, within the brush's height scaled by
+    // the pitch scale. A turn brings time into pitch, by as much as the brush
+    // is long, so it may read any band.
+    acrossPitch: (view) => {
+      const shift = widest(stateRange(view, "transformShiftSemis"));
+      const scale = narrowest(stateRange(view, "transformScalePitch"));
+      if (!only(stateRange(view, "transformRotation"), 0)) return null;
+      if (only(stateRange(view, "transformScalePitch"), 1)) return shift;
+      if (scale <= NO_SCALE_BELOW) return null;
+      return shift + widest(stateRange(view, "brushSizePitch")) * Math.max(1, 1 / scale);
+    },
+  },
+  sort: {
+    pastBrush: () => NO_REACH,
+    aroundPixel: (view, ctx) => {
+      if (!SORTS_ALONG_TIME.has(Number(view.sortDirection))) return NO_REACH;
+      const span = SORT_TIME_BINS * (ctx.binSeconds ?? 0);
+      return { before: span, after: span };
+    },
+    acrossPitch: (view, bandsPerOctave) =>
+      SORTS_ALONG_PITCH.has(Number(view.sortDirection)) ? (SORT_PITCH_BANDS * 12) / bandsPerOctave : 0,
+  },
+  attract: {
+    pastBrush: attractReach,
+    aroundPixel: (view, ctx) => {
+      if (widest(stateRange(view, "attractAmountX")) === 0) return NO_REACH;
+      const span = ATTRACT_PIECE_KERNELS * widest(stateRange(view, "attractSmoothX")) * (60 / ctx.bpm);
+      return { before: span, after: span };
+    },
+    acrossPitch: (view) =>
+      widest(stateRange(view, "attractAmountY")) === 0
+        ? 0
+        : ATTRACT_PIECE_KERNELS * widest(stateRange(view, "attractSmoothY")),
+  },
+  transmute: {
+    pastBrush: transmuteReach,
+    aroundPixel: transmuteReach,
+    acrossPitch: (view) => (Number(view.transmuteTo) === TRANSMUTE_TO_PITCH ? null : 0),
+  },
+  evolve: {
+    pastBrush: evolveReach,
+    aroundPixel: (view, ctx) => {
+      const smear = evolveSmear(view, ctx);
+      const wraps = Number(view.evolveEdgeMode) === WRAP_EDGE && smear.before > 0;
+      return wraps ? null : smear;
+    },
+    acrossPitch: (view) =>
+      (evolveNeighbourhoods(view) * widest(stateRange(view, "evolveScaleY")) * EVOLVE_SCALE_FULL_SEMIS) / 100,
+  },
+  convolve: { pastBrush: convolveReach, aroundPixel: convolveReach, acrossPitch: () => 0 },
+};
+
 /**
  * The reach of every enabled effect in the brush that reads past the dab's own
  * span. Effects that read only the texel they write are absent.
@@ -346,15 +465,7 @@ export function brushReaches(state: State, ctx: ReachContext): StepReach[] {
   const out: StepReach[] = [];
   for (const { effect, view, step, repeats } of chainedEffects(state)) {
     const span = brushSpan(createStepStateView(state, step), ctx);
-    let reach = NO_REACH;
-    if (effect === "blur") reach = blurReach(view, ctx);
-    else if (effect === "clone") reach = cloneReach(view, ctx);
-    else if (effect === "transform") reach = transformReach(view, ctx, span.seconds, span.pitchUv);
-    else if (effect === "transmute") reach = transmuteReach(view, ctx);
-    else if (effect === "attract") reach = attractReach(view, ctx);
-    else if (effect === "evolve") reach = evolveReach(view, ctx);
-    else if (effect === "convolve") reach = convolveReach(view, ctx);
-    reach = withEnvelope(reach, view, ctx);
+    const reach = withEnvelope(EFFECT_REACH[effect].pastBrush(view, ctx, span), view, ctx);
     if (reach.before <= 0 && reach.after <= 0) continue;
     out.push({ effect, step, brushSeconds: span.seconds, reach, repeats });
   }
@@ -367,57 +478,6 @@ function only(range: ValueRange, value: number): boolean {
 }
 
 /**
- * How far from each pixel it paints one effect reads, in seconds of the file,
- * or null when it may read anywhere in the brush: a warp that scales, turns or
- * mirrors, a sort along time, and any read an edge mode wraps round to the
- * brush's far end.
- */
-function pieceReachOf(effect: EffectType, state: State, ctx: ReachContext): TimeReach | null {
-  switch (effect) {
-    case "blur": {
-      const smear = blurSmear(state, ctx);
-      const wraps = Number(state.blurEdgeMode) === WRAP_EDGE && (smear.before > 0 || smear.after > 0);
-      return wraps ? null : smear;
-    }
-    case "clone": {
-      const taps = cloneTaps(state, ctx);
-      const wraps = Number(state.cloneEdgeMode) === WRAP_EDGE && (taps.before > 0 || taps.after > 0);
-      return wraps ? null : taps;
-    }
-    case "transform": {
-      const warps =
-        !only(stateRange(state, "transformScaleTime"), 1) ||
-        !only(stateRange(state, "transformSpeed"), 1) ||
-        !only(stateRange(state, "transformRotation"), 0);
-      const shift = widest(stateRange(state, "transformShiftBeats")) * (60 / ctx.bpm);
-      if (warps || (shift > 0 && Number(state.transformEdgeMode) === WRAP_EDGE)) return null;
-      return { before: shift, after: shift };
-    }
-    case "sort": {
-      if (!SORTS_ALONG_TIME.has(Number(state.sortDirection))) return NO_REACH;
-      const span = SORT_TIME_BINS * (ctx.binSeconds ?? 0);
-      return { before: span, after: span };
-    }
-    case "attract": {
-      if (widest(stateRange(state, "attractAmountX")) === 0) return NO_REACH;
-      const span = ATTRACT_PIECE_KERNELS * widest(stateRange(state, "attractSmoothX")) * (60 / ctx.bpm);
-      return { before: span, after: span };
-    }
-    case "transmute":
-      return transmuteReach(state, ctx);
-    case "evolve": {
-      const smear = evolveSmear(state, ctx);
-      const wraps = Number(state.evolveEdgeMode) === WRAP_EDGE && smear.before > 0;
-      return wraps ? null : smear;
-    }
-    case "convolve":
-      return convolveReach(state, ctx);
-    default:
-      return NO_REACH;
-  }
-}
-
-/**
  * How far from each pixel it paints the brush reads, in seconds of the file:
  * what a dab painted a piece at a time must hold around each piece. Null
  * when some effect may read anywhere in the brush, so only the whole dab at
@@ -427,7 +487,7 @@ export function pieceReach(state: State, ctx: ReachContext): TimeReach | null {
   let before = 0;
   let after = 0;
   for (const { effect, view, repeats } of chainedEffects(state)) {
-    const own = pieceReachOf(effect, view, ctx);
+    const own = EFFECT_REACH[effect].aroundPixel(view, ctx);
     if (!own) return null;
     const reach = withEnvelope(own, view, ctx);
     before += reach.before * repeats;
@@ -461,50 +521,6 @@ export function firstEnabledStep(state: State): number {
   return (state.brushes[state.activeBrushIndex]?.steps ?? []).findIndex((step) => step.enabled !== false);
 }
 
-// The Transmute route that moves a band across pitch.
-const TRANSMUTE_TO_PITCH = 3;
-
-/**
- * How far across pitch, in semitones, one effect reads from a band it
- * writes, or null when it may read any band.
- */
-function pitchReachOf(effect: EffectType, state: State, bandsPerOctave: number): number | null {
-  switch (effect) {
-    case "transform": {
-      // A pitch scale reads about the pivot, within the brush's height scaled
-      // by the pitch scale. A turn brings time into pitch, by as much as the
-      // brush is long, so it may read any band.
-      const shift = widest(stateRange(state, "transformShiftSemis"));
-      const scale = narrowest(stateRange(state, "transformScalePitch"));
-      if (!only(stateRange(state, "transformRotation"), 0)) return null;
-      if (only(stateRange(state, "transformScalePitch"), 1)) return shift;
-      if (scale <= NO_SCALE_BELOW) return null;
-      return shift + widest(stateRange(state, "brushSizePitch")) * Math.max(1, 1 / scale);
-    }
-    case "blur":
-      return (
-        (widest(stateRange(state, "blurAmountPitch")) / 100) * BLUR_FULL_SEMIS +
-        (widest(stateRange(state, "blurNoisePitch")) / 100) * BLUR_NOISE_FULL_SEMIS
-      );
-    case "clone":
-      return cloneTapSemis(state);
-    case "evolve":
-      return (evolveNeighbourhoods(state) * widest(stateRange(state, "evolveScaleY")) * EVOLVE_SCALE_FULL_SEMIS) / 100;
-    case "attract":
-      return widest(stateRange(state, "attractAmountY")) === 0
-        ? 0
-        : ATTRACT_PIECE_KERNELS * widest(stateRange(state, "attractSmoothY"));
-    case "transmute":
-      return Number(state.transmuteTo) === TRANSMUTE_TO_PITCH ? null : 0;
-    case "convolve":
-      return 0;
-    case "sort":
-      return SORTS_ALONG_PITCH.has(Number(state.sortDirection)) ? (SORT_PITCH_BANDS * 12) / bandsPerOctave : 0;
-    default:
-      return 0;
-  }
-}
-
 /**
  * How far across pitch, in semitones, the brush reads from the bands it
  * writes, or null when some effect may read any band.
@@ -512,7 +528,7 @@ function pitchReachOf(effect: EffectType, state: State, bandsPerOctave: number):
 export function pitchReach(state: State, bandsPerOctave: number): number | null {
   let reach = 0;
   for (const { effect, view, repeats } of chainedEffects(state)) {
-    const semis = pitchReachOf(effect, view, bandsPerOctave);
+    const semis = EFFECT_REACH[effect].acrossPitch(view, bandsPerOctave);
     if (semis === null) return null;
     reach += semis * repeats;
   }
@@ -634,9 +650,9 @@ function effectReadBox(effect: EffectType, view: State, ctx: ReachContext, box: 
   });
   if (effect === "transform" && moves(view))
     return fitBox(read(unionBox(box, warpBox(view, ctx, box, brush))), brush, ctx);
-  const own = pieceReachOf(effect, view, ctx);
+  const own = EFFECT_REACH[effect].aroundPixel(view, ctx);
   const time = own && withEnvelope(own, view, ctx);
-  const semis = pitchReachOf(effect, view, ctx.bandsPerOctave);
+  const semis = EFFECT_REACH[effect].acrossPitch(view, ctx.bandsPerOctave);
   // A read across pitch lands between bands, so it takes one band more.
   const pitch = semis === null ? 1 : semis === 0 ? 0 : semitonesToUv(semis, ctx) + 1 / ctx.numBands;
   return fitBox(
