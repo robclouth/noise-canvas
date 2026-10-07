@@ -35,16 +35,21 @@ import type { SelfState } from "./self-window";
 import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock, gridQuantumFrames, type BlockGrid } from "./block-grid";
 import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
 import {
+  brushUnits,
   firstEnabledStep,
   pieceReach,
-  readBoxes,
+  stagePoints,
+  stageReads,
   strokeReach,
   unionBox,
   type BrushBox,
+  type BrushUnit,
   type ReachContext,
   type ReadBox,
-  type TimeSpan,
+  type StagePoint,
+  type TapResponseRead,
 } from "./effect-reach";
+import { attractFieldKey, impulseKey } from "./impulse-key";
 import { strokeRefusal as refusalFor } from "./whole-file-gate";
 import { reachFixes, reachFixMessage } from "./reach-fix";
 import { attractFieldNeeds, impulseNeeds, mergeNeedsByFile, type ImpulseNeed } from "./impulse-need";
@@ -52,7 +57,9 @@ import {
   GpuMemoryError,
   type ImpulseFileInfo,
   type InputPart,
+  type PassAt,
   type SourceFileInfo,
+  type StrokeParams,
   type StrokeRenderer,
 } from "./stroke-renderer";
 import { DEFAULT_ONSET_SENSITIVITY } from "./constants";
@@ -160,6 +167,7 @@ function sourceReadsFor(
     const margin = 1 << Math.max(...sourceSpectrogram.synthesisMetadata.bandStepLog2s);
     reads.push({
       fileId: source.id,
+      step: index,
       wantOriginal: step.sourceDataMode === "original",
       ...(self ? { self: { step: index, state: selfStateOf(step, isFirst) } } : {}),
       ...(isFirst ? { first: true } : {}),
@@ -352,18 +360,17 @@ export type DispatchOptions = {
     renderer: StrokeRenderer;
     view: CanvasView;
     input?: SourceFileInfo;
-    /** The input a part at a time, for a first step whose read no one view holds; `input` is the first part's. */
+    /**
+     * The input of the first pass the dab runs a part at a time, for a pass
+     * whose read no one view holds; for a first step's, `input` is the first
+     * part's.
+     */
     inputParts?: readonly InputPart[];
     /** The key of a response each part binds its own share of, which no window holds. */
     partResponse?: string;
-    /**
-     * The effect of the first step that reads `inputParts`, by its place among
-     * the step's enabled effects, and its pass that does, by material index.
-     */
-    inputPartsEffect?: number;
-    inputPartsPass?: number;
-    /** Paints only the first step's passes before that pass. */
-    stopBeforePartsPass?: boolean;
+    /** The pass the dab starts at, with what it reads, and the pass it stops before. */
+    from?: StrokeParams["from"];
+    to?: PassAt;
     reads: ReadPart;
     sketch?: boolean;
   };
@@ -542,9 +549,8 @@ export function dispatchStroke(
           selection: state.filesSelection[fileId] ?? null,
           clip: beside && clip ? clipToView(beside.view, clip) : (canvas?.clipToCanvas(clip ?? null) ?? null),
           inputParts: beside?.inputParts,
-          inputPartsEffect: beside?.inputPartsEffect,
-          inputPartsPass: beside?.inputPartsPass,
-          stopBeforePartsPass: beside?.stopBeforePartsPass,
+          from: beside?.from,
+          to: beside?.to,
         },
         state,
         sourceFileInfo,
@@ -848,6 +854,9 @@ function bandsOfPitch(minY: number, maxY: number, numBands: number): BandSpan {
   };
 }
 
+// The core of a part that takes every read point.
+const WHOLE_CORE = { start: -Infinity, end: Infinity, first: -Infinity, last: Infinity };
+
 // The most tiles one dab is cut into beside the canvas before it is refused.
 const MAX_BESIDE_TILES = 4096;
 
@@ -880,36 +889,32 @@ type BesideTile = {
   readBands: BandSpan;
   others: ReadPart;
   /**
-   * The frames and bands the first step reads apart, when it does: where its
-   * read points land, and what it reads besides that every part must hold.
+   * The frames and bands the stage's first pass reads apart, when it does:
+   * where its read points land, and what it reads besides that every part
+   * must hold.
    */
   inputBox: {
     frames: FrameSpan;
     bands: BandSpan;
     near: { frames: FrameSpan; bands: BandSpan } | null;
-    /** What the passes before the far one read to write a region, when any run. */
-    before: ((box: ReadBox) => ReadBox) | null;
   } | null;
-  /** The view a tile read in parts paints on, when not its whole view. */
-  partsView?: CanvasView;
+  /** The stage of the dab the tile paints. */
+  stage: Stage;
   /**
-   * The first step's effect that reads apart, by its place among the step's
-   * effects, its pass that does, by material index, and whether passes run
-   * before it.
-   */
-  farPass: { effect: number; pass: number | undefined; prefixed: boolean } | null;
-  /**
-   * For a first step that sums taps: the view of what it reads besides those
-   * taps, the frames and bands each tap reads, and the file the taps weigh
-   * themselves by with the frames of it each tap reads, when a window over
-   * that file holds only part of it.
+   * For a stage whose first pass sums taps: the view of what it reads besides
+   * those taps, the frames and bands each tap reads, and the file the taps
+   * weigh themselves by with the frames of it each tap reads, when a window
+   * over that file holds only part of it.
    */
   copies: {
     own: CanvasView;
     taps: { frames: FrameSpan; bands: BandSpan }[];
     response: TapResponse | null;
-    /** What the taps read: the step's input, or the canvas as the dab finds it. */
-    from: "input" | "canvas";
+    /**
+     * What the taps read: the first step's input, the canvas as the dab finds
+     * it, or what the stages before wrote.
+     */
+    from: "input" | "canvas" | "chain";
     totals: 1 | 2;
   } | null;
   /** The input read a part at a time, when one view of it holds more than a window. */
@@ -929,8 +934,26 @@ type InputPartPlan = {
   response?: CanvasView;
 };
 
+/** A run of an effect, the same for every pass of it. */
+function passKey(pass: { step: number; effect: number; iteration: number }): string {
+  return `${pass.step}:${pass.effect}:${pass.iteration}`;
+}
+
+/**
+ * A stage of a dab painted beside the canvas: its passes from `from` up to
+ * `to`, as places among the tiling's stage points.
+ */
+type Stage = { from: number; to: number };
+
 /** The file a first step's taps weigh themselves by, and the frames of it each tap reads. */
-type TapResponse = { key: string; fileId: string; grid: BlockGrid; reads: FrameSpan[]; bands: BandSpan };
+type TapResponse = {
+  key: string;
+  fileId: string;
+  grid: BlockGrid;
+  reads: FrameSpan[];
+  bands: BandSpan;
+  sliceable: boolean;
+};
 
 /**
  * A step's brush as the region it covers, past the file's ends where it runs
@@ -961,9 +984,14 @@ type BesideTiling = {
   start: number;
   end: number;
   union: BrushUnionUv;
-  whole: boolean;
+  wholePitch: boolean;
   written: BandSpan;
-  tileOf: (bands: BandSpan, frames: FrameSpan) => BesideTile;
+  /** The places the dab may be cut into stages, and the units of the brush they lie between. */
+  points: StagePoint[];
+  units: BrushUnit[];
+  /** The stage that runs every pass of the dab. */
+  whole: Stage;
+  tileOf: (bands: BandSpan, frames: FrameSpan, stage: Stage) => BesideTile;
   halves: (tile: BesideTile) => [BesideTile, BesideTile][];
   partsOf: (tile: BesideTile, budget: number, most: number) => InputPartPlan[] | null;
   copyGroupsOf: (tile: BesideTile, budget: number, most: number) => InputPartPlan[] | null;
@@ -990,8 +1018,10 @@ function besideTiling(
   }
   if (end <= start) return null;
   const union = brushUnionAt(context, state, cursorPos, ctx.bpm, ctx.fileSeconds);
-  const whole = union.fullPitch || union.wrapsPitch;
-  const written: BandSpan = whole ? { first: 0, last: numBands - 1 } : bandsOfPitch(union.min.y, union.max.y, numBands);
+  const wholePitch = union.fullPitch || union.wrapsPitch;
+  const written: BandSpan = wholePitch
+    ? { first: 0, last: numBands - 1 }
+    : bandsOfPitch(union.min.y, union.max.y, numBands);
   const brushes = stepBrushesAt(context, state, cursorPos, ctx.bpm, ctx.fileSeconds).map((brush) =>
     brushBox(brush, ctx.fileSeconds),
   );
@@ -1029,8 +1059,8 @@ function besideTiling(
   };
   // A response a window holds whole is bound whole; one it holds only part of
   // is read a group of taps at a time.
-  const tapResponse = (response: { key: string; reads: TimeSpan[]; bands: BandSpan }): TapResponse | null => {
-    const file = responseFileFor(context, response.key === "" ? null : response.key);
+  const tapResponse = (response: TapResponseRead): TapResponse | null => {
+    const file = responseFileFor(context, response.path);
     const spectrogram = file?.spectrogramData;
     if (!file || !spectrogram || !responseIsWindowed(context, file.id)) return null;
     const grid = file.id === context.fileId ? canvas.grid : canvas.fileGrid(file.id);
@@ -1042,14 +1072,35 @@ function besideTiling(
       fileId: file.id,
       grid,
       bands: response.bands,
+      sliceable: response.sliceable,
       reads: response.reads.map((read) => ({
         start: Math.max(0, Math.floor(read.start * rate) - seam),
         end: Math.min(spectrogram.numFrames, Math.ceil(read.end * rate) + seam),
       })),
     };
   };
-  const tileOf = (bands: BandSpan, frames: FrameSpan): BesideTile => {
-    const { own, all, far, effect, prefixed, before } = readBoxes(
+  const units = brushUnits(state);
+  // A stage starts only at a unit the renderer runs a pass of, so none runs nothing.
+  const runs = new Set(renderer.passesOf(state).flatMap((passes) => passes.map(passKey)));
+  const points = stagePoints(
+    state,
+    ctx,
+    {
+      start: start / sampleRate,
+      end: end / sampleRate,
+      low: bandIndexToPitchUv(written.last + 1, numBands),
+      high: bandIndexToPitchUv(written.first, numBands),
+    },
+    brushes,
+  ).filter((point, index) => {
+    const unit = units[point.unit];
+    return index === 0 || !unit || runs.has(passKey({ ...unit, effect: unit.item }));
+  });
+  const wholeStage: Stage = { from: 0, to: points.length - 1 };
+  const firstStep = firstEnabledStep(state);
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+  const tileOf = (bands: BandSpan, frames: FrameSpan, stage: Stage): BesideTile => {
+    const { own, all, far } = stageReads(
       state,
       ctx,
       {
@@ -1059,41 +1110,51 @@ function besideTiling(
         high: bandIndexToPitchUv(bands.first, numBands),
       },
       brushes,
+      points[stage.from],
+      points[stage.to],
     );
+    // A stage after the dab's first pass reads what the stages before it
+    // wrote, unless it starts a step that reads a file of its own.
+    const startsDab = stage.from === 0;
+    const fromUnit = units[points[stage.from].unit];
+    const startsOwnStep =
+      fromUnit !== undefined &&
+      fromUnit.step !== firstStep &&
+      fromUnit.iteration === 0 &&
+      fromUnit.item === 0 &&
+      points[stage.from].pass === undefined;
+    const readsStore = !startsDab && !(startsOwnStep && steps[fromUnit.step]?.sourceFile?.path !== undefined);
+    const apart = startsDab ? inputApart : readsStore;
     const taps = far?.kind === "sum" ? far.taps : null;
     const point = far?.kind === "point" ? far : null;
-    // A far read the passes before it write is read off what they paint,
-    // never off the step's input apart.
-    const input = point && !prefixed ? (point.near ? unionBox(point.near, point.far) : point.far) : null;
+    const input = point ? (point.near ? unionBox(point.near, point.far) : point.far) : null;
     // What the brush reads with its copies along time on the tile's own view.
-    const whole = taps ? taps.reduce(unionBox, own) : point && prefixed ? all : own;
+    const whole = taps ? all : own;
     const read = input ? unionBox(own, input) : whole;
     const reads = framesOfBox(read);
     const readBands = bandsOfBox(read, numBands);
     // The first step reads its input where the warp puts it; other files it
     // reads there are read only there, not over the span to the dab.
     const others: ReadPart = input ? { first: framesOfBox(input), rest: framesOfBox(own) } : reads;
-    if (!(input || point) || inputApart) {
+    if (!(input || point) || apart) {
       const spanOf = (box: ReadBox): { frames: FrameSpan; bands: BandSpan } => ({
         frames: framesOfBox(box),
         bands: bandsOfBox(box, numBands),
       });
-      const inputBox = point && { ...spanOf(point.far), near: point.near && spanOf(point.near), before };
+      const inputBox = point && { ...spanOf(point.far), near: point.near && spanOf(point.near) };
       const copies =
-        taps && inputApart
+        taps && apart
           ? {
               own: viewOfBox(own),
               taps: taps.map(spanOf),
               response: far?.kind === "sum" && far.response ? tapResponse(far.response) : null,
-              from: far?.kind === "sum" ? (far.from ?? "input") : "input",
+              from: startsDab ? (far?.kind === "sum" ? (far.from ?? "input") : "input") : ("chain" as const),
               totals: far?.kind === "sum" ? (far.totals ?? 1) : 1,
             }
           : null;
-      const apart = (point || copies) && far;
       return {
         view: viewOfBox(whole),
         input: input && viewOfBox(input),
-        partsView: point && prefixed ? viewOfBox(own) : undefined,
         bands,
         frames,
         reads,
@@ -1101,11 +1162,11 @@ function besideTiling(
         others,
         inputBox,
         copies,
-        farPass: apart ? { effect, pass: far.kind === "sum" ? far.pass : undefined, prefixed } : null,
+        stage,
       };
     }
     return {
-      view: viewOfBox(firstReadsHere ? read : own),
+      view: viewOfBox(firstReadsHere || !startsDab ? read : own),
       input: null,
       bands,
       frames,
@@ -1114,12 +1175,12 @@ function besideTiling(
       others,
       inputBox: null,
       copies: null,
-      farPass: null,
+      stage,
     };
   };
-  const framesOf = (from: number, to: number): FrameSpan => ({
-    start: Math.max(start, frameRangeOfBlock(grid, from).start),
-    end: Math.min(end, frameRangeOfBlock(grid, to).end),
+  const framesOf = (within: FrameSpan, from: number, to: number): FrameSpan => ({
+    start: Math.max(within.start, frameRangeOfBlock(grid, from).start),
+    end: Math.min(within.end, frameRangeOfBlock(grid, to).end),
   });
   const quantum = gridQuantumFrames(grid);
   const halves = (tile: BesideTile): [BesideTile, BesideTile][] => {
@@ -1129,17 +1190,23 @@ function besideTiling(
     const cut = Math.round((tile.frames.start + tile.frames.end) / 2 / quantum) * quantum;
     if (to > from) {
       const mid = Math.floor((from + to) / 2);
-      out.push([tileOf(tile.bands, framesOf(from, mid)), tileOf(tile.bands, framesOf(mid + 1, to))]);
+      out.push([
+        tileOf(tile.bands, framesOf(tile.frames, from, mid), tile.stage),
+        tileOf(tile.bands, framesOf(tile.frames, mid + 1, to), tile.stage),
+      ]);
     } else if (cut > tile.frames.start && cut < tile.frames.end) {
       out.push([
-        tileOf(tile.bands, { start: tile.frames.start, end: cut }),
-        tileOf(tile.bands, { start: cut, end: tile.frames.end }),
+        tileOf(tile.bands, { start: tile.frames.start, end: cut }, tile.stage),
+        tileOf(tile.bands, { start: cut, end: tile.frames.end }, tile.stage),
       ]);
     }
     const { first, last } = tile.bands;
     if (last > first) {
       const mid = Math.floor((first + last) / 2);
-      out.push([tileOf({ first, last: mid }, tile.frames), tileOf({ first: mid + 1, last }, tile.frames)]);
+      out.push([
+        tileOf({ first, last: mid }, tile.frames, tile.stage),
+        tileOf({ first: mid + 1, last }, tile.frames, tile.stage),
+      ]);
     }
     return out;
   };
@@ -1147,7 +1214,6 @@ function besideTiling(
   // over, and the bins a tonality check looks back over, in the coarsest band.
   const partBefore = PART_BINS_BEFORE * seam;
   const partAfter = PART_BINS_AFTER * seam;
-  const firstStep = firstEnabledStep(state);
   const firstBrush = brushes[firstStep];
   // A wrapped read folds back across the whole axis.
   const partable = !(firstBrush?.wrapsTime || firstBrush?.wrapsPitch);
@@ -1166,25 +1232,15 @@ function besideTiling(
   const partsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const box = tile.inputBox;
     if (!partable || !box) return null;
-    const { near, before } = box;
-    // A part's view holds what the pass reads besides its read points too, and
-    // what the passes before it read to write all that.
-    const viewOfPart = (frames: FrameSpan, bands: BandSpan): CanvasView => {
-      const core = near
-        ? {
-            frames: { start: Math.min(frames.start, near.frames.start), end: Math.max(frames.end, near.frames.end) },
-            bands: { first: Math.min(bands.first, near.bands.first), last: Math.max(bands.last, near.bands.last) },
-          }
-        : { frames, bands };
-      if (!before) return viewOfCore(core.frames, core.bands);
-      const widened = before({
-        start: core.frames.start / sampleRate,
-        end: core.frames.end / sampleRate,
-        low: bandIndexToPitchUv(core.bands.last + 1, numBands),
-        high: bandIndexToPitchUv(core.bands.first, numBands),
-      });
-      return viewOfCore(framesOfBox(widened), bandsOfBox(widened, numBands));
-    };
+    const { near } = box;
+    // A part's view holds what the pass reads besides its read points too.
+    const viewOfPart = (frames: FrameSpan, bands: BandSpan): CanvasView =>
+      near
+        ? viewOfCore(
+            { start: Math.min(frames.start, near.frames.start), end: Math.max(frames.end, near.frames.end) },
+            { first: Math.min(bands.first, near.bands.first), last: Math.max(bands.last, near.bands.last) },
+          )
+        : viewOfCore(frames, bands);
     const parts: { frames: FrameSpan; bands: BandSpan; view: CanvasView }[] = [];
     const pending = [{ frames: box.frames, bands: box.bands, view: viewOfPart(box.frames, box.bands) }];
     for (let part = pending.pop(); part; part = pending.pop()) {
@@ -1223,7 +1279,10 @@ function besideTiling(
     }));
   };
   // Taps are taken in order, as many to a group as one view of them fits, and
-  // one view of the response they read.
+  // one view of the response they read. A group whose response reads no view
+  // holds takes as many taps as its own view fits, and is read once for each
+  // slice of what they read of the response, each tap adding its term where
+  // its response bin lies.
   const copyGroupsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const taps = tile.copies?.taps;
     if (!partable || !taps) return null;
@@ -1251,12 +1310,16 @@ function besideTiling(
           },
         });
       }
-      const fits = (index: number): boolean => {
-        const { frames, bands, heard } = unions[index];
-        if (texelsOfCore(frames, bands) > budget) return false;
-        return !response || canvasTexelsOfFrames(response.grid, heard.start, heard.end, response.bands) <= budget;
+      const inputFits = (index: number): boolean => {
+        const { frames, bands } = unions[index];
+        return texelsOfCore(frames, bands) <= budget;
       };
-      if (!fits(0) || groups.length >= most) return null;
+      const heardFits = (heard: FrameSpan): boolean =>
+        !response || canvasTexelsOfFrames(response.grid, heard.start, heard.end, response.bands) <= budget;
+      if (!inputFits(0) || groups.length >= most) return null;
+      const sliced = !heardFits(unions[0].heard);
+      if (sliced && !response?.sliceable) return null;
+      const fits = (index: number): boolean => inputFits(index) && (sliced || heardFits(unions[index].heard));
       let low = 0;
       let high = unions.length - 1;
       while (low < high) {
@@ -1265,16 +1328,66 @@ function besideTiling(
         else high = mid - 1;
       }
       const { frames, bands, heard } = unions[low];
-      groups.push({
-        view: viewOfCore(frames, bands),
-        taps: { first, last: first + low },
-        response: response ? canvasViewOfFrames(response.grid, heard.start, heard.end, response.bands) : undefined,
-      });
+      const view = viewOfCore(frames, bands);
+      const group = { first, last: first + low };
+      if (!response) groups.push({ view, taps: group });
+      else if (!sliced)
+        groups.push({
+          view,
+          taps: group,
+          response: canvasViewOfFrames(response.grid, heard.start, heard.end, response.bands),
+        });
+      else {
+        const slices = responseSlices(response, heard, budget, most - groups.length);
+        if (!slices) return null;
+        for (const slice of slices) groups.push({ view, taps: group, response: slice });
+      }
       first += low + 1;
     }
     return groups;
   };
-  return { renderer, start, end, union, whole, written, tileOf, halves, partsOf, copyGroupsOf };
+  return {
+    renderer,
+    start,
+    end,
+    union,
+    wholePitch,
+    written,
+    points,
+    units,
+    whole: wholeStage,
+    tileOf,
+    halves,
+    partsOf,
+    copyGroupsOf,
+  };
+}
+
+/**
+ * Views of the response over `heard`, cut on the response grid's quantum so
+ * no bin lies in two, each holding no more than `budget` texels. Null when
+ * one quantum alone holds more, or when it takes more than `most` slices.
+ */
+function responseSlices(response: TapResponse, heard: FrameSpan, budget: number, most: number): CanvasView[] | null {
+  const quantum = gridQuantumFrames(response.grid);
+  const end = Math.min(response.grid.numFrames, Math.ceil(heard.end / quantum) * quantum);
+  const texels = (from: number, to: number): number => canvasTexelsOfFrames(response.grid, from, to, response.bands);
+  const slices: CanvasView[] = [];
+  for (let start = Math.floor(heard.start / quantum) * quantum; start < end; ) {
+    if (texels(start, start + quantum) > budget || slices.length >= most) return null;
+    // The widest slice that fits, in whole quanta, found by halving.
+    let low = 1;
+    let high = Math.ceil((end - start) / quantum);
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (texels(start, Math.min(end, start + mid * quantum)) <= budget) low = mid;
+      else high = mid - 1;
+    }
+    const sliceEnd = Math.min(end, start + low * quantum);
+    slices.push(canvasViewOfFrames(response.grid, start, sliceEnd, response.bands));
+    start = sliceEnd;
+  }
+  return slices;
 }
 
 /**
@@ -1295,7 +1408,7 @@ export function dabReadRegion(
   const span = dabSpan(context, state, cursor, canvas);
   const tiling = besideTiling(context, state, cursor, span, canvas);
   if (!tiling) return null;
-  const root = tiling.tileOf(tiling.written, { start: tiling.start, end: tiling.end });
+  const root = tiling.tileOf(tiling.written, { start: tiling.start, end: tiling.end }, tiling.whole);
   const { extent } = span;
   const before = Math.max(extent.before, extent.piece?.before ?? 0);
   const after = Math.max(extent.after, extent.piece?.after ?? 0);
@@ -1319,13 +1432,15 @@ export function dabReadRegion(
 
 /**
  * How to paint a dab the canvas window cannot hold: beside the canvas, in
- * tiles of bands over spans of frames. Each tile is read through a view of the
- * region its effects read to paint it, and a tile whose view holds more than
- * a window is halved, across bands or in time, whichever reads less. Every tile
- * reads the file as it was before the dab, so the tiles never read each
- * other's paint, and a dab that reads the canvas as it paints is cut as any
- * other. Null when a tile that cannot shrink its read still reads more than a
- * view holds.
+ * tiles of bands over spans of frames, and in stages when no one tile can run
+ * every pass. Each tile is read through a view of the region its passes read
+ * to paint it, and a tile whose view holds more than a window is halved,
+ * across bands or in time, whichever reads less. Every tile reads the file as
+ * it was before the dab, so the tiles never read each other's paint, and a
+ * dab that reads the canvas as it paints is cut as any other. A stage after
+ * the first reads what the stages before it wrote, kept over the region it
+ * reads. Null when some stage has a tile that cannot shrink its read and
+ * still reads more than a view holds.
  */
 function besideFor(
   context: FileStrokeContext,
@@ -1337,12 +1452,267 @@ function besideFor(
 ): PaintBeside | null {
   const tiling = besideTiling(context, state, cursorPos, span, canvas);
   if (!tiling) return null;
-  const { renderer, start, end, union, whole, written, tileOf, halves, partsOf, copyGroupsOf } = tiling;
+  const stages = planStages(context, state, span, canvas, tiling);
+  if (!stages) return null;
+  const { renderer, union, wholePitch } = tiling;
+  const passAt = (point: number): PassAt | undefined => {
+    const at = tiling.points[point];
+    const unit = tiling.units[at.unit];
+    return unit && { step: unit.step, effect: unit.item, iteration: unit.iteration, pass: at.pass };
+  };
+  const compute = async (tileDone: () => boolean): Promise<StrokePaint | null> => {
+    const timing: BesideTiming = { readMs: 0, setupMs: 0, paintMs: 0, readbackMs: 0 };
+    const started = performance.now();
+    const paintTiles = async (
+      tiles: readonly BesideTile[],
+      spanOfStage: DabSpan,
+      run: StageRun,
+      done: () => boolean,
+    ): Promise<StrokePaint[] | null> => {
+      const pieces: StrokePaint[] = [];
+      for (const tile of tiles) {
+        const piece = await paintTileBeside(
+          context,
+          state,
+          cursorPos,
+          spanOfStage,
+          canvas,
+          renderer,
+          tile,
+          run,
+          options,
+          timing,
+        );
+        if (!piece || !done()) return null;
+        pieces.push(piece);
+      }
+      return pieces;
+    };
+    // What the stages before each stage point wrote, over the views the
+    // stages after it read.
+    const inputs = new Map<number, StageInput>();
+    for (const [index, planned] of stages.entries()) {
+      const { stage, span: spanOfStage, tiles, stepStart, region } = planned;
+      const input = stage.from > 0 ? inputs.get(stage.from) : undefined;
+      const stepInput = stepStart !== null ? inputs.get(stepStart) : undefined;
+      if ((stage.from > 0 && !input) || (stepStart !== null && !stepInput))
+        throw new Error("A stage of the dab reads what no stage before it wrote.");
+      const run: StageRun = {
+        from: stage.from > 0 ? passAt(stage.from) : undefined,
+        to: passAt(stage.to),
+        input: input ?? null,
+        stepInput: stepInput ?? null,
+        final: index === stages.length - 1,
+      };
+      if (!run.final) {
+        const texels = canvasTexelsOfFrames(canvas.grid, region.frames.start, region.frames.end, region.bands);
+        if (texels <= Math.min(KEPT_STAGE_TEXELS, KEPT_STAGE_WINDOWS * canvas.texelBudget)) {
+          const pieces = await paintTiles(tiles, spanOfStage, run, tileDone);
+          if (!pieces) return null;
+          inputs.set(stage.to, async (view) => composePixelRangeValues(heldRanges(view.ranges), pieces));
+        } else {
+          // Painted again over each view a later stage reads, as tiles of it.
+          inputs.set(stage.to, async (view) => {
+            const over = planTiles(spanOfStage, canvas, tiling, stage, viewRegion(view));
+            const pieces = over && (await paintTiles(over, spanOfStage, run, () => true));
+            return pieces && composePixelRangeValues(heldRanges(view.ranges), pieces);
+          });
+          for (let tile = 0; tile < tiles.length; tile++) tileDone();
+        }
+        continue;
+      }
+      const pieces = await paintTiles(tiles, spanOfStage, run, tileDone);
+      if (!pieces) return null;
+      const joined = joinPaint(pieces);
+      diag.info("canvas", "beside dab", {
+        stages: stages.length,
+        tiles: stages.reduce((sum, each) => sum + each.tiles.length, 0),
+        parts: stages.reduce(
+          (sum, each) => sum + each.tiles.reduce((count, tile) => count + (tile.parts?.length ?? 0), 0),
+          0,
+        ),
+        texels: tiles.reduce((sum, tile) => sum + tile.view.texels, 0),
+        ...timing,
+        totalMs: performance.now() - started,
+      });
+      return joined;
+    }
+    return null;
+  };
+  const pitch = wholePitch ? { min: 0, max: 1 } : { min: Math.max(0, union.min.y), max: Math.min(1, union.max.y) };
+  return { compute, tiles: stages.reduce((sum, planned) => sum + planned.tiles.length, 0), pitch };
+}
 
+/**
+ * A stage of a dab with its tiles, and the stage point that holds its step's
+ * input when it starts after its step's first pass in a step past the first.
+ */
+type PlannedStage = {
+  stage: Stage;
+  span: DabSpan;
+  tiles: BesideTile[];
+  stepStart: number | null;
+  /** The frames and bands the stage writes. */
+  region: { frames: FrameSpan; bands: BandSpan };
+};
+
+/** What the stages before a stage point wrote, over a view a later stage reads; null when a read fails. */
+type StageInput = (view: CanvasView) => Promise<Float32Array | null>;
+
+// Texels a stage's output is kept over, at most, for the stages after it to
+// read; past that, and past a number of windows, each view they read is
+// painted again.
+const KEPT_STAGE_TEXELS = 1 << 23;
+const KEPT_STAGE_WINDOWS = 4;
+
+/** The frames and bands a view holds bins of. */
+function viewRegion(view: CanvasView): { frames: FrameSpan; bands: BandSpan } {
+  const bands = { first: Infinity, last: -Infinity };
+  for (let band = 0; band * 2 + 1 < view.ranges.length; band++) {
+    if (view.ranges[band * 2 + 1] === 0) continue;
+    bands.first = Math.min(bands.first, band);
+    bands.last = Math.max(bands.last, band);
+  }
+  return { frames: { start: view.startFrame, end: view.endFrame }, bands };
+}
+
+/**
+ * The stages a dab is painted in, first to last. The last writes the dab;
+ * each one before it writes what the next reads. Working back from the end,
+ * each stage runs as many passes as its tiles can hold. A stage that starts
+ * after the first pass of a step past the first also reads that step's input,
+ * so the stage before it starts no earlier than the step does. Null when some
+ * pass cannot be painted in any stage.
+ */
+function planStages(
+  context: FileStrokeContext,
+  state: State,
+  span: DabSpan,
+  canvas: WindowedCanvas,
+  tiling: BesideTiling,
+): PlannedStage[] | null {
+  const { points, units } = tiling;
+  const last = points.length - 1;
+  const firstStep = units[0]?.step;
+  const stepOf = (point: number): number | undefined => units[points[point].unit]?.step;
+  const startsStep = (point: number): boolean => {
+    const { unit, pass } = points[point];
+    return pass === undefined && (unit === 0 || units[unit - 1]?.step !== units[unit]?.step);
+  };
+  // The stage point a step's first pass sits at, for a point inside a step past the first.
+  const stepStartOf = (point: number): number | null => {
+    if (point >= last || startsStep(point) || stepOf(point) === firstStep) return null;
+    let at = point;
+    while (at > 0 && !startsStep(at)) at--;
+    return at;
+  };
+  const stages: PlannedStage[] = [];
+  let to = last;
+  let region = { frames: { start: tiling.start, end: tiling.end }, bands: tiling.written };
+  for (;;) {
+    let planned: PlannedStage | null = null;
+    // A brush of no effects runs its passthrough in one stage of no units.
+    const latest = last === 0 ? 0 : to - 1;
+    for (let from = stepStartOf(to) ?? 0; from <= latest && !planned; from++) {
+      const stage = { from, to };
+      const root = tiling.tileOf(region.bands, region.frames, stage);
+      const spanOfStage = stageSpan(context, state, span, tiling, stage, root);
+      const tiles = planTiles(spanOfStage, canvas, tiling, stage, region);
+      if (tiles) planned = { stage, span: spanOfStage, tiles, stepStart: stepStartOf(from), region };
+    }
+    if (!planned) return null;
+    stages.unshift(planned);
+    if (planned.stage.from === 0) return stages;
+    region = regionOfViews(planned.tiles);
+    to = planned.stage.from;
+  }
+}
+
+/**
+ * The dab's span with only what a stage's passes read of other files: the
+ * reads of its steps, and the responses and fields its units weigh by. A
+ * field is read over the frames the stage reads of this file, and over what
+ * the taps of its first pass read of it.
+ */
+function stageSpan(
+  context: FileStrokeContext,
+  state: State,
+  span: DabSpan,
+  tiling: BesideTiling,
+  stage: Stage,
+  root: BesideTile,
+): DabSpan {
+  const { points, units } = tiling;
+  if (stage.from === tiling.whole.from && stage.to === tiling.whole.to) return span;
+  const end = points[stage.to];
+  const runs = units.slice(points[stage.from].unit, end.unit + (end.pass === undefined ? 0 : 1));
+  const steps = new Set(runs.map((unit) => unit.step));
+  const keys = new Set<string>();
+  for (const { effect, view } of runs) {
+    if (effect === "convolve") keys.add(impulseKey(view));
+    const field = view.attractSourceFile?.path;
+    if (effect === "attract" && Number(view.attractMap) === 0 && field) keys.add(attractFieldKey(field));
+  }
+  const heard = root.copies?.response ?? null;
+  const impulseBindings = impulseNeedsFor(context, state, { startFrame: root.reads.start, endFrame: root.reads.end })
+    .filter((entry) => keys.has(entry.key))
+    .map((entry) => {
+      if (entry.key !== heard?.key || heard.reads.length === 0) return entry;
+      const startFrame = Math.min(entry.need.startFrame, ...heard.reads.map((read) => read.start));
+      const endFrame = Math.max(entry.need.endFrame, ...heard.reads.map((read) => read.end));
+      return { ...entry, need: { ...entry.need, startFrame, endFrame } };
+    });
+  const sources = span.needs.sources.filter((read) => steps.has(read.step));
+  return {
+    ...span,
+    impulseBindings,
+    needs: {
+      ...span.needs,
+      sources,
+      impulses: impulseBindings.map((entry) => entry.need).filter((need) => responseIsWindowed(context, need.fileId)),
+    },
+  };
+}
+
+/** The frames and bands every view a stage's tiles bind lies within. */
+function regionOfViews(tiles: readonly BesideTile[]): { frames: FrameSpan; bands: BandSpan } {
+  const frames = { start: Infinity, end: -Infinity };
+  const bands = { first: Infinity, last: -Infinity };
+  const add = (view: CanvasView): void => {
+    const region = viewRegion(view);
+    frames.start = Math.min(frames.start, region.frames.start);
+    frames.end = Math.max(frames.end, region.frames.end);
+    bands.first = Math.min(bands.first, region.bands.first);
+    bands.last = Math.max(bands.last, region.bands.last);
+  };
+  for (const tile of tiles) {
+    add(tile.view);
+    if (tile.input) add(tile.input);
+    for (const part of tile.parts ?? []) add(part.view);
+  }
+  return { frames, bands };
+}
+
+/**
+ * The tiles one stage of a dab is painted in over `region`, each with the
+ * parts of its input it reads when one view of that holds more than a
+ * window. Null when a tile that cannot shrink its read still reads more than
+ * a view holds. The region's corners are tried first, as the smallest tiles
+ * halving reaches, so a stage that cannot be painted fails at once.
+ */
+function planTiles(
+  span: DabSpan,
+  canvas: WindowedCanvas,
+  tiling: BesideTiling,
+  stage: Stage,
+  region: { frames: FrameSpan; bands: BandSpan },
+): BesideTile[] | null {
+  const { tileOf, halves, partsOf, copyGroupsOf } = tiling;
   const budget = canvas.texelBudget;
   const cost = (tile: BesideTile): number => Math.max(tile.view.texels, tile.input?.texels ?? 0);
   let partCount = 0;
-  // A tile whose views all fit paints in one go.
+  // A tile whose views all fit paints in one go; a stage after the dab's
+  // first pass binds its input apart as one part.
   const fitsWhole = (tile: BesideTile): boolean =>
     tile.view.texels <= budget && (tile.input?.texels ?? 0) <= budget && canvas.othersFit(span.needs, tile.others);
   // A tile whose own view fits reads an input too wide for one view a part at
@@ -1357,20 +1727,31 @@ function besideFor(
       return groups && { view: copies.own, parts: groups };
     }
     if (!canvas.othersFit(span.needs, tile.others)) return null;
-    const view = tile.partsView ?? tile.view;
-    if (view.texels > budget) return null;
+    if (tile.view.texels > budget) return null;
     const parts = partsOf(tile, budget, MAX_BESIDE_TILES - partCount);
-    return parts && { view, parts };
+    return parts && { view: tile.view, parts };
   };
+  const quantum = gridQuantumFrames(canvas.grid);
+  const { frames, bands } = region;
+  for (const at of [frames.start, Math.max(frames.start, frames.end - quantum)]) {
+    for (const band of [bands.first, bands.last]) {
+      const corner = tileOf({ first: band, last: band }, { start: at, end: Math.min(frames.end, at + quantum) }, stage);
+      if (!fitsWhole(corner) && !inParts(corner)) return null;
+    }
+  }
   // Texels a tile reads: its view, and its input when apart. One whose reads of
   // other files no window holds reads them in parts too, whatever its size.
   const reads = (tile: BesideTile): number =>
     canvas.othersFit(span.needs, tile.others) ? tile.view.texels + (tile.input?.texels ?? 0) : Infinity;
   const larger = ([a, b]: [BesideTile, BesideTile]): number => Math.max(cost(a), cost(b));
   const tiles: BesideTile[] = [];
-  const pending = [tileOf(written, { start, end })];
+  const pending = [tileOf(bands, frames, stage)];
   for (let tile = pending.pop(); tile; tile = pending.pop()) {
     if (fitsWhole(tile)) {
+      if (stage.from > 0 && tile.input) {
+        tile.parts = [{ view: tile.input, core: WHOLE_CORE }];
+        partCount += 1;
+      }
       tiles.push(tile);
       continue;
     }
@@ -1392,27 +1773,7 @@ function besideFor(
     if (!split || tiles.length + pending.length >= MAX_BESIDE_TILES) return null;
     pending.push(...split);
   }
-  const compute = async (tileDone: () => boolean): Promise<StrokePaint | null> => {
-    const parts: StrokePaint[] = [];
-    const timing: BesideTiming = { readMs: 0, setupMs: 0, paintMs: 0, readbackMs: 0 };
-    const started = performance.now();
-    for (const tile of tiles) {
-      const part = await paintTileBeside(context, state, cursorPos, span, canvas, renderer, tile, options, timing);
-      if (!part || !tileDone()) return null;
-      parts.push(part);
-    }
-    const joined = joinPaint(parts);
-    diag.info("canvas", "beside dab", {
-      tiles: tiles.length,
-      parts: partCount,
-      texels: tiles.reduce((sum, tile) => sum + tile.view.texels, 0),
-      ...timing,
-      totalMs: performance.now() - started,
-    });
-    return joined;
-  };
-  const pitch = whole ? { min: 0, max: 1 } : { min: Math.max(0, union.min.y), max: Math.min(1, union.max.y) };
-  return { compute, tiles: tiles.length, pitch };
+  return tiles;
 }
 
 /** What a tile whose taps are read a group at a time needs held: each group binds its own part of the response. */
@@ -1425,9 +1786,24 @@ function needsInGroups(needs: DabNeeds, copies: NonNullable<BesideTile["copies"]
 type BesideTiming = { readMs: number; setupMs: number; paintMs: number; readbackMs: number };
 
 /**
- * Paints the dab on a renderer beside the canvas over the tile's view,
- * loaded with the file as the stroke found it and the stroke's paint so far,
- * and returns what it painted on the tile's bands and frames.
+ * How a stage's tiles paint: the pass the stage starts at and the one it
+ * stops before, absent at the dab's own ends; what the stages before wrote,
+ * which the stage reads as its input, and its step's input when it starts
+ * after its step's first pass; and whether it writes the dab.
+ */
+type StageRun = {
+  from: PassAt | undefined;
+  to: PassAt | undefined;
+  input: StageInput | null;
+  stepInput: StageInput | null;
+  final: boolean;
+};
+
+/**
+ * Paints a stage of the dab on a renderer beside the canvas over the tile's
+ * view, loaded with the file as the stroke found it and the stroke's paint so
+ * far. The last stage returns what it painted on the tile's bands and frames;
+ * one before it returns all the tile's bands and frames hold after it.
  */
 async function paintTileBeside(
   context: FileStrokeContext,
@@ -1437,6 +1813,7 @@ async function paintTileBeside(
   canvas: WindowedCanvas,
   renderer: StrokeRenderer,
   tile: BesideTile,
+  run: StageRun,
   options: DispatchOptions,
   timing: BesideTiming,
 ): Promise<StrokePaint | null> {
@@ -1450,55 +1827,34 @@ async function paintTileBeside(
   const response = tile.parts && copies?.response ? copies.response : null;
   const needs = response && copies ? needsInGroups(span.needs, copies) : span.needs;
   if (!(await canvas.holdOthers(needs, tile.others))) return null;
-  const far = tile.farPass;
-  const prefixed = tile.parts && far?.prefixed ? far : null;
-  // A part a later pass reads holds what the passes before it paint there.
-  const before = prefixed
-    ? async (part: CanvasView): Promise<Float32Array | null> => {
-        const set = await besideOver(context, span, canvas, renderer, part);
-        if (!set) return null;
-        try {
-          const painting = {
-            ...options,
-            span,
-            clip: { start: part.startFrame, end: part.endFrame },
-            beside: {
-              renderer: set.beside,
-              view: part,
-              inputPartsEffect: prefixed.effect,
-              inputPartsPass: prefixed.pass,
-              stopBeforePartsPass: true,
-              partResponse: response?.key,
-              reads: tile.others,
-            },
-          };
-          if (!dispatchStroke(context, state, cursorPos, false, painting)) return null;
-          const whole = fileRangesToView(part, set.layout, heldRanges(part.ranges));
-          return whole ? await set.beside.readPixelRanges(whole) : new Float32Array(0);
-        } finally {
-          set.dispose();
-        }
-      }
-    : null;
-  const parts = tile.parts ? await readParts(context, state, canvas, tile.parts, copies, before) : null;
+  const parts = tile.parts ? await readParts(context, state, canvas, tile.parts, copies, run.input) : null;
   if (tile.parts && !parts) return null;
-  const input = parts
-    ? prefixed
-      ? null
-      : parts.first
-    : tile.input
-      ? await inputSource(context, state, canvas, tile.input)
-      : null;
+  const input = parts ? parts.first : tile.input ? await inputSource(context, state, canvas, tile.input) : null;
   if (tile.input && !input) return null;
+  const textures: DataTexture[] = [];
+  const inputTexture = async (input: StageInput): Promise<DataTexture | null> => {
+    const values = await input(view);
+    if (!values) return null;
+    const texture = viewTexture(view, values);
+    textures.push(texture);
+    return texture;
+  };
+  const dispose = (): void => {
+    input?.dispose();
+    for (const texture of textures) texture.dispose();
+  };
   const set = await besideOver(context, span, canvas, renderer, view);
   if (!set) {
-    input?.dispose();
-    if (prefixed) parts?.first.dispose();
+    dispose();
     return null;
   }
   lap("readMs");
   const { beside, layout } = set;
   try {
+    const chain = run.from && run.input ? await inputTexture(run.input) : null;
+    const stepInput = run.from && run.stepInput ? await inputTexture(run.stepInput) : null;
+    if (run.from && (!chain || (run.stepInput && !stepInput))) return null;
+    const from = run.from && chain ? { ...run.from, chain, stepInput: stepInput ?? undefined } : undefined;
     lap("setupMs");
     const painting = {
       ...options,
@@ -1507,28 +1863,38 @@ async function paintTileBeside(
       beside: {
         renderer: beside,
         view,
-        input: input?.source,
+        input: run.from ? undefined : input?.source,
         inputParts: parts?.parts,
-        inputPartsEffect: parts ? far?.effect : undefined,
-        inputPartsPass: parts ? far?.pass : undefined,
         partResponse: response?.key,
+        from,
+        to: run.to,
         reads: tile.others,
       },
     };
     if (!dispatchStroke(context, state, cursorPos, false, painting)) return null;
     lap("paintMs");
+    if (!run.final) {
+      const ranges = regionPixels(canvas, frames, bands);
+      const local = fileRangesToView(view, layout, ranges);
+      if (!local) throw new Error("A stage's tile view does not hold the tile.");
+      const values = await beside.readPixelRanges(local);
+      lap("readbackMs");
+      return { ranges, values, masks: [] };
+    }
     const dirty = beside.getDirtyPixelRanges();
     const onBands = dirty ? viewRangesToFile(view, rangesOnBands(view, dirty, bands)) : new Uint32Array(0);
     const keptFile = intersectPixelRanges(onBands, frameSpanPixels(canvas, frames));
-    const kept = pixelRangeCount(keptFile) > 0 ? fileRangesToView(view, layout, keptFile) : null;
-    if (!kept) return { ranges: new Uint32Array(0), values: new Float32Array(0), masks: [] };
-    const [values, masks] = await Promise.all([beside.readPixelRanges(kept), beside.readStrokeMaskRanges(kept)]);
+    const keptRanges = pixelRangeCount(keptFile) > 0 ? fileRangesToView(view, layout, keptFile) : null;
+    if (!keptRanges) return { ranges: new Uint32Array(0), values: new Float32Array(0), masks: [] };
+    const [values, masks] = await Promise.all([
+      beside.readPixelRanges(keptRanges),
+      beside.readStrokeMaskRanges(keptRanges),
+    ]);
     lap("readbackMs");
     return { ranges: keptFile, values, masks };
   } finally {
     set.dispose();
-    input?.dispose();
-    if (prefixed) parts?.first.dispose();
+    dispose();
   }
 }
 
@@ -1585,18 +1951,27 @@ async function readParts(
   canvas: WindowedCanvas,
   plans: readonly InputPartPlan[],
   copies: BesideTile["copies"],
-  before: ((view: CanvasView) => Promise<Float32Array | null>) | null,
+  kept: StageInput | null,
 ): Promise<{ first: { source: SourceFileInfo; dispose: () => void }; parts: InputPart[] } | null> {
   const response = copies?.response ?? null;
   const live = copies?.from === "canvas" ? true : undefined;
+  // Parts that share a view, as a tap group read once per slice of its
+  // response does, share one read of it.
+  const reads = new Map<CanvasView, Promise<Float32Array | null>>();
+  const readOf = (view: CanvasView): Promise<Float32Array | null> => {
+    let read = reads.get(view);
+    if (!read) {
+      read = kept ? kept(view) : inputValues(state, canvas, view, context, live);
+      reads.set(view, read);
+    }
+    return read;
+  };
   const [inputs, heard] = await Promise.all([
-    before
-      ? (async () => {
-          const out: (Float32Array | null)[] = [];
-          for (const plan of plans) out.push(await before(plan.view));
-          return out;
-        })()
-      : Promise.all(plans.map((plan) => inputValues(state, canvas, plan.view, context, live))),
+    (async () => {
+      const out: (Float32Array | null)[] = [];
+      for (const plan of plans) out.push(await readOf(plan.view));
+      return out;
+    })(),
     Promise.all(
       plans.map((plan) =>
         response && plan.response ? canvas.readFile(response.fileId, heldRanges(plan.response.ranges)) : null,
@@ -1743,6 +2118,17 @@ function frameSpanPixels(canvas: WindowedCanvas, frames: FrameSpan): Uint32Array
     const from = Math.max(k0, Math.ceil(frames.start / step));
     const to = Math.min(k0 + count, Math.ceil(frames.end / step));
     if (to > from) out.push(view.ranges[band * 2] + (from - k0), to - from);
+  }
+  return Uint32Array.from(out);
+}
+
+/** Every file pixel of `bands` whose bin starts inside `frames`. */
+function regionPixels(canvas: WindowedCanvas, frames: FrameSpan, bands: BandSpan): Uint32Array {
+  const all = frameSpanPixels(canvas, frames);
+  const out: number[] = [];
+  for (let i = 0; i + 1 < all.length; i += 2) {
+    const band = bandAtPixel(canvas.grid.layout, all[i]);
+    if (band >= bands.first && band <= bands.last) out.push(all[i], all[i + 1]);
   }
   return Uint32Array.from(out);
 }

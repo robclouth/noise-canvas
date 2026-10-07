@@ -88,6 +88,7 @@ describe("sourceReadSpan", () => {
 describe("sourceNeedsOver", () => {
   const read = (fileId: string, from: number, to: number, destStart: number, destEnd: number): SourceRead => ({
     fileId,
+    step: 0,
     wantOriginal: false,
     read: { start: from, end: to },
     dest: { start: destStart, end: destEnd },

@@ -103,10 +103,16 @@ const CASES = LENGTHS.flatMap((seconds) =>
 
 const REVERSE = { transformScaleTime: -1, transformEdgeMode: 0 };
 
+// The file a scenario paints from when it reads another file.
+const OTHER_FILE_PATH = "/other.wav";
+
 /** A sine pattern on modulator 1 driving `key` at full amount. */
 function sweeping(key: string): Record<string, unknown> {
   return { modulator1Mode: 0, modulator1PatternShape: 0, [`${key}Mod1Amount`]: 100 };
 }
+
+/** One step of a brush painted in stages: its effect, its settings and its length in beats. */
+type StageStep = { effect: EffectType; step: Record<string, unknown>; beats: number };
 
 /** `state` on a file at `bpm`. */
 function atBpm(bpm: number, state: State): State {
@@ -427,9 +433,22 @@ const SCENARIOS: {
       },
     },
     {
+      name: "from IR Start a pattern sweeps fully",
+      step: {
+        convolveIrSize: 128,
+        convolveIrTimeOffset: 40,
+        ...sweeping("convolveIrTimeOffset"),
+      },
+    },
+    {
       name: "through another file",
       readsOther: true,
       step: { convolveIrSize: 512 },
+    },
+    {
+      name: "through another file from IR Start a pattern sweeps fully",
+      readsOther: true,
+      step: { convolveIrSize: 128, convolveIrTimeOffset: 50, ...sweeping("convolveIrTimeOffset") },
     },
   ].map(({ name, step, readsOther }) => ({
     name: `a convolve ${name}, its taps read in groups`,
@@ -478,9 +497,24 @@ const SCENARIOS: {
   ...[
     { name: "on a slow file", bpm: 61, windowBlocks: 16 },
     { name: "on a small window", bpm: 121, windowBlocks: SMALL_WINDOW_BLOCKS },
-  ].map(({ name, bpm, windowBlocks }) => ({
+    {
+      name: "toward a modulator's pattern on a small window",
+      bpm: 121,
+      windowBlocks: SMALL_WINDOW_BLOCKS,
+      step: { attractMap: 3, modulator1Mode: 0, modulator1PatternShape: 0 },
+    },
+    {
+      name: "toward another file on a small window",
+      bpm: 121,
+      windowBlocks: SMALL_WINDOW_BLOCKS,
+      readsOther: true,
+      step: { attractSourceFile: { path: OTHER_FILE_PATH } },
+    },
+  ].map(({ name, bpm, windowBlocks, step, readsOther }) => ({
     name: `an attract at its widest in time and pitch ${name}, its time pass read in groups`,
     windowBlocks,
+    otherWindowBlocks: readsOther ? windowBlocks : undefined,
+    readsOther,
     dabs: () => [
       {
         x: 0.5,
@@ -496,6 +530,7 @@ const SCENARIOS: {
               attractSmoothX: 4,
               attractSmoothY: 24,
               brushSizePitch: 24,
+              ...step,
             },
             4,
             false,
@@ -509,6 +544,12 @@ const SCENARIOS: {
       name: "a dynamics then a wide reversal",
       effects: ["dynamics", "transform"] as EffectType[],
       beats: 31,
+      step: { dynamicsGainDb: -6, ...REVERSE },
+    },
+    {
+      name: "a dynamics then a reversal of the whole file",
+      effects: ["dynamics", "transform"] as EffectType[],
+      beats: 32,
       step: { dynamicsGainDb: -6, ...REVERSE },
     },
     {
@@ -537,6 +578,88 @@ const SCENARIOS: {
       { x: 10 / seconds, y: 0.5, state: atBpm(61, brushState(effects, { ...step, brushSizePitch: 24 }, beats, false)) },
     ],
   })),
+  ...(
+    [
+      {
+        name: "a dynamics step then a wide reversal step",
+        steps: [
+          { effect: "dynamics", step: { dynamicsGainDb: -6 }, beats: 31 },
+          { effect: "transform", step: REVERSE, beats: 31 },
+        ],
+      },
+      {
+        // The copies read across the whole file, which no stage keeps on a long
+        // one, so the dynamics is painted again under each group they read.
+        name: "a dynamics step then a step of the widest copies",
+        steps: [
+          { effect: "dynamics", step: { dynamicsGainDb: -6 }, beats: 4 },
+          { effect: "clone", step: { cloneCountX: 63, cloneSpaceBeats: 32, cloneEdgeMode: 1 }, beats: 4 },
+        ],
+      },
+      {
+        name: "a dynamics step then a step convolving through its longest response",
+        steps: [
+          { effect: "dynamics", step: { dynamicsGainDb: -6 }, beats: 4 },
+          { effect: "convolve", step: { convolveIrSize: 512 }, beats: 4 },
+        ],
+      },
+      {
+        name: "a transform whose scale a pattern sweeps, run twice",
+        steps: [
+          {
+            effect: "transform",
+            step: {
+              transformScaleTime: 0.5,
+              ...sweeping("transformScaleTime"),
+              transformEdgeMode: 1,
+              brushIterations: 2,
+            },
+            beats: 4,
+          },
+        ],
+      },
+      {
+        name: "a blur at its widest, run three times",
+        steps: [
+          {
+            effect: "blur",
+            step: { blurAmountTime: 100, blurAmountPitch: 100, blurEdgeMode: 1, brushIterations: 3 },
+            beats: 2,
+          },
+        ],
+      },
+      {
+        name: "a long backward convolve, run twice",
+        steps: [
+          { effect: "convolve", step: { convolveIrSize: 256, convolveIrRate: -2, brushIterations: 2 }, beats: 4 },
+        ],
+      },
+      {
+        name: "an evolve at its widest in time and pitch on a slow file",
+        steps: [{ effect: "evolve", step: { evolveScaleX: 100, evolveScaleY: 100, evolveFlow: 40 }, beats: 4 }],
+      },
+      // A second run follows the gradient of the first, which magnifies how the
+      // first rounds, so the flow is gentle.
+      {
+        name: "an evolve wide in time, run twice",
+        steps: [{ effect: "evolve", step: { evolveScaleX: 97, evolveFlow: 2, brushIterations: 2 }, beats: 4 }],
+      },
+    ] satisfies { name: string; steps: StageStep[] }[]
+  ).map(({ name, steps }) => ({
+    name: `${name}, painted in stages`,
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    otherWindowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: (seconds: number) => {
+      const [first, ...rest] = steps.map(({ effect, step, beats }) =>
+        atBpm(61, brushState(effect, { brushSizePitch: 24, ...step }, beats, false)),
+      );
+      const brush = first.brushes[first.activeBrushIndex];
+      rest.forEach((state, index) =>
+        brush.steps.push({ ...state.brushes[state.activeBrushIndex].steps[0], id: `stage-step-${index}` }),
+      );
+      return [{ x: 10 / seconds, y: 0.5, state: first }];
+    },
+  })),
   ...[
     { name: "eight copies four beats apart", step: { cloneCountX: 8, cloneSpaceBeats: 4 } },
     {
@@ -563,6 +686,23 @@ const SCENARIOS: {
       },
     ],
   })),
+  {
+    // No stage over the whole file is kept on a window this small, so the
+    // reversal paints the dynamics again under each view it reads.
+    name: "a dynamics then a reversal of the whole file on a one-block window, painted in stages",
+    windowBlocks: 1,
+    otherWindowBlocks: 1,
+    dabs: (seconds: number) => [
+      {
+        x: 10 / seconds,
+        y: 0.5,
+        state: atBpm(
+          61,
+          brushState(["dynamics", "transform"], { dynamicsGainDb: -6, ...REVERSE, brushSizePitch: 24 }, 32, false),
+        ),
+      },
+    ],
+  },
   {
     name: "a blur at its widest at 60 bpm, on a small window",
     windowBlocks: SMALL_WINDOW_BLOCKS,
@@ -596,9 +736,6 @@ afterAll(() => {
   renderer?.dispose();
   renderer = null;
 });
-
-// The file a scenario paints from when it reads another file.
-const OTHER_FILE_PATH = "/other.wav";
 
 /**
  * The painted file at `windowBlocks`, with the other file beside it at the

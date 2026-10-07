@@ -107,6 +107,11 @@ export type CommonUniforms = {
   sourcePartAccum: { value: number };
   sourcePartSlot: { value: number };
   sourcePartTotals1: { value: Texture | null };
+  // A pass that reads around each pixel besides its read point, drawn in
+  // parts: which stage of it a draw is (0 for a pass drawn whole), and what
+  // an earlier stage wrote that it reads at each pixel.
+  sourceNearStage: { value: number };
+  sourceNearTex0: { value: Texture | null };
   // Set while the step's input is read through a view of its own: the input
   // laid out as the dest canvas, which holds every pixel the pass writes.
   sourceUnderOn: { value: boolean };
@@ -222,6 +227,8 @@ export function createDefaultUniforms(): CommonUniforms {
     sourcePartAccum: { value: 0 },
     sourcePartSlot: { value: 0 },
     sourcePartTotals1: { value: null },
+    sourceNearStage: { value: 0 },
+    sourceNearTex0: { value: null },
     sourceUnderOn: { value: false },
     sourceUnderTex: { value: null },
     brushPan: { value: defaultParameterUniform(0.0, 0.0, 1.0) },
@@ -305,6 +312,15 @@ export type UpdateEffectUniformsProps = {
 
 export abstract class BaseEffect {
   materials: THREE.RawShaderMaterial[] = [];
+
+  /**
+   * True for an effect whose pass reads around each pixel besides its read
+   * point. Drawn in parts, it draws in four stages: 1 and 2 over each pixel's
+   * own neighbourhood, each into a texture of its own; 3 a part at a time,
+   * reading what 1 wrote; and 4 over each pixel, reading what the parts wrote
+   * as its source and what 2 wrote.
+   */
+  readsNearInParts = false;
 
   abstract updateEffectUniforms(props: UpdateEffectUniformsProps): void;
 

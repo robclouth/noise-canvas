@@ -27,6 +27,15 @@ vec2 evolveFlowStep(vec2 direction, float flow, vec2 neighbourhood) {
   return clamp(direction * flow * EVOLVE_FLOW_REACH * neighbourhood, -limit, limit);
 }
 
+// The stages of a pass whose advected reads are drawn in parts: the flow
+// steps and the spread terms, each worked out over the pixel's own
+// neighbourhood; the advected reads, a part at a time; and the output, from
+// what the parts read and the spread terms.
+const int EVOLVE_STEPS = 1;
+const int EVOLVE_SPREADS = 2;
+const int EVOLVE_ADVECTED = 3;
+const int EVOLVE_FINISH = 4;
+
 void main() {
     vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
     if (brushWeightIsZero(destUv)) {
@@ -58,75 +67,111 @@ void main() {
     vec2 scaleX = resolveParameter(evolveScaleX, mods);
     vec2 scaleY = resolveParameter(evolveScaleY, mods);
 
-    bool sameNeighborhood = (scaleX.x == scaleX.y) && (scaleY.x == scaleY.y) && coords.sameSourceUv;
-
-    // Sample the L-channel neighborhood (+ reuse for R when sameNeighborhood).
-    // The scales arrive as source UV, converted from beats and semitones.
     vec2 neighbourL = abs(vec2(scaleX.x, scaleY.x));
     vec2 neighbourR = abs(vec2(scaleX.y, scaleY.y));
-    float offsetXL = neighbourL.x;
-    float offsetYL = neighbourL.y;
-    vec4 centerL = sampleWithEdgeMode(coords.sourceL, coords.dest, sourceOffsetX, sourceOffsetY, evolveEdgeMode);
-    vec4 leftL = sampleWithEdgeMode(coords.sourceL + vec2(-offsetXL, 0.0), coords.dest, sourceOffsetX - offsetXL, sourceOffsetY, evolveEdgeMode);
-    vec4 rightL = sampleWithEdgeMode(coords.sourceL + vec2(offsetXL, 0.0), coords.dest, sourceOffsetX + offsetXL, sourceOffsetY, evolveEdgeMode);
-    vec4 upL = sampleWithEdgeMode(coords.sourceL + vec2(0.0, offsetYL), coords.dest, sourceOffsetX, sourceOffsetY + offsetYL, evolveEdgeMode);
-    vec4 downL = sampleWithEdgeMode(coords.sourceL + vec2(0.0, -offsetYL), coords.dest, sourceOffsetX, sourceOffsetY - offsetYL, evolveEdgeMode);
+    ivec2 at = ivec2(gl_FragCoord.xy);
 
-    vec4 centerR, leftR, rightR, upR, downR;
-    if (sameNeighborhood) {
-        centerR = centerL; leftR = leftL; rightR = rightL; upR = upL; downR = downL;
+    vec4 advectedL, advectedR;
+    float laplacianL, laplacianR;
+    if (sourceNearStage == EVOLVE_FINISH) {
+        // The source holds what the parts read, and the near texture the
+        // spread terms.
+        advectedL = texelFetch(sourceSpectrogramTex, at, 0);
+        advectedR = advectedL;
+        vec4 spreads = texelFetch(sourceNearTex0, at, 0);
+        laplacianL = spreads.x;
+        laplacianR = spreads.y;
     } else {
-        float offsetXR = neighbourR.x;
-        float offsetYR = neighbourR.y;
-        centerR = sampleWithEdgeMode(coords.sourceR, coords.dest, sourceOffsetX, sourceOffsetY, evolveEdgeMode);
-        leftR = sampleWithEdgeMode(coords.sourceR + vec2(-offsetXR, 0.0), coords.dest, sourceOffsetX - offsetXR, sourceOffsetY, evolveEdgeMode);
-        rightR = sampleWithEdgeMode(coords.sourceR + vec2(offsetXR, 0.0), coords.dest, sourceOffsetX + offsetXR, sourceOffsetY, evolveEdgeMode);
-        upR = sampleWithEdgeMode(coords.sourceR + vec2(0.0, offsetYR), coords.dest, sourceOffsetX, sourceOffsetY + offsetYR, evolveEdgeMode);
-        downR = sampleWithEdgeMode(coords.sourceR + vec2(0.0, -offsetYR), coords.dest, sourceOffsetX, sourceOffsetY - offsetYR, evolveEdgeMode);
+        // Each channel's flow step, in source UV: worked out from the
+        // neighbourhood here, or, while the advected reads are drawn in parts,
+        // read from the near texture, which holds it in source frames along time.
+        vec2 stepL, stepR;
+        if (sourceNearStage == EVOLVE_ADVECTED) {
+            vec4 steps = texelFetch(sourceNearTex0, at, 0);
+            stepL = vec2(steps.x / sourceFrameCount, steps.y);
+            stepR = vec2(steps.z / sourceFrameCount, steps.w);
+        } else {
+            bool sameNeighborhood = (scaleX.x == scaleX.y) && (scaleY.x == scaleY.y) && coords.sameSourceUv;
+
+            // Sample the L-channel neighborhood (+ reuse for R when sameNeighborhood).
+            float offsetXL = neighbourL.x;
+            float offsetYL = neighbourL.y;
+            vec4 centerL = sampleWithEdgeMode(coords.sourceL, coords.dest, sourceOffsetX, sourceOffsetY, evolveEdgeMode);
+            vec4 leftL = sampleWithEdgeMode(coords.sourceL + vec2(-offsetXL, 0.0), coords.dest, sourceOffsetX - offsetXL, sourceOffsetY, evolveEdgeMode);
+            vec4 rightL = sampleWithEdgeMode(coords.sourceL + vec2(offsetXL, 0.0), coords.dest, sourceOffsetX + offsetXL, sourceOffsetY, evolveEdgeMode);
+            vec4 upL = sampleWithEdgeMode(coords.sourceL + vec2(0.0, offsetYL), coords.dest, sourceOffsetX, sourceOffsetY + offsetYL, evolveEdgeMode);
+            vec4 downL = sampleWithEdgeMode(coords.sourceL + vec2(0.0, -offsetYL), coords.dest, sourceOffsetX, sourceOffsetY - offsetYL, evolveEdgeMode);
+
+            vec4 centerR, leftR, rightR, upR, downR;
+            if (sameNeighborhood) {
+                centerR = centerL; leftR = leftL; rightR = rightL; upR = upL; downR = downL;
+            } else {
+                float offsetXR = neighbourR.x;
+                float offsetYR = neighbourR.y;
+                centerR = sampleWithEdgeMode(coords.sourceR, coords.dest, sourceOffsetX, sourceOffsetY, evolveEdgeMode);
+                leftR = sampleWithEdgeMode(coords.sourceR + vec2(-offsetXR, 0.0), coords.dest, sourceOffsetX - offsetXR, sourceOffsetY, evolveEdgeMode);
+                rightR = sampleWithEdgeMode(coords.sourceR + vec2(offsetXR, 0.0), coords.dest, sourceOffsetX + offsetXR, sourceOffsetY, evolveEdgeMode);
+                upR = sampleWithEdgeMode(coords.sourceR + vec2(0.0, offsetYR), coords.dest, sourceOffsetX, sourceOffsetY + offsetYR, evolveEdgeMode);
+                downR = sampleWithEdgeMode(coords.sourceR + vec2(0.0, -offsetYR), coords.dest, sourceOffsetX, sourceOffsetY - offsetYR, evolveEdgeMode);
+            }
+
+            // Calculate gradient (for advection) - based on magnitude differences
+            vec2 gradientL = vec2(
+                getMag(rightL.rg) - getMag(leftL.rg),
+                getMag(upL.rg) - getMag(downL.rg)
+            );
+            vec2 gradientR = vec2(
+                getMag(rightR.ba) - getMag(leftR.ba),
+                getMag(upR.ba) - getMag(downR.ba)
+            );
+
+            // Add swirl (rotate gradient 90 degrees and blend with original)
+            vec2 swirlGradientL = vec2(-gradientL.y, gradientL.x);
+            vec2 swirlGradientR = vec2(-gradientR.y, gradientR.x);
+            vec2 flowDirectionL = mix(gradientL, swirlGradientL, swirl.x);
+            vec2 flowDirectionR = mix(gradientR, swirlGradientR, swirl.y);
+
+            // Per-channel drift bias
+            vec2 driftBiasL = vec2(driftX.x, driftY.x) * 0.1;
+            vec2 driftBiasR = vec2(driftX.y, driftY.y) * 0.1;
+            flowDirectionL += driftBiasL;
+            flowDirectionR += driftBiasR;
+
+            stepL = evolveFlowStep(flowDirectionL, flow.x, neighbourL);
+            stepR = evolveFlowStep(flowDirectionR, flow.y, neighbourR);
+
+            // Diffuse: Laplacian (neighbor average - center)
+            float neighborAvgL = (getMag(leftL.rg) + getMag(rightL.rg) + getMag(upL.rg) + getMag(downL.rg)) / 4.0;
+            float neighborAvgR = (getMag(leftR.ba) + getMag(rightR.ba) + getMag(upR.ba) + getMag(downR.ba)) / 4.0;
+            laplacianL = neighborAvgL - getMag(centerL.rg);
+            laplacianR = neighborAvgR - getMag(centerR.ba);
+
+            if (sourceNearStage == EVOLVE_STEPS) {
+                outColor = vec4(stepL.x * sourceFrameCount, stepL.y, stepR.x * sourceFrameCount, stepR.y);
+                return;
+            }
+            if (sourceNearStage == EVOLVE_SPREADS) {
+                outColor = vec4(laplacianL, laplacianR, 0.0, 0.0);
+                return;
+            }
+        }
+
+        // Advect: sample from upstream position with edge mode handling
+        vec2 advectedUvL = coords.sourceL - stepL;
+        vec2 advectedUvR = coords.sourceR - stepR;
+        // An advected read is the one part's whose core holds its point.
+        sourcePartMiss = false;
+        advectedL = sampleWithEdgeMode(advectedUvL, coords.dest, sourceOffsetX - stepL.x, sourceOffsetY - stepL.y, evolveEdgeMode);
+        bool missL = sourcePartMiss;
+        sourcePartMiss = false;
+        advectedR = sampleWithEdgeMode(advectedUvR, coords.dest, sourceOffsetX - stepR.x, sourceOffsetY - stepR.y, evolveEdgeMode);
+        bool missR = sourcePartMiss;
+        if (sourcePartOn && (sourcePartChannel == 0 ? missL : missR)) discard;
+        if (sourceNearStage == EVOLVE_ADVECTED) {
+            outColor = vec4(advectedL.rg, advectedR.ba);
+            return;
+        }
     }
-
-    // Calculate gradient (for advection) - based on magnitude differences
-    vec2 gradientL = vec2(
-        getMag(rightL.rg) - getMag(leftL.rg),
-        getMag(upL.rg) - getMag(downL.rg)
-    );
-    vec2 gradientR = vec2(
-        getMag(rightR.ba) - getMag(leftR.ba),
-        getMag(upR.ba) - getMag(downR.ba)
-    );
-
-    // Add swirl (rotate gradient 90 degrees and blend with original)
-    vec2 swirlGradientL = vec2(-gradientL.y, gradientL.x);
-    vec2 swirlGradientR = vec2(-gradientR.y, gradientR.x);
-    vec2 flowDirectionL = mix(gradientL, swirlGradientL, swirl.x);
-    vec2 flowDirectionR = mix(gradientR, swirlGradientR, swirl.y);
-
-    // Per-channel drift bias
-    vec2 driftBiasL = vec2(driftX.x, driftY.x) * 0.1;
-    vec2 driftBiasR = vec2(driftX.y, driftY.y) * 0.1;
-    flowDirectionL += driftBiasL;
-    flowDirectionR += driftBiasR;
-
-    // Advect: sample from upstream position with edge mode handling
-    vec2 stepL = evolveFlowStep(flowDirectionL, flow.x, neighbourL);
-    vec2 stepR = evolveFlowStep(flowDirectionR, flow.y, neighbourR);
-    vec2 advectedUvL = coords.sourceL - stepL;
-    vec2 advectedUvR = coords.sourceR - stepR;
-    // Every part of the input holds the neighbourhood reads; an advected read
-    // is the one part's whose core holds its point.
-    sourcePartMiss = false;
-    vec4 advectedL = sampleWithEdgeMode(advectedUvL, coords.dest, sourceOffsetX - stepL.x, sourceOffsetY - stepL.y, evolveEdgeMode);
-    bool missL = sourcePartMiss;
-    sourcePartMiss = false;
-    vec4 advectedR = sampleWithEdgeMode(advectedUvR, coords.dest, sourceOffsetX - stepR.x, sourceOffsetY - stepR.y, evolveEdgeMode);
-    bool missR = sourcePartMiss;
-    if (sourcePartOn && (sourcePartChannel == 0 ? missL : missR)) discard;
-
-    // Diffuse: Laplacian (neighbor average - center)
-    float neighborAvgL = (getMag(leftL.rg) + getMag(rightL.rg) + getMag(upL.rg) + getMag(downL.rg)) / 4.0;
-    float neighborAvgR = (getMag(leftR.ba) + getMag(rightR.ba) + getMag(upR.ba) + getMag(downR.ba)) / 4.0;
-    float laplacianL = neighborAvgL - getMag(centerL.rg);
-    float laplacianR = neighborAvgR - getMag(centerR.ba);
 
     // Get magnitudes from advected samples
     float magL = getMag(advectedL.rg);

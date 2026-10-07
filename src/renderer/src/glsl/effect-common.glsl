@@ -95,6 +95,12 @@ uniform int   sourcePartAccum;
 // the second set while the totals are finished.
 uniform int   sourcePartSlot;
 uniform sampler2D sourcePartTotals1;
+// A pass drawn in parts that reads around each pixel besides its read point:
+// 0 for a pass drawn whole, else the stage of it this draw is, as the effect
+// numbers them; what an earlier stage wrote that this one reads arrives in
+// the near texture, laid out as the dest canvas.
+uniform int   sourceNearStage;
+uniform sampler2D sourceNearTex0;
 
 void gateSourcePart(vec2 sourceUv) {
   if (!sourcePartOn) return;

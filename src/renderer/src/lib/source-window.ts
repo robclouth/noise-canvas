@@ -73,6 +73,8 @@ export function sourceReadSpan(
  */
 export type SourceRead = {
   fileId: string;
+  /** The step that reads, by its index among the brush's steps. */
+  step: number;
   wantOriginal: boolean;
   /**
    * A read of the painted file itself, far from the dab: the step it is, and

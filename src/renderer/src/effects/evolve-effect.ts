@@ -10,6 +10,8 @@ import { BaseEffect, createDefaultUniforms, sourceLayout, UpdateEffectUniformsPr
 const defaultUniformValue = defaultParameterUniform(0, -100, 100);
 
 class EvolveEffect extends BaseEffect {
+  readsNearInParts = true;
+
   constructor() {
     super();
     this.materials = [

@@ -1,7 +1,7 @@
 import { buildShapeTable, type CloneShapeKey } from "@renderer/effects/clone-shapes";
 import type { EffectType } from "@renderer/effects/types";
 import { EVOLVE_SCALE_FULL_BEATS, EVOLVE_SCALE_FULL_SEMIS, NUM_MODULATORS } from "@renderer/lib/constants";
-import { impulseKey, responsePath } from "@renderer/lib/impulse-key";
+import { attractFieldKey, impulseKey, responsePath } from "@renderer/lib/impulse-key";
 import { modulatedRange, type ValueRange } from "@renderer/lib/modulation-range";
 import { originFraction, resolveBrushFootprint } from "@renderer/lib/utils";
 import { createEffectStateView, createStepStateView } from "@renderer/store";
@@ -379,10 +379,11 @@ const CUT_EDGE = 0;
  * so the extremes bound every band between.
  */
 function convolveResponseHz(view: State, ctx: ReachContext, region: ReadBox): number[] {
-  const hzAt = (pitchUv: number): number =>
-    (ctx.minFreq ?? 1) * 2 ** ((pitchUv * ctx.numBands - 0.5) / ctx.bandsPerOctave);
   const shift = stateRange(view, "convolveIrPitchShift");
-  return [hzAt(region.low), hzAt(region.high)].flatMap((f) => [f * 2 ** (-shift.hi / 12), f * 2 ** (-shift.lo / 12)]);
+  return [hzAtPitch(ctx, region.low), hzAtPitch(ctx, region.high)].flatMap((f) => [
+    f * 2 ** (-shift.hi / 12),
+    f * 2 ** (-shift.lo / 12),
+  ]);
 }
 
 /** The brush's own span on each axis, in file seconds and in pitch UV. */
@@ -436,14 +437,17 @@ export type FarRead =
   | { kind: "point"; own: ReadBox; near: ReadBox | null; far: ReadBox }
   /**
    * The effect sums reads of the input tap by tap, and `taps` holds each
-   * tap's. An effect that weighs each tap by a file it filters through names
-   * that file in `response`, with the seconds of it each tap reads.
+   * tap's. An effect that weighs each tap by another file names that file in
+   * `response`: the key the effect looks it up by, its path, null for the
+   * painted file, the seconds of it each tap reads and the bands it reads.
+   * A `sliceable` response is one each tap reads at a single bin, so a slice
+   * of it serves the taps whose bin lies in the slice.
    */
   | {
       kind: "sum";
       own: ReadBox;
       taps: ReadBox[];
-      response?: { key: string; reads: TimeSpan[]; bands: { first: number; last: number } };
+      response?: TapResponseRead;
       /**
        * What the taps read: the step's input, or the canvas as the dab finds
        * it, which an effect gathering from what it paints over reads.
@@ -453,15 +457,37 @@ export type FarRead =
       totals?: 1 | 2;
       /**
        * The effect's pass that sums the taps, by its material index, when it
-       * is not the effect's first; `prefixed` when passes of the effect run
-       * before it, which every tap box already widens by what they read.
+       * is not the effect's first; `prior` is what the effect's passes before
+       * it read to write a region, when any run.
        */
       pass?: number;
-      prefixed?: boolean;
+      prior?: (box: ReadBox) => ReadBox;
     };
 
 /** Seconds [start, end) of a file. */
 export type TimeSpan = { start: number; end: number };
+
+/** What a sum's taps read of the file they weigh themselves by. */
+export type TapResponseRead = {
+  key: string;
+  path: string | null;
+  reads: TimeSpan[];
+  bands: { first: number; last: number };
+  sliceable: boolean;
+};
+
+/** The key the file an effect weighs its taps by is held under, or null when it reads none. */
+function responseKeyOf(effect: EffectType, view: State): string | null {
+  if (effect === "convolve") return impulseKey(view);
+  const field = view.attractSourceFile?.path;
+  if (effect === "attract" && Number(view.attractMap) === ATTRACT_MAP_SOURCE && field) return attractFieldKey(field);
+  return null;
+}
+
+/** The frequency at the middle of the band at pitch UV `pitchUv`, as a band's own. */
+function hzAtPitch(ctx: ReachContext, pitchUv: number): number {
+  return (ctx.minFreq ?? 1) * 2 ** ((pitchUv * ctx.numBands - 0.5) / ctx.bandsPerOctave);
+}
 
 /** An effect that reads only the pixel it writes. */
 const OWN_PIXEL: EffectReach = { pastBrush: () => NO_REACH, aroundPixel: () => NO_REACH, acrossPitch: () => 0 };
@@ -559,16 +585,19 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
     },
     acrossPitch: (view, bandsPerOctave) => attractPitchSemis(view, bandsPerOctave),
     // The time pass sums into each pixel what lands on it from bins of its
-    // band a whole number of taps away, and the field map weighs each by the
-    // sound around it. It gathers from the canvas it paints over, or from what
+    // band a whole number of taps away, and a field map weighs each by the
+    // mass around it. It gathers from the canvas it paints over, or from what
     // the pitch pass before it wrote, which reads a few bands either side and
-    // a bin along time. A field from another file or a modulator lies past
-    // what parts hold.
+    // a bin along time. A field of the sound itself is read where the taps
+    // are; another file's is read through its window, and a modulator's off
+    // the modulator textures, which cover the view the pixel paints on.
     apart: (view, ctx, region, brush) => {
       if (widest(stateRange(view, "attractAmountX")) === 0) return null;
       const prefixed = !only(stateRange(view, "attractAmountY"), 0);
       const map = Number(view.attractMap);
-      const field = map === ATTRACT_MAP_SOURCE && !view.attractSourceFile?.path;
+      const ownField = map === ATTRACT_MAP_SOURCE && !view.attractSourceFile?.path;
+      const modulatorField = map >= ATTRACT_MAP_FIRST_MODULATOR;
+      const field = map === ATTRACT_MAP_SOURCE || modulatorField;
       if (!field && map !== ATTRACT_MAP_GRID) return null;
       const binAt = ctx.binSecondsAtPitch;
       if (!binAt) return null;
@@ -587,7 +616,7 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
       const smoothMax = Math.max(widest(smooth) * beat, strideMax);
       // A pixel's lattice reaches a smoothing, rounded up to its next tap, past
       // each tap; its taps reach the window and a stride.
-      const lattice = field ? smoothMax + tapMax : 0;
+      const lattice = ownField ? smoothMax + tapMax : 0;
       const furthest = 3 * smoothMax + strideMax;
       const reach = Math.min(half + 1, Math.floor(furthest / tapMin));
       const pitchReach = prefixed
@@ -607,11 +636,33 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
               ctx,
             )
           : box;
-      const own = before(fitBox(withEnvelopeBox(region, view, ctx), brush, ctx));
+      const latticeReach = modulatorField ? furthest + smoothMax + tapMax + strideMax : 0;
+      const envelope = withEnvelopeBox(region, view, ctx);
+      const own = fitBox(
+        { ...envelope, start: envelope.start - latticeReach, end: envelope.end + latticeReach },
+        brush,
+        ctx,
+      );
       const taps: ReadBox[] = [];
+      // Another file's field is laid over this one in proportion, and each tap
+      // reads it a lattice either side of where it gathers, in the band at its
+      // pixel's frequency.
+      const fieldPath = map === ATTRACT_MAP_SOURCE ? (view.attractSourceFile?.path ?? null) : null;
+      const fieldFile = fieldPath ? (ctx.responseSpan?.(fieldPath) ?? null) : null;
+      if (fieldPath && !fieldFile?.bandAt) return null;
+      const fieldReads: TimeSpan[] = [];
+      const fieldLattice = smoothMax + tapMax;
+      const fieldRead = (box: ReadBox): TimeSpan => {
+        const scale = (fieldFile?.seconds ?? 0) / ctx.fileSeconds;
+        return {
+          start: Math.max(0, (box.start - fieldLattice) * scale),
+          end: Math.min(fieldFile?.seconds ?? 0, (box.end + fieldLattice) * scale),
+        };
+      };
       for (let tap = -(half + 1); tap <= half + 1; tap++) {
         if (Math.abs(tap) > reach) {
           taps.push(own);
+          fieldReads.push(fieldRead(own));
           continue;
         }
         // A bin gathers only from bins its brush covers; the field it is
@@ -625,11 +676,32 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
           },
           brush,
         );
-        taps.push(
-          from ? before(fitBox({ ...from, start: from.start - lattice, end: from.end + lattice }, brush, ctx)) : own,
-        );
+        const read = from ? fitBox({ ...from, start: from.start - lattice, end: from.end + lattice }, brush, ctx) : own;
+        taps.push(read);
+        fieldReads.push(fieldRead(read));
       }
-      return { kind: "sum", own, taps, from: "canvas", totals: 2, pass: ATTRACT_TIME_PASS, prefixed };
+      const fieldBands = fieldFile?.bandAt
+        ? [hzAtPitch(ctx, region.low), hzAtPitch(ctx, region.high)].map(fieldFile.bandAt)
+        : [];
+      return {
+        kind: "sum",
+        own,
+        taps,
+        response:
+          fieldPath && fieldBands.length > 0
+            ? {
+                key: attractFieldKey(fieldPath),
+                path: fieldPath,
+                reads: fieldReads,
+                bands: { first: Math.min(...fieldBands) - 1, last: Math.max(...fieldBands) + 1 },
+                sliceable: false,
+              }
+            : undefined,
+        from: "canvas",
+        totals: 2,
+        pass: ATTRACT_TIME_PASS,
+        prior: prefixed ? before : undefined,
+      };
     },
   },
   transmute: {
@@ -647,7 +719,9 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
     acrossPitch: (view) =>
       (evolveNeighbourhoods(view) * widest(stateRange(view, "evolveScaleY")) * EVOLVE_SCALE_FULL_SEMIS) / 100,
     // While Flow can move it, each channel of a pixel takes its value from one
-    // advected read; its gradient taps read one neighbourhood around the pixel.
+    // advected read. Its gradient taps read one neighbourhood around the
+    // pixel, which the view it paints on holds, and a pass drawn in parts
+    // works out its steps there first.
     apart: (view, ctx, region, brush) => {
       if (only(stateRange(view, "evolveFlow"), 0)) return null;
       const edge = Number(view.evolveEdgeMode);
@@ -670,8 +744,8 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
       };
       return {
         kind: "point",
-        own: fitBox(withEnvelopeBox(region, view, ctx), brush, ctx),
-        near: around(1),
+        own: unionBox(fitBox(withEnvelopeBox(region, view, ctx), brush, ctx), around(1)),
+        near: null,
         far: around(EVOLVE_FLOW_NEIGHBOURHOODS),
       };
     },
@@ -719,8 +793,10 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
         taps,
         response: {
           key: impulseKey(view),
+          path: responsePath(view),
           reads,
           bands: { first: Math.min(...bands) - 1, last: Math.max(...bands) + 1 },
+          sliceable: true,
         },
       };
     },
@@ -771,17 +847,25 @@ export function pieceReach(state: State, ctx: ReachContext): TimeReach | null {
  * it runs. Each reads what the one before it wrote, so reaches along the
  * chain add up.
  */
-function chainedEffects(state: State): { effect: EffectType; view: State; step: number; repeats: number }[] {
+function chainedEffects(
+  state: State,
+): { effect: EffectType; view: State; step: number; item: number; repeats: number }[] {
   const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-  const out: { effect: EffectType; view: State; step: number; repeats: number }[] = [];
+  const out: { effect: EffectType; view: State; step: number; item: number; repeats: number }[] = [];
   for (let index = 0; index < steps.length; index++) {
     if (steps[index].enabled === false) continue;
     const step = createStepStateView(state, index);
     const repeats = Math.max(1, Math.floor(Number(step.brushIterations) || 1));
-    for (const item of step.effects) {
-      if (item.enabled)
-        out.push({ effect: item.effect, view: createEffectStateView(state, index, item), step: index, repeats });
-    }
+    const enabled = step.effects.filter((item) => item.enabled);
+    enabled.forEach((item, place) =>
+      out.push({
+        effect: item.effect,
+        view: createEffectStateView(state, index, item),
+        step: index,
+        item: place,
+        repeats,
+      }),
+    );
   }
   return out;
 }
@@ -828,83 +912,104 @@ const FOLDS_INTO_BRUSH: ReadonlySet<number> = new Set([2, 3, 4]);
 // Semitones a scale snap can move a transform's pitch shift either way.
 const SNAP_SEMIS = 6;
 
+/** One run of an effect in the brush: its step, its place among the step's enabled effects, and its iteration. */
+export type BrushUnit = { effect: EffectType; view: State; step: number; item: number; iteration: number };
+
+/** Every run of an effect the brush's enabled steps make, in the order they run. */
+export function brushUnits(state: State): BrushUnit[] {
+  const out: BrushUnit[] = [];
+  for (const entry of chainedEffects(state)) {
+    for (let iteration = 0; iteration < entry.repeats; iteration++)
+      out.push({ effect: entry.effect, view: entry.view, step: entry.step, item: entry.item, iteration });
+  }
+  return out;
+}
+
 /**
- * The region of the file the brush reads to paint `box`, where `brushes`
- * holds each step's own brush. Effects run one after another, so the region
- * is worked out from the last effect back: each widens what the one after it
- * reads by what it reads around each pixel, or maps it through its warp.
- *
- * The first effect of the first step, run once, that sets its reads of its
- * input apart (`EffectReach.apart`) returns them as `far`, with its place
- * among the step's effects as `effect`; `own` is what the brush reads besides,
- * through the view it paints on, and `all` what one view must hold to paint
- * the box without parts. The effects before it in the step write what it
- * reads, so each of its reads widens by what they read: a sum's taps already
- * are, and a point read's views widen by `before`. `prefixed` marks a far
- * read some pass runs before. `far` is null when no effect sets its reads
- * apart.
+ * A place between two passes of the brush: before unit `unit`'s pass `pass`,
+ * by material index, or its first when absent. A unit past the last is the
+ * dab's end.
  */
-export function readBoxes(
+export type StagePoint = { unit: number; pass?: number };
+
+/**
+ * The places a dab may be cut into stages: before each unit, and before an
+ * effect's pass that reads its input apart after passes of its own.
+ */
+export function stagePoints(state: State, ctx: ReachContext, box: ReadBox, brushes: readonly BrushBox[]): StagePoint[] {
+  const units = brushUnits(state);
+  const out: StagePoint[] = [];
+  units.forEach((unit, index) => {
+    out.push({ unit: index });
+    const brush = brushes[unit.step] ?? { ...box, wrapsTime: false, wrapsPitch: false };
+    const far = EFFECT_REACH[unit.effect].apart?.(unit.view, ctx, box, brush) ?? null;
+    if (far?.kind === "sum" && far.prior && far.pass !== undefined) out.push({ unit: index, pass: far.pass });
+  });
+  out.push({ unit: units.length });
+  return out;
+}
+
+/**
+ * What the passes of the brush from `from` up to `to` read to paint `box`,
+ * where `brushes` holds each step's own brush. Passes run one after another,
+ * so the region is worked out from the last back: each widens what the one
+ * after it reads by what it reads around each pixel, or maps it through its
+ * warp.
+ *
+ * When the first unit the stage runs sets its reads of its input apart
+ * (`EffectReach.apart`), they are returned as `far`; `own` is what the stage
+ * reads besides, through the view it paints on, and `all` what one view must
+ * hold to paint the box without parts. A unit whose far pass comes after
+ * passes of its own sets its reads apart only in a stage that starts at that
+ * pass. `far` is null when the first unit sets nothing apart.
+ */
+export function stageReads(
   state: State,
   ctx: ReachContext,
   box: ReadBox,
   brushes: readonly BrushBox[],
-): {
-  own: ReadBox;
-  all: ReadBox;
-  far: FarRead | null;
-  effect: number;
-  prefixed: boolean;
-  before: ((box: ReadBox) => ReadBox) | null;
-} {
-  const chain = chainedEffects(state);
+  from: StagePoint,
+  to: StagePoint,
+): { own: ReadBox; all: ReadBox; far: FarRead | null } {
+  const units = brushUnits(state);
   const brushOf = (step: number): BrushBox => brushes[step] ?? { ...box, wrapsTime: false, wrapsPitch: false };
-  const through = (index: number, region: ReadBox): ReadBox => {
-    const { effect, view, step, repeats } = chain[index];
-    let out = region;
-    for (let r = 0; r < repeats; r++) out = effectReadBox(effect, view, ctx, out, brushOf(step));
-    return out;
+  const apartOf = (index: number, region: ReadBox): FarRead | null => {
+    const { effect, view, step } = units[index];
+    return EFFECT_REACH[effect].apart?.(view, ctx, region, brushOf(step)) ?? null;
   };
-  // What the effects after each one read of what it writes.
-  const after: ReadBox[] = new Array(chain.length);
+  const whole = (index: number, region: ReadBox): ReadBox => {
+    const { effect, view, step } = units[index];
+    return effectReadBox(effect, view, ctx, region, brushOf(step));
+  };
   let region = box;
-  for (let i = chain.length - 1; i >= 0; i--) {
-    after[i] = region;
-    region = through(i, region);
+  // A stage that ends inside a unit runs only that unit's passes before its far one.
+  if (to.pass !== undefined && to.unit < units.length) {
+    const prior = to.unit > from.unit || from.pass === undefined ? apartOf(to.unit, region) : null;
+    region = prior?.kind === "sum" && prior.prior ? prior.prior(region) : whole(to.unit, region);
+    if (to.unit === from.unit) return { own: region, all: region, far: null };
   }
-  const firstStep = firstEnabledStep(state);
-  for (let i = 0; i < chain.length && chain[i].step === firstStep && chain[i].repeats === 1; i++) {
-    const { effect, view, step } = chain[i];
-    const far = EFFECT_REACH[effect].apart?.(view, ctx, after[i], brushOf(step)) ?? null;
-    if (!far) continue;
-    // A response another effect reads too is held whole for it anyway.
-    const response = far.kind === "sum" ? far.response : undefined;
-    if (
-      response &&
-      chain.some((other, j) => j !== i && other.effect === "convolve" && impulseKey(other.view) === response.key)
-    )
-      continue;
-    const prefix = (read: ReadBox): ReadBox => {
-      let out = read;
-      for (let j = i - 1; j >= 0; j--) out = through(j, out);
-      return out;
-    };
-    const own = prefix(far.own);
-    if (far.kind === "sum") {
-      const taps = far.taps.map(prefix);
-      return {
-        own,
-        all: taps.reduce(unionBox, own),
-        far: { ...far, taps },
-        effect: i,
-        prefixed: i > 0 || far.prefixed === true,
-        before: null,
-      };
-    }
-    const reads = far.near ? unionBox(far.near, far.far) : far.far;
-    return { own, all: unionBox(own, prefix(reads)), far, effect: i, prefixed: i > 0, before: i > 0 ? prefix : null };
+  for (let index = to.unit - 1; index > from.unit; index--) region = whole(index, region);
+  if (from.unit >= units.length || from.unit >= to.unit) return { own: region, all: region, far: null };
+  const far = apartOf(from.unit, region);
+  const startsAtFar = far?.kind === "sum" && far.prior ? from.pass === far.pass : from.pass === undefined;
+  // A response another unit of the stage reads too is held whole for it anyway.
+  const response = far?.kind === "sum" ? far.response : undefined;
+  const last = to.pass === undefined ? to.unit - 1 : to.unit;
+  const shared =
+    response !== undefined &&
+    units.some(
+      (other, index) =>
+        index !== from.unit &&
+        index <= last &&
+        index > from.unit &&
+        responseKeyOf(other.effect, other.view) === response.key,
+    );
+  if (!far || !startsAtFar || shared) {
+    const read = whole(from.unit, region);
+    return { own: read, all: read, far: null };
   }
-  return { own: region, all: region, far: null, effect: 0, prefixed: false, before: null };
+  const reads = far.kind === "sum" ? far.taps : [far.near ? unionBox(far.near, far.far) : far.far];
+  return { own: far.own, all: reads.reduce(unionBox, far.own), far };
 }
 
 /**

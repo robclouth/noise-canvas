@@ -1683,6 +1683,7 @@ describe("a canvas that holds a window of the file", () => {
 
     const read: SourceRead = {
       fileId: sourceFileId,
+      step: 0,
       wantOriginal: false,
       read: { start: 0, end: sourceGrid.blockFrames / 3 },
       dest: { start: 0, end: 100 },
@@ -1785,6 +1786,7 @@ describe("a canvas that holds a window of the file", () => {
     const end = blocks * grid.blockFrames;
     const read: SourceRead = {
       fileId: sourceFileId,
+      step: 0,
       wantOriginal: false,
       read: { start: 0, end },
       dest: { start: 0, end },

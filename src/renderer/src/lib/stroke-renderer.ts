@@ -37,6 +37,7 @@ import { scatterIntoTargets } from "./target-scatter";
 import { phaseTurnMaterial } from "../components/phase-turn-material";
 import { rangeCopyMaterial } from "../components/range-copy-material";
 import { BaseEffect, CommonUniforms, createDefaultUniforms, splitRatio } from "../effects/base-effect";
+import type { EffectItem } from "../effects/types";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
@@ -331,19 +332,47 @@ export interface StrokeParams {
    */
   clip?: { frameStart: number; frameEnd: number } | null;
   /**
-   * The first step's input read a part at a time, for a first pass whose read
-   * spans more than one texture of it holds.
+   * The input of the first pass the dab runs, read a part at a time, for a
+   * pass whose read spans more than one texture of it holds.
    */
   inputParts?: readonly InputPart[];
   /**
-   * The effect of the first step that reads `inputParts`, by its place among
-   * the step's enabled effects, and its pass that does, by material index:
-   * the effect's first pass when absent, and the step's first effect.
+   * Starts the dab at this pass, which reads `chain` laid out as the canvas;
+   * a pass after its step's first reads its step's input as `stepInput`.
    */
-  inputPartsEffect?: number;
-  inputPartsPass?: number;
-  /** Runs only the first step's passes before that pass, for the input of a part it reads. */
-  stopBeforePartsPass?: boolean;
+  from?: PassAt & { chain: Texture; stepInput?: Texture };
+  /** Stops the dab before this pass. */
+  to?: PassAt;
+}
+
+/**
+ * A pass of the brush: its step, by index among the brush's steps; its
+ * effect, by place among the step's enabled effects; the iteration; and the
+ * pass, by material index, the effect's first when absent. A pass that does
+ * not run stands for the first one after it that does.
+ */
+export type PassAt = { step: number; effect: number; iteration: number; pass?: number };
+
+/** One pass a step runs, as the step plans them. */
+type PlannedPass = {
+  effect: BaseEffect;
+  effectIndex: number;
+  effectState: State;
+  passIndex: number;
+  iteration: number;
+  inSwappedDomain: boolean;
+};
+
+/** Where `at` falls among a step's planned passes: the first that runs at or after it. */
+function passOrdinal(passes: readonly PlannedPass[], at: PassAt): number {
+  const pass = at.pass ?? -Infinity;
+  const index = passes.findIndex(
+    (planned) =>
+      planned.effectIndex > at.effect ||
+      (planned.effectIndex === at.effect &&
+        (planned.iteration > at.iteration || (planned.iteration === at.iteration && planned.passIndex >= pass))),
+  );
+  return index < 0 ? passes.length : index;
 }
 
 /**
@@ -726,7 +755,10 @@ export class StrokeRenderer {
   /**
    * Draws a first pass once per part of its input, each through the part's
    * own view and each channel pair on its own, so every channel of a pixel
-   * takes the read of the part whose core holds its read point.
+   * takes the read of the part whose core holds its read point. A pass that
+   * reads around each pixel too is drawn in the stages
+   * `BaseEffect.readsNearInParts` names, those over each pixel loaded through
+   * `near`.
    */
   private drawInParts(
     parts: readonly InputPart[],
@@ -734,11 +766,60 @@ export class StrokeRenderer {
     material: RawShaderMaterial,
     target: WebGLRenderTarget,
     list: PixelRangeList,
+    near?: (gate: PartGate) => void,
   ): void {
     if (parts.some((part) => part.taps)) {
       this.drawTapsInParts(parts, load, material, target, list);
       return;
     }
+    if (!near) {
+      this.drawPointParts(parts, load, material, target, list, {});
+      return;
+    }
+    const [steps, spreads, advected] = [this.viewFloatTarget(), this.viewFloatTarget(), this.viewFloatTarget()];
+    try {
+      near({ sourceNearStage: { value: 1 } });
+      this.drawRanges(material, steps, list);
+      near({ sourceNearStage: { value: 2 } });
+      this.drawRanges(material, spreads, list);
+      this.drawPointParts(parts, load, material, advected, list, {
+        sourceNearStage: { value: 3 },
+        sourceNearTex0: { value: steps.texture },
+      });
+      near({
+        sourceNearStage: { value: 4 },
+        sourceNearTex0: { value: spreads.texture },
+        sourceSpectrogramTex: { value: advected.texture },
+      });
+      this.drawRanges(material, target, list);
+    } finally {
+      steps.dispose();
+      spreads.dispose();
+      advected.dispose();
+    }
+  }
+
+  /** A float target laid out as the canvas view. */
+  private viewFloatTarget(): WebGLRenderTarget {
+    return new WebGLRenderTarget(this.view.textureWidth, this.view.textureHeight, {
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+  }
+
+  /** Draws a one-read pass once per part and channel pair, each with `extra` set too. */
+  private drawPointParts(
+    parts: readonly InputPart[],
+    load: (source: SourceFileInfo, gate: PartGate, response?: PartResponse) => void,
+    material: RawShaderMaterial,
+    target: WebGLRenderTarget,
+    list: PixelRangeList,
+    extra: PartGate,
+  ): void {
     const gl = this.gl.getContext();
     for (const part of parts) {
       if (!part.core) throw new Error("A part of a one-read pass names no core.");
@@ -755,6 +836,7 @@ export class StrokeRenderer {
         );
         for (const channel of [0, 1]) {
           load(source, {
+            ...extra,
             sourcePartOn: { value: true },
             sourcePartCore: { value: core },
             sourcePartChannel: { value: channel },
@@ -788,18 +870,7 @@ export class StrokeRenderer {
     list: PixelRangeList,
   ): void {
     const slots = parts[0]?.totals ?? 1;
-    const totals = Array.from(
-      { length: 2 * slots },
-      () =>
-        new WebGLRenderTarget(this.view.textureWidth, this.view.textureHeight, {
-          format: RGBAFormat,
-          type: FloatType,
-          minFilter: NearestFilter,
-          magFilter: NearestFilter,
-          depthBuffer: false,
-          stencilBuffer: false,
-        }),
-    );
+    const totals = Array.from({ length: 2 * slots }, () => this.viewFloatTarget());
     try {
       const held: (WebGLRenderTarget | null)[] = new Array(slots).fill(null);
       for (const [index, part] of parts.entries()) {
@@ -1168,6 +1239,66 @@ export class StrokeRenderer {
   }
 
   /**
+   * Every (effect, iteration, pass) a step renders, in order. Effects drop
+   * passes that would be a no-op at the current settings, so first and last
+   * pass bookkeeping counts what renders, not what exists. A step whose every
+   * pass drops out still runs one passthrough, which carries the source
+   * offset, the brush blend and the write of its output.
+   */
+  private plannedPassesOf(state: State, stepIndex: number): PlannedPass[] {
+    const stepState = createStepStateView(state, stepIndex);
+    const brushIterations = stepState.brushIterations as number;
+    const items = (stepState.effects as EffectItem[]).filter(({ enabled }) => enabled);
+    const planned: PlannedPass[] = [];
+    // A pass that moves the pair out of magnitude and phase leaves every pass
+    // after it reading that domain, until one moves it back.
+    let swapped = false;
+    for (const [effectIndex, effectItem] of items.entries()) {
+      const effect = this.effects[effectItem.effect];
+      if (!effect) continue;
+      const effectState = createEffectStateView(state, stepIndex, effectItem);
+      const activePasses = effect.getActivePasses?.(effectState) ?? effect.materials.map((_, index) => index);
+      if (activePasses.length === 0) continue;
+      for (let i = 0; i < brushIterations; i++) {
+        for (const passIndex of activePasses) {
+          planned.push({ effect, effectIndex, effectState, passIndex, iteration: i, inSwappedDomain: swapped });
+          swapped = effect.domainAfter?.(effectState, swapped) ?? swapped;
+        }
+      }
+    }
+    const passthrough = this.effects.passthrough;
+    if (planned.length === 0 && passthrough) {
+      planned.push({
+        effect: passthrough,
+        effectIndex: 0,
+        effectState: stepState,
+        passIndex: 0,
+        iteration: 0,
+        inSwappedDomain: false,
+      });
+    }
+    return planned;
+  }
+
+  /** Every pass the active brush's enabled steps run, step by step, as `PassAt`s. */
+  passesOf(state: State): PassAt[][] {
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+    const out: PassAt[][] = [];
+    for (let step = 0; step < steps.length; step++) {
+      if (steps[step].enabled === false) continue;
+      out.push(
+        this.plannedPassesOf(state, step).map((pass) => ({
+          step,
+          effect: pass.effectIndex,
+          iteration: pass.iteration,
+          pass: pass.passIndex,
+        })),
+      );
+    }
+    return out;
+  }
+
+  /**
    * Points the source half of a step's uniforms at the painted file, for a step
    * that reads what the steps before it produced rather than a source file.
    */
@@ -1450,6 +1581,8 @@ export class StrokeRenderer {
       sourcePartAccum: { value: 0 },
       sourcePartSlot: { value: 0 },
       sourcePartTotals1: { value: this.textures.placeholderTexture },
+      sourceNearStage: { value: 0 },
+      sourceNearTex0: { value: this.textures.placeholderTexture },
       sourceUnderOn: { value: false },
       sourceUnderTex: { value: this.textures.placeholderTexture },
       blendMode: { value: stepState.blendMode },
@@ -1726,8 +1859,21 @@ export class StrokeRenderer {
     // Generate random value seeded by position using Perlin noise
     const strokeRandom = this.randomAt(new Vector2(this.fileUvX(cursorPos.x), cursorPos.y));
 
-    const stepsRun = params.stopBeforePartsPass ? 1 : numSteps;
-    for (let stepIndex = 0; stepIndex < stepsRun; stepIndex++) {
+    // Every pass each step plans, and the steps and passes the dab runs of them.
+    const stepPasses = stepGeometries.map((geometry) => this.plannedPassesOf(state, geometry.index));
+    const { from, to } = params;
+    const firstRun = from ? stepGeometries.findIndex((geometry) => geometry.index === from.step) : 0;
+    const toStep = to ? stepGeometries.findIndex((geometry) => geometry.index === to.step) : numSteps;
+    if (firstRun < 0 || toStep < 0) throw new Error("The pass the dab starts or stops at is in no step it runs.");
+    const firstPass = from ? passOrdinal(stepPasses[firstRun], from) : 0;
+    const stopPass = to && toStep < numSteps ? passOrdinal(stepPasses[toStep], to) : Infinity;
+    const lastRun = stopPass > 0 ? Math.min(toStep, numSteps - 1) : toStep - 1;
+    const lastPass = stopPass > 0 && toStep < numSteps ? stopPass : stepPasses[lastRun]?.length;
+    if (lastRun < firstRun || (lastRun === firstRun && lastPass <= firstPass))
+      throw new Error("The dab starts at or after the pass it stops before.");
+    if (from && firstRun > 0) chainFbo = { texture: from.stepInput ?? from.chain };
+    let partsRead = false;
+    for (let stepIndex = firstRun; stepIndex <= lastRun; stepIndex++) {
       const geometry = stepGeometries[stepIndex];
       const stepState = geometry.state;
       const stepBrushSizeUv = geometry.sizeUv;
@@ -1793,10 +1939,10 @@ export class StrokeRenderer {
       const stepWrapsTime = stepWrapMode === 1 || stepWrapMode === 3;
       // The step's uniforms with `source` as the file it reads, laid out as
       // that source's view: a part of the input reads through its own.
-      const uniformsReading = (source: SourceFileInfo): CommonUniforms => {
+      const uniformsReading = (source: SourceFileInfo, asSource = readsSourceFile): CommonUniforms => {
         const sourceBpm = state.filepathsBpm?.[source.filePath] || bpm;
         const sourceDuration = sourceViewFrames(source) / source.spectrogramData.sampleRate;
-        const sourceOffsetUv = readsSourceFile
+        const sourceOffsetUv = asSource
           ? this.sourceOffsetForViews(
               source.spectrogramData,
               source.view,
@@ -1921,70 +2067,22 @@ export class StrokeRenderer {
         sourceUnderOn: { value: false },
       };
 
-      // Reset currentReadFbo to the step's input for effect processing
-      let currentReadFbo: WebGLRenderTarget | { texture: Texture } = stepInputFbo;
+      // The step's first pass reads its input, unless the dab starts later in it.
+      let currentReadFbo: WebGLRenderTarget | { texture: Texture } =
+        from && stepIndex === firstRun && firstPass > 0 ? { texture: from.chain } : stepInputFbo;
 
-      const isLastStep = stepIndex === stepsRun - 1;
+      const isLastStep = stepIndex === lastRun;
 
       const brushIterations = stepState.brushIterations as number;
 
-      // Flatten every (effect, iteration, pass) the step will render. Effects
-      // drop passes that would be a no-op at the current settings, so first/last
-      // pass bookkeeping has to count what actually renders, not what exists.
-      const plannedPasses: {
-        effect: BaseEffect;
-        effectIndex: number;
-        effectState: State;
-        passIndex: number;
-        iteration: number;
-        inSwappedDomain: boolean;
-      }[] = [];
-      // A pass that moves the pair out of magnitude and phase leaves every pass
-      // after it reading that domain, until one moves it back.
-      let swapped = false;
-      for (const [effectIndex, effectItem] of enabledEffectItems.entries()) {
-        const effect = this.effects[effectItem.effect];
-        if (!effect) continue;
-        const effectState = createEffectStateView(state, geometry.index, effectItem);
-        const activePasses = effect.getActivePasses?.(effectState) ?? effect.materials.map((_, index) => index);
-        if (activePasses.length === 0) continue;
-        for (let i = 0; i < brushIterations; i++) {
-          for (const passIndex of activePasses) {
-            plannedPasses.push({ effect, effectIndex, effectState, passIndex, iteration: i, inSwappedDomain: swapped });
-            swapped = effect.domainAfter?.(effectState, swapped) ?? swapped;
-          }
-        }
-      }
-
-      // The pass that reads the first step's input a part at a time.
-      let partsAt = 0;
-      if (stepIndex === 0 && (params.inputPartsEffect !== undefined || params.inputPartsPass !== undefined)) {
-        const effectIndex = params.inputPartsEffect ?? 0;
-        partsAt = plannedPasses.findIndex(
-          (pass) =>
-            pass.iteration === 0 &&
-            pass.effectIndex === effectIndex &&
-            (params.inputPartsPass === undefined || pass.passIndex === params.inputPartsPass),
-        );
-        if (partsAt < 0) throw new Error("The pass that reads the input in parts does not run.");
-      }
-      if (stepIndex === 0 && params.stopBeforePartsPass) plannedPasses.splice(partsAt);
-
-      // Every pass dropped out. One passthrough still has to run: it carries the
-      // source offset, the brush blend, and the write into destinationFbo.
-      if (plannedPasses.length === 0) {
-        const passthrough = this.effects.passthrough;
-        if (passthrough) {
-          plannedPasses.push({
-            effect: passthrough,
-            effectIndex: 0,
-            effectState: createStepStateView(state, geometry.index),
-            passIndex: 0,
-            iteration: 0,
-            inSwappedDomain: false,
-          });
-        }
-      }
+      // The passes the step runs: from the dab's first pass in its first
+      // step, and up to its last in its last.
+      const plannedPasses = stepPasses[stepIndex].slice(
+        stepIndex === firstRun ? firstPass : 0,
+        stepIndex === lastRun ? lastPass : undefined,
+      );
+      // The first pass the step runs, by its place among all it plans.
+      const passOffset = stepIndex === firstRun ? firstPass : 0;
 
       const iterationContexts = Array.from({ length: brushIterations }, (_, i) =>
         createModContext(stepState, { ...stepContext, iteration: brushIterations > 1 ? i / (brushIterations - 1) : 0 }),
@@ -2012,7 +2110,7 @@ export class StrokeRenderer {
       // Apply each planned pass in order
       for (let passOrdinal = 0; passOrdinal < plannedPasses.length; passOrdinal++) {
         const { effect, effectState, passIndex: p, iteration: i, inSwappedDomain } = plannedPasses[passOrdinal];
-        const isFirstOfStep = passOrdinal === 0;
+        const isFirstOfStep = passOrdinal + passOffset === 0;
         const uniformsForThisIteration = isFirstOfStep ? { ...commonUniforms } : { ...iterativeUniforms };
 
         uniformsForThisIteration.inSwappedDomain = { value: inSwappedDomain };
@@ -2078,9 +2176,20 @@ export class StrokeRenderer {
         };
 
         const ranges = isFinalPass ? finalRanges : passRanges;
-        if (stepIndex === 0 && passOrdinal === partsAt && params.inputParts && (partsAt > 0 || readsNamedFile)) {
-          // A later pass reads at a pixel's own place what the pass before it wrote there.
-          if (partsAt > 0) {
+        // The dab's first pass may read its input a part at a time: a first
+        // step's own input, a later step's, or what the pass before it wrote.
+        const partsHere =
+          stepIndex === firstRun && passOrdinal === 0 && params.inputParts !== undefined
+            ? isFirstOfStep
+              ? readsNamedFile || stepIndex > 0
+                ? "input"
+                : null
+              : "chain"
+            : null;
+        if (partsHere && params.inputParts) {
+          partsRead = true;
+          // A pass reads at a pixel's own place its input there.
+          if (partsHere === "chain" || stepIndex > 0) {
             uniformsForThisIteration.sourceUnderOn = { value: true };
             uniformsForThisIteration.sourceUnderTex = { value: inputTexture };
           }
@@ -2089,10 +2198,10 @@ export class StrokeRenderer {
             params.inputParts,
             (source, gate, response) => {
               if (read?.source !== source) {
-                const uniforms = withSourceUniforms(uniformsForThisIteration, uniformsReading(source));
+                const uniforms = withSourceUniforms(uniformsForThisIteration, uniformsReading(source, true));
                 // A later pass reads what the one before it wrote at the
                 // same place, so a part's view only shifts its reads.
-                if (partsAt > 0) {
+                if (partsHere === "chain") {
                   const start = source.view?.startFrame ?? 0;
                   const frames = sourceViewFrames(source);
                   uniforms.sourceOffsetX = { value: (this.view.startFrame - start) / frames };
@@ -2116,6 +2225,23 @@ export class StrokeRenderer {
             material,
             currentWriteFbo,
             ranges,
+            // The stages over each pixel read the input laid out as the
+            // canvas, the input under the pixel.
+            effect.readsNearInParts
+              ? (gate) =>
+                  effect.updateEffectUniforms({
+                    commonUniforms: {
+                      ...withSourceUniforms(uniformsForThisIteration, iterativeUniforms),
+                      sourceSpectrogramTex: { value: uniformsForThisIteration.sourceUnderTex.value },
+                      ...gate,
+                    },
+                    passIndex: p,
+                    file: stepSource,
+                    state: effectState,
+                    modContext: iterationContext,
+                    impulses: params.impulses,
+                  })
+              : undefined,
           );
         } else {
           effect.updateEffectUniforms({
@@ -2135,6 +2261,7 @@ export class StrokeRenderer {
       // The output of this step becomes the input for the next step
       chainFbo = currentReadFbo;
     }
+    if (params.inputParts && !partsRead) throw new Error("The dab's first pass does not read its input in parts.");
 
     // A committed stroke folds its footprint back into the canonical buffer,
     // which keeps currentReadFBO canonical; a preview leaves it in the partner

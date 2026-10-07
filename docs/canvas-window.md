@@ -437,37 +437,55 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     reaches `beginDisplaySeedFromStore` with no coarse strip to stand in, and
     the levels fill in one block at a time.
 
-16. **A dab the window cannot hold is painted beside the canvas, in tiles.**
-    `besideFor` cuts it into tiles of bands over spans of frames. `readBoxes`
-    says what region a tile reads: from the brush's last effect back, each
-    effect widens the region by what it reads around a pixel, maps it through
-    its warp, or takes its step's whole brush when it may read anywhere in it.
-    A tile reads through a view of that region alone, its edges moved out to
-    two bins of the coarsest band (`canvasViewOfFrames`), so a bin keeps its
-    parity and no view is a block wider than its reads. A tile that reads
-    more than a window holds is halved across bands or blocks, whichever
-    reads less; one inside a block halves in time at two coarsest bins. A
-    tile that cannot read less is refused.
-    The first effect of the first step, run once, that may set its reads of
-    its input apart does: `EFFECT_REACH[effect].apart` returns them as a
-    `FarRead`, and `readBoxes` hands them back beside `own`, what the brush
-    reads besides through the view it paints on, and `all`, what one view
-    must hold to paint the tile without parts. No code outside the reach table
-    names an effect. The effects before it in the step write what it reads,
-    so each of its reads widens by what they read (`before`; a sum's taps
-    widen in place), its parts are painted with those effects first, as for
-    an attract's pitch pass below, and the renderer finds the effect by its
-    place among the step's enabled effects (`inputPartsEffect`). A pass after
-    the first reads what the one before it wrote at the same place, so its
-    parts take the step's offsets of none: only the shift and scale from the
-    view it paints on to the part's. A `FarRead` is one of two kinds:
+16. **A dab the window cannot hold is painted beside the canvas, in tiles,
+    and in stages when no one tile can run every pass.** The brush runs as
+    units, one for each enabled effect and iteration (`brushUnits`), and a
+    dab may be cut between any two units, or before an effect's pass that
+    reads apart after passes of its own (`stagePoints`). `stageReads` says
+    what region a stage reads to write a region: from the stage's last pass
+    back, each widens the region by what it reads around a pixel, maps it
+    through its warp, or takes its step's whole brush when it may read
+    anywhere in it. A tile reads through a view of that region alone, its
+    edges moved out to two bins of the coarsest band (`canvasViewOfFrames`),
+    so a bin keeps its parity and no view is a block wider than its reads. A
+    tile that reads more than a window holds is halved across bands or
+    blocks, whichever reads less; one inside a block halves in time at two
+    coarsest bins (`planTiles`). A stage whose smallest tiles, at the corners
+    of its region, cannot be painted fails at once.
+    `planStages` works back from the dab's end: each stage runs as many
+    passes as its tiles can hold, and the stage before it writes the region
+    every view the later stage binds lies within (`regionOfViews`). The
+    stages paint first to last, and a later stage reads what the stages
+    before it wrote as its input (`StageInput`), through views laid out as
+    any other, so no tile ever runs more passes than it can hold. What a
+    stage writes is kept over its region when that holds no more than four
+    windows and `KEPT_STAGE_TEXELS`; past that, the stage is painted again
+    under each view a later stage reads, as tiles over that view alone. A
+    later stage's tile whose views fit reads its input as one part. A stage that starts after the first pass of a step past the first
+    also reads that step's input, the blend base and the modulators' input,
+    so the stage before it starts no earlier than the step does, and what
+    that step's first stage reads is kept until the step is done. A stage
+    holds only what its own passes read of other files (`stageSpan`). The
+    renderer starts a dab at any pass and stops it before any other
+    (`StrokeParams.from` and `to`, as `PassAt`), and throws when the dab
+    would run nothing.
+    The first unit of a stage that may set its reads of its input apart
+    does: `EFFECT_REACH[effect].apart` returns them as a `FarRead`, and
+    `stageReads` hands them back beside `own`, what the stage reads besides
+    through the view it paints on, and `all`, what one view must hold to
+    paint the tile without parts. No code outside the reach table names an
+    effect. A first stage reads its parts off the file; a later one off what
+    the stages before it kept. A pass after its step's first reads what the
+    one before it wrote at the same place, so its parts take only the shift
+    and scale from the view it paints on to the part's; a step's first pass
+    reads its parts as the first step reads its own. A `FarRead` is one of
+    two kinds:
     - **point**: each channel of a pixel takes its value from one read point
       of the input: a transform that warps or shifts, or an evolve whose Flow
       can move its read. `far` holds every such point and `near` what else
-      the effect reads of the input, which every part must hold: an evolve's
-      gradient taps, a neighbourhood around the pixel. A shader marks its
-      read point by clearing `sourcePartMiss` before the read and taking it
-      after; the neighbourhood reads before it set nothing that counts. The input is read through a view of its own, so
+      the effect reads of the input, which every part must hold. A shader
+      marks its read point by clearing `sourcePartMiss` before the read and
+      taking it after. The input is read through a view of its own, so
       reversing a whole file reads its far end, and a shift reads the one box
       it lands on, without one view spanning both. When that view holds more
       than a window, the input is read in parts (`InputPart`): the far box is
@@ -477,11 +495,15 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
       channel whose read point lies in its core and discards the rest
       (`gateSourcePart`), so every pixel takes one part's read, and the parts
       at the box's edges take every read past it. While a pass is drawn in
-      parts, Bleed zero-pads a read past the file, not past the part. A
-      part's view is one span holding its core and `near` both, so a core far
-      along both axes at once makes the view large: an evolve at its widest
-      in time and in pitch together on a slow file still refuses on a small
-      window.
+      parts, Bleed zero-pads a read past the file, not past the part. An
+      evolve's gradient taps read a neighbourhood around the pixel, which the
+      view it paints on holds (its `own`), so its parts hold only their cores:
+      an effect that `readsNearInParts` draws in four stages, the first two
+      over each pixel's own neighbourhood, writing its flow steps and spread
+      terms, the third a part at a time, reading the steps, and the last over
+      each pixel, reading what the parts wrote and the spread terms. They
+      share one sampler (`sourceNearTex0`): the evolve shader binds nearly as
+      many textures as a fragment shader may, and two more fail to link it.
     - **sum**: the effect sums reads of the input tap by tap: a repeat's
       copies along time, or a convolve's taps. `taps` holds each tap's region.
       When no one view holds them all, the taps are taken in order, as many to
@@ -489,46 +511,42 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
       the group's sum to the totals the groups before it left in one of two
       targets in turn; a last draw turns the totals into the pass's output.
       The totals ride on the dest texture while a group adds to them and on
-      the source texture while they are finished, because the repeat pass
-      already samples all the textures a fragment shader may. A shader reads
-      only the taps `sourcePartTaps` names while `sourcePartAccum` is 1, and
-      none while it is 2.
-      A convolve weighs each tap by one bin of its response, so `response`
-      names that file and the seconds of it each tap reads; each tap moves its
-      read by the response bin at the tile's own frequencies, so a tile of a
-      few octaves reads tight boxes. When a window over the response holds
-      only part of what the taps read, a group also takes the view of the
-      response its taps read (`TapResponse`), over the response bands the
-      tile reads, and binds it in place of the window (`partResponse`); the
-      tile then holds no window over the response. A group grows while both
-      views fit (`canvasTexelsOfFrames` counts them without building them),
-      and its last tap is found by halving, since the views only grow as taps
-      join. A tile whose reads of other files no window holds counts as
-      reading without end, so the planner reads it in groups rather than
-      halving it in search of a size at which it fits. An attract whose pitch
-      pull is off runs only its time pass, which gathers into each bin what
-      lands on it from bins of its band a whole number of taps away, weighed
-      by the sound around each (`from: "canvas"`: it gathers from the canvas
-      it paints over, so its parts hold the canvas as the dab finds it). It
-      keeps a complex sum and an energy for each channel, two sets of four
+      the source texture while they are finished. A shader reads only the
+      taps `sourcePartTaps` names while `sourcePartAccum` is 1, and none while
+      it is 2.
+      An effect that weighs each tap by another file names it in `response`:
+      the key it looks the file up by, its path, the seconds of it each tap
+      reads, and the bands. A convolve weighs each tap by one bin of its
+      response; each tap moves its read by the response bin at the tile's own
+      frequencies, so a tile of a few octaves reads tight boxes. When a window
+      over the response holds only part of what the taps read, a group also
+      takes the view of the response its taps read (`TapResponse`), over the
+      response bands the tile reads, and binds it in place of the window
+      (`partResponse`); the tile then holds no window over the response. A
+      group grows while both views fit (`canvasTexelsOfFrames` counts them
+      without building them), and its last tap is found by halving, since the
+      views only grow as taps join. When even one tap's response read holds
+      more than a window, as an IR Start a pattern sweeps makes it, a
+      `sliceable` response is cut into slices on the response grid's quantum
+      (`responseSlices`) and the group is drawn once per slice: a tap reads
+      its bin from the one slice that holds it, so each slice adds the taps
+      whose bins lie in it. A tile whose reads of other files no window holds
+      counts as reading without end, so the planner reads it in groups rather
+      than halving it in search of a size at which it fits.
+      An attract's time pass gathers into each bin what lands on it from bins
+      of its band a whole number of taps away, weighed by a field around each
+      tap. A first stage gathers from the canvas it paints over
+      (`from: "canvas"`), so its parts hold the canvas as the dab finds it.
+      It keeps a complex sum and an energy for each channel, two sets of four
       totals (`totals: 2`): a group draws once for each set, and the finish
-      takes the second set through `sourcePartTotals1`. A field from another
-      file or a modulator lies past what parts hold, so those maps keep the
-      whole read. With the pitch pull on, the time pass comes second and
-      gathers what the pitch pass wrote: the read names its pass by material
-      index (`pass`) and is `prefixed`, and every tap box widens by what the
-      pitch pass reads. Each part is then painted first: the dab, stopped
-      before that pass (`stopBeforePartsPass`), on a renderer over the part's
-      view, whose whole view the time pass then reads (`besideOver`). The
-      renderer finds the pass among those it plans (`inputPartsPass`) and
-      throws when it does not run; while it reads the parts, its reads at a
-      pixel's own place take what the pass before it wrote. Each tap's part still
-      holds its whole field lattice, about two smoothings along time, over
-      every band the pitch pass reads: an attract at its widest along both
-      axes on a slow file can still need more than a small window holds, and
-      refuses there. An IR Start a pattern
-      sweeps widely moves every tap's response read across the sweep, which no
-      group of taps shrinks, so such a dab still refuses on a small window.
+      takes the second set through `sourcePartTotals1`. A field of the sound
+      itself is read where the taps are, so each tap's box holds its lattice; a
+      modulator's field is read off the modulator textures, so the time pass's
+      `own` holds the lattice around every pixel; another file's field is the
+      taps' `response`, not sliceable, since a tap's pull weighs a whole
+      lattice. With the pitch pull on, the time pass comes second: the read
+      names its pass by material index (`pass`) and what the pitch pass reads
+      (`prior`), and the time pass starts a stage of its own.
       A wrapped read folds across the whole axis, so a brush that wraps is never
       read in parts. While the input is apart, every read of it at a pixel's own
       place reads the input laid over the view the dab paints on
