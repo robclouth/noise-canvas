@@ -356,7 +356,11 @@ export type DispatchOptions = {
     inputParts?: readonly InputPart[];
     /** The key of a response each part binds its own share of, which no window holds. */
     partResponse?: string;
-    /** The pass of the brush's first effect that reads `inputParts`, by its material index. */
+    /**
+     * The effect of the first step that reads `inputParts`, by its place among
+     * the step's enabled effects, and its pass that does, by material index.
+     */
+    inputPartsEffect?: number;
     inputPartsPass?: number;
     /** Paints only the first step's passes before that pass. */
     stopBeforePartsPass?: boolean;
@@ -538,6 +542,7 @@ export function dispatchStroke(
           selection: state.filesSelection[fileId] ?? null,
           clip: beside && clip ? clipToView(beside.view, clip) : (canvas?.clipToCanvas(clip ?? null) ?? null),
           inputParts: beside?.inputParts,
+          inputPartsEffect: beside?.inputPartsEffect,
           inputPartsPass: beside?.inputPartsPass,
           stopBeforePartsPass: beside?.stopBeforePartsPass,
         },
@@ -878,7 +883,21 @@ type BesideTile = {
    * The frames and bands the first step reads apart, when it does: where its
    * read points land, and what it reads besides that every part must hold.
    */
-  inputBox: { frames: FrameSpan; bands: BandSpan; near: { frames: FrameSpan; bands: BandSpan } | null } | null;
+  inputBox: {
+    frames: FrameSpan;
+    bands: BandSpan;
+    near: { frames: FrameSpan; bands: BandSpan } | null;
+    /** What the passes before the far one read to write a region, when any run. */
+    before: ((box: ReadBox) => ReadBox) | null;
+  } | null;
+  /** The view a tile read in parts paints on, when not its whole view. */
+  partsView?: CanvasView;
+  /**
+   * The first step's effect that reads apart, by its place among the step's
+   * effects, its pass that does, by material index, and whether passes run
+   * before it.
+   */
+  farPass: { effect: number; pass: number | undefined; prefixed: boolean } | null;
   /**
    * For a first step that sums taps: the view of what it reads besides those
    * taps, the frames and bands each tap reads, and the file the taps weigh
@@ -892,9 +911,6 @@ type BesideTile = {
     /** What the taps read: the step's input, or the canvas as the dab finds it. */
     from: "input" | "canvas";
     totals: 1 | 2;
-    /** The first effect's pass that sums the taps, by its material index, and whether passes run before it. */
-    pass: number | undefined;
-    prefixed: boolean;
   } | null;
   /** The input read a part at a time, when one view of it holds more than a window. */
   parts?: InputPartPlan[];
@@ -1033,7 +1049,7 @@ function besideTiling(
     };
   };
   const tileOf = (bands: BandSpan, frames: FrameSpan): BesideTile => {
-    const { own, far } = readBoxes(
+    const { own, all, far, effect, prefixed, before } = readBoxes(
       state,
       ctx,
       {
@@ -1046,21 +1062,23 @@ function besideTiling(
     );
     const taps = far?.kind === "sum" ? far.taps : null;
     const point = far?.kind === "point" ? far : null;
-    const input = point && (point.near ? unionBox(point.near, point.far) : point.far);
+    // A far read the passes before it write is read off what they paint,
+    // never off the step's input apart.
+    const input = point && !prefixed ? (point.near ? unionBox(point.near, point.far) : point.far) : null;
     // What the brush reads with its copies along time on the tile's own view.
-    const whole = taps ? taps.reduce(unionBox, own) : own;
+    const whole = taps ? taps.reduce(unionBox, own) : point && prefixed ? all : own;
     const read = input ? unionBox(own, input) : whole;
     const reads = framesOfBox(read);
     const readBands = bandsOfBox(read, numBands);
     // The first step reads its input where the warp puts it; other files it
     // reads there are read only there, not over the span to the dab.
     const others: ReadPart = input ? { first: framesOfBox(input), rest: framesOfBox(own) } : reads;
-    if (!input || inputApart) {
+    if (!(input || point) || inputApart) {
       const spanOf = (box: ReadBox): { frames: FrameSpan; bands: BandSpan } => ({
         frames: framesOfBox(box),
         bands: bandsOfBox(box, numBands),
       });
-      const inputBox = point && { ...spanOf(point.far), near: point.near && spanOf(point.near) };
+      const inputBox = point && { ...spanOf(point.far), near: point.near && spanOf(point.near), before };
       const copies =
         taps && inputApart
           ? {
@@ -1069,13 +1087,13 @@ function besideTiling(
               response: far?.kind === "sum" && far.response ? tapResponse(far.response) : null,
               from: far?.kind === "sum" ? (far.from ?? "input") : "input",
               totals: far?.kind === "sum" ? (far.totals ?? 1) : 1,
-              pass: far?.kind === "sum" ? far.pass : undefined,
-              prefixed: far?.kind === "sum" && far.prefixed === true,
             }
           : null;
+      const apart = (point || copies) && far;
       return {
         view: viewOfBox(whole),
         input: input && viewOfBox(input),
+        partsView: point && prefixed ? viewOfBox(own) : undefined,
         bands,
         frames,
         reads,
@@ -1083,10 +1101,11 @@ function besideTiling(
         others,
         inputBox,
         copies,
+        farPass: apart ? { effect, pass: far.kind === "sum" ? far.pass : undefined, prefixed } : null,
       };
     }
     return {
-      view: viewOfBox(firstReadsHere ? unionBox(own, input) : own),
+      view: viewOfBox(firstReadsHere ? read : own),
       input: null,
       bands,
       frames,
@@ -1095,6 +1114,7 @@ function besideTiling(
       others,
       inputBox: null,
       copies: null,
+      farPass: null,
     };
   };
   const framesOf = (from: number, to: number): FrameSpan => ({
@@ -1146,15 +1166,25 @@ function besideTiling(
   const partsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const box = tile.inputBox;
     if (!partable || !box) return null;
-    const { near } = box;
-    // A part's view holds what the pass reads besides its read points too.
-    const viewOfPart = (frames: FrameSpan, bands: BandSpan): CanvasView =>
-      near
-        ? viewOfCore(
-            { start: Math.min(frames.start, near.frames.start), end: Math.max(frames.end, near.frames.end) },
-            { first: Math.min(bands.first, near.bands.first), last: Math.max(bands.last, near.bands.last) },
-          )
-        : viewOfCore(frames, bands);
+    const { near, before } = box;
+    // A part's view holds what the pass reads besides its read points too, and
+    // what the passes before it read to write all that.
+    const viewOfPart = (frames: FrameSpan, bands: BandSpan): CanvasView => {
+      const core = near
+        ? {
+            frames: { start: Math.min(frames.start, near.frames.start), end: Math.max(frames.end, near.frames.end) },
+            bands: { first: Math.min(bands.first, near.bands.first), last: Math.max(bands.last, near.bands.last) },
+          }
+        : { frames, bands };
+      if (!before) return viewOfCore(core.frames, core.bands);
+      const widened = before({
+        start: core.frames.start / sampleRate,
+        end: core.frames.end / sampleRate,
+        low: bandIndexToPitchUv(core.bands.last + 1, numBands),
+        high: bandIndexToPitchUv(core.bands.first, numBands),
+      });
+      return viewOfCore(framesOfBox(widened), bandsOfBox(widened, numBands));
+    };
     const parts: { frames: FrameSpan; bands: BandSpan; view: CanvasView }[] = [];
     const pending = [{ frames: box.frames, bands: box.bands, view: viewOfPart(box.frames, box.bands) }];
     for (let part = pending.pop(); part; part = pending.pop()) {
@@ -1327,9 +1357,10 @@ function besideFor(
       return groups && { view: copies.own, parts: groups };
     }
     if (!canvas.othersFit(span.needs, tile.others)) return null;
-    if (tile.view.texels > budget) return null;
+    const view = tile.partsView ?? tile.view;
+    if (view.texels > budget) return null;
     const parts = partsOf(tile, budget, MAX_BESIDE_TILES - partCount);
-    return parts && { view: tile.view, parts };
+    return parts && { view, parts };
   };
   // Texels a tile reads: its view, and its input when apart. One whose reads of
   // other files no window holds reads them in parts too, whatever its size.
@@ -1419,7 +1450,8 @@ async function paintTileBeside(
   const response = tile.parts && copies?.response ? copies.response : null;
   const needs = response && copies ? needsInGroups(span.needs, copies) : span.needs;
   if (!(await canvas.holdOthers(needs, tile.others))) return null;
-  const prefixed = tile.parts && copies?.prefixed ? copies : null;
+  const far = tile.farPass;
+  const prefixed = tile.parts && far?.prefixed ? far : null;
   // A part a later pass reads holds what the passes before it paint there.
   const before = prefixed
     ? async (part: CanvasView): Promise<Float32Array | null> => {
@@ -1433,8 +1465,10 @@ async function paintTileBeside(
             beside: {
               renderer: set.beside,
               view: part,
+              inputPartsEffect: prefixed.effect,
               inputPartsPass: prefixed.pass,
               stopBeforePartsPass: true,
+              partResponse: response?.key,
               reads: tile.others,
             },
           };
@@ -1475,7 +1509,8 @@ async function paintTileBeside(
         view,
         input: input?.source,
         inputParts: parts?.parts,
-        inputPartsPass: copies?.pass,
+        inputPartsEffect: parts ? far?.effect : undefined,
+        inputPartsPass: parts ? far?.pass : undefined,
         partResponse: response?.key,
         reads: tile.others,
       },

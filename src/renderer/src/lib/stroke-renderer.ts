@@ -336,9 +336,11 @@ export interface StrokeParams {
    */
   inputParts?: readonly InputPart[];
   /**
-   * The pass of the brush's first effect that reads `inputParts`, by its
-   * material index: the first pass the step runs when absent.
+   * The effect of the first step that reads `inputParts`, by its place among
+   * the step's enabled effects, and its pass that does, by material index:
+   * the effect's first pass when absent, and the step's first effect.
    */
+  inputPartsEffect?: number;
   inputPartsPass?: number;
   /** Runs only the first step's passes before that pass, for the input of a part it reads. */
   stopBeforePartsPass?: boolean;
@@ -1931,6 +1933,7 @@ export class StrokeRenderer {
       // pass bookkeeping has to count what actually renders, not what exists.
       const plannedPasses: {
         effect: BaseEffect;
+        effectIndex: number;
         effectState: State;
         passIndex: number;
         iteration: number;
@@ -1939,7 +1942,7 @@ export class StrokeRenderer {
       // A pass that moves the pair out of magnitude and phase leaves every pass
       // after it reading that domain, until one moves it back.
       let swapped = false;
-      for (const effectItem of enabledEffectItems) {
+      for (const [effectIndex, effectItem] of enabledEffectItems.entries()) {
         const effect = this.effects[effectItem.effect];
         if (!effect) continue;
         const effectState = createEffectStateView(state, geometry.index, effectItem);
@@ -1947,7 +1950,7 @@ export class StrokeRenderer {
         if (activePasses.length === 0) continue;
         for (let i = 0; i < brushIterations; i++) {
           for (const passIndex of activePasses) {
-            plannedPasses.push({ effect, effectState, passIndex, iteration: i, inSwappedDomain: swapped });
+            plannedPasses.push({ effect, effectIndex, effectState, passIndex, iteration: i, inSwappedDomain: swapped });
             swapped = effect.domainAfter?.(effectState, swapped) ?? swapped;
           }
         }
@@ -1955,10 +1958,13 @@ export class StrokeRenderer {
 
       // The pass that reads the first step's input a part at a time.
       let partsAt = 0;
-      if (stepIndex === 0 && params.inputPartsPass !== undefined) {
-        const first = enabledEffectItems[0] && this.effects[enabledEffectItems[0].effect];
+      if (stepIndex === 0 && (params.inputPartsEffect !== undefined || params.inputPartsPass !== undefined)) {
+        const effectIndex = params.inputPartsEffect ?? 0;
         partsAt = plannedPasses.findIndex(
-          (pass) => pass.iteration === 0 && pass.effect === first && pass.passIndex === params.inputPartsPass,
+          (pass) =>
+            pass.iteration === 0 &&
+            pass.effectIndex === effectIndex &&
+            (params.inputPartsPass === undefined || pass.passIndex === params.inputPartsPass),
         );
         if (partsAt < 0) throw new Error("The pass that reads the input in parts does not run.");
       }
@@ -1971,6 +1977,7 @@ export class StrokeRenderer {
         if (passthrough) {
           plannedPasses.push({
             effect: passthrough,
+            effectIndex: 0,
             effectState: createStepStateView(state, geometry.index),
             passIndex: 0,
             iteration: 0,
@@ -2082,7 +2089,20 @@ export class StrokeRenderer {
             params.inputParts,
             (source, gate, response) => {
               if (read?.source !== source) {
-                read = { source, uniforms: withSourceUniforms(uniformsForThisIteration, uniformsReading(source)) };
+                const uniforms = withSourceUniforms(uniformsForThisIteration, uniformsReading(source));
+                // A later pass reads what the one before it wrote at the
+                // same place, so a part's view only shifts its reads.
+                if (partsAt > 0) {
+                  const start = source.view?.startFrame ?? 0;
+                  const frames = sourceViewFrames(source);
+                  uniforms.sourceOffsetX = { value: (this.view.startFrame - start) / frames };
+                  uniforms.sourceOffsetY = { value: 0 };
+                  uniforms.sourceTimeScale = { value: this.viewFrameCount / frames };
+                  uniforms.sourceBandScale = { value: 1 };
+                  uniforms.sourceTimeOffset = { value: defaultParameterUniform(0, -1, 1) };
+                  uniforms.sourcePitchOffset = { value: defaultParameterUniform(0, -1, 1) };
+                }
+                read = { source, uniforms };
               }
               effect.updateEffectUniforms({
                 commonUniforms: { ...read.uniforms, ...gate },

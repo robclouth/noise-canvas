@@ -834,38 +834,77 @@ const SNAP_SEMIS = 6;
  * is worked out from the last effect back: each widens what the one after it
  * reads by what it reads around each pixel, or maps it through its warp.
  *
- * The brush's first effect, run once, reads the file as the first step's
- * input. One that sets those reads apart (`EffectReach.apart`) returns them
- * as `far`, and `own` is what the brush reads besides. `far` is null when the
- * first effect reads as any other does.
+ * The first effect of the first step, run once, that sets its reads of its
+ * input apart (`EffectReach.apart`) returns them as `far`, with its place
+ * among the step's effects as `effect`; `own` is what the brush reads besides,
+ * through the view it paints on, and `all` what one view must hold to paint
+ * the box without parts. The effects before it in the step write what it
+ * reads, so each of its reads widens by what they read: a sum's taps already
+ * are, and a point read's views widen by `before`. `prefixed` marks a far
+ * read some pass runs before. `far` is null when no effect sets its reads
+ * apart.
  */
 export function readBoxes(
   state: State,
   ctx: ReachContext,
   box: ReadBox,
   brushes: readonly BrushBox[],
-): { own: ReadBox; far: FarRead | null } {
+): {
+  own: ReadBox;
+  all: ReadBox;
+  far: FarRead | null;
+  effect: number;
+  prefixed: boolean;
+  before: ((box: ReadBox) => ReadBox) | null;
+} {
   const chain = chainedEffects(state);
-  const [first] = chain;
+  const brushOf = (step: number): BrushBox => brushes[step] ?? { ...box, wrapsTime: false, wrapsPitch: false };
+  const through = (index: number, region: ReadBox): ReadBox => {
+    const { effect, view, step, repeats } = chain[index];
+    let out = region;
+    for (let r = 0; r < repeats; r++) out = effectReadBox(effect, view, ctx, out, brushOf(step));
+    return out;
+  };
+  // What the effects after each one read of what it writes.
+  const after: ReadBox[] = new Array(chain.length);
   let region = box;
-  const brushOf = (step: number): BrushBox => brushes[step] ?? { ...region, wrapsTime: false, wrapsPitch: false };
-  for (let i = chain.length - 1; i >= 1; i--) {
-    const { effect, view, step, repeats } = chain[i];
-    const brush = brushOf(step);
-    for (let r = 0; r < repeats; r++) region = effectReadBox(effect, view, ctx, region, brush);
+  for (let i = chain.length - 1; i >= 0; i--) {
+    after[i] = region;
+    region = through(i, region);
   }
-  if (!first) return { own: region, far: null };
-  const leads = first.step === firstEnabledStep(state) && first.repeats === 1;
-  const far = leads ? (EFFECT_REACH[first.effect].apart?.(first.view, ctx, region, brushOf(first.step)) ?? null) : null;
-  // A response another effect reads too is held whole for it anyway.
-  const shared =
-    far?.kind === "sum" &&
-    far.response !== undefined &&
-    chain.slice(1).some((later) => later.effect === "convolve" && impulseKey(later.view) === far.response?.key);
-  if (far && !shared) return { own: far.own, far };
-  const brush = brushOf(first.step);
-  for (let r = 0; r < first.repeats; r++) region = effectReadBox(first.effect, first.view, ctx, region, brush);
-  return { own: region, far: null };
+  const firstStep = firstEnabledStep(state);
+  for (let i = 0; i < chain.length && chain[i].step === firstStep && chain[i].repeats === 1; i++) {
+    const { effect, view, step } = chain[i];
+    const far = EFFECT_REACH[effect].apart?.(view, ctx, after[i], brushOf(step)) ?? null;
+    if (!far) continue;
+    // A response another effect reads too is held whole for it anyway.
+    const response = far.kind === "sum" ? far.response : undefined;
+    if (
+      response &&
+      chain.some((other, j) => j !== i && other.effect === "convolve" && impulseKey(other.view) === response.key)
+    )
+      continue;
+    const prefix = (read: ReadBox): ReadBox => {
+      let out = read;
+      for (let j = i - 1; j >= 0; j--) out = through(j, out);
+      return out;
+    };
+    const own = prefix(far.own);
+    if (far.kind === "sum") {
+      const taps = far.taps.map(prefix);
+      return {
+        own,
+        all: taps.reduce(unionBox, own),
+        far: { ...far, taps },
+        effect: i,
+        prefixed: i > 0 || far.prefixed === true,
+        before: null,
+      };
+    }
+    const reads = far.near ? unionBox(far.near, far.far) : far.far;
+    return { own, all: unionBox(own, prefix(reads)), far, effect: i, prefixed: i > 0, before: i > 0 ? prefix : null };
+  }
+  return { own: region, all: region, far: null, effect: 0, prefixed: false, before: null };
 }
 
 /**

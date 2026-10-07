@@ -448,11 +448,19 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
     more than a window holds is halved across bands or blocks, whichever
     reads less; one inside a block halves in time at two coarsest bins. A
     tile that cannot read less is refused.
-    The brush's first effect, run once, may set its reads of the first step's
-    input apart: `EFFECT_REACH[effect].apart` returns them as a `FarRead`, and
-    `readBoxes` hands them back beside `own`, what the brush reads besides
-    through the view it paints on. No code outside the reach table names an
-    effect. A `FarRead` is one of two kinds:
+    The first effect of the first step, run once, that may set its reads of
+    its input apart does: `EFFECT_REACH[effect].apart` returns them as a
+    `FarRead`, and `readBoxes` hands them back beside `own`, what the brush
+    reads besides through the view it paints on, and `all`, what one view
+    must hold to paint the tile without parts. No code outside the reach table
+    names an effect. The effects before it in the step write what it reads,
+    so each of its reads widens by what they read (`before`; a sum's taps
+    widen in place), its parts are painted with those effects first, as for
+    an attract's pitch pass below, and the renderer finds the effect by its
+    place among the step's enabled effects (`inputPartsEffect`). A pass after
+    the first reads what the one before it wrote at the same place, so its
+    parts take the step's offsets of none: only the shift and scale from the
+    view it paints on to the part's. A `FarRead` is one of two kinds:
     - **point**: each channel of a pixel takes its value from one read point
       of the input: a transform that warps or shifts, or an evolve whose Flow
       can move its read. `far` holds every such point and `near` what else

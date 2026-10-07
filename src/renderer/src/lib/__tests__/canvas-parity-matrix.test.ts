@@ -505,6 +505,39 @@ const SCENARIOS: {
     ],
   })),
   ...[
+    {
+      name: "a dynamics then a wide reversal",
+      effects: ["dynamics", "transform"] as EffectType[],
+      beats: 31,
+      step: { dynamicsGainDb: -6, ...REVERSE },
+    },
+    {
+      name: "a blur then the widest copies",
+      effects: ["blur", "clone"] as EffectType[],
+      beats: 4,
+      step: { blurAmountTime: 10, cloneCountX: 63, cloneSpaceBeats: 32, cloneEdgeMode: 1 },
+    },
+    {
+      name: "a dynamics then a convolve through its longest response",
+      effects: ["dynamics", "convolve"] as EffectType[],
+      beats: 4,
+      step: { dynamicsGainDb: -6, convolveIrSize: 512 },
+    },
+    {
+      name: "a dynamics then an evolve wide in time",
+      effects: ["dynamics", "evolve"] as EffectType[],
+      beats: 4,
+      step: { dynamicsGainDb: -6, evolveScaleX: 97, evolveFlow: 40 },
+    },
+  ].map(({ name, effects, beats, step }) => ({
+    name: `${name}, the second effect's input read in parts`,
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    otherWindowBlocks: SMALL_WINDOW_BLOCKS,
+    dabs: (seconds: number) => [
+      { x: 10 / seconds, y: 0.5, state: atBpm(61, brushState(effects, { ...step, brushSizePitch: 24 }, beats, false)) },
+    ],
+  })),
+  ...[
     { name: "eight copies four beats apart", step: { cloneCountX: 8, cloneSpaceBeats: 4 } },
     {
       name: "copies both ways in time and pitch, decaying",
