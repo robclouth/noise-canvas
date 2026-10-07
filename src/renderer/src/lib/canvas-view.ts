@@ -24,6 +24,13 @@ export type CanvasView = {
   texels: number;
   textureWidth: number;
   textureHeight: number;
+  /**
+   * Frames the file is turned by in the view's ranges and bin indices, a
+   * whole number of quanta: a view past an end of a file whose time wraps
+   * holds the file turned so its span lies inside. Its frames stay the
+   * file's own. Absent for a view of the file as it lies.
+   */
+  turn?: number;
 };
 
 /** The texture a whole file's packed run folds into, as a shader reads its size. */
@@ -303,8 +310,9 @@ export function viewRangesLeaving(current: CanvasView, next: CanvasView): Uint32
 
 /**
  * File-absolute pixel ranges as the view's own pixel indices, split at band
- * edges. Null when any pixel falls outside the view, which would leave it
- * without a place in the view's textures.
+ * edges and, in a turned view, where the turned file starts again. Null when
+ * any pixel falls outside the view, which would leave it without a place in
+ * the view's textures.
  */
 export function fileRangesToView(view: CanvasView, fileLayout: BandLayout, ranges: Uint32Array): Uint32Array | null {
   const out: number[] = [];
@@ -314,13 +322,18 @@ export function fileRangesToView(view: CanvasView, fileLayout: BandLayout, range
     while (left > 0) {
       const band = bandAtPixel(fileLayout, start);
       const bandStart = fileLayout.metadata[band * 4];
-      const bandEnd = bandStart + fileLayout.metadata[band * 4 + 1];
-      const count = Math.min(left, bandEnd - start);
+      const length = fileLayout.metadata[band * 4 + 1];
+      let count = Math.min(left, bandStart + length - start);
       if (count <= 0) return null;
-      const viewStart = view.ranges[band * 2];
       const viewCount = view.ranges[band * 2 + 1];
-      if (start < viewStart || start + count > viewStart + viewCount) return null;
-      out.push(view.layout.metadata[band * 4] + (start - viewStart), count);
+      let at = start - view.ranges[band * 2];
+      if (view.turn) {
+        const turned = wrapIndex(start - bandStart - view.turn / 2 ** fileLayout.metadata[band * 4 + 2], length);
+        count = Math.min(count, length - turned);
+        at = turned - view.bandK0[band];
+      }
+      if (at < 0 || at + count > viewCount) return null;
+      out.push(view.layout.metadata[band * 4] + at, count);
       start += count;
       left -= count;
     }
@@ -328,8 +341,13 @@ export function fileRangesToView(view: CanvasView, fileLayout: BandLayout, range
   return Uint32Array.from(out);
 }
 
-/** The view's own pixel ranges as file-absolute ranges, split at band edges. */
-export function viewRangesToFile(view: CanvasView, ranges: Uint32Array): Uint32Array {
+/**
+ * The view's own pixel ranges as file-absolute ranges, split at band edges
+ * and, in a turned view, where the file starts again; a turned view needs the
+ * file's layout for that.
+ */
+export function viewRangesToFile(view: CanvasView, ranges: Uint32Array, fileLayout?: BandLayout): Uint32Array {
+  if (view.turn && !fileLayout) throw new Error("a turned view's ranges need the file's layout");
   const out: number[] = [];
   for (let i = 0; i + 1 < ranges.length; i += 2) {
     let start = ranges[i];
@@ -338,12 +356,78 @@ export function viewRangesToFile(view: CanvasView, ranges: Uint32Array): Uint32A
       const band = bandAtPixel(view.layout, start);
       const bandStart = view.layout.metadata[band * 4];
       const bandEnd = bandStart + view.layout.metadata[band * 4 + 1];
-      const count = Math.min(left, Math.max(0, bandEnd - start));
+      let count = Math.min(left, Math.max(0, bandEnd - start));
       if (count <= 0) throw new Error("view range reaches outside the view's bands");
-      out.push(view.ranges[band * 2] + (start - bandStart), count);
+      if (view.turn && fileLayout) {
+        const fileStart = fileLayout.metadata[band * 4];
+        const length = fileLayout.metadata[band * 4 + 1];
+        const step = 2 ** fileLayout.metadata[band * 4 + 2];
+        const bin = wrapIndex(view.bandK0[band] + (start - bandStart) + view.turn / step, length);
+        count = Math.min(count, length - bin);
+        out.push(fileStart + bin, count);
+      } else {
+        out.push(view.ranges[band * 2] + (start - bandStart), count);
+      }
       start += count;
       left -= count;
     }
+  }
+  return Uint32Array.from(out);
+}
+
+/**
+ * The view over the frames [start, end) of a file whose time axis wraps
+ * round, which may run past either end of it: a view of the file turned by a
+ * whole number of quanta so the span lies inside it (`turn`), its frames still
+ * the file's own, past an end where the span runs past one. A span inside the
+ * file gets a plain view.
+ */
+export function ringViewOfFrames(grid: BlockGrid, start: number, end: number, bands?: BandSpan): CanvasView {
+  const turn = ringTurn(grid, start, end);
+  if (turn === 0) return canvasViewOfFrames(grid, start, end, bands);
+  const view = canvasViewOfFrames(grid, start - turn, end - turn, bands);
+  return { ...view, startFrame: view.startFrame + turn, endFrame: view.endFrame + turn, turn };
+}
+
+/** The texels `ringViewOfFrames` would hold over the same frames and bands, without building it. */
+export function ringTexelsOfFrames(grid: BlockGrid, start: number, end: number, bands?: BandSpan): number {
+  const turn = ringTurn(grid, start, end);
+  return canvasTexelsOfFrames(grid, start - turn, end - turn, bands);
+}
+
+/** Frames a ring view over [start, end) turns its file by: none for a span inside the file. */
+function ringTurn(grid: BlockGrid, start: number, end: number): number {
+  if (start >= 0 && end <= grid.numFrames) return 0;
+  const quantum = gridQuantumFrames(grid);
+  return Math.floor(start / quantum) * quantum;
+}
+
+/** `n` modulo `m`, from 0 up to `m`. */
+function wrapIndex(n: number, m: number): number {
+  return ((n % m) + m) % m;
+}
+
+/**
+ * The file pixels a view holds, in the view's own order, over the bands it
+ * holds bins of. A turned view's band holds them in two runs where it crosses
+ * the file's end.
+ */
+export function viewFilePixels(view: CanvasView, fileLayout: BandLayout): Uint32Array {
+  const out: number[] = [];
+  for (let band = 0; band < fileLayout.numBands; band++) {
+    const count = view.ranges[band * 2 + 1];
+    if (count === 0) continue;
+    if (!view.turn) {
+      out.push(view.ranges[band * 2], count);
+      continue;
+    }
+    const offset = fileLayout.metadata[band * 4];
+    const length = fileLayout.metadata[band * 4 + 1];
+    const step = 2 ** fileLayout.metadata[band * 4 + 2];
+    const first = wrapIndex(view.bandK0[band] + view.turn / step, length);
+    const head = Math.min(count, length - first);
+    out.push(offset + first, head);
+    if (count > head) out.push(offset, count - head);
   }
   return Uint32Array.from(out);
 }

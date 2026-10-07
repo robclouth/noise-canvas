@@ -17,14 +17,6 @@ uniform float brushWrapSpanX;
 bool wrapsTimeAxis()  { return wrapMode == 1 || wrapMode == 3; }
 bool wrapsPitchAxis() { return wrapMode == 2 || wrapMode == 3; }
 
-// Folds a UV back into the canvas on whichever axes wrap.
-vec2 wrapUv(vec2 uv) {
-  vec2 wrapped = uv;
-  if (wrapsTimeAxis())  wrapped.x = fract(uv.x);
-  if (wrapsPitchAxis()) wrapped.y = fract(uv.y);
-  return wrapped;
-}
-
 // Position relative to the brush origin. On a wrapping axis the offset is taken
 // modulo the file, so a fragment at the far edge sits just past the brush
 // start rather than a whole file behind it.

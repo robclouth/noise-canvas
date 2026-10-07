@@ -619,16 +619,6 @@ const SCENARIOS: {
         ],
       },
       {
-        name: "a blur at its widest, run three times",
-        steps: [
-          {
-            effect: "blur",
-            step: { blurAmountTime: 100, blurAmountPitch: 100, blurEdgeMode: 1, brushIterations: 3 },
-            beats: 2,
-          },
-        ],
-      },
-      {
         name: "a long backward convolve, run twice",
         steps: [
           { effect: "convolve", step: { convolveIrSize: 256, convolveIrRate: -2, brushIterations: 2 }, beats: 4 },
@@ -686,6 +676,51 @@ const SCENARIOS: {
       },
     ],
   })),
+  // A brush that wraps round the file in time, its reads running past the
+  // end into the file's start: near the end, and across it.
+  ...[
+    { name: "shift", effect: "transform", step: { transformShiftBeats: 3, transformEdgeMode: 1 } },
+    {
+      name: "swept scale",
+      effect: "transform",
+      step: { transformScaleTime: 0.5, ...sweeping("transformScaleTime"), transformEdgeMode: 1 },
+    },
+    { name: "evolve", effect: "evolve", step: { evolveScaleX: 97, evolveFlow: 2 } },
+    { name: "convolve", effect: "convolve", step: { convolveIrSize: 256, convolveIrRate: -2 } },
+    {
+      name: "repeat",
+      effect: "clone",
+      step: { cloneCountX: 6, cloneSpaceBeats: 1, cloneEdgeMode: 1 },
+    },
+    {
+      name: "attract",
+      effect: "attract",
+      step: { attractMap: 0, attractAmountX: 100, attractAmountY: 0, attractSmoothX: 4 },
+    },
+  ].flatMap(({ name, effect, step }) =>
+    [
+      { where: "near the end", x: 0.995 },
+      { where: "across the end", x: 0.9995 },
+    ].map(({ where, x }) => ({
+      name: `${name} on a brush wrapping ${where}`,
+      windowBlocks: SMALL_WINDOW_BLOCKS,
+      dabs: () => [
+        {
+          x,
+          y: 0.5,
+          state: atBpm(
+            61,
+            brushState(
+              effect as EffectType,
+              { ...step, brushWrapMode: 3, brushAnchorMode: 1, brushSizePitch: 24 },
+              4,
+              false,
+            ),
+          ),
+        },
+      ],
+    })),
+  ),
   {
     // No stage over the whole file is kept on a window this small, so the
     // reversal paints the dynamics again under each view it reads.

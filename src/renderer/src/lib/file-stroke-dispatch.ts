@@ -9,12 +9,14 @@ import type {
   FileRendererHandle,
 } from "./file-renderer-types";
 import {
-  canvasViewOf,
   canvasTexelsOfFrames,
   canvasViewOfFrames,
   clipToView,
   fileRangesToView,
   fileUvToViewUv,
+  ringTexelsOfFrames,
+  ringViewOfFrames,
+  viewFilePixels,
   viewCoversFile,
   viewRangesToFile,
   type BandSpan,
@@ -368,6 +370,8 @@ export type DispatchOptions = {
     inputParts?: readonly InputPart[];
     /** The key of a response each part binds its own share of, which no window holds. */
     partResponse?: string;
+    /** True when the parts lay out the whole file. */
+    inputPartsFold?: boolean;
     /** The pass the dab starts at, with what it reads, and the pass it stops before. */
     from?: StrokeParams["from"];
     to?: PassAt;
@@ -549,6 +553,7 @@ export function dispatchStroke(
           selection: state.filesSelection[fileId] ?? null,
           clip: beside && clip ? clipToView(beside.view, clip) : (canvas?.clipToCanvas(clip ?? null) ?? null),
           inputParts: beside?.inputParts,
+          inputPartsFold: beside?.inputPartsFold,
           from: beside?.from,
           to: beside?.to,
         },
@@ -575,10 +580,15 @@ export function dispatchStroke(
 }
 
 function reachContext(context: FileStrokeContext, state: State): ReachContext | null {
+  return context.canvasRef.current?.holdsWholeFile ? null : fileReachContext(context, state);
+}
+
+/** What the reach of a brush is measured against on this file, whatever its canvas holds. */
+function fileReachContext(context: FileStrokeContext, state: State): ReachContext | null {
   const { fileId, canvasRef, openFiles } = context;
   const canvas = canvasRef.current;
   const file = openFiles[fileId];
-  if (!canvas || canvas.holdsWholeFile || !file?.spectrogramData) return null;
+  if (!canvas || !file?.spectrogramData) return null;
   const spectrogram = file.spectrogramData;
   return {
     bpm: state.filepathsBpm[file.filePath] || 120,
@@ -957,17 +967,17 @@ type TapResponse = {
 
 /**
  * A step's brush as the region it covers, past the file's ends where it runs
- * past them, as the shaders pivot it; all of the file along an axis it wraps
- * round.
+ * past them, as the shaders pivot it; all of the file across pitch where it
+ * wraps round that axis.
  */
 function brushBox(brush: StepBrush, fileSeconds: number): BrushBox {
-  const endX = brush.anchor.x + brush.sizeUv.x;
+  const startX = brush.anchor.x;
+  const endX = startX + brush.sizeUv.x;
   const endY = brush.anchor.y + brush.sizeUv.y;
-  const roundTime = brush.wrapsTime && (brush.anchor.x < 0 || endX > 1);
   const roundPitch = brush.wrapsPitch && (brush.anchor.y < 0 || endY > 1);
   return {
-    start: roundTime ? 0 : brush.anchor.x * fileSeconds,
-    end: roundTime ? fileSeconds : endX * fileSeconds,
+    start: startX * fileSeconds,
+    end: endX * fileSeconds,
     low: roundPitch ? 0 : brush.anchor.y,
     high: roundPitch ? 1 : endY,
     wrapsTime: brush.wrapsTime,
@@ -997,6 +1007,13 @@ type BesideTiling = {
   copyGroupsOf: (tile: BesideTile, budget: number, most: number) => InputPartPlan[] | null;
 };
 
+/**
+ * How a dab is tiled beside the canvas. A brush that wraps round the file in
+ * time lies on one unrolled line from its start: what it writes and reads
+ * past an end of the file runs on past it, and its views hold the file
+ * turned round (`ringViewOfFrames`), so the bins past an end are those at the
+ * other.
+ */
 function besideTiling(
   context: FileStrokeContext,
   state: State,
@@ -1006,18 +1023,24 @@ function besideTiling(
 ): BesideTiling | null {
   const renderer = context.strokeRendererRef.current;
   const file = context.openFiles[context.fileId];
-  const ctx = reachContext(context, state);
+  const ctx = fileReachContext(context, state);
   if (!renderer || !file || !ctx) return null;
   const { numBands, numFrames, sampleRate } = context.spectrogramData;
   const { grid } = canvas;
+  const union = brushUnionAt(context, state, cursorPos, ctx.bpm, ctx.fileSeconds);
+  const ring = union.wrapsTime;
   let start = numFrames;
   let end = 0;
   for (const write of span.extent.writes) {
     start = Math.min(start, write.start);
     end = Math.max(end, write.end);
   }
+  // A brush that wraps across an end writes on past it.
+  if (ring && union.hasSteps && (union.min.x < 0 || union.max.x > 1)) {
+    start = Math.floor(union.min.x * numFrames);
+    end = Math.ceil(union.max.x * numFrames);
+  }
   if (end <= start) return null;
-  const union = brushUnionAt(context, state, cursorPos, ctx.bpm, ctx.fileSeconds);
   const wholePitch = union.fullPitch || union.wrapsPitch;
   const written: BandSpan = wholePitch
     ? { first: 0, last: numBands - 1 }
@@ -1050,13 +1073,21 @@ function besideTiling(
       readStart = Math.min(readStart, box.start + move);
       readEnd = Math.max(readEnd, box.end + move);
     }
-    const first = Math.max(0, Math.floor(readStart * sampleRate) - seam);
-    return { start: first, end: Math.max(first + 1, Math.min(numFrames, Math.ceil(readEnd * sampleRate) + seam)) };
+    return spanOfFrames(Math.floor(readStart * sampleRate) - seam, Math.ceil(readEnd * sampleRate) + seam);
   };
-  const viewOfBox = (box: ReadBox): CanvasView => {
-    const frames = framesOfBox(box);
-    return canvasViewOfFrames(grid, frames.start, frames.end, bandsOfBox(box, numBands));
+  // Frames [from, to) of the file, or on a ring past its ends, where a span
+  // reaching round the whole ring takes the whole file.
+  const quantum = gridQuantumFrames(grid);
+  const spanOfFrames = (from: number, to: number): FrameSpan => {
+    if (ring && to - from < numFrames - quantum) return { start: from, end: Math.max(from + 1, to) };
+    const first = Math.max(0, from);
+    return { start: first, end: Math.max(first + 1, Math.min(numFrames, to)) };
   };
+  const viewOver = (frames: FrameSpan, bands: BandSpan): CanvasView =>
+    ring
+      ? ringViewOfFrames(grid, frames.start, frames.end, bands)
+      : canvasViewOfFrames(grid, frames.start, frames.end, bands);
+  const viewOfBox = (box: ReadBox): CanvasView => viewOver(framesOfBox(box), bandsOfBox(box, numBands));
   // A response a window holds whole is bound whole; one it holds only part of
   // is read a group of taps at a time.
   const tapResponse = (response: TapResponseRead): TapResponse | null => {
@@ -1178,15 +1209,16 @@ function besideTiling(
       stage,
     };
   };
-  const framesOf = (within: FrameSpan, from: number, to: number): FrameSpan => ({
-    start: Math.max(within.start, frameRangeOfBlock(grid, from).start),
-    end: Math.min(within.end, frameRangeOfBlock(grid, to).end),
+  const framesOf = (inside: FrameSpan, from: number, to: number): FrameSpan => ({
+    start: Math.max(inside.start, frameRangeOfBlock(grid, from).start),
+    end: Math.min(inside.end, frameRangeOfBlock(grid, to).end),
   });
-  const quantum = gridQuantumFrames(grid);
   const halves = (tile: BesideTile): [BesideTile, BesideTile][] => {
     const out: [BesideTile, BesideTile][] = [];
-    const from = blockOfFrame(grid, tile.frames.start);
-    const to = blockOfFrame(grid, tile.frames.end - 1);
+    // A tile past an end of the file halves in time, not by blocks.
+    const inFile = tile.frames.start >= 0 && tile.frames.end <= numFrames;
+    const from = inFile ? blockOfFrame(grid, tile.frames.start) : 0;
+    const to = inFile ? blockOfFrame(grid, tile.frames.end - 1) : 0;
     const cut = Math.round((tile.frames.start + tile.frames.end) / 2 / quantum) * quantum;
     if (to > from) {
       const mid = Math.floor((from + to) / 2);
@@ -1214,24 +1246,21 @@ function besideTiling(
   // over, and the bins a tonality check looks back over, in the coarsest band.
   const partBefore = PART_BINS_BEFORE * seam;
   const partAfter = PART_BINS_AFTER * seam;
-  const firstBrush = brushes[firstStep];
-  // A wrapped read folds back across the whole axis.
-  const partable = !(firstBrush?.wrapsTime || firstBrush?.wrapsPitch);
+  const coreBands = (bands: BandSpan): BandSpan => ({
+    first: Math.max(0, bands.first - 1),
+    last: Math.min(numBands - 1, bands.last + 1),
+  });
   // The view a part reads its reads of `frames` and `bands` through.
   const viewOfCore = (frames: FrameSpan, bands: BandSpan): CanvasView =>
-    canvasViewOfFrames(grid, Math.max(0, frames.start - partBefore), Math.min(numFrames, frames.end + partAfter), {
-      first: Math.max(0, bands.first - 1),
-      last: Math.min(numBands - 1, bands.last + 1),
-    });
+    viewOver(spanOfFrames(frames.start - partBefore, frames.end + partAfter), coreBands(bands));
   // The texels `viewOfCore` would hold.
-  const texelsOfCore = (frames: FrameSpan, bands: BandSpan): number =>
-    canvasTexelsOfFrames(grid, Math.max(0, frames.start - partBefore), Math.min(numFrames, frames.end + partAfter), {
-      first: Math.max(0, bands.first - 1),
-      last: Math.min(numBands - 1, bands.last + 1),
-    });
+  const texelsOfCore = (frames: FrameSpan, bands: BandSpan): number => {
+    const span = spanOfFrames(frames.start - partBefore, frames.end + partAfter);
+    return (ring ? ringTexelsOfFrames : canvasTexelsOfFrames)(grid, span.start, span.end, coreBands(bands));
+  };
   const partsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const box = tile.inputBox;
-    if (!partable || !box) return null;
+    if (!box) return null;
     const { near } = box;
     // A part's view holds what the pass reads besides its read points too.
     const viewOfPart = (frames: FrameSpan, bands: BandSpan): CanvasView =>
@@ -1285,7 +1314,7 @@ function besideTiling(
   // its response bin lies.
   const copyGroupsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const taps = tile.copies?.taps;
-    if (!partable || !taps) return null;
+    if (!taps) return null;
     const response = tile.copies?.response ?? null;
     const groups: InputPartPlan[] = [];
     for (let first = 0; first < taps.length; ) {
@@ -1509,13 +1538,15 @@ function besideFor(
         if (texels <= Math.min(KEPT_STAGE_TEXELS, KEPT_STAGE_WINDOWS * canvas.texelBudget)) {
           const pieces = await paintTiles(tiles, spanOfStage, run, tileDone);
           if (!pieces) return null;
-          inputs.set(stage.to, async (view) => composePixelRangeValues(heldRanges(view.ranges), pieces));
+          inputs.set(stage.to, async (view) =>
+            composePixelRangeValues(viewFilePixels(view, canvas.grid.layout), pieces),
+          );
         } else {
           // Painted again over each view a later stage reads, as tiles of it.
           inputs.set(stage.to, async (view) => {
             const over = planTiles(spanOfStage, canvas, tiling, stage, viewRegion(view));
             const pieces = over && (await paintTiles(over, spanOfStage, run, () => true));
-            return pieces && composePixelRangeValues(heldRanges(view.ranges), pieces);
+            return pieces && composePixelRangeValues(viewFilePixels(view, canvas.grid.layout), pieces);
           });
           for (let tile = 0; tile < tiles.length; tile++) tileDone();
         }
@@ -1865,6 +1896,7 @@ async function paintTileBeside(
         view,
         input: run.from ? undefined : input?.source,
         inputParts: parts?.parts,
+        inputPartsFold: tile.parts ? partsCoverFile(tile.parts, context.spectrogramData.numFrames) : undefined,
         partResponse: response?.key,
         from,
         to: run.to,
@@ -1882,7 +1914,9 @@ async function paintTileBeside(
       return { ranges, values, masks: [] };
     }
     const dirty = beside.getDirtyPixelRanges();
-    const onBands = dirty ? viewRangesToFile(view, rangesOnBands(view, dirty, bands)) : new Uint32Array(0);
+    const onBands = dirty
+      ? sortedRanges(viewRangesToFile(view, rangesOnBands(view, dirty, bands), layout))
+      : new Uint32Array(0);
     const keptFile = intersectPixelRanges(onBands, frameSpanPixels(canvas, frames));
     const keptRanges = pixelRangeCount(keptFile) > 0 ? fileRangesToView(view, layout, keptFile) : null;
     if (!keptRanges) return { ranges: new Uint32Array(0), values: new Float32Array(0), masks: [] };
@@ -1910,14 +1944,13 @@ async function besideOver(
   renderer: StrokeRenderer,
   view: CanvasView,
 ): Promise<{ beside: StrokeRenderer; layout: BandLayout; dispose: () => void } | null> {
-  const fileRanges = heldRanges(view.ranges);
+  const layout = { numBands: context.spectrogramData.numBands, metadata: context.spectrogramData.metadata };
   const [start, paint, original] = await Promise.all([
-    canvas.readStart(fileRanges),
-    canvas.readStrokePaint(fileRanges),
-    span.needs.original ? canvas.readOriginal(fileRanges) : Promise.resolve(null),
+    readInView(view, layout, (ranges) => canvas.readStart(ranges)),
+    canvas.readStrokePaint(sortedRanges(viewFilePixels(view, layout))),
+    span.needs.original ? readInView(view, layout, (ranges) => canvas.readOriginal(ranges)) : Promise.resolve(null),
   ]);
   if (!start || (span.needs.original && !original)) return null;
-  const layout = { numBands: context.spectrogramData.numBands, metadata: context.spectrogramData.metadata };
   const beside = renderer.beside(view);
   const originalTexture = original ? viewTexture(view, original) : null;
   beside.initialize();
@@ -2053,12 +2086,12 @@ async function inputValues(
   context: FileStrokeContext,
   canvasAsFound?: boolean,
 ): Promise<Float32Array | null> {
-  const ranges = heldRanges(view.ranges);
+  const ranges = viewFilePixels(view, canvas.grid.layout);
   const first = context.createStepStateView(state, firstEnabledStep(state));
   const live = canvasAsFound || (first.accumulate && first.sourceDataMode !== "start");
   const [start, paint] = await Promise.all([
-    canvas.readStart(ranges),
-    live ? canvas.readStrokePaint(ranges) : Promise.resolve(null),
+    readInView(view, canvas.grid.layout, (sorted) => canvas.readStart(sorted)),
+    live ? canvas.readStrokePaint(sortedRanges(ranges)) : Promise.resolve(null),
   ]);
   if (!start) return null;
   return paint && pixelRangeCount(paint.ranges) > 0
@@ -2102,24 +2135,58 @@ function inputOver(
   };
 }
 
-/** Every band's file pixels over the blocks a frame span covers, cut to its frames. */
+/**
+ * Every band's file pixels whose bins start inside `frames`, in order. On a
+ * file whose time wraps, frames past an end are the bins at the other.
+ */
 function frameSpanPixels(canvas: WindowedCanvas, frames: FrameSpan): Uint32Array {
-  const view = canvasViewOf(
-    canvas.grid,
-    blockOfFrame(canvas.grid, frames.start),
-    blockOfFrame(canvas.grid, frames.end - 1),
-  );
+  const { layout } = canvas.grid;
   const out: number[] = [];
-  const { metadata, numBands } = view.layout;
-  for (let band = 0; band < numBands; band++) {
-    const step = 2 ** metadata[band * 4 + 2];
-    const k0 = view.bandK0[band];
-    const count = view.ranges[band * 2 + 1];
-    const from = Math.max(k0, Math.ceil(frames.start / step));
-    const to = Math.min(k0 + count, Math.ceil(frames.end / step));
-    if (to > from) out.push(view.ranges[band * 2] + (from - k0), to - from);
+  for (let band = 0; band < layout.numBands; band++) {
+    const offset = layout.metadata[band * 4];
+    const length = layout.metadata[band * 4 + 1];
+    const step = 2 ** layout.metadata[band * 4 + 2];
+    const to = Math.ceil(frames.end / step);
+    for (let bin = Math.ceil(frames.start / step); bin < to; ) {
+      const at = ((bin % length) + length) % length;
+      const count = Math.min(to - bin, length - at);
+      out.push(offset + at, count);
+      bin += count;
+    }
   }
-  return Uint32Array.from(out);
+  return sortedRanges(Uint32Array.from(out));
+}
+
+/** True when a tile's parts together reach over the whole file. */
+function partsCoverFile(parts: readonly InputPartPlan[], numFrames: number): boolean {
+  let start = Infinity;
+  let end = -Infinity;
+  for (const part of parts) {
+    start = Math.min(start, part.view.startFrame);
+    end = Math.max(end, part.view.endFrame);
+  }
+  return start <= 0 && end >= numFrames;
+}
+
+/** Ranges as [start, count] pairs in the order of their starts. */
+function sortedRanges(ranges: Uint32Array): Uint32Array {
+  const pairs: [number, number][] = [];
+  for (let i = 0; i + 1 < ranges.length; i += 2) pairs.push([ranges[i], ranges[i + 1]]);
+  pairs.sort((x, y) => x[0] - y[0]);
+  return Uint32Array.from(pairs.flat());
+}
+
+/** What `read` returns over the file pixels a view holds, in the view's order; it reads them in the file's. */
+async function readInView(
+  view: CanvasView,
+  layout: BandLayout,
+  read: (ranges: Uint32Array) => Promise<Float32Array | null>,
+): Promise<Float32Array | null> {
+  const order = viewFilePixels(view, layout);
+  if (!view.turn) return read(order);
+  const sorted = sortedRanges(order);
+  const values = await read(sorted);
+  return values && composePixelRangeValues(order, [{ ranges: sorted, values }]);
 }
 
 /** Every file pixel of `bands` whose bin starts inside `frames`. */
@@ -2216,6 +2283,15 @@ export function paintDab(
   painted?: () => void,
 ): boolean {
   if (onsetsPendingFor(context, state)) return false;
+  // A dab that wraps round the file past an end paints on the file turned
+  // round, on a canvas over the whole file too, so every canvas paints it alike.
+  if (canvas.holdsWholeFile && wrapsPastEnds(context, state, aim)) {
+    const ring = besideFor(context, state, aim, span, canvas, options);
+    if (ring) {
+      canvas.paintBeside(span.extent, ring);
+      return true;
+    }
+  }
   if (!reachOf(context, state).refusal && canvas.servable(span.extent, span.needs)) {
     return canvas.paintWhenHeld(span.extent, span.needs, (clip) => {
       const done = dispatchStroke(context, state, aim, false, { ...options, span, clip });
@@ -2227,6 +2303,22 @@ export function paintDab(
   if (!beside) return false;
   canvas.paintBeside(span.extent, beside);
   return true;
+}
+
+/**
+ * True when a dab's brush wraps round the file in time and writes or reads
+ * past one of its ends.
+ */
+function wrapsPastEnds(context: FileStrokeContext, state: State, aim: Vector2): boolean {
+  const ctx = fileReachContext(context, state);
+  if (!ctx) return false;
+  const union = brushUnionAt(context, state, aim, ctx.bpm, ctx.fileSeconds);
+  if (!union.wrapsTime || !union.hasSteps) return false;
+  const reach = strokeReach(state, ctx);
+  const piece = pieceReach(state, ctx);
+  const before = Math.max(reach.before, piece?.before ?? ctx.fileSeconds);
+  const after = Math.max(reach.after, piece?.after ?? ctx.fileSeconds);
+  return union.min.x * ctx.fileSeconds - before < 0 || union.max.x * ctx.fileSeconds + after > ctx.fileSeconds;
 }
 
 export function prepareStrokeBatch(

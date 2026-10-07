@@ -45,6 +45,28 @@ uniform int       destFileFrameCount;
 
 uniform sampler2D originalSpectrogramTex;
 
+// Set while a pass reads its source in parts that together lay out the whole
+// file, so a read past an end of it folds back as on a view of the whole.
+uniform bool sourceFoldsTime;
+
+// Folds a UV back into the file on whichever axes wrap. Along time only a
+// source laid out over its whole file folds, or one of the parts that lay it
+// out: a view of a span holds every read it takes, past an end of the file
+// too, the file turned round.
+vec2 wrapUv(vec2 uv) {
+  vec2 wrapped = uv;
+  bool wholeSource = sourceViewStartFrame == 0 && float(sourceFileFrameCount) == sourceFrameCount;
+  if (wrapsTimeAxis() && wholeSource) wrapped.x = fract(uv.x);
+  if (wrapsTimeAxis() && sourceFoldsTime && !wholeSource) {
+    float frame = float(sourceViewStartFrame) + uv.x * sourceFrameCount;
+    float file = float(sourceFileFrameCount);
+    frame -= file * floor(frame / file);
+    wrapped.x = (frame - float(sourceViewStartFrame)) / sourceFrameCount;
+  }
+  if (wrapsPitchAxis()) wrapped.y = fract(uv.y);
+  return wrapped;
+}
+
 uniform float selectionActive;
 uniform vec2  selectionFrames;
 uniform vec2  selectionBands;

@@ -11,7 +11,10 @@ import {
   clipRangesToView,
   fileRangesToView,
   fileUvToViewUv,
+  ringTexelsOfFrames,
+  ringViewOfFrames,
   viewCoversFile,
+  viewFilePixels,
   viewRangesToFile,
   viewUvToFileUv,
 } from "../canvas-view";
@@ -287,5 +290,51 @@ describe("the fold a packed run takes", () => {
   it("hands back a run that already fills its texture", () => {
     const run = new Float32Array(64 * 2);
     expect(padToFold(run, 64, 2)).toBe(run);
+  });
+});
+
+describe("ringViewOfFrames", () => {
+  const quantum = gridQuantumFrames(grid);
+  const end = grid.numFrames;
+  // Every file pixel a view holds, one by one, in the view's order.
+  const pixelsOf = (ranges: Uint32Array): number[] => {
+    const out: number[] = [];
+    for (let i = 0; i + 1 < ranges.length; i += 2) for (let k = 0; k < ranges[i + 1]; k++) out.push(ranges[i] + k);
+    return out;
+  };
+
+  it("is the plain view over a span inside the file", () => {
+    const span = { start: 3 * quantum, end: 9 * quantum };
+    expect(ringViewOfFrames(grid, span.start, span.end)).toEqual(canvasViewOfFrames(grid, span.start, span.end));
+  });
+
+  it.each([
+    { name: "past the file's end", start: end - 5 * quantum, end: end + 3 * quantum },
+    { name: "before the file's start", start: -3 * quantum, end: 5 * quantum },
+  ])("holds the file's bins at the other end $name, its frames its own", ({ start, end: last }) => {
+    const view = ringViewOfFrames(grid, start, last);
+    expect(view.startFrame).toBeLessThanOrEqual(start);
+    expect(view.endFrame).toBeGreaterThanOrEqual(last);
+    expect(view.texels).toBe(ringTexelsOfFrames(grid, start, last));
+    const pixels = pixelsOf(viewFilePixels(view, grid.layout));
+    expect(pixels.length).toBe(view.texels);
+    // Each band's bins run on round the file's end to its start.
+    for (let band = 0; band < grid.layout.numBands; band++) {
+      const offset = grid.layout.metadata[band * 4];
+      const length = grid.layout.metadata[band * 4 + 1];
+      const step = 2 ** grid.layout.metadata[band * 4 + 2];
+      const bins = pixels.filter((pixel) => pixel >= offset && pixel < offset + length).map((pixel) => pixel - offset);
+      const first = Math.floor(view.startFrame / step);
+      bins.forEach((bin, k) => expect(bin).toBe((((first + k) % length) + length) % length));
+    }
+  });
+
+  it("maps the file's pixels into a turned view and back", () => {
+    const view = ringViewOfFrames(grid, end - 4 * quantum, end + 4 * quantum);
+    const file = viewFilePixels(view, grid.layout);
+    const local = fileRangesToView(view, grid.layout, file);
+    expect(local).not.toBeNull();
+    expect(pixelsOf(local!)).toEqual(Array.from({ length: view.texels }, (_, k) => k));
+    expect(pixelsOf(viewRangesToFile(view, local!, grid.layout))).toEqual(pixelsOf(file));
   });
 });

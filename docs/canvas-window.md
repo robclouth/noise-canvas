@@ -547,8 +547,21 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
       lattice. With the pitch pull on, the time pass comes second: the read
       names its pass by material index (`pass`) and what the pitch pass reads
       (`prior`), and the time pass starts a stage of its own.
-      A wrapped read folds across the whole axis, so a brush that wraps is never
-      read in parts. While the input is apart, every read of it at a pixel's own
+      A brush that wraps round the file in time lies on one unrolled line from
+      its start: what it writes and reads past an end of the file runs on past
+      it, the part of the brush past the end after it, and its reads past the
+      end take the bins at the file's start, a band's bins a ring. Its views
+      past an end hold the file turned by whole quanta (`ringViewOfFrames`,
+      `turn`), their frames still the file's own, and every read and write of
+      the file goes through `viewFilePixels`, `fileRangesToView` and
+      `viewRangesToFile`, which follow the turn. A read reaching round the whole
+      file takes the whole axis instead; it then folds back into the file, as
+      on a view of the whole file, and so do the parts that lay such a read out
+      (`sourceFoldsTime`). Any other view never folds a read
+      (`wrapUv`). Such a dab paints on a view of the file turned round on every
+      canvas, one over the whole file too (`wrapsPastEnds` in `paintDab`), so a
+      short file and a long one paint it alike. A brush that wraps across
+      pitch reads the whole of that axis. While the input is apart, every read of it at a pixel's own
       place reads the input laid over the view the dab paints on
       (`sourceUnderTex`): the audio level the brush weight follows, the
       envelope followers, and Locked's phase under the pixel. That view holds

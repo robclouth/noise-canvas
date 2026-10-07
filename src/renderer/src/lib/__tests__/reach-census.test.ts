@@ -10,7 +10,8 @@ import { strokeRefusal } from "../file-stroke-dispatch";
 /**
  * No brush is refused on a long file whose canvas holds only a few blocks of
  * it: every effect at its widest, as the first step, after another step,
- * and repeated.
+ * repeated, and on a brush that wraps round the file near its end and across
+ * it.
  */
 const SECONDS = 300;
 
@@ -109,6 +110,26 @@ const WAYS: { name: string; blocks: number; x: number; shape: (state: State) => 
     shape: (state) => {
       const step = state.brushes[state.activeBrushIndex].steps[0];
       Object.assign(step, { brushIterations: 3 });
+      return state;
+    },
+  },
+  {
+    name: "wrapping, near the end of the file",
+    blocks: 4,
+    x: 0.995,
+    shape: (state) => {
+      const step = state.brushes[state.activeBrushIndex].steps[0];
+      Object.assign(step, { brushWrapMode: 3, brushAnchorMode: 1 });
+      return state;
+    },
+  },
+  {
+    name: "wrapping across the end of the file",
+    blocks: 4,
+    x: 0.9995,
+    shape: (state) => {
+      const step = state.brushes[state.activeBrushIndex].steps[0];
+      Object.assign(step, { brushWrapMode: 3, brushAnchorMode: 1 });
       return state;
     },
   },

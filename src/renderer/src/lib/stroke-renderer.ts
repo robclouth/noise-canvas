@@ -336,6 +336,8 @@ export interface StrokeParams {
    * pass whose read spans more than one texture of it holds.
    */
   inputParts?: readonly InputPart[];
+  /** True when the parts lay out the whole file, so a read past an end of it folds back. */
+  inputPartsFold?: boolean;
   /**
    * Starts the dab at this pass, which reads `chain` laid out as the canvas;
    * a pass after its step's first reads its step's input as `stepInput`.
@@ -1583,6 +1585,7 @@ export class StrokeRenderer {
       sourcePartTotals1: { value: this.textures.placeholderTexture },
       sourceNearStage: { value: 0 },
       sourceNearTex0: { value: this.textures.placeholderTexture },
+      sourceFoldsTime: { value: false },
       sourceUnderOn: { value: false },
       sourceUnderTex: { value: this.textures.placeholderTexture },
       blendMode: { value: stepState.blendMode },
@@ -1953,7 +1956,9 @@ export class StrokeRenderer {
               sourceBandUvSlope(this.spectrogramData, source.spectrogramData),
               bpm / sourceBpm,
               stepPositionUv,
-              stepWrapsTime,
+              // A view of this file's own input lies where the dab reads it,
+              // past an end of the file too.
+              stepWrapsTime && !source.ownInput,
             )
           : this.sourceOffsetForViews(
               this.spectrogramData,
@@ -1965,7 +1970,7 @@ export class StrokeRenderer {
               1,
               1,
               stepPositionUv,
-              stepWrapsTime,
+              false,
             );
         return this.buildStepUniforms(
           stepState,
@@ -2214,7 +2219,11 @@ export class StrokeRenderer {
                 read = { source, uniforms };
               }
               effect.updateEffectUniforms({
-                commonUniforms: { ...read.uniforms, ...gate },
+                commonUniforms: {
+                  ...read.uniforms,
+                  sourceFoldsTime: { value: params.inputPartsFold === true },
+                  ...gate,
+                },
                 passIndex: p,
                 file: source,
                 state: effectState,

@@ -112,6 +112,8 @@ export type CommonUniforms = {
   // an earlier stage wrote that it reads at each pixel.
   sourceNearStage: { value: number };
   sourceNearTex0: { value: Texture | null };
+  // Set while a pass reads its source in parts that lay out the whole file.
+  sourceFoldsTime: { value: boolean };
   // Set while the step's input is read through a view of its own: the input
   // laid out as the dest canvas, which holds every pixel the pass writes.
   sourceUnderOn: { value: boolean };
@@ -229,6 +231,7 @@ export function createDefaultUniforms(): CommonUniforms {
     sourcePartTotals1: { value: null },
     sourceNearStage: { value: 0 },
     sourceNearTex0: { value: null },
+    sourceFoldsTime: { value: false },
     sourceUnderOn: { value: false },
     sourceUnderTex: { value: null },
     brushPan: { value: defaultParameterUniform(0.0, 0.0, 1.0) },

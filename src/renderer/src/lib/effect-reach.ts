@@ -1195,14 +1195,18 @@ function intersectBox(a: ReadBox, b: ReadBox): ReadBox | null {
 
 /**
  * `box` within the file. A read past either end of an axis the brush wraps
- * round lands at the other end, so it takes the whole of that axis.
+ * round lands at the other end: along time it keeps its place past the end,
+ * on the file turned round, unless it reaches round the whole file; across
+ * pitch it takes the whole axis.
  */
 function fitBox(box: ReadBox, brush: BrushBox, ctx: ReachContext): ReadBox {
-  const pastTime = box.start < 0 || box.end > ctx.fileSeconds;
+  const roundTime = brush.wrapsTime && box.end - box.start >= ctx.fileSeconds;
   const pastPitch = box.low < 0 || box.high > 1;
+  const start = brush.wrapsTime ? box.start : Math.max(0, box.start);
+  const end = brush.wrapsTime ? box.end : Math.min(ctx.fileSeconds, box.end);
   return {
-    start: brush.wrapsTime && pastTime ? 0 : Math.max(0, box.start),
-    end: brush.wrapsTime && pastTime ? ctx.fileSeconds : Math.min(ctx.fileSeconds, box.end),
+    start: roundTime ? 0 : start,
+    end: roundTime ? ctx.fileSeconds : end,
     low: brush.wrapsPitch && pastPitch ? 0 : Math.max(0, box.low),
     high: brush.wrapsPitch && pastPitch ? 1 : Math.min(1, box.high),
   };
