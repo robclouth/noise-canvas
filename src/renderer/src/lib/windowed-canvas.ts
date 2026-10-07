@@ -1567,6 +1567,16 @@ export class WindowedCanvas {
 
   private readonly sourceGrids = new Map<string, BlockGrid>();
 
+  /** The block grid of an open file's store, or null while it has none. */
+  fileGrid(fileId: string): BlockGrid | null {
+    return this.sourceGrid(fileId);
+  }
+
+  /** An open file's committed values over file-absolute pixel ranges, or null when it cannot be read. */
+  async readFile(fileId: string, ranges: Uint32Array): Promise<Float32Array | null> {
+    return (await this.deps.sourceBlocks(fileId)?.readCurrent(ranges)) ?? null;
+  }
+
   private sourceGrid(fileId: string): BlockGrid | null {
     const known = this.sourceGrids.get(fileId);
     if (known) return known;

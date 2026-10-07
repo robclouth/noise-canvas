@@ -50,10 +50,16 @@ const CASES: { name: string; effect: EffectType; blocks: number; bpm?: number; s
     },
   },
   {
-    name: "Convolve through a long response",
+    name: "Convolve from an IR Start a pattern sweeps",
     effect: "convolve",
     blocks: 4,
-    step: { convolveIrSize: max("convolveIrSize") },
+    step: {
+      convolveIrSize: max("convolveIrSize"),
+      convolveIrTimeOffset: 50,
+      modulator1Mode: 0,
+      modulator1PatternShape: 0,
+      convolveIrTimeOffsetMod1Amount: 100,
+    },
   },
 ];
 

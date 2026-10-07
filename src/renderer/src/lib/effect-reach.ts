@@ -1,7 +1,7 @@
 import { buildShapeTable, type CloneShapeKey } from "@renderer/effects/clone-shapes";
 import type { EffectType } from "@renderer/effects/types";
 import { EVOLVE_SCALE_FULL_BEATS, EVOLVE_SCALE_FULL_SEMIS, NUM_MODULATORS } from "@renderer/lib/constants";
-import { responsePath } from "@renderer/lib/impulse-key";
+import { impulseKey, responsePath } from "@renderer/lib/impulse-key";
 import { modulatedRange, type ValueRange } from "@renderer/lib/modulation-range";
 import { originFraction, resolveBrushFootprint } from "@renderer/lib/utils";
 import { createEffectStateView, createStepStateView } from "@renderer/store";
@@ -11,7 +11,14 @@ import type { ParameterKey, State } from "@renderer/store/types";
 export type TimeReach = { before: number; after: number };
 
 /** How long a file is, and how much real time its coarsest stored bin covers. */
-export type FileSpan = { seconds: number; binSeconds: number };
+export type FileSpan = {
+  seconds: number;
+  binSeconds: number;
+  /** Seconds one bin lasts in the band that holds `hz`. */
+  binSecondsAt?: (hz: number) => number;
+  /** The band that holds `hz`, within the file's bands. */
+  bandAt?: (hz: number) => number;
+};
 
 /** The clocks a reach is measured against. */
 export type ReachContext = {
@@ -31,6 +38,8 @@ export type ReachContext = {
   blockSeconds?: number;
   bandsPerOctave: number;
   numBands: number;
+  /** The frequency of the file's lowest band. */
+  minFreq?: number;
   /** One bin of the file's coarsest band, in seconds. */
   binSeconds?: number;
 };
@@ -326,6 +335,22 @@ function convolveReach(effect: State, ctx: ReachContext): TimeReach {
   return { before: Math.max(0, rate.hi) * span, after: Math.max(0, -rate.lo) * span };
 }
 
+// The edge mode that zeroes every read past the brush.
+const CUT_EDGE = 0;
+
+/**
+ * The frequencies at which the pixels of `region` read the response: each band
+ * reads the response's band at its own frequency, moved by IR Pitch Shift.
+ * The response's bands and bin lengths change monotonically with frequency,
+ * so the extremes bound every band between.
+ */
+function convolveResponseHz(view: State, ctx: ReachContext, region: ReadBox): number[] {
+  const hzAt = (pitchUv: number): number =>
+    (ctx.minFreq ?? 1) * 2 ** ((pitchUv * ctx.numBands - 0.5) / ctx.bandsPerOctave);
+  const shift = stateRange(view, "convolveIrPitchShift");
+  return [hzAt(region.low), hzAt(region.high)].flatMap((f) => [f * 2 ** (-shift.hi / 12), f * 2 ** (-shift.lo / 12)]);
+}
+
 /** The brush's own span on each axis, in file seconds and in pitch UV. */
 function brushSpan(step: State, ctx: ReachContext): BrushSpan {
   const footprint = resolveBrushFootprint({
@@ -375,8 +400,20 @@ export type FarRead =
    * which every part must hold.
    */
   | { kind: "point"; own: ReadBox; near: ReadBox | null; far: ReadBox }
-  /** The effect sums reads of the input tap by tap, and `taps` holds each tap's. */
-  | { kind: "sum"; own: ReadBox; taps: ReadBox[] };
+  /**
+   * The effect sums reads of the input tap by tap, and `taps` holds each
+   * tap's. An effect that weighs each tap by a file it filters through names
+   * that file in `response`, with the seconds of it each tap reads.
+   */
+  | {
+      kind: "sum";
+      own: ReadBox;
+      taps: ReadBox[];
+      response?: { key: string; reads: TimeSpan[]; bands: { first: number; last: number } };
+    };
+
+/** Seconds [start, end) of a file. */
+export type TimeSpan = { start: number; end: number };
 
 /** An effect that reads only the pixel it writes. */
 const OWN_PIXEL: EffectReach = { pastBrush: () => NO_REACH, aroundPixel: () => NO_REACH, acrossPitch: () => 0 };
@@ -521,7 +558,55 @@ const EFFECT_REACH: Record<EffectType, EffectReach> = {
       };
     },
   },
-  convolve: { pastBrush: convolveReach, aroundPixel: convolveReach, acrossPitch: () => 0 },
+  convolve: {
+    pastBrush: convolveReach,
+    aroundPixel: convolveReach,
+    acrossPitch: () => 0,
+    // Each tap reads the input a whole number of response bins away, and that
+    // tap's bin of the response, so a group of taps reads both only there.
+    apart: (view, ctx, region, brush) => {
+      if (FOLDS_INTO_BRUSH.has(Number(view.convolveEdgeMode))) return null;
+      const response = ctx.responseSpan?.(responsePath(view)) ?? null;
+      if (!response?.binSecondsAt || !response.bandAt) return null;
+      const bandAt = response.bandAt;
+      const hz = convolveResponseHz(view, ctx, region);
+      const seconds = hz.map(response.binSecondsAt);
+      const bins = { min: Math.min(...seconds), max: Math.max(...seconds) };
+      const bands = hz.map(bandAt);
+      const start = stateRange(view, "convolveIrTimeOffset");
+      const rate = stateRange(view, "convolveIrRate");
+      const first = Math.max(0, start.lo / 100) * response.seconds;
+      const last = Math.min(1, Math.max(0, start.hi / 100)) * response.seconds;
+      const own = fitBox(withEnvelopeBox(region, view, ctx), brush, ctx);
+      const cut = Number(view.convolveEdgeMode) === CUT_EDGE;
+      const taps: ReadBox[] = [];
+      const reads: TimeSpan[] = [];
+      const count = Math.max(1, Math.floor(Number(view.convolveIrSize)));
+      // Tap k moves its read by k times the rate times the bin; these bound it.
+      const products = [rate.lo * bins.min, rate.lo * bins.max, rate.hi * bins.min, rate.hi * bins.max];
+      const least = Math.min(...products);
+      const most = Math.max(...products);
+      for (let k = 0; k < count && first + k * bins.min < response.seconds; k++) {
+        const read = fitBox({ ...own, start: own.start - k * most, end: own.end - k * least }, brush, ctx);
+        taps.push(cut ? (intersectBox(read, brush) ?? own) : read);
+        reads.push({
+          start: Math.min(response.seconds, first + k * bins.min),
+          end: Math.min(response.seconds, last + (k + 1) * bins.max),
+        });
+      }
+      // A read between bands takes the band either side.
+      return {
+        kind: "sum",
+        own,
+        taps,
+        response: {
+          key: impulseKey(view),
+          reads,
+          bands: { first: Math.min(...bands) - 1, last: Math.max(...bands) + 1 },
+        },
+      };
+    },
+  },
 };
 
 /**
@@ -654,7 +739,12 @@ export function readBoxes(
   if (!first) return { own: region, far: null };
   const leads = first.step === firstEnabledStep(state) && first.repeats === 1;
   const far = leads ? (EFFECT_REACH[first.effect].apart?.(first.view, ctx, region, brushOf(first.step)) ?? null) : null;
-  if (far) return { own: far.own, far };
+  // A response another effect reads too is held whole for it anyway.
+  const shared =
+    far?.kind === "sum" &&
+    far.response !== undefined &&
+    chain.slice(1).some((later) => later.effect === "convolve" && impulseKey(later.view) === far.response?.key);
+  if (far && !shared) return { own: far.own, far };
   const brush = brushOf(first.step);
   for (let r = 0; r < first.repeats; r++) region = effectReadBox(first.effect, first.view, ctx, region, brush);
   return { own: region, far: null };

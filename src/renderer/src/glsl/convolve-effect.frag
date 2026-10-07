@@ -78,10 +78,21 @@ void main() {
   // can rewrite it; no separate srcBaseBandIdx needed.
   float irBaseBandIdx = (irTimeOff * convolveIrFileFrameCount - convolveIrViewStartFrame) / irBandTimeScale;
 
-  int effectiveTaps = int(min(float(convolveIrSize), irBandLength));
+  // A response read a group of taps at a time holds only the group's bins, so
+  // its taps run to IR Size and the bounds below skip what it does not hold.
+  int effectiveTaps = sourcePartAccum == 0 ? int(min(float(convolveIrSize), irBandLength)) : convolveIrSize;
+  // The taps this draw reads: all of them, one group, or none while the
+  // totals the groups left are finished.
+  int firstTap = sourcePartAccum == 1 ? int(sourcePartTaps.x) : 0;
+  int lastTap = sourcePartAccum == 1 ? int(sourcePartTaps.y) : (sourcePartAccum == 2 ? -1 : effectiveTaps - 1);
 
   vec2 accumL = vec2(0.0);
   vec2 accumR = vec2(0.0);
+  if (sourcePartAccum != 0) {
+    vec4 sums = sourcePartAccum == 1 ? texture(destSpectrogramTex, vUv) : texture(sourceSpectrogramTex, vUv);
+    accumL = sums.rg;
+    accumR = sums.ba;
+  }
 
   // rate controls how the source advances per tap, measured in REAL TIME:
   //   rate =  1: forward reverb at normal speed (one IR-tap of real time into the past per step)
@@ -107,7 +118,8 @@ void main() {
 
   // IR always reads forward (tap k → IR frame k + 0.5).
   for (int k = 0; k < 512; k++) {
-    if (k >= effectiveTaps) break;
+    if (k >= effectiveTaps || k > lastTap) break;
+    if (k < firstTap) continue;
 
     // --- Brush edge mode (X axis only; convolve doesn't step across bands). --
     float tapDestUvX = coords.dest.x - destUvStepPerTap * float(k);
@@ -155,6 +167,11 @@ void main() {
     float tapSign = tapInvert ? -1.0 : 1.0;
     accumL += tapSign * magL * vec2(cos(phsL), sin(phsL));
     accumR += tapSign * magR * vec2(cos(phsR), sin(phsR));
+  }
+
+  if (sourcePartAccum == 1) {
+    outColor = vec4(accumL, accumR);
+    return;
   }
 
   float outMagL = length(accumL) * gain * convolveIrNormScale;

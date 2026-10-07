@@ -474,15 +474,32 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
       along both axes at once makes the view large: an evolve at its widest
       in time and in pitch together on a slow file still refuses on a small
       window.
-    - **sum**: the effect sums reads of the input tap by tap (a repeat's
-      copies along time). `taps` holds each tap's region. When no one view
-      holds them all, the taps are taken in order, as many to a group as one
-      view fits, and the pass is drawn once per group, adding the group's sum
-      to the totals the groups before it left in one of two targets in turn;
-      a last draw turns the totals into the pass's output. The totals ride on
-      the dest texture while a group adds to them and on the source texture
-      while they are finished, because the repeat pass already samples all
-      the textures a fragment shader may.
+    - **sum**: the effect sums reads of the input tap by tap: a repeat's
+      copies along time, or a convolve's taps. `taps` holds each tap's region.
+      When no one view holds them all, the taps are taken in order, as many to
+      a group as one view fits, and the pass is drawn once per group, adding
+      the group's sum to the totals the groups before it left in one of two
+      targets in turn; a last draw turns the totals into the pass's output.
+      The totals ride on the dest texture while a group adds to them and on
+      the source texture while they are finished, because the repeat pass
+      already samples all the textures a fragment shader may. A shader reads
+      only the taps `sourcePartTaps` names while `sourcePartAccum` is 1, and
+      none while it is 2.
+      A convolve weighs each tap by one bin of its response, so `response`
+      names that file and the seconds of it each tap reads; each tap moves its
+      read by the response bin at the tile's own frequencies, so a tile of a
+      few octaves reads tight boxes. When a window over the response holds
+      only part of what the taps read, a group also takes the view of the
+      response its taps read (`TapResponse`), over the response bands the
+      tile reads, and binds it in place of the window (`partResponse`); the
+      tile then holds no window over the response. A group grows while both
+      views fit (`canvasTexelsOfFrames` counts them without building them),
+      and its last tap is found by halving, since the views only grow as taps
+      join. A tile whose reads of other files no window holds counts as
+      reading without end, so the planner reads it in groups rather than
+      halving it in search of a size at which it fits. An IR Start a pattern
+      sweeps widely moves every tap's response read across the sweep, which no
+      group of taps shrinks, so such a dab still refuses on a small window.
       A wrapped read folds across the whole axis, so a brush that wraps is never
       read in parts. While the input is apart, every read of it at a pixel's own
       place reads the input laid over the view the dab paints on

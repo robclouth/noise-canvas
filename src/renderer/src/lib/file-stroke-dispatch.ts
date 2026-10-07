@@ -10,6 +10,7 @@ import type {
 } from "./file-renderer-types";
 import {
   canvasViewOf,
+  canvasTexelsOfFrames,
   canvasViewOfFrames,
   clipToView,
   fileRangesToView,
@@ -31,7 +32,7 @@ import {
 } from "./source-window";
 import type { DabNeeds, PaintBeside, StrokePaint, WindowedCanvas } from "./windowed-canvas";
 import type { SelfState } from "./self-window";
-import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock, gridQuantumFrames } from "./block-grid";
+import { blockOfFrame, coarsestBinFrames, frameRangeOfBlock, gridQuantumFrames, type BlockGrid } from "./block-grid";
 import { blockReadSpan, type DabExtent, type FrameSpan } from "./held-dabs";
 import {
   firstEnabledStep,
@@ -42,6 +43,7 @@ import {
   type BrushBox,
   type ReachContext,
   type ReadBox,
+  type TimeSpan,
 } from "./effect-reach";
 import { strokeRefusal as refusalFor } from "./whole-file-gate";
 import { reachFixes, reachFixMessage } from "./reach-fix";
@@ -352,6 +354,8 @@ export type DispatchOptions = {
     input?: SourceFileInfo;
     /** The input a part at a time, for a first step whose read no one view holds; `input` is the first part's. */
     inputParts?: readonly InputPart[];
+    /** The key of a response each part binds its own share of, which no window holds. */
+    partResponse?: string;
     reads: ReadPart;
     sketch?: boolean;
   };
@@ -431,6 +435,7 @@ export function dispatchStroke(
 
   const impulses = new Map<string, ImpulseFileInfo>();
   for (const entry of span?.impulseBindings ?? impulseNeedsFor(context, state)) {
+    if (entry.key === beside?.partResponse) continue;
     const response = openFiles[entry.need.fileId];
     const spectrogram = response?.spectrogramData;
     if (!spectrogram) return false;
@@ -566,13 +571,26 @@ function reachContext(context: FileStrokeContext, state: State): ReachContext | 
     binSeconds: coarsestBinFrames(canvas.grid) / spectrogram.sampleRate,
     bandsPerOctave: spectrogram.bandsPerOctave,
     numBands: spectrogram.numBands,
+    minFreq: spectrogram.minFreq,
     responseSpan: (path) => {
       const other = responseFileFor(context, path)?.spectrogramData;
       if (!other) return null;
       const stride = 1 << Math.max(...other.synthesisMetadata.bandStepLog2s);
-      return { seconds: other.numFrames / other.sampleRate, binSeconds: stride / other.sampleRate };
+      return {
+        seconds: other.numFrames / other.sampleRate,
+        binSeconds: stride / other.sampleRate,
+        binSecondsAt: (hz) => 2 ** other.metadata[bandOfHz(other, hz) * 4 + 2] / other.sampleRate,
+        bandAt: (hz) => bandOfHz(other, hz),
+      };
     },
   };
+}
+
+/** The band of a file that holds `hz`, as the convolve shader finds a response band. */
+function bandOfHz(spectrogram: SpectrogramData, hz: number): number {
+  const index =
+    spectrogram.numBands - 1 - spectrogram.bandsPerOctave * Math.log2(Math.max(hz, 1e-6) / spectrogram.minFreq);
+  return Math.min(spectrogram.numBands - 1, Math.max(0, Math.floor(index)));
 }
 
 /**
@@ -852,10 +870,16 @@ type BesideTile = {
    */
   inputBox: { frames: FrameSpan; bands: BandSpan; near: { frames: FrameSpan; bands: BandSpan } | null } | null;
   /**
-   * For a first step that sums copies along time: the view of what it reads
-   * besides those copies, and the frames and bands each copy reads.
+   * For a first step that sums taps: the view of what it reads besides those
+   * taps, the frames and bands each tap reads, and the file the taps weigh
+   * themselves by with the frames of it each tap reads, when a window over
+   * that file holds only part of it.
    */
-  copies: { own: CanvasView; taps: { frames: FrameSpan; bands: BandSpan }[] } | null;
+  copies: {
+    own: CanvasView;
+    taps: { frames: FrameSpan; bands: BandSpan }[];
+    response: TapResponse | null;
+  } | null;
   /** The input read a part at a time, when one view of it holds more than a window. */
   parts?: InputPartPlan[];
 };
@@ -863,9 +887,18 @@ type BesideTile = {
 /**
  * One part of a tile's input: the view it is read through, and which reads it
  * serves: the file frames and bands of its `core`, unbounded where it takes
- * every read past the input's edge, or the copies of its `taps`.
+ * every read past the input's edge, or the taps of its `taps`, with the view
+ * of the response those taps read.
  */
-type InputPartPlan = { view: CanvasView; core?: InputPart["core"]; taps?: InputPart["taps"] };
+type InputPartPlan = {
+  view: CanvasView;
+  core?: InputPart["core"];
+  taps?: InputPart["taps"];
+  response?: CanvasView;
+};
+
+/** The file a first step's taps weigh themselves by, and the frames of it each tap reads. */
+type TapResponse = { key: string; fileId: string; grid: BlockGrid; reads: FrameSpan[]; bands: BandSpan };
 
 /**
  * A step's brush as the region it covers, past the file's ends where it runs
@@ -962,6 +995,27 @@ function besideTiling(
     const frames = framesOfBox(box);
     return canvasViewOfFrames(grid, frames.start, frames.end, bandsOfBox(box, numBands));
   };
+  // A response a window holds whole is bound whole; one it holds only part of
+  // is read a group of taps at a time.
+  const tapResponse = (response: { key: string; reads: TimeSpan[]; bands: BandSpan }): TapResponse | null => {
+    const file = responseFileFor(context, response.key === "" ? null : response.key);
+    const spectrogram = file?.spectrogramData;
+    if (!file || !spectrogram || !responseIsWindowed(context, file.id)) return null;
+    const grid = file.id === context.fileId ? canvas.grid : canvas.fileGrid(file.id);
+    if (!grid) return null;
+    const rate = spectrogram.sampleRate;
+    const seam = coarsestBinFrames(grid);
+    return {
+      key: response.key,
+      fileId: file.id,
+      grid,
+      bands: response.bands,
+      reads: response.reads.map((read) => ({
+        start: Math.max(0, Math.floor(read.start * rate) - seam),
+        end: Math.min(spectrogram.numFrames, Math.ceil(read.end * rate) + seam),
+      })),
+    };
+  };
   const tileOf = (bands: BandSpan, frames: FrameSpan): BesideTile => {
     const { own, far } = readBoxes(
       state,
@@ -996,6 +1050,7 @@ function besideTiling(
           ? {
               own: viewOfBox(own),
               taps: taps.map(spanOf),
+              response: far?.kind === "sum" && far.response ? tapResponse(far.response) : null,
             }
           : null;
       return {
@@ -1062,6 +1117,12 @@ function besideTiling(
       first: Math.max(0, bands.first - 1),
       last: Math.min(numBands - 1, bands.last + 1),
     });
+  // The texels `viewOfCore` would hold.
+  const texelsOfCore = (frames: FrameSpan, bands: BandSpan): number =>
+    canvasTexelsOfFrames(grid, Math.max(0, frames.start - partBefore), Math.min(numFrames, frames.end + partAfter), {
+      first: Math.max(0, bands.first - 1),
+      last: Math.min(numBands - 1, bands.last + 1),
+    });
   const partsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const box = tile.inputBox;
     if (!partable || !box) return null;
@@ -1111,32 +1172,55 @@ function besideTiling(
       },
     }));
   };
-  // Copies are taken in order, as many to a group as one view of them fits.
+  // Taps are taken in order, as many to a group as one view of them fits, and
+  // one view of the response they read.
   const copyGroupsOf = (tile: BesideTile, budget: number, most: number): InputPartPlan[] | null => {
     const taps = tile.copies?.taps;
     if (!partable || !taps) return null;
+    const response = tile.copies?.response ?? null;
     const groups: InputPartPlan[] = [];
     for (let first = 0; first < taps.length; ) {
-      let last = first;
-      let frames = taps[first].frames;
-      let bands = taps[first].bands;
-      let view = viewOfCore(frames, bands);
-      if (view.texels > budget || groups.length >= most) return null;
-      for (let next = first + 1; next < taps.length; next++) {
-        const wider = {
-          start: Math.min(frames.start, taps[next].frames.start),
-          end: Math.max(frames.end, taps[next].frames.end),
-        };
-        const across = {
-          first: Math.min(bands.first, taps[next].bands.first),
-          last: Math.max(bands.last, taps[next].bands.last),
-        };
-        const merged = viewOfCore(wider, across);
-        if (merged.texels > budget) break;
-        [last, frames, bands, view] = [next, wider, across, merged];
+      // What the taps [first, first + i] read, for each i: the views only grow
+      // as taps join, so the last tap a group takes is found by halving.
+      const unions: { frames: FrameSpan; bands: BandSpan; heard: FrameSpan }[] = [];
+      for (let tap = first; tap < taps.length; tap++) {
+        const before = unions.at(-1);
+        const reads = response?.reads[tap] ?? { start: 0, end: 0 };
+        unions.push({
+          frames: {
+            start: Math.min(before?.frames.start ?? Infinity, taps[tap].frames.start),
+            end: Math.max(before?.frames.end ?? -Infinity, taps[tap].frames.end),
+          },
+          bands: {
+            first: Math.min(before?.bands.first ?? Infinity, taps[tap].bands.first),
+            last: Math.max(before?.bands.last ?? -Infinity, taps[tap].bands.last),
+          },
+          heard: {
+            start: Math.min(before?.heard.start ?? Infinity, reads.start),
+            end: Math.max(before?.heard.end ?? -Infinity, reads.end),
+          },
+        });
       }
-      groups.push({ view, taps: { first, last } });
-      first = last + 1;
+      const fits = (index: number): boolean => {
+        const { frames, bands, heard } = unions[index];
+        if (texelsOfCore(frames, bands) > budget) return false;
+        return !response || canvasTexelsOfFrames(response.grid, heard.start, heard.end, response.bands) <= budget;
+      };
+      if (!fits(0) || groups.length >= most) return null;
+      let low = 0;
+      let high = unions.length - 1;
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (fits(mid)) low = mid;
+        else high = mid - 1;
+      }
+      const { frames, bands, heard } = unions[low];
+      groups.push({
+        view: viewOfCore(frames, bands),
+        taps: { first, last: first + low },
+        response: response ? canvasViewOfFrames(response.grid, heard.start, heard.end, response.bands) : undefined,
+      });
+      first += low + 1;
     }
     return groups;
   };
@@ -1212,22 +1296,25 @@ function besideFor(
   const fitsWhole = (tile: BesideTile): boolean =>
     tile.view.texels <= budget && (tile.input?.texels ?? 0) <= budget && canvas.othersFit(span.needs, tile.others);
   // A tile whose own view fits reads an input too wide for one view a part at
-  // a time, and one whose copies along time no one view holds reads them a
-  // group at a time: the view it then paints on, and its parts.
+  // a time, and one whose taps no one view holds, or whose response no window
+  // holds, reads them a group at a time: the view it then paints on, and its
+  // parts.
   const inParts = (tile: BesideTile): { view: CanvasView; parts: InputPartPlan[] } | null => {
-    if (!canvas.othersFit(span.needs, tile.others)) return null;
-    const own = tile.view.texels <= budget ? null : tile.copies?.own;
-    if (own) {
-      if (own.texels > budget) return null;
+    const { copies } = tile;
+    if (copies && (tile.view.texels > budget || !canvas.othersFit(span.needs, tile.others))) {
+      if (copies.own.texels > budget || !canvas.othersFit(needsInGroups(span.needs, copies), tile.others)) return null;
       const groups = copyGroupsOf(tile, budget, MAX_BESIDE_TILES - partCount);
-      return groups && { view: own, parts: groups };
+      return groups && { view: copies.own, parts: groups };
     }
+    if (!canvas.othersFit(span.needs, tile.others)) return null;
     if (tile.view.texels > budget) return null;
     const parts = partsOf(tile, budget, MAX_BESIDE_TILES - partCount);
     return parts && { view: tile.view, parts };
   };
-  // Texels a tile reads: its view, and its input when apart.
-  const reads = (tile: BesideTile): number => tile.view.texels + (tile.input?.texels ?? 0);
+  // Texels a tile reads: its view, and its input when apart. One whose reads of
+  // other files no window holds reads them in parts too, whatever its size.
+  const reads = (tile: BesideTile): number =>
+    canvas.othersFit(span.needs, tile.others) ? tile.view.texels + (tile.input?.texels ?? 0) : Infinity;
   const larger = ([a, b]: [BesideTile, BesideTile]): number => Math.max(cost(a), cost(b));
   const tiles: BesideTile[] = [];
   const pending = [tileOf(written, { start, end })];
@@ -1277,6 +1364,12 @@ function besideFor(
   return { compute, tiles: tiles.length, pitch };
 }
 
+/** What a tile whose taps are read a group at a time needs held: each group binds its own part of the response. */
+function needsInGroups(needs: DabNeeds, copies: NonNullable<BesideTile["copies"]>): DabNeeds {
+  const { response } = copies;
+  return response ? { ...needs, impulses: needs.impulses.filter((need) => need.fileId !== response.fileId) } : needs;
+}
+
 /** Milliseconds a dab painted beside the canvas spent in each phase, over all its tiles. */
 type BesideTiming = { readMs: number; setupMs: number; paintMs: number; readbackMs: number };
 
@@ -1310,8 +1403,10 @@ async function paintTileBeside(
     span.needs.original ? canvas.readOriginal(fileRanges) : Promise.resolve(null),
   ]);
   if (!start || (span.needs.original && !original)) return null;
-  if (!(await canvas.holdOthers(span.needs, tile.others))) return null;
-  const parts = tile.parts ? await readParts(context, state, canvas, tile.parts) : null;
+  const response = tile.parts && tile.copies?.response ? tile.copies.response : null;
+  const needs = response && tile.copies ? needsInGroups(span.needs, tile.copies) : span.needs;
+  if (!(await canvas.holdOthers(needs, tile.others))) return null;
+  const parts = tile.parts ? await readParts(context, state, canvas, tile.parts, response) : null;
   if (tile.parts && !parts) return null;
   const input = parts ? parts.first : tile.input ? await inputSource(context, state, canvas, tile.input) : null;
   if (tile.input && !input) return null;
@@ -1335,7 +1430,14 @@ async function paintTileBeside(
       ...options,
       span,
       clip: frames,
-      beside: { renderer: beside, view, input: input?.source, inputParts: parts?.parts, reads: tile.others },
+      beside: {
+        renderer: beside,
+        view,
+        input: input?.source,
+        inputParts: parts?.parts,
+        partResponse: response?.key,
+        reads: tile.others,
+      },
     };
     if (!dispatchStroke(context, state, cursorPos, false, painting)) return null;
     lap("paintMs");
@@ -1364,16 +1466,30 @@ async function readParts(
   state: State,
   canvas: WindowedCanvas,
   plans: readonly InputPartPlan[],
+  response: TapResponse | null,
 ): Promise<{ first: { source: SourceFileInfo; dispose: () => void }; parts: InputPart[] } | null> {
+  const [inputs, heard] = await Promise.all([
+    Promise.all(plans.map((plan) => inputValues(state, canvas, plan.view, context))),
+    Promise.all(
+      plans.map((plan) =>
+        response && plan.response ? canvas.readFile(response.fileId, heldRanges(plan.response.ranges)) : null,
+      ),
+    ),
+  ]);
   const values: Float32Array[] = [];
-  for (const read of await Promise.all(plans.map((plan) => inputValues(state, canvas, plan.view, context)))) {
+  for (const read of inputs) {
     if (!read) return null;
     values.push(read);
   }
+  if (plans.some((plan, index) => response && plan.response && !heard[index])) return null;
+  const responseFile = response ? context.openFiles[response.fileId]?.spectrogramData : null;
+  if (response && !responseFile) return null;
   const first = inputOver(context, state, plans[0].view, values[0]);
   if (!first) return null;
-  const parts = plans.map(
-    (plan, index): InputPart => ({
+  const parts = plans.map((plan, index): InputPart => {
+    const view = plan.response;
+    const read = heard[index];
+    return {
       core: plan.core,
       taps: plan.taps,
       source: () => {
@@ -1382,8 +1498,29 @@ async function readParts(
         if (!made) throw new Error("the painted file closed while its input was read in parts");
         return made;
       },
-    }),
-  );
+      response:
+        response && responseFile && view && read
+          ? {
+              key: response.key,
+              open: () => {
+                const packed = viewTexture(view, read);
+                const metadata = bandMetadataTexture(view.layout, responseFile.sampleRate);
+                return {
+                  info: {
+                    spectrogramData: responseFile,
+                    textures: { packed: { texture: packed, dispose: () => packed.dispose() }, metadata },
+                    view,
+                  },
+                  dispose: () => {
+                    packed.dispose();
+                    metadata.dispose();
+                  },
+                };
+              },
+            }
+          : undefined,
+    };
+  });
   return { first, parts };
 }
 

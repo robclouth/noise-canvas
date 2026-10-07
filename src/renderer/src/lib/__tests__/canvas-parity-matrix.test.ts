@@ -412,6 +412,42 @@ const SCENARIOS: {
     ],
   })),
   ...[
+    { name: "through its longest response", step: { convolveIrSize: 512 } },
+    { name: "through its longest response, backward", step: { convolveIrSize: 512, convolveIrRate: -1 } },
+    { name: "of 64 taps at a rate of 48", step: { convolveIrSize: 64, convolveIrRate: 48 } },
+    {
+      name: "from IR Start a pattern sweeps a little",
+      step: {
+        convolveIrSize: 256,
+        convolveIrTimeOffset: 30,
+        ...sweeping("convolveIrTimeOffset"),
+        convolveIrTimeOffsetMod1Amount: 1,
+      },
+    },
+    {
+      name: "through another file",
+      readsOther: true,
+      step: { convolveIrSize: 512 },
+    },
+  ].map(({ name, step, readsOther }) => ({
+    name: `a convolve ${name}, its taps read in groups`,
+    windowBlocks: SMALL_WINDOW_BLOCKS,
+    otherWindowBlocks: SMALL_WINDOW_BLOCKS,
+    readsOther,
+    dabs: () => [
+      {
+        x: 0.5,
+        y: 0.5,
+        state: brushState(
+          "convolve",
+          { ...step, ...(readsOther ? { convolveIrFile: { path: OTHER_FILE_PATH } } : {}), brushSizePitch: 24 },
+          4,
+          false,
+        ),
+      },
+    ],
+  })),
+  ...[
     { name: "eight copies four beats apart", step: { cloneCountX: 8, cloneSpaceBeats: 4 } },
     {
       name: "copies both ways in time and pitch, decaying",

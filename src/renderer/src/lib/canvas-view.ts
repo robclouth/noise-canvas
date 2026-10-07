@@ -50,11 +50,34 @@ export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: num
  * `bands`. `firstBlock` and `lastBlock` are the blocks it touches.
  */
 export function canvasViewOfFrames(grid: BlockGrid, start: number, end: number, bands?: BandSpan): CanvasView {
+  const { startFrame, endFrame } = viewFrames(grid, start, end);
+  return viewOver(grid, startFrame, endFrame, blockOfFrame(grid, startFrame), blockOfFrame(grid, endFrame - 1), bands);
+}
+
+/** The texels `canvasViewOfFrames` would hold over the same frames and bands, without building it. */
+export function canvasTexelsOfFrames(grid: BlockGrid, start: number, end: number, bands?: BandSpan): number {
+  const { startFrame, endFrame } = viewFrames(grid, start, end);
+  const { layout, numFrames } = grid;
+  const first = bands ? Math.max(0, bands.first) : 0;
+  const last = bands ? Math.min(layout.numBands - 1, bands.last) : layout.numBands - 1;
+  let texels = 0;
+  for (let band = first; band <= last; band++) {
+    const length = layout.metadata[band * 4 + 1];
+    const step = layout.metadata[band * 4 + 2];
+    const k0 = Math.min(length, startFrame / 2 ** step);
+    const kEnd = endFrame >= numFrames ? length : Math.min(length, endFrame / 2 ** step);
+    texels += Math.max(0, kEnd - k0);
+  }
+  return texels;
+}
+
+/** The frames a view over [start, end) spans: its edges moved out to the grid's quantum and kept inside the file. */
+function viewFrames(grid: BlockGrid, start: number, end: number): { startFrame: number; endFrame: number } {
   const quantum = gridQuantumFrames(grid);
   // A span wholly past the file's end keeps the file's last quantum.
   const startFrame = Math.max(0, Math.floor(Math.min(start, grid.numFrames - 1) / quantum) * quantum);
   const endFrame = Math.min(grid.numFrames, Math.max(startFrame + quantum, Math.ceil(end / quantum) * quantum));
-  return viewOver(grid, startFrame, endFrame, blockOfFrame(grid, startFrame), blockOfFrame(grid, endFrame - 1), bands);
+  return { startFrame, endFrame };
 }
 
 function viewOver(

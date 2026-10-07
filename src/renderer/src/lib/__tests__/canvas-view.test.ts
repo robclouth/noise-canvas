@@ -6,6 +6,7 @@ import { ANALYSIS_MAX_TEXTURE_SIZE, packedFold, padToFold } from "../constants";
 import { blockGrid, blockPixelRanges, blockTexels, gridQuantumFrames } from "../block-grid";
 import {
   canvasViewOf,
+  canvasTexelsOfFrames,
   canvasViewOfFrames,
   clipRangesToView,
   fileRangesToView,
@@ -114,6 +115,20 @@ describe("canvasViewOfFrames", () => {
     const view = canvasViewOfFrames(grid, small.numFrames - 1, small.numFrames + quantum);
     expect(view.endFrame).toBe(small.numFrames);
     expect(view.texels).toBeGreaterThan(0);
+  });
+
+  it("holds the texels canvasTexelsOfFrames counts for it", () => {
+    const spans = [
+      [grid.blockFrames + quantum * 1.5, grid.blockFrames + quantum * 3.25],
+      [0, small.numFrames],
+      [small.numFrames - 1, small.numFrames + quantum],
+      [small.numFrames + quantum * 3, small.numFrames + quantum * 5],
+    ];
+    for (const [start, end] of spans) {
+      for (const bands of [undefined, { first: 1, last: 2 }, { first: -3, last: small.numBands + 4 }]) {
+        expect(canvasTexelsOfFrames(grid, start, end, bands)).toBe(canvasViewOfFrames(grid, start, end, bands).texels);
+      }
+    }
   });
 });
 

@@ -272,7 +272,7 @@ export interface SourceFileInfo {
  */
 export interface ImpulseFileInfo {
   spectrogramData: SpectrogramData;
-  textures: { packed: WebGLRenderTarget; metadata: DataTexture };
+  textures: { packed: Pick<WebGLRenderTarget, "texture" | "dispose">; metadata: DataTexture };
   /** The span `textures.packed` lays out. Absent when it holds the whole file. */
   view?: CanvasView;
 }
@@ -348,10 +348,15 @@ export type InputPart = {
   core?: { start: number; end: number; first: number; last: number };
   taps?: { first: number; last: number };
   source: () => { source: SourceFileInfo; dispose: () => void };
+  /** The part of the response the taps read, under the key the effect looks it up by. */
+  response?: { key: string; open: () => { info: ImpulseFileInfo; dispose: () => void } };
 };
 
 /** The uniforms a part draw sets over the pass's own. */
 type PartGate = Partial<CommonUniforms>;
+
+/** The part of a response a part draw reads, under the key the effect looks it up by. */
+type PartResponse = { key: string; info: ImpulseFileInfo };
 
 // A core edge this far out takes every read past it.
 const PART_EDGE = 1e30;
@@ -714,7 +719,7 @@ export class StrokeRenderer {
    */
   private drawInParts(
     parts: readonly InputPart[],
-    load: (source: SourceFileInfo, gate: PartGate) => void,
+    load: (source: SourceFileInfo, gate: PartGate, response?: PartResponse) => void,
     material: RawShaderMaterial,
     target: WebGLRenderTarget,
     list: PixelRangeList,
@@ -766,7 +771,7 @@ export class StrokeRenderer {
    */
   private drawTapsInParts(
     parts: readonly InputPart[],
-    load: (source: SourceFileInfo, gate: PartGate) => void,
+    load: (source: SourceFileInfo, gate: PartGate, response?: PartResponse) => void,
     material: RawShaderMaterial,
     target: WebGLRenderTarget,
     list: PixelRangeList,
@@ -785,27 +790,39 @@ export class StrokeRenderer {
     try {
       let held: WebGLRenderTarget | null = null;
       for (const [index, part] of parts.entries()) {
-        if (!part.taps) throw new Error("A part of a pass that sums copies names no copies.");
+        if (!part.taps) throw new Error("A part of a pass that sums taps names no taps.");
         const { source, dispose } = part.source();
+        const response = part.response?.open();
         try {
-          load(source, {
-            sourcePartAccum: { value: 1 },
-            sourcePartTaps: { value: new Vector2(part.taps.first, part.taps.last) },
-            destSpectrogramTex: { value: held?.texture ?? this.textures.placeholderTexture },
-          });
+          load(
+            source,
+            {
+              sourcePartAccum: { value: 1 },
+              sourcePartTaps: { value: new Vector2(part.taps.first, part.taps.last) },
+              destSpectrogramTex: { value: held?.texture ?? this.textures.placeholderTexture },
+            },
+            part.response && response && { key: part.response.key, info: response.info },
+          );
           const next = totals[index % 2];
           this.drawRanges(material, next, list);
           held = next;
         } finally {
+          response?.dispose();
           dispose();
         }
       }
       if (!held) return;
       const { source, dispose } = parts[0].source();
+      const response = parts[0].response?.open();
       try {
-        load(source, { sourcePartAccum: { value: 2 }, sourceSpectrogramTex: { value: held.texture } });
+        load(
+          source,
+          { sourcePartAccum: { value: 2 }, sourceSpectrogramTex: { value: held.texture } },
+          parts[0].response && response && { key: parts[0].response.key, info: response.info },
+        );
         this.drawRanges(material, target, list);
       } finally {
+        response?.dispose();
         dispose();
       }
     } finally {
@@ -2025,7 +2042,7 @@ export class StrokeRenderer {
           let read: { source: SourceFileInfo; uniforms: CommonUniforms } | null = null;
           this.drawInParts(
             params.inputParts,
-            (source, gate) => {
+            (source, gate, response) => {
               if (read?.source !== source) {
                 read = { source, uniforms: withSourceUniforms(uniformsForThisIteration, uniformsReading(source)) };
               }
@@ -2035,7 +2052,7 @@ export class StrokeRenderer {
                 file: source,
                 state: effectState,
                 modContext: iterationContext,
-                impulses: params.impulses,
+                impulses: response ? new Map(params.impulses).set(response.key, response.info) : params.impulses,
               });
             },
             material,
