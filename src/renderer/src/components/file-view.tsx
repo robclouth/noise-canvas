@@ -1310,9 +1310,10 @@ export const FileView = memo((props: FileViewProps) => {
         )}
       </Box>
       {isSynthesizing && <Loader size="xs" pos="absolute" bottom={25} right={10} />}
-      {/* The view stays visible under a splice; this layer just badges it and
-          soaks up pointer input until the rebuild lands. */}
-      {busyMessage && (
+      {/* The view stays visible, greyed, under a splice or while its onsets
+          are found; this layer badges it and soaks up pointer input until the
+          work lands. */}
+      {busyMessage && !loadingMessage && (
         <Box
           pos="absolute"
           style={{
@@ -1322,6 +1323,7 @@ export const FileView = memo((props: FileViewProps) => {
             alignItems: "center",
             justifyContent: "center",
             cursor: "wait",
+            backgroundColor: "rgba(0, 0, 0, 0.45)",
           }}
         >
           <Box

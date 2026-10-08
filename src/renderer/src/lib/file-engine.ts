@@ -401,6 +401,7 @@ export class FileEngine {
 
     if (!historyHookedRef.current) {
       historyHookedRef.current = true;
+      if (openFiles[fileId]?.onsetsPending) getState().setFileFindingOnsets(fileId, true);
 
       const epoch = this.epoch;
       const current = () => !this.disposed && this.epoch === epoch;
@@ -437,6 +438,7 @@ export class FileEngine {
         const onsetsSettled = (): void => {
           const opened = openFiles[fileId];
           if (opened) opened.onsetsPending = false;
+          getState().setFileFindingOnsets(fileId, false);
         };
         if (nodeId === null) {
           try {

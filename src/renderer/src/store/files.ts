@@ -289,6 +289,8 @@ export interface FilesState {
    * message shows in a badge over it while pointer input is held off.
    */
   filesBusy: Record<string, string>;
+  /** Holds the file's view busy while its onsets are still being found, and frees it once they are. */
+  setFileFindingOnsets: (fileId: string, finding: boolean) => void;
   activeFileId: string | null;
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
   fullscreenFileId: string | null;
@@ -1636,6 +1638,9 @@ export const FILES_PERSISTED_KEYS = [
   "fileDisplayNames",
 ] as const;
 
+/** The badge over a file's view while its onsets are still being found. */
+const FINDING_ONSETS_MESSAGE = "Finding onsets...";
+
 /** A stroke's footprint cut to one commit window. */
 type FootprintPiece = { window: CommitWindow; footprint: NonNullable<CommitSource["footprint"]> };
 
@@ -2857,6 +2862,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesSelection[fileId];
           delete state.filesDirty[fileId];
           delete state.filesLoading[fileId];
+          delete state.filesBusy[fileId];
           delete state.filesSynthesizing[fileId];
           delete state.persistedFilePaths[fileId];
           delete state.fileDisplayNames[fileId];
@@ -4232,6 +4238,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         } else {
           state.filesLoading[fileId] = message;
         }
+      }),
+    );
+  },
+  setFileFindingOnsets: (fileId: string, finding: boolean) => {
+    set(
+      produce((state: State) => {
+        if (finding && !state.filesBusy[fileId]) state.filesBusy[fileId] = FINDING_ONSETS_MESSAGE;
+        else if (!finding && state.filesBusy[fileId] === FINDING_ONSETS_MESSAGE) delete state.filesBusy[fileId];
       }),
     );
   },
