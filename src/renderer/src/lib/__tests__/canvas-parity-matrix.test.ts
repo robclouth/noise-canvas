@@ -619,6 +619,16 @@ const SCENARIOS: {
         ],
       },
       {
+        name: "a blur at its widest, run three times",
+        steps: [
+          {
+            effect: "blur",
+            step: { blurAmountTime: 100, blurAmountPitch: 100, blurEdgeMode: 1, brushIterations: 3 },
+            beats: 2,
+          },
+        ],
+      },
+      {
         name: "a long backward convolve, run twice",
         steps: [
           { effect: "convolve", step: { convolveIrSize: 256, convolveIrRate: -2, brushIterations: 2 }, beats: 4 },

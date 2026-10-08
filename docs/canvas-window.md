@@ -560,8 +560,13 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
       (`sourceFoldsTime`). Any other view never folds a read
       (`wrapUv`). Such a dab paints on a view of the file turned round on every
       canvas, one over the whole file too (`wrapsPastEnds` in `paintDab`), so a
-      short file and a long one paint it alike. A brush that wraps across
-      pitch reads the whole of that axis. While the input is apart, every read of it at a pixel's own
+      short file and a long one paint it alike. Its hover preview on a canvas
+      over the whole file draws on the file as it lies and shows the same
+      (`wrap-preview.test.ts`). The renderer keeps the stroke's painted time as
+      spans (`addTimeSpan`), so a dab across the end leaves two pieces, and the
+      commit rebuilds each piece on its own view, the last first, as one
+      history step (`commitWindowsOf`), not the file between them. A brush
+      that wraps across pitch reads the whole of that axis. While the input is apart, every read of it at a pixel's own
       place reads the input laid over the view the dab paints on
       (`sourceUnderTex`): the audio level the brush weight follows, the
       envelope followers, and Locked's phase under the pixel. That view holds
