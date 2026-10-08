@@ -7,6 +7,7 @@ const gate = vi.hoisted(() => ({
   committed: [] as Float32Array[],
   readRanges: null as ((ranges: Uint32Array) => Float32Array) | null,
   prepared: [] as { base: Float32Array; baseRanges: Uint32Array; after: Float32Array; ranges: Uint32Array }[],
+  calls: [] as { layout: PackedLayout; window: CommitWindow; stroke: CommitStroke }[],
 }));
 
 vi.mock("@renderer/effects", () => ({ effects: {} }));
@@ -67,8 +68,17 @@ vi.mock("../host", () => ({
     os: { totalmem: () => 8 * 1024 ** 3 },
     analysis: {
       getGpuMemoryInfo: () => ({ bytes: 8 * 1024 ** 3, unified: true }),
-      commitStroke: async (packed: Float32Array) => {
+      commitStroke: async (
+        packed: Float32Array,
+        layout: PackedLayout,
+        _sampleRate: number,
+        _params: unknown,
+        _audio: Float32Array[],
+        window: CommitWindow,
+        stroke: CommitStroke,
+      ) => {
         gate.committed.push(Float32Array.from(packed));
+        gate.calls.push({ layout, window, stroke });
         return {
           channels: [new Float32Array(SAMPLES)],
           peak: 1,
@@ -103,6 +113,7 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 import { createBrushSlice } from "../../store/brush";
 import type { StrokeCommitSnapshot } from "../stroke-commit";
+import type { CommitStroke, CommitWindow, PackedLayout } from "../../../../main/lib/types";
 import type { State, ZustandGet, ZustandSet } from "../../store/types";
 
 const FILE_ID = "f1";
@@ -360,7 +371,46 @@ describe("a commit over a view of the file", () => {
     gate.stored = stored;
     gate.committed = [];
     gate.prepared = [];
+    gate.calls = [];
     gate.readRanges = (ranges) => gatherPixelRanges(stored, ranges);
+  });
+
+  it("commits a brush that wraps across the end on a view of each end, the last first, as one outcome", async () => {
+    const { files } = makeStore();
+    openLongFile();
+    const step = 1 << layout.bandStepLog2s[band];
+    const kEnd = Math.floor((long.numFrames - 2000) / step);
+    const ends = Uint32Array.of(layout.bandOffsets[band], 3, layout.bandOffsets[band] + kEnd, 3);
+    const endValues = Float32Array.from({ length: 24 }, (_, i) => -1 - i);
+    const snapshot = {
+      ...viewSnapshot(false),
+      dirtyRegion: { startX: 0, endX: 1, startY: 0, endY: 1 },
+      dirtyRanges: ends,
+      wrapMode: 3,
+      footprintUv: { timeMin: 0, timeMax: 1, pitchMin: 0, pitchMax: 1 },
+    } as StrokeCommitSnapshot;
+
+    const outcome = await files.commitStroke(FILE_ID, snapshot, {
+      data: null,
+      footprint: { ranges: ends, values: Promise.resolve(endValues) },
+    });
+
+    expect(gate.calls).toHaveLength(2);
+    const [last, first] = gate.calls;
+    expect(last.window.startFrame).toBeGreaterThan(first.window.endFrame);
+    expect(first.window.startFrame).toBe(0);
+    expect(last.window.endFrame).toBe((kEnd + 3) * step);
+    for (const call of gate.calls) {
+      expect(call.layout.viewStartFrame).toBeDefined();
+      expect(call.stroke.footStartFrame).toBe(call.window.startFrame);
+      expect(call.stroke.footEndFrame).toBe(call.window.endFrame);
+    }
+    expect((last.layout.viewEndFrame ?? 0) - (last.layout.viewStartFrame ?? 0)).toBeLessThan(long.numFrames / 2);
+    expect(outcome?.audioHops).toHaveLength(2);
+    expect(outcome?.view).toBeNull();
+    expect(outcome?.preparedDelta).toBeNull();
+    expect(gate.prepared).toHaveLength(0);
+    expect(firstDifference(outcome!.baseFootprint!, gatherPixelRanges(stored, ends))).toBe(-1);
   });
 
   it("cuts the delta from the view as the store held it, then hands the addon the view with the stroke over it", async () => {

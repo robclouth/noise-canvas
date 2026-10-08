@@ -388,7 +388,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           const updated = openFiles[activeFileId];
           // A stroke that changed nothing gets no node, and the id that comes
           // back is its parent's — whose caches already belong to it.
-          if (node.isNew && outcome.audioHop) historyManager.setNodeAudioHop(node.id, outcome.audioHop);
+          if (node.isNew) historyManager.setNodeAudioHops(node.id, outcome.audioHops);
           if (node.isNew && outcome.audioBuffer) {
             historyManager.setStateAudio(node.id, outcome.audioBuffer, result.peak > 0 ? result.peak : 1);
           }

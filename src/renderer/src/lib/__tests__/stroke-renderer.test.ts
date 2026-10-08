@@ -1451,6 +1451,29 @@ describe("StrokeRenderer", () => {
       const dataAfter = await renderer.getFBOData();
       expect(dataAfter).toBeInstanceOf(Float32Array);
     });
+
+    it("keeps paint at the two ends of the view apart in the stroke's footprint", () => {
+      renderer.initialize();
+      renderer.beginStroke();
+      renderer.addPaintedBox(0, 0.1, 0, 1);
+      renderer.addPaintedBox(0.9, 1, 0, 1);
+      const ranges = renderer.getDirtyPixelRanges() ?? new Uint32Array(0);
+      const { metadata, numBands } = spectrogramData;
+      let split = 0;
+      for (let b = 0; b < numBands; b++) {
+        const offset = metadata[b * 4];
+        const length = metadata[b * 4 + 1];
+        const inBand: number[][] = [];
+        for (let i = 0; i < ranges.length; i += 2) {
+          if (ranges[i] >= offset && ranges[i] < offset + length) inBand.push([ranges[i], ranges[i] + ranges[i + 1]]);
+        }
+        const middle = offset + Math.floor(length / 2);
+        expect(inBand.some(([start, end]) => start <= middle && middle < end)).toBe(false);
+        if (inBand.length === 2) split++;
+      }
+      expect(split).toBeGreaterThan(0);
+      expect(renderer.getCommittedFootprintUv()).toMatchObject({ timeMin: 0, timeMax: 1 });
+    });
   });
 
   describe("multi-step with iterations", () => {

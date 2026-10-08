@@ -56,14 +56,25 @@ import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type {
   AnalysisParams,
   CommitLevels,
+  CommitStroke,
   CommitStrokeResult,
+  CommitWindow,
   PackedLayout,
   PackedOnsets,
   SplicePiece,
 } from "../../../main/lib/types";
 import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
 import { commitViewOf, composeViewBuffer, scatterCommitPatch, viewHolds, type CommitView } from "../lib/commit-view";
-import { copyCompactOverlap, gatherPixelRanges, scatterCompactPixelRanges } from "../lib/pixel-ranges";
+import {
+  composePixelRangeValues,
+  copyCompactOverlap,
+  gatherPixelRanges,
+  intersectPixelRanges,
+  mergePixelRanges,
+  pixelRangeCount,
+  scatterCompactPixelRanges,
+  subtractPixelRanges,
+} from "../lib/pixel-ranges";
 import {
   computeOutputLevels,
   measureOutputLevels,
@@ -81,7 +92,7 @@ import { destroyHistoryManager, getHistoryManager, type PreparedDelta } from "..
 import { serializeEditCommand, serializeFileTask } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
-import { commitStrokeOf, commitWindowOf, projectsWholeFile, type StrokeCommitSnapshot } from "../lib/stroke-commit";
+import { commitStrokeOf, commitWindowsOf, projectsWholeFile, type StrokeCommitSnapshot } from "../lib/stroke-commit";
 import type {
   Brush,
   LoopRegion,
@@ -113,7 +124,8 @@ import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils"
 export interface CommitOutcome {
   result: CommitStrokeResult;
   audioBuffer: AudioBuffer | null;
-  audioHop: AudioHop | null;
+  /** The hops for history, one per window the commit rebuilt, in the order it rebuilt them. */
+  audioHops: AudioHop[];
   /** The view a windowed commit ran on, with `viewBuffer` holding its pixels after the commit. */
   view: CommitView | null;
   viewBuffer: Float32Array | null;
@@ -1624,6 +1636,269 @@ export const FILES_PERSISTED_KEYS = [
   "fileDisplayNames",
 ] as const;
 
+/** A stroke's footprint cut to one commit window. */
+type FootprintPiece = { window: CommitWindow; footprint: NonNullable<CommitSource["footprint"]> };
+
+/**
+ * The stroke's footprint cut into one piece per commit window, each the
+ * painted pixels in that window's view. Null when a painted pixel lies in no
+ * window's view, or a window's view is the whole file.
+ */
+function footprintPieces(
+  layout: PackedLayout,
+  sampleRate: number,
+  windows: CommitWindow[],
+  footprint: NonNullable<CommitSource["footprint"]>,
+): FootprintPiece[] | null {
+  const pieces: FootprintPiece[] = [];
+  let covered: Uint32Array = new Uint32Array(0);
+  for (const window of windows) {
+    const view = commitViewOf(layout, window, sampleRate);
+    if (!view) return null;
+    const ranges = intersectPixelRanges(footprint.ranges, view.ranges);
+    covered = mergePixelRanges(covered, ranges);
+    const values = Promise.resolve(footprint.values).then((all) => {
+      const out = new Float32Array(pixelRangeCount(ranges) * 4);
+      copyCompactOverlap(out, ranges, all, footprint.ranges);
+      return out;
+    });
+    pieces.push({ window, footprint: { ranges, values } });
+  }
+  return subtractPixelRanges(footprint.ranges, covered).length === 0 ? pieces : null;
+}
+
+/**
+ * Commits a stroke over one window of the file, or over the whole file when
+ * `window` is null: synthesis, limiter, projection and onsets, with the audio
+ * installed and the hop that takes it back.
+ */
+async function commitInWindow(
+  get: ZustandGet,
+  fileId: string,
+  snapshot: StrokeCommitSnapshot,
+  source: CommitSource,
+  window: CommitWindow | null,
+  options: {
+    layout: PackedLayout;
+    stroke: CommitStroke;
+    prepareDelta: boolean;
+    autoPlaybackParams: StrokeCommitSnapshot["autoPlaybackParams"];
+  },
+): Promise<CommitOutcome | null> {
+  const file = openFiles[fileId];
+  if (!file?.spectrogramData) return null;
+  const spec = file.spectrogramData;
+  const { layout, stroke } = options;
+  const wholeFile = projectsWholeFile(snapshot);
+
+  const params: AnalysisParams = { bandsPerOctave: spec.bandsPerOctave, minFreq: spec.minFreq };
+  // Only the span the stroke touched needs its onsets found again, padded
+  // either side because an event is anchored at the foot of its attack and
+  // measured for a moment after it. Without a reference from a whole-file
+  // pass this reads everything, and produces one.
+  const onsetReference = file.onsetReference;
+  if (onsetReference && hasOnsetGate(file) && window) {
+    params.detectOnsets = true;
+    params.onsetStartSec = Math.max(0, window.startFrame / spec.sampleRate - ONSET_REGION_PAD_SEC);
+    params.onsetEndSec = Math.min(
+      spec.numFrames / spec.sampleRate,
+      window.endFrame / spec.sampleRate + ONSET_REGION_PAD_SEC,
+    );
+    params.onsetOdfReference = onsetReference.odfMax;
+    params.onsetBandMax = onsetReference.bandMax;
+  } else if (!hasOnsetGate(file) || wholeFile) {
+    params.detectOnsets = true;
+  }
+
+  // Without a window, or without audio to splice into, the commit rebuilds
+  // the whole file — which is what the addon does when either is missing.
+  // The audio goes with it either way: the limiter measures the stroke
+  // against it, so a rebuild without it would hold the whole file down.
+  const existingBuffer = file.audioBuffer;
+  const existingAudio: Float32Array[] = [];
+  if (existingBuffer) {
+    for (let i = 0; i < existingBuffer.numberOfChannels; i++) existingAudio.push(existingBuffer.getChannelData(i));
+  }
+  const beforeMeta: AudioStateMeta = {
+    peak: file.audioPeak ?? 1,
+    gainReductionDb: file.gainReductionDb,
+    maxGainReductionDb: file.maxGainReductionDb,
+  };
+
+  get().setFileSynthesizing(fileId, true);
+  try {
+    // A windowed call hands the addon only the window's reach instead of the
+    // whole packed state. It needs a window with audio to splice into and a
+    // regional onset reference, and the extension host does not speak it.
+    const windowable =
+      window != null &&
+      !wholeFile &&
+      existingAudio.length > 0 &&
+      !(params.detectOnsets && params.onsetStartSec === undefined) &&
+      !host.env.isExtension;
+    const view = windowable && window ? commitViewOf(layout, window, spec.sampleRate) : null;
+
+    const commitStart = performance.now();
+    let data = source.data;
+    // The whole painted state, read only when a pass needs all of it and
+    // the caller did not hand it over: the store's committed pixels with
+    // the stroke's footprint over them.
+    let wholeReadMs = 0;
+    const readWhole = async (): Promise<Float32Array> => {
+      if (data) return data;
+      const readStart = performance.now();
+      const whole = await getHistoryManager(fileId).currentBlockState();
+      if (whole && source.footprint) {
+        scatterCompactPixelRanges(whole, await source.footprint.values, source.footprint.ranges);
+      }
+      wholeReadMs = performance.now() - readStart;
+      if (!whole) throw new Error("the commit could not read the committed state");
+      data = whole;
+      return whole;
+    };
+    const commitWhole = async (): Promise<CommitStrokeResult> =>
+      host.analysis.commitStroke(
+        await readWhole(),
+        layout,
+        spec.sampleRate,
+        params,
+        existingAudio,
+        window ?? { startFrame: -1, endFrame: -1, startBand: -1, endBand: -1 },
+        stroke,
+      );
+    let usedView = false;
+    let viewFromStore = false;
+    let viewBuffer: Float32Array | null = null;
+    let preparedDelta: PreparedDelta | null = null;
+    let baseFootprint: Float32Array | null = null;
+    let viewReadMs = 0;
+    let storeReadMs = 0;
+    let paintedReadMs = 0;
+    let prepareMs = 0;
+    let result: CommitStrokeResult;
+    // The store's background flush waits while the commit runs, so the two
+    // do not share the machine.
+    const resumeFlush = (await getBlockStore(fileId))?.pauseFlush() ?? (() => {});
+    try {
+      if (view && window) {
+        // The view's pre-stroke pixels come from the block store, read while
+        // the stroke's own pixels come off the canvas, and those are written
+        // over them; only when the store cannot serve them is the view
+        // gathered from a whole readback. Before the stroke goes over them,
+        // they give the history its delta, or the footprint's old values
+        // when a projection will widen what the delta covers.
+        const footprint = source.footprint;
+        if (footprint && viewHolds(view, footprint.ranges)) {
+          const readStart = performance.now();
+          const [preStroke, values] = await Promise.all([
+            getHistoryManager(fileId)
+              .currentRanges(view.ranges)
+              .finally(() => (storeReadMs = performance.now() - readStart)),
+            Promise.resolve(footprint.values).finally(() => (paintedReadMs = performance.now() - readStart)),
+          ]);
+          viewReadMs = performance.now() - readStart;
+          if (preStroke) {
+            const prepareStart = performance.now();
+            const prepare =
+              snapshot.reanalyzeEnabled || !options.prepareDelta ? undefined : host.analysis.prepareHistoryDelta;
+            if (prepare) {
+              preparedDelta = {
+                ranges: footprint.ranges,
+                ...(await prepare(preStroke, view.ranges, values, footprint.ranges)),
+              };
+            } else {
+              baseFootprint = new Float32Array(values.length);
+              copyCompactOverlap(baseFootprint, footprint.ranges, preStroke, view.ranges);
+            }
+            prepareMs = performance.now() - prepareStart;
+            viewBuffer = composeViewBuffer(preStroke, view, values, footprint.ranges);
+            viewFromStore = viewBuffer != null;
+          }
+        }
+        if (!viewBuffer) viewBuffer = gatherPixelRanges(await readWhole(), view.ranges);
+        try {
+          result = await host.analysis.commitStroke(
+            viewBuffer,
+            { ...layout, viewStartFrame: view.startFrame, viewEndFrame: view.endFrame },
+            spec.sampleRate,
+            params,
+            existingAudio,
+            window,
+            stroke,
+          );
+          usedView = true;
+        } catch (error) {
+          if (!(error instanceof Error) || !/view/.test(error.message)) throw error;
+          // The view fell short of a pass's reach; the whole state still
+          // commits correctly, at the cost of reading all of it.
+          console.error("windowed commit fell back to the whole state:", error);
+          result = await commitWhole();
+        }
+      } else {
+        result = await commitWhole();
+      }
+    } finally {
+      resumeFlush();
+    }
+    if (usedView && view && viewBuffer && data) {
+      scatterCommitPatch(data, view, viewBuffer, result.patch.ranges, layout);
+      // The residuals that make the tail invertible are collected by the
+      // history's own turn walk over the block store, not from this copy.
+      if (result.tailApplied === false && hasPhaseTurns(result.tail)) {
+        applyPhaseTurns(data, result.tail, false);
+      }
+    }
+    diag.timing("timing", "commitStroke", performance.now() - commitStart, {
+      bandRanges: result.patch.ranges.length / 3,
+      windowed: usedView ? 1 : 0,
+      viewFromStore: viewFromStore ? 1 : 0,
+      viewReadMs: Math.round(viewReadMs),
+      storeReadMs: Math.round(storeReadMs),
+      paintedReadMs: Math.round(paintedReadMs),
+      prepareMs: Math.round(prepareMs),
+      wholeReadMs: Math.round(wholeReadMs),
+      ...result.phases,
+    });
+
+    if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;
+    else if (snapshot.dirtyRegion) file.unprojectedPaint = true;
+
+    // Cut before the result is installed: the slices read the buffer the
+    // commit was measured against.
+    const audioHop = buildAudioHop({
+      existing: existingAudio,
+      result: result.channels,
+      start: result.audioWindow.start,
+      end: result.audioWindow.end,
+      beforeMeta,
+      afterMeta: {
+        peak: result.peak > 0 ? result.peak : 1,
+        gainReductionDb: result.gainReductionDb,
+        maxGainReductionDb: result.maxGainReductionDb,
+      },
+    });
+
+    const audioBuffer = await get().applySynthesizedAudio(fileId, result, {
+      autoPlaybackParams: options.autoPlaybackParams,
+      onsetStartSec: params.onsetStartSec,
+      onsetEndSec: params.onsetEndSec,
+      levelWindow: window ? result.levels : undefined,
+    });
+    return {
+      result,
+      audioBuffer,
+      audioHops: audioHop ? [audioHop] : [],
+      view: usedView ? view : null,
+      viewBuffer: usedView ? viewBuffer : null,
+      data: data ?? null,
+      preparedDelta,
+      baseFootprint,
+    };
+  } finally {
+    get().setFileSynthesizing(fileId, false);
+  }
+}
+
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
   newFile: async () => {
     const confirmed = await new Promise<boolean>((resolve) => {
@@ -2949,225 +3224,71 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   commitStroke: async (fileId, snapshot, source) => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData) return null;
-
     const spec = file.spectrogramData;
-    const wholeFile = projectsWholeFile(snapshot);
-    const window = commitWindowOf(snapshot);
-    const stroke = commitStrokeOf(snapshot, snapshot.limiterEnabled);
-
-    const params: AnalysisParams = { bandsPerOctave: spec.bandsPerOctave, minFreq: spec.minFreq };
-    // Only the span the stroke touched needs its onsets found again, padded
-    // either side because an event is anchored at the foot of its attack and
-    // measured for a moment after it. Without a reference from a whole-file
-    // pass this reads everything, and produces one.
-    const onsetReference = file.onsetReference;
-    if (onsetReference && hasOnsetGate(file) && window) {
-      params.detectOnsets = true;
-      params.onsetStartSec = Math.max(0, window.startFrame / spec.sampleRate - ONSET_REGION_PAD_SEC);
-      params.onsetEndSec = Math.min(
-        spec.numFrames / spec.sampleRate,
-        window.endFrame / spec.sampleRate + ONSET_REGION_PAD_SEC,
-      );
-      params.onsetOdfReference = onsetReference.odfMax;
-      params.onsetBandMax = onsetReference.bandMax;
-    } else if (!hasOnsetGate(file) || wholeFile) {
-      params.detectOnsets = true;
-    }
-
-    // Without a window, or without audio to splice into, the commit rebuilds
-    // the whole file — which is what the addon does when either is missing.
-    // The audio goes with it either way: the limiter measures the stroke
-    // against it, so a rebuild without it would hold the whole file down.
-    const existingBuffer = file.audioBuffer;
-    const existingAudio: Float32Array[] = [];
-    if (existingBuffer) {
-      for (let i = 0; i < existingBuffer.numberOfChannels; i++) existingAudio.push(existingBuffer.getChannelData(i));
-    }
-    const beforeMeta: AudioStateMeta = {
-      peak: file.audioPeak ?? 1,
-      gainReductionDb: file.gainReductionDb,
-      maxGainReductionDb: file.maxGainReductionDb,
+    const layout: PackedLayout = {
+      numFrames: spec.numFrames,
+      numChannels: spec.numChannels,
+      numBands: spec.numBands,
+      bandOffsets: spec.synthesisMetadata.bandOffsets,
+      bandStepLog2s: spec.synthesisMetadata.bandStepLog2s,
+      bandLengths: spec.synthesisMetadata.bandLengths,
     };
-
-    get().setFileSynthesizing(fileId, true);
-    try {
-      const layout: PackedLayout = {
-        numFrames: spec.numFrames,
-        numChannels: spec.numChannels,
-        numBands: spec.numBands,
-        bandOffsets: spec.synthesisMetadata.bandOffsets,
-        bandStepLog2s: spec.synthesisMetadata.bandStepLog2s,
-        bandLengths: spec.synthesisMetadata.bandLengths,
-      };
-      // A windowed call hands the addon only the window's reach instead of the
-      // whole packed state. It needs a window with audio to splice into and a
-      // regional onset reference, and the extension host does not speak it.
-      const windowable =
-        window != null &&
-        !wholeFile &&
-        existingAudio.length > 0 &&
-        !(params.detectOnsets && params.onsetStartSec === undefined) &&
-        !host.env.isExtension;
-      const view = windowable && window ? commitViewOf(layout, window, spec.sampleRate) : null;
-
-      const commitStart = performance.now();
-      let data = source.data;
-      // The whole painted state, read only when a pass needs all of it and
-      // the caller did not hand it over: the store's committed pixels with
-      // the stroke's footprint over them.
-      let wholeReadMs = 0;
-      const readWhole = async (): Promise<Float32Array> => {
-        if (data) return data;
-        const readStart = performance.now();
-        const whole = await getHistoryManager(fileId).currentBlockState();
-        if (whole && source.footprint) {
-          scatterCompactPixelRanges(whole, await source.footprint.values, source.footprint.ranges);
-        }
-        wholeReadMs = performance.now() - readStart;
-        if (!whole) throw new Error("the commit could not read the committed state");
-        data = whole;
-        return whole;
-      };
-      const commitWhole = async (): Promise<CommitStrokeResult> =>
-        host.analysis.commitStroke(
-          await readWhole(),
-          layout,
-          spec.sampleRate,
-          params,
-          existingAudio,
-          window ?? { startFrame: -1, endFrame: -1, startBand: -1, endBand: -1 },
-          stroke,
-        );
-      let usedView = false;
-      let viewFromStore = false;
-      let viewBuffer: Float32Array | null = null;
-      let preparedDelta: PreparedDelta | null = null;
-      let baseFootprint: Float32Array | null = null;
-      let viewReadMs = 0;
-      let storeReadMs = 0;
-      let paintedReadMs = 0;
-      let prepareMs = 0;
-      let result: CommitStrokeResult;
-      // The store's background flush waits while the commit runs, so the two
-      // do not share the machine.
-      const resumeFlush = (await getBlockStore(fileId))?.pauseFlush() ?? (() => {});
-      try {
-        if (view && window) {
-          // The view's pre-stroke pixels come from the block store, read while
-          // the stroke's own pixels come off the canvas, and those are written
-          // over them; only when the store cannot serve them is the view
-          // gathered from a whole readback. Before the stroke goes over them,
-          // they give the history its delta, or the footprint's old values
-          // when a projection will widen what the delta covers.
-          const footprint = source.footprint;
-          if (footprint && viewHolds(view, footprint.ranges)) {
-            const readStart = performance.now();
-            const [preStroke, values] = await Promise.all([
-              getHistoryManager(fileId)
-                .currentRanges(view.ranges)
-                .finally(() => (storeReadMs = performance.now() - readStart)),
-              Promise.resolve(footprint.values).finally(() => (paintedReadMs = performance.now() - readStart)),
-            ]);
-            viewReadMs = performance.now() - readStart;
-            if (preStroke) {
-              const prepareStart = performance.now();
-              const prepare = snapshot.reanalyzeEnabled ? undefined : host.analysis.prepareHistoryDelta;
-              if (prepare) {
-                preparedDelta = {
-                  ranges: footprint.ranges,
-                  ...(await prepare(preStroke, view.ranges, values, footprint.ranges)),
-                };
-              } else {
-                baseFootprint = new Float32Array(values.length);
-                copyCompactOverlap(baseFootprint, footprint.ranges, preStroke, view.ranges);
-              }
-              prepareMs = performance.now() - prepareStart;
-              viewBuffer = composeViewBuffer(preStroke, view, values, footprint.ranges);
-              viewFromStore = viewBuffer != null;
-            }
-          }
-          if (!viewBuffer) viewBuffer = gatherPixelRanges(await readWhole(), view.ranges);
-          try {
-            result = await host.analysis.commitStroke(
-              viewBuffer,
-              { ...layout, viewStartFrame: view.startFrame, viewEndFrame: view.endFrame },
-              spec.sampleRate,
-              params,
-              existingAudio,
-              window,
-              stroke,
-            );
-            usedView = true;
-          } catch (error) {
-            if (!(error instanceof Error) || !/view/.test(error.message)) throw error;
-            // The view fell short of a pass's reach; the whole state still
-            // commits correctly, at the cost of reading all of it.
-            console.error("windowed commit fell back to the whole state:", error);
-            result = await commitWhole();
-          }
-        } else {
-          result = await commitWhole();
-        }
-      } finally {
-        resumeFlush();
-      }
-      if (usedView && view && viewBuffer && data) {
-        scatterCommitPatch(data, view, viewBuffer, result.patch.ranges, layout);
-        // The residuals that make the tail invertible are collected by the
-        // history's own turn walk over the block store, not from this copy.
-        if (result.tailApplied === false && hasPhaseTurns(result.tail)) {
-          applyPhaseTurns(data, result.tail, false);
-        }
-      }
-      diag.timing("timing", "commitStroke", performance.now() - commitStart, {
-        bandRanges: result.patch.ranges.length / 3,
-        windowed: usedView ? 1 : 0,
-        viewFromStore: viewFromStore ? 1 : 0,
-        viewReadMs: Math.round(viewReadMs),
-        storeReadMs: Math.round(storeReadMs),
-        paintedReadMs: Math.round(paintedReadMs),
-        prepareMs: Math.round(prepareMs),
-        wholeReadMs: Math.round(wholeReadMs),
-        ...result.phases,
-      });
-
-      if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;
-      else if (snapshot.dirtyRegion) file.unprojectedPaint = true;
-
-      // Cut before the result is installed: the slices read the buffer the
-      // commit was measured against.
-      const audioHop = buildAudioHop({
-        existing: existingAudio,
-        result: result.channels,
-        start: result.audioWindow.start,
-        end: result.audioWindow.end,
-        beforeMeta,
-        afterMeta: {
-          peak: result.peak > 0 ? result.peak : 1,
-          gainReductionDb: result.gainReductionDb,
-          maxGainReductionDb: result.maxGainReductionDb,
-        },
-      });
-
-      const audioBuffer = await get().applySynthesizedAudio(fileId, result, {
+    const stroke = commitStrokeOf(snapshot, snapshot.limiterEnabled);
+    const windows = commitWindowsOf(snapshot, layout);
+    const footprint = source.footprint;
+    // Pieces each commit on a view, which needs audio to splice into and onsets
+    // found by region; without them each would rebuild the whole file.
+    const viewable = file.audioBuffer != null && hasOnsetGate(file) && !host.env.isExtension;
+    const pieces =
+      windows && windows.length > 1 && footprint && viewable
+        ? footprintPieces(layout, spec.sampleRate, windows, footprint)
+        : null;
+    if (!pieces || !footprint) {
+      return await commitInWindow(get, fileId, snapshot, source, windows?.[0] ?? null, {
+        layout,
+        stroke,
+        prepareDelta: true,
         autoPlaybackParams: snapshot.autoPlaybackParams,
-        onsetStartSec: params.onsetStartSec,
-        onsetEndSec: params.onsetEndSec,
-        levelWindow: window ? result.levels : undefined,
       });
-      return {
-        result,
-        audioBuffer,
-        audioHop,
-        view: usedView ? view : null,
-        viewBuffer: usedView ? viewBuffer : null,
-        data: data ?? null,
-        preparedDelta,
-        baseFootprint,
-      };
-    } finally {
-      get().setFileSynthesizing(fileId, false);
     }
+
+    // Each piece commits as a stroke of its own over what the one after it
+    // left, the last piece first, so each reads the audio the one before it
+    // installed; together they are the one history step.
+    const outcomes: CommitOutcome[] = [];
+    const bases: { ranges: Uint32Array; values: Float32Array }[] = [];
+    let data = source.data;
+    for (let i = pieces.length - 1; i >= 0; i--) {
+      const { window } = pieces[i];
+      const outcome = await commitInWindow(get, fileId, snapshot, { data, footprint: pieces[i].footprint }, window, {
+        layout,
+        stroke: {
+          ...stroke,
+          footStartFrame: Math.max(stroke.footStartFrame, window.startFrame),
+          footEndFrame: Math.min(stroke.footEndFrame, window.endFrame),
+        },
+        prepareDelta: false,
+        autoPlaybackParams: i === 0 ? snapshot.autoPlaybackParams : null,
+      });
+      if (!outcome) return null;
+      if (outcome.result.patch.ranges.length > 0 || hasPhaseTurns(outcome.result.tail)) {
+        throw new Error("a commit cut into pieces projected; its patches cannot join into one step");
+      }
+      data = outcome.data ?? data;
+      outcomes.push(outcome);
+      if (outcome.baseFootprint) bases.push({ ranges: pieces[i].footprint.ranges, values: outcome.baseFootprint });
+    }
+    const last = outcomes[outcomes.length - 1];
+    return {
+      result: last.result,
+      audioBuffer: last.audioBuffer,
+      audioHops: outcomes.flatMap((outcome) => outcome.audioHops),
+      view: null,
+      viewBuffer: null,
+      data: data ?? null,
+      preparedDelta: null,
+      baseFootprint: bases.length === pieces.length ? composePixelRangeValues(footprint.ranges, bases) : null,
+    };
   },
   /**
    * Put a file's onsets back to the ones belonging to a history node — after an

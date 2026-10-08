@@ -1,4 +1,5 @@
-import type { CommitStroke, CommitWindow } from "../../../main/lib/types";
+import type { CommitStroke, CommitWindow, PackedLayout } from "../../../main/lib/types";
+import { commitViewSpan } from "./commit-view";
 import type { HistoryDimensions } from "./history-manager";
 import type { SpectrogramData, State } from "@renderer/store/types";
 
@@ -121,6 +122,63 @@ export function commitWindowOf(snapshot: StrokeCommitSnapshot): CommitWindow | n
   const startBand = Math.max(0, Math.floor((1 - dirtyRegion.endY) * spec.numBands));
   const endBand = Math.min(spec.numBands, Math.ceil((1 - dirtyRegion.startY) * spec.numBands));
   return { startFrame, endFrame, startBand, endBand };
+}
+
+// Windows a commit is cut into at most; a stroke painted in more pieces commits as one.
+const MAX_COMMIT_WINDOWS = 4;
+
+/**
+ * The commit's window cut where the stroke's paint leaves a gap wider than a
+ * windowed commit reaches, one window per piece in file order, so a brush that
+ * wraps across the end of the file rebuilds its two ends and not the file
+ * between them. One window when the paint has no such gap, when the commit
+ * projects or makes hard edges exact, or when the pieces would not save
+ * synthesis. Null for the whole file, as `commitWindowOf`.
+ */
+export function commitWindowsOf(snapshot: StrokeCommitSnapshot, layout: PackedLayout): CommitWindow[] | null {
+  const whole = commitWindowOf(snapshot);
+  if (!whole) return null;
+  const stroke = commitStrokeOf(snapshot, snapshot.limiterEnabled);
+  const ranges = snapshot.dirtyRanges;
+  if (snapshot.reanalyzeEnabled || stroke.hardEdgeStart || stroke.hardEdgeEnd || !ranges) return [whole];
+
+  const order = [...layout.bandOffsets.keys()].sort((a, b) => layout.bandOffsets[a] - layout.bandOffsets[b]);
+  const spans: { startFrame: number; endFrame: number }[] = [];
+  for (let i = 0; i + 1 < ranges.length; i += 2) {
+    let lo = 0;
+    let hi = order.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (layout.bandOffsets[order[mid]] <= ranges[i]) lo = mid;
+      else hi = mid - 1;
+    }
+    const band = order[lo];
+    const k = ranges[i] - layout.bandOffsets[band];
+    const step = layout.bandStepLog2s[band];
+    const startFrame = Math.max(whole.startFrame, k * 2 ** step);
+    const endFrame = Math.min(whole.endFrame, (k + ranges[i + 1]) * 2 ** step);
+    if (endFrame > startFrame) spans.push({ startFrame, endFrame });
+  }
+  spans.sort((a, b) => a.startFrame - b.startFrame);
+
+  const sampleRate = snapshot.spec.sampleRate;
+  const pieces: { startFrame: number; endFrame: number }[] = [];
+  for (const span of spans) {
+    const last = pieces[pieces.length - 1];
+    if (
+      last &&
+      commitViewSpan(layout, last, sampleRate).endFrame > commitViewSpan(layout, span, sampleRate).startFrame
+    ) {
+      last.endFrame = Math.max(last.endFrame, span.endFrame);
+    } else pieces.push({ ...span });
+  }
+  if (pieces.length < 2 || pieces.length > MAX_COMMIT_WINDOWS) return [whole];
+  const frames = (span: { startFrame: number; endFrame: number }): number => {
+    const view = commitViewSpan(layout, span, sampleRate);
+    return view.endFrame - view.startFrame;
+  };
+  if (pieces.reduce((sum, piece) => sum + frames(piece), 0) >= frames(whole)) return [whole];
+  return pieces.map((piece) => ({ ...whole, ...piece }));
 }
 
 /**

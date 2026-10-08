@@ -18,7 +18,7 @@ import { persist, subscribeWithSelector } from "zustand/middleware";
 import type { PersistStorage, StorageValue } from "zustand/middleware";
 import { host } from "@renderer/lib/host";
 import { gatherFileGroups } from "@renderer/lib/file-reorder";
-import { readTruth } from "@renderer/lib/drive-truth";
+import { readAudioEnergy, readTruth } from "@renderer/lib/drive-truth";
 import { APP_PERSISTED_KEYS, createAppSlice } from "./app";
 import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
@@ -468,6 +468,7 @@ useStore.subscribe(
 if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_GLOBALS === "1") {
   (globalThis as unknown as { __store?: typeof useStore }).__store = useStore;
   (globalThis as unknown as { __readTruth?: typeof readTruth }).__readTruth = readTruth;
+  (globalThis as unknown as { __readAudioEnergy?: typeof readAudioEnergy }).__readAudioEnergy = readAudioEnergy;
 }
 
 export function getModulator(index: number) {

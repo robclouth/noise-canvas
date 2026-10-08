@@ -5,6 +5,7 @@ import {
   buildStrokeCommitSnapshot,
   commitStrokeOf,
   commitWindowOf,
+  commitWindowsOf,
   projectsWholeFile,
   type DirtyRegionUv,
   type FootprintUv,
@@ -17,21 +18,21 @@ const SR = 48000;
 const NUM_FRAMES = SR * 4;
 const NUM_BANDS = 8;
 
-function makeSpec(): SpectrogramData {
+function makeSpec(numFrames = NUM_FRAMES): SpectrogramData {
   const bandOffsets: number[] = [];
   const bandLengths: number[] = [];
   const bandStepLog2s: number[] = [];
   let offset = 0;
   for (let b = 0; b < NUM_BANDS; b++) {
     const step = b; // coarser strides as the band index rises
-    const length = Math.max(1, NUM_FRAMES >> step);
+    const length = Math.max(1, numFrames >> step);
     bandOffsets.push(offset);
     bandLengths.push(length);
     bandStepLog2s.push(step);
     offset += length;
   }
   return {
-    numFrames: NUM_FRAMES,
+    numFrames,
     numBands: NUM_BANDS,
     numChannels: 1,
     sampleRate: SR,
@@ -192,6 +193,80 @@ describe("commit window", () => {
     const snapshot = makeSnapshot({ reanalyzeEnabled: false, hasUnprojectedPaint: true });
     expect(projectsWholeFile(snapshot)).toBe(false);
     expect(commitWindowOf(snapshot)).not.toBeNull();
+  });
+});
+
+describe("commit windows", () => {
+  const LONG = SR * 300;
+  const spec = makeSpec(LONG);
+  const meta = spec.synthesisMetadata;
+  const layout = {
+    numFrames: LONG,
+    numChannels: 1,
+    numBands: NUM_BANDS,
+    bandOffsets: Uint32Array.from(meta.bandOffsets),
+    bandStepLog2s: Int32Array.from(meta.bandStepLog2s),
+    bandLengths: Uint32Array.from(meta.bandLengths),
+  };
+  /** Every band's pixels over each frame span, as a footprint's dirty ranges. */
+  const rangesOver = (...spans: [number, number][]): Uint32Array => {
+    const out: number[] = [];
+    for (let b = 0; b < NUM_BANDS; b++) {
+      for (const [start, end] of spans) {
+        out.push(meta.bandOffsets[b] + (start >> b), ((end - 1) >> b) - (start >> b) + 1);
+      }
+    }
+    return Uint32Array.from(out);
+  };
+  const across = (overrides: Partial<StrokeCommitSnapshot> = {}): StrokeCommitSnapshot =>
+    makeSnapshot({
+      spec,
+      wrapMode: 3,
+      curveTime: 40,
+      dirtyRegion: { startX: 0, endX: 1, startY: 0.2, endY: 0.8 },
+      dirtyRanges: rangesOver([0, SR / 2], [LONG - SR / 2, LONG]),
+      ...overrides,
+    });
+
+  it("rebuilds the two ends of a brush that wraps across the end of the file, and not the file between", () => {
+    const windows = commitWindowsOf(across(), layout);
+    const whole = commitWindowOf(across());
+    const pieces = [
+      [0, SR / 2],
+      [LONG - SR / 2, LONG],
+    ];
+    const coarsest = 2 ** (NUM_BANDS - 1);
+    expect(windows).toHaveLength(2);
+    windows?.forEach((window, k) => {
+      expect(window.startFrame).toBeLessThanOrEqual(pieces[k][0]);
+      expect(window.startFrame).toBeGreaterThan(pieces[k][0] - coarsest);
+      expect(window.endFrame).toBeGreaterThanOrEqual(pieces[k][1]);
+      expect(window.endFrame).toBeLessThan(pieces[k][1] + coarsest);
+    });
+    for (const window of windows ?? []) {
+      expect(window.startBand).toBe(whole?.startBand);
+      expect(window.endBand).toBe(whole?.endBand);
+    }
+  });
+
+  it("keeps one window when the pieces lie within a commit's reach of each other", () => {
+    const near = across({ dirtyRanges: rangesOver([SR * 10, SR * 11], [SR * 14, SR * 15]) });
+    expect(commitWindowsOf(near, layout)).toEqual([commitWindowOf(near)]);
+  });
+
+  it("keeps one window when the commit projects or makes hard edges exact", () => {
+    const projects = across({ reanalyzeEnabled: true });
+    expect(commitWindowsOf(projects, layout)).toEqual([commitWindowOf(projects)]);
+    const hard = across({
+      wrapMode: 0,
+      curveTime: 100,
+      footprintUv: { timeMin: 0.1, timeMax: 0.9, pitchMin: 0, pitchMax: 1 },
+    });
+    expect(commitWindowsOf(hard, layout)).toEqual([commitWindowOf(hard)]);
+  });
+
+  it("is null when the commit rebuilds the whole file", () => {
+    expect(commitWindowsOf(across({ dirtyRegion: null }), layout)).toBeNull();
   });
 });
 

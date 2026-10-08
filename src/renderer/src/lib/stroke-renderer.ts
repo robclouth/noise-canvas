@@ -128,6 +128,35 @@ const FOOTPRINT_MARGIN_BINS = 4;
 // whole-texture draw and a buffer swap, rather than folded back by a copy.
 const SWAP_FOOTPRINT_FRACTION = 0.5;
 
+/** A span of view UV time, [start, end). */
+type TimeSpan = { start: number; end: number };
+
+// Spans a stroke's footprint keeps apart; past it the two closest join.
+const MAX_TIME_SPANS = 32;
+
+/** Adds [start, end) to sorted disjoint spans, joining any it overlaps or touches. */
+function addTimeSpan(spans: TimeSpan[], start: number, end: number): TimeSpan[] {
+  if (!(end > start)) return spans;
+  const out: TimeSpan[] = [];
+  let added = { start, end };
+  for (const span of spans) {
+    if (span.end < added.start) out.push(span);
+    else if (span.start > added.end) {
+      out.push(added);
+      added = span;
+    } else added = { start: Math.min(span.start, added.start), end: Math.max(span.end, added.end) };
+  }
+  out.push(added);
+  while (out.length > MAX_TIME_SPANS) {
+    let join = 0;
+    for (let i = 1; i < out.length - 1; i++) {
+      if (out[i + 1].start - out[i].end < out[join + 1].start - out[join].end) join = i;
+    }
+    out.splice(join, 2, { start: out[join].start, end: out[join + 1].end });
+  }
+  return out;
+}
+
 function viewDataTexture(
   data: Float32Array,
   width: number,
@@ -596,9 +625,9 @@ export class StrokeRenderer {
   // its dabs and reset per stroke in beginStroke(). getDirtyPixelRanges() turns
   // these into the packed-pixel footprint the history delta stores. Kept
   // separate from dirtyRegion (which synthesis clears) so a mid-stroke clear
-  // can't drop earlier dabs.
-  private committedTimeMin = Infinity;
-  private committedTimeMax = -Infinity;
+  // can't drop earlier dabs. Time is a list of disjoint spans, so paint at
+  // both ends of the view does not count the middle as painted.
+  private committedTimes: TimeSpan[] = [];
   private committedPitchMin = Infinity;
   private committedPitchMax = -Infinity;
   // Monotonic count of stroke starts. Commit-time work that runs async after a
@@ -2358,8 +2387,7 @@ export class StrokeRenderer {
       // A dab changes pixels only within its brush footprint, so accumulate the
       // footprint for the history delta regardless of whether the GPU scissored
       // the render (a full-band dab still has a bounded time window).
-      this.committedTimeMin = Math.min(this.committedTimeMin, strokeStartX);
-      this.committedTimeMax = Math.max(this.committedTimeMax, strokeEndX);
+      this.committedTimes = addTimeSpan(this.committedTimes, strokeStartX, strokeEndX);
       this.committedPitchMin = Math.min(this.committedPitchMin, strokeStartY);
       this.committedPitchMax = Math.max(this.committedPitchMax, strokeEndY);
 
@@ -3116,10 +3144,7 @@ export class StrokeRenderer {
     const currentFrames = current.endFrame - current.startFrame;
     const nextFrames = next.endFrame - next.startFrame;
     const rebaseX = (x: number): number => (x * currentFrames + current.startFrame - next.startFrame) / nextFrames;
-    if (this.committedTimeMax > this.committedTimeMin) {
-      this.committedTimeMin = rebaseX(this.committedTimeMin);
-      this.committedTimeMax = rebaseX(this.committedTimeMax);
-    }
+    this.committedTimes = this.committedTimes.map((span) => ({ start: rebaseX(span.start), end: rebaseX(span.end) }));
     if (this.dirtyRegion) {
       this.dirtyRegion.startX = rebaseX(this.dirtyRegion.startX);
       this.dirtyRegion.endX = rebaseX(this.dirtyRegion.endX);
@@ -3206,8 +3231,7 @@ export class StrokeRenderer {
     // Reset the committed footprint for the new stroke. Tied to the stroke
     // boundary (not dirtyRegion's clear) so every dab of this stroke folds into
     // one footprint that history reads at commit.
-    this.committedTimeMin = Infinity;
-    this.committedTimeMax = -Infinity;
+    this.committedTimes = [];
     this.committedPitchMin = Infinity;
     this.committedPitchMax = -Infinity;
     this.strokeGeneration++;
@@ -3223,10 +3247,10 @@ export class StrokeRenderer {
    * dirty region uses (0 = top of the texture).
    */
   getCommittedFootprintUv(): { timeMin: number; timeMax: number; pitchMin: number; pitchMax: number } | null {
-    if (this.committedTimeMax <= this.committedTimeMin) return null;
+    if (this.committedTimes.length === 0) return null;
     return {
-      timeMin: Math.max(0, this.committedTimeMin),
-      timeMax: Math.min(1, this.committedTimeMax),
+      timeMin: Math.max(0, this.committedTimes[0].start),
+      timeMax: Math.min(1, this.committedTimes[this.committedTimes.length - 1].end),
       pitchMin: Math.max(0, this.committedPitchMin),
       pitchMax: Math.min(1, this.committedPitchMax),
     };
@@ -3265,8 +3289,7 @@ export class StrokeRenderer {
   /** Counts a box of the view, in unpacked UV, as painted by the current stroke. */
   addPaintedBox(startX: number, endX: number, startY: number, endY: number): void {
     this.expandDirtyRegion(startX, endX, startY, endY);
-    this.committedTimeMin = Math.min(this.committedTimeMin, startX);
-    this.committedTimeMax = Math.max(this.committedTimeMax, endX);
+    this.committedTimes = addTimeSpan(this.committedTimes, startX, endX);
     this.committedPitchMin = Math.min(this.committedPitchMin, startY);
     this.committedPitchMax = Math.max(this.committedPitchMax, endY);
   }
@@ -3290,7 +3313,7 @@ export class StrokeRenderer {
    * stores a full snapshot.
    */
   getDirtyPixelRanges(): Uint32Array | null {
-    if (this.committedTimeMax <= this.committedTimeMin) return null;
+    if (this.committedTimes.length === 0) return null;
 
     const { numBands, metadata } = this.viewSpec;
     const pitchMargin = 4;
@@ -3299,17 +3322,30 @@ export class StrokeRenderer {
       Math.floor(pitchUvToBandIndex(this.committedPitchMin, numBands)) + pitchMargin,
     );
     const lowBand = Math.max(0, Math.floor(pitchUvToBandIndex(this.committedPitchMax, numBands)) - pitchMargin);
-    const t0 = Math.max(0, this.committedTimeMin);
-    const t1 = Math.min(1, this.committedTimeMax);
     const timeMargin = 4;
 
     const ranges: number[] = [];
     for (let b = lowBand; b <= highBand; b++) {
       const offset = Math.round(metadata[b * 4]);
       const length = Math.round(metadata[b * 4 + 1]);
-      const start = Math.max(offset, offset + Math.floor(t0 * length) - timeMargin);
-      const end = Math.min(offset + length, offset + Math.ceil(t1 * length) + timeMargin);
-      if (end > start) ranges.push(start, end - start);
+      let open = -1;
+      let close = -1;
+      for (const span of this.committedTimes) {
+        const t0 = Math.max(0, span.start);
+        const t1 = Math.min(1, span.end);
+        if (t1 <= t0) continue;
+        const start = Math.max(offset, offset + Math.floor(t0 * length) - timeMargin);
+        const end = Math.min(offset + length, offset + Math.ceil(t1 * length) + timeMargin);
+        if (end <= start) continue;
+        if (open >= 0 && start <= close) {
+          close = Math.max(close, end);
+          continue;
+        }
+        if (open >= 0) ranges.push(open, close - open);
+        open = start;
+        close = end;
+      }
+      if (open >= 0) ranges.push(open, close - open);
     }
     return ranges.length ? new Uint32Array(ranges) : null;
   }

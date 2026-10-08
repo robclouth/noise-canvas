@@ -442,7 +442,7 @@ export class HistoryManager {
   private readonly nodeDeltas: ByteBudgetCache<Uint8Array>;
   // The audio each stroke rewrote, before and after, so a hop restores the
   // audio the state had rather than synthesising it again.
-  private readonly nodeAudioHops: ByteBudgetCache<AudioHop>;
+  private readonly nodeAudioHops: ByteBudgetCache<AudioHop[]>;
   // The phase turns each stroke made past its ranges; null for a stroke that
   // made none. A node absent here is read back from its delta on disk.
   private readonly nodeTurns = new Map<string, PhaseTurns | null>();
@@ -458,7 +458,9 @@ export class HistoryManager {
     this.fileId = fileId;
     const budgets = historyCacheBudgets(host.os.totalmem());
     this.nodeDeltas = new ByteBudgetCache<Uint8Array>(budgets.deltas, (bytes) => bytes.byteLength);
-    this.nodeAudioHops = new ByteBudgetCache<AudioHop>(budgets.audioHops, audioHopBytes);
+    this.nodeAudioHops = new ByteBudgetCache<AudioHop[]>(budgets.audioHops, (hops) =>
+      hops.reduce((sum, hop) => sum + audioHopBytes(hop), 0),
+    );
     this.dir = this.resolveDir();
   }
 
@@ -1984,9 +1986,12 @@ export class HistoryManager {
     }
   }
 
-  /** Keeps the audio a stroke rewrote, so hops over it restore rather than synthesise. */
-  setNodeAudioHop(nodeId: string, hop: AudioHop): void {
-    this.nodeAudioHops.set(nodeId, hop);
+  /**
+   * Keeps the audio a stroke rewrote, so hops over it restore rather than
+   * synthesise: one hop per span it rewrote, in the order it rewrote them.
+   */
+  setNodeAudioHops(nodeId: string, hops: AudioHop[]): void {
+    if (hops.length > 0) this.nodeAudioHops.set(nodeId, hops);
   }
 
   /**
@@ -1999,14 +2004,14 @@ export class HistoryManager {
     const up: AudioHop[] = [];
     const down: AudioHop[] = [];
     for (const id of hops.up) {
-      const hop = this.nodeAudioHops.get(id);
-      if (!hop) return false;
-      up.push(hop);
+      const kept = this.nodeAudioHops.get(id);
+      if (!kept) return false;
+      up.push(...[...kept].reverse());
     }
     for (const id of hops.down) {
-      const hop = this.nodeAudioHops.get(id);
-      if (!hop) return false;
-      down.push(hop);
+      const kept = this.nodeAudioHops.get(id);
+      if (!kept) return false;
+      down.push(...kept);
     }
     const walk = editsAlongHops(up, down);
     if (!walk) return false;

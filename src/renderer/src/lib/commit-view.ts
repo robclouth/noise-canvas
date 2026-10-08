@@ -14,18 +14,23 @@ export type CommitView = PackedView;
  * be the whole file anyway.
  */
 export function commitViewOf(layout: PackedLayout, window: CommitWindow, sampleRate: number): CommitView | null {
+  const span = commitViewSpan(layout, window, sampleRate);
+  if ((span.startFrame <= 0 && span.endFrame >= layout.numFrames) || span.endFrame <= span.startFrame) return null;
+  return packedViewOf(layout, span.startFrame, span.endFrame);
+}
+
+/** The frames the view of a commit over `window` spans, within the file. */
+export function commitViewSpan(
+  layout: PackedLayout,
+  window: { startFrame: number; endFrame: number },
+  sampleRate: number,
+): { startFrame: number; endFrame: number } {
   let maxStep = 0;
   for (let b = 0; b < layout.numBands; b++) maxStep = Math.max(maxStep, layout.bandStepLog2s[b]);
   const quantumSec = (1 << maxStep) / sampleRate;
   const leadSec = 0.25 + 6.0 + 0.08 + 2 * quantumSec + 0.5;
   const trailSec = Math.max(0.1 + 2.0 + quantumSec, 0.25 + 0.19 + 2 * quantumSec) + 0.5;
-  const span = alignToBandGrid(
-    layout,
-    window.startFrame - leadSec * sampleRate,
-    window.endFrame + trailSec * sampleRate,
-  );
-  if ((span.startFrame <= 0 && span.endFrame >= layout.numFrames) || span.endFrame <= span.startFrame) return null;
-  return packedViewOf(layout, span.startFrame, span.endFrame);
+  return alignToBandGrid(layout, window.startFrame - leadSec * sampleRate, window.endFrame + trailSec * sampleRate);
 }
 
 /**

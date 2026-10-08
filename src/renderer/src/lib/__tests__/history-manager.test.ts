@@ -1459,7 +1459,7 @@ describe("HistoryManager hops", () => {
       beforeMeta: { peak: 0.5 },
       afterMeta: { peak: 0.9, maxGainReductionDb: 3 },
     };
-    mgr.setNodeAudioHop(aId, hop);
+    mgr.setNodeAudioHops(aId, [hop]);
 
     await mgr.navigateToParent();
     expect(synthesizeFile).not.toHaveBeenCalled();
@@ -1468,6 +1468,58 @@ describe("HistoryManager hops", () => {
     await mgr.navigateToLastChild();
     expect(synthesizeFile).not.toHaveBeenCalled();
     expect(spliceFileAudio).toHaveBeenLastCalledWith("f1", [{ start: 100, channels: hop.after }], hop.afterMeta);
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("puts back every span of a stroke that rewrote its audio in pieces, in order", async () => {
+    installManagerEnv();
+    installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const { id: aId } = await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    const end: AudioHop = {
+      start: 900,
+      end: 902,
+      before: [new Float32Array([1, 2])],
+      after: [new Float32Array([3, 4])],
+      beforeMeta: { peak: 0.5 },
+      afterMeta: { peak: 0.6 },
+    };
+    const start: AudioHop = {
+      start: 0,
+      end: 2,
+      before: [new Float32Array([5, 6])],
+      after: [new Float32Array([7, 8])],
+      beforeMeta: { peak: 0.6 },
+      afterMeta: { peak: 0.7 },
+    };
+    mgr.setNodeAudioHops(aId, [end, start]);
+
+    await mgr.navigateToParent();
+    expect(spliceFileAudio).toHaveBeenLastCalledWith(
+      "f1",
+      [
+        { start: 0, channels: start.before },
+        { start: 900, channels: end.before },
+      ],
+      end.beforeMeta,
+    );
+
+    await mgr.navigateToLastChild();
+    expect(spliceFileAudio).toHaveBeenLastCalledWith(
+      "f1",
+      [
+        { start: 900, channels: end.after },
+        { start: 0, channels: start.after },
+      ],
+      start.afterMeta,
+    );
+    expect(synthesizeFile).not.toHaveBeenCalled();
 
     mgr.dispose();
     delete fakeOpenFiles["f1"];

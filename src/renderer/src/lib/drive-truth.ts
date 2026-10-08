@@ -62,3 +62,19 @@ export async function readTruth(fileId: string, points: TruthPoint[]): Promise<T
     };
   });
 }
+
+/** The sum of squared samples of every channel of a file's audio over each [start, end) span in seconds. */
+export function readAudioEnergy(fileId: string, spans: [number, number][]): number[] {
+  const buffer = openFiles[fileId]?.audioBuffer;
+  if (!buffer) throw new Error(`no audio for ${fileId}`);
+  return spans.map(([start, end]) => {
+    const from = Math.max(0, Math.floor(start * buffer.sampleRate));
+    const to = Math.min(buffer.length, Math.ceil(end * buffer.sampleRate));
+    let sum = 0;
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      const samples = buffer.getChannelData(ch);
+      for (let i = from; i < to; i++) sum += samples[i] * samples[i];
+    }
+    return sum;
+  });
+}
