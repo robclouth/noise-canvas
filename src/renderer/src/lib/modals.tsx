@@ -1,10 +1,9 @@
-import { NumberInput, SimpleGrid, Stack, Text, TextInput, type ModalProps } from "@mantine/core";
+import { Stack, Text, TextInput, type ModalProps } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
 import { type ReactNode, type RefObject } from "react";
 import { StackFilesFields, type StackLayerOption } from "../components/stack-files-fields";
-import { GenerateFields, type GenerateSettings } from "../components/generate-fields";
-import { LengthFields } from "../components/length-fields";
-import { secondsToLength, type LengthValues } from "./length-values";
+import type { ParameterDialogBody, ParameterDialogProps } from "../components/parameter-dialog";
+import { UI_LAYERS } from "./ui-layers";
 
 export { openContextModal };
 
@@ -15,7 +14,7 @@ export { openContextModal };
  * ModalsProvider, and to the few dialogs that render `<Modal>` themselves.
  */
 export const APP_MODAL_PROPS: Partial<ModalProps> = {
-  zIndex: 1000,
+  zIndex: UI_LAYERS.modal,
   size: "xs",
   shadow: "xl",
   styles: {
@@ -190,253 +189,75 @@ export function openPrompt({
   return modalId.current;
 }
 
-type NewFileValues = { sampleRate: number; bpm: number; lengthBeats: number };
-
-type OpenNewFilePromptOptions = {
-  title?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  defaults?: Partial<NewFileValues>;
-  onConfirm: (values: NewFileValues) => void | Promise<void>;
+/** What a dialog that keeps its values in parameters calls back with; the caller reads the values from the store. */
+type ParameterPromptOptions = {
+  onConfirm: () => void | Promise<void>;
   onCancel?: () => void;
   onClose?: () => void;
 };
 
-export function openNewFilePrompt({
-  title = "New File",
-  confirmLabel = "Create",
-  cancelLabel = "Cancel",
-  defaults,
-  onConfirm,
-  onCancel,
-  onClose,
-}: OpenNewFilePromptOptions): string {
-  const sampleRateRef: RefObject<HTMLInputElement | null> = { current: null };
-  const bpmRef: RefObject<HTMLInputElement | null> = { current: null };
-  const lengthRef: RefObject<HTMLInputElement | null> = { current: null };
-
-  return openConfirmModal({
-    title,
-    children: (
-      <SimpleGrid cols={2} spacing="sm">
-        <NumberInput
-          ref={sampleRateRef}
-          size="xs"
-          label="Sample rate"
-          defaultValue={defaults?.sampleRate ?? 44100}
-          min={8000}
-          max={192000}
-          step={1000}
-          variant="unstyled"
-          hideControls
-          data-autofocus
-        />
-        <NumberInput
-          ref={bpmRef}
-          size="xs"
-          label="BPM"
-          defaultValue={defaults?.bpm ?? 120}
-          min={1}
-          max={999}
-          step={1}
-          variant="unstyled"
-          hideControls
-        />
-        <NumberInput
-          ref={lengthRef}
-          size="xs"
-          label="Length beats"
-          defaultValue={defaults?.lengthBeats ?? 16}
-          min={1}
-          max={64}
-          step={1}
-          variant="unstyled"
-          hideControls
-        />
-      </SimpleGrid>
-    ),
-    labels: { confirm: confirmLabel, cancel: cancelLabel },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
-    onConfirm: async () => {
-      const sampleRate = parseInt(sampleRateRef.current?.value ?? "");
-      const bpm = parseInt(bpmRef.current?.value ?? "");
-      const lengthBeats = parseInt(lengthRef.current?.value ?? "");
-      if (!Number.isFinite(sampleRate) || !Number.isFinite(bpm) || !Number.isFinite(lengthBeats)) return;
-      await onConfirm({ sampleRate, bpm, lengthBeats });
+function openParameterDialog(
+  title: string,
+  size: "sm" | "md",
+  body: ParameterDialogBody,
+  confirmLabel: string,
+  { onConfirm, onCancel, onClose }: ParameterPromptOptions,
+): string {
+  const cleanup = attachEnterToLastButton();
+  let confirmed = false;
+  const innerProps: ParameterDialogProps = {
+    body,
+    confirmLabel,
+    onConfirm: () => {
+      confirmed = true;
+      return onConfirm();
     },
-    onCancel,
-    onClose,
-  });
-}
-
-type OpenSplitPartsPromptOptions = {
-  defaultParts?: number;
-  onConfirm: (parts: number) => void | Promise<void>;
-  onCancel?: () => void;
-  onClose?: () => void;
-};
-
-export function openSplitPartsPrompt({
-  defaultParts = 4,
-  onConfirm,
-  onCancel,
-  onClose,
-}: OpenSplitPartsPromptOptions): string {
-  const partsRef: RefObject<HTMLInputElement | null> = { current: null };
-
-  return openConfirmModal({
-    title: "Split into parts",
-    children: (
-      <Stack gap="xs">
-        <Text size="sm" c="dimmed">
-          Factorises the spectrogram into layers that each capture a recurring sound, ordered from lowest to highest.
-          The parts stay linked and add back up to this file.
-        </Text>
-        <NumberInput
-          ref={partsRef}
-          size="xs"
-          label="Parts"
-          defaultValue={defaultParts}
-          min={2}
-          max={16}
-          step={1}
-          data-autofocus
-        />
-      </Stack>
-    ),
-    labels: { confirm: "Split", cancel: "Cancel" },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
-    onConfirm: async () => {
-      const parts = parseInt(partsRef.current?.value ?? "");
-      if (!Number.isFinite(parts)) return;
-      await onConfirm(Math.min(16, Math.max(2, parts)));
-    },
-    onCancel,
-    onClose,
-  });
-}
-
-// Last-used settings, so reopening the dialog picks up where it left off.
-let lastSilenceValues: LengthValues = { length: 4, unit: "beats" };
-
-type OpenInsertSilencePromptOptions = {
-  bpm: number;
-  onConfirm: (values: LengthValues) => void | Promise<void>;
-  onCancel?: () => void;
-  onClose?: () => void;
-};
-
-export function openInsertSilencePrompt({ bpm, onConfirm, onCancel, onClose }: OpenInsertSilencePromptOptions): string {
-  const values: RefObject<LengthValues> = { current: lastSilenceValues };
-
-  return openConfirmModal({
-    title: "Insert Silence",
-    size: "sm",
-    children: <LengthFields values={values} bpm={bpm} />,
-    labels: { confirm: "Insert", cancel: "Cancel" },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
-    onConfirm: async () => {
-      if (!Number.isFinite(values.current.length) || values.current.length <= 0) return;
-      lastSilenceValues = values.current;
-      await onConfirm(values.current);
-    },
-    onCancel,
-    onClose,
-  });
-}
-
-let lastSetLengthUnit: LengthValues["unit"] = "beats";
-
-type OpenSetLengthPromptOptions = {
-  /** What the file measures now, which the field opens on. */
-  seconds: number;
-  bpm: number;
-  onConfirm: (values: LengthValues) => void | Promise<void>;
-  onCancel?: () => void;
-  onClose?: () => void;
-};
-
-export function openSetLengthPrompt({
-  seconds,
-  bpm,
-  onConfirm,
-  onCancel,
-  onClose,
-}: OpenSetLengthPromptOptions): string {
-  const unit = lastSetLengthUnit;
-  const values: RefObject<LengthValues> = {
-    current: { length: Math.round(secondsToLength(seconds, unit, bpm) * 1000) / 1000, unit },
   };
-
-  return openConfirmModal({
-    title: "Set Length",
-    size: "sm",
-    children: (
-      <Stack gap="xs">
-        <Text size="sm" c="dimmed">
-          Cuts the file short, or pads it with silence, to the length you give.
-        </Text>
-        <LengthFields values={values} bpm={bpm} />
-      </Stack>
-    ),
-    labels: { confirm: "Set", cancel: "Cancel" },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
-    onConfirm: async () => {
-      if (!Number.isFinite(values.current.length) || values.current.length <= 0) return;
-      lastSetLengthUnit = values.current.unit;
-      await onConfirm(values.current);
+  return openContextModal({
+    modal: "parameterDialog",
+    title,
+    size,
+    innerProps,
+    onClose: () => {
+      cleanup();
+      if (!confirmed) onCancel?.();
+      onClose?.();
     },
-    onCancel,
-    onClose,
   });
 }
 
-type OpenGeneratePromptOptions = {
-  initial: GenerateSettings;
+/** Opens New File, kept in the `newFile*` parameters. */
+export function openNewFilePrompt(options: ParameterPromptOptions): string {
+  return openParameterDialog("New File", "sm", { kind: "newFile" }, "Create", options);
+}
+
+/** Opens Split into Parts, kept in `splitParts`. */
+export function openSplitPartsPrompt(options: ParameterPromptOptions): string {
+  return openParameterDialog("Split into parts", "sm", { kind: "splitParts" }, "Split", options);
+}
+
+/** Opens Insert Silence, kept in the `silence*` parameters. */
+export function openInsertSilencePrompt({ bpm, ...options }: ParameterPromptOptions & { bpm: number }): string {
+  return openParameterDialog("Insert Silence", "sm", { kind: "insertSilence", bpm }, "Insert", options);
+}
+
+/** Opens Set Length, kept in the `fileLength*` parameters. */
+export function openSetLengthPrompt({ bpm, ...options }: ParameterPromptOptions & { bpm: number }): string {
+  return openParameterDialog("Set Length", "sm", { kind: "setLength", bpm }, "Set", options);
+}
+
+/** Opens Generate, kept in the `generate*` parameters. */
+export function openGeneratePrompt({
+  hasSelection,
+  bandLimited,
+  ...options
+}: ParameterPromptOptions & {
   /** True when a selection exists, so the result lands in it rather than over the whole file. */
   hasSelection: boolean;
   /** True when the selection leaves some bands out, which offers the Input choice. */
   bandLimited: boolean;
-  onConfirm: (settings: GenerateSettings) => void | Promise<void>;
-  onCancel?: () => void;
-  onClose?: () => void;
-};
-
-export function openGeneratePrompt({
-  initial,
-  hasSelection,
-  bandLimited,
-  onConfirm,
-  onCancel,
-  onClose,
-}: OpenGeneratePromptOptions): void {
-  const values: RefObject<GenerateSettings> = { current: initial };
-  openConfirmModal({
-    title: "Generate",
-    size: "md",
-    children: (
-      <Stack gap="sm">
-        <Text size="sm" c="dimmed">
-          {hasSelection
-            ? "Makes new sound for the selection from a prompt. At 100% it replaces the selection, carrying on from the sound around it; lower keeps more of what is there."
-            : "Makes new sound for the whole file from a prompt. At 100% it replaces the file; lower keeps more of what is there."}
-        </Text>
-        <GenerateFields values={values} bandLimited={bandLimited} />
-      </Stack>
-    ),
-    labels: { confirm: "Generate", cancel: "Cancel" },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
-    onConfirm: async () => {
-      await onConfirm(values.current);
-    },
-    onCancel,
-    onClose,
-  });
+}): string {
+  return openParameterDialog("Generate", "md", { kind: "generate", hasSelection, bandLimited }, "Generate", options);
 }
 
 type OpenStackFilesPromptOptions = {

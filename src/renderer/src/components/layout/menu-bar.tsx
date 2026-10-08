@@ -1,4 +1,5 @@
 import { useStore } from "@/store";
+import { UI_LAYERS } from "@renderer/lib/ui-layers";
 import { Box, Group, Menu, Text, UnstyledButton } from "@mantine/core";
 import { acceleratorLabel, APP_MENUS, runCommand, visibleItems, type AppMenuItem } from "@renderer/lib/app-menu";
 import { getHistoryManager } from "@renderer/lib/history-manager";
@@ -95,7 +96,7 @@ export const AppMenuBar = memo(function AppMenuBar() {
       align="center"
       wrap="nowrap"
       bg="dark.8"
-      style={{ borderBottom: "1px solid var(--mantine-color-dark-6)", zIndex: 1001 }}
+      style={{ borderBottom: "1px solid var(--mantine-color-dark-6)", zIndex: UI_LAYERS.chrome }}
     >
       {APP_MENUS.map((menu) => {
         const items = visibleItems(menu);

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { FILE_LENGTH_KEYS, SILENCE_LENGTH_KEYS } from "../length-values";
 import { openInsertSilencePrompt } from "../modals";
 
 // Gates the addon calls a test drives, so work can be left in flight while the
@@ -18,6 +19,10 @@ const gate = vi.hoisted(() => ({
   storedOnsets: [] as { nodeId: string; packed: Float32Array }[],
   silenceValues: null as { length: number; unit: "beats" | "seconds" } | null,
   setLengthValues: null as { length: number; unit: "beats" | "seconds" } | null,
+  /** Writes a length into the store as the dialog's controls would, under the "silence" or "fileLength" keys. */
+  writeLength: null as
+    | ((dialog: "silence" | "fileLength", values: { length: number; unit: "beats" | "seconds" }) => void)
+    | null,
   analysisResult: () => {
     const bands = 4;
     return {
@@ -51,13 +56,15 @@ vi.mock("../modals", () => ({
     else void opts.onCancel?.();
   }),
   openNewFilePrompt: vi.fn(),
-  openInsertSilencePrompt: vi.fn((opts: { onConfirm: (values: unknown) => void; onClose?: () => void }) => {
-    if (gate.silenceValues) opts.onConfirm(gate.silenceValues);
-    else opts.onClose?.();
+  openInsertSilencePrompt: vi.fn((opts: { onConfirm: () => void; onClose?: () => void }) => {
+    if (!gate.silenceValues) return opts.onClose?.();
+    gate.writeLength?.("silence", gate.silenceValues);
+    opts.onConfirm();
   }),
-  openSetLengthPrompt: vi.fn((opts: { onConfirm: (values: unknown) => void; onClose?: () => void }) => {
-    if (gate.setLengthValues) opts.onConfirm(gate.setLengthValues);
-    else opts.onClose?.();
+  openSetLengthPrompt: vi.fn((opts: { onConfirm: () => void; onClose?: () => void }) => {
+    if (!gate.setLengthValues) return opts.onClose?.();
+    gate.writeLength?.("fileLength", gate.setLengthValues);
+    opts.onConfirm();
   }),
   openStackFilesPrompt: vi.fn(),
 }));
@@ -169,6 +176,11 @@ function makeStore(overrides: Partial<State> = {}) {
     stackOfLayer: {},
     ...overrides,
   } as unknown as State;
+
+  gate.writeLength = (dialog, values) => {
+    const keys = dialog === "silence" ? SILENCE_LENGTH_KEYS : FILE_LENGTH_KEYS;
+    set({ [keys.unit]: values.unit, [values.unit === "beats" ? keys.beats : keys.seconds]: values.length });
+  };
 
   return { get, files, set };
 }

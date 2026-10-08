@@ -1034,7 +1034,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Close File** (`Cmd/Ctrl+W`).
 - **Preferences…** (`Cmd/Ctrl+,`) – opens the settings that apply to the whole app.
 - **Export Image…** – saves the active file's spectrogram as a PNG, for artwork rather than for audio. A live preview shows what you will get.
-  - **Colour** – Editor keeps the app's own look. Mono, Magma, Viridis and Ice restyle it, and Random rolls a new palette each time you pick it.
+  - **Colour** – Editor keeps the app's own look. Mono, Magma, Viridis and Ice restyle it, and Random rolls a new palette when you pick it. The dice beside the image size rolls another.
   - **Shape** – 1:1, 4:5, 3:2, 16:9, or 9:16 for a phone screen.
   - **Size** – 2K, 4K or 8K along the long edge.
   - **Poster** – adds the file's name as a caption underneath.

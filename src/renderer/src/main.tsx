@@ -13,6 +13,7 @@ import { installNativeAudioContext } from "./lib/audio-context";
 import { diag, installDiagErrorCapture } from "./lib/diag-log";
 import { host } from "./lib/host";
 import { APP_MODAL_PROPS } from "./lib/modals";
+import { UI_LAYERS } from "./lib/ui-layers";
 
 installDiagErrorCapture();
 installNativeAudioContext();
@@ -59,8 +60,10 @@ const theme = createTheme({
       },
     }),
     Menu: Menu.extend({ defaultProps: { shadow: "xl" } }),
-    Modal: Modal.extend({ defaultProps: { overlayProps: { blur: 8, backgroundOpacity: 0.5 } } }),
-    Popover: Popover.extend({ defaultProps: { shadow: "xl" } }),
+    Modal: Modal.extend({
+      defaultProps: { zIndex: UI_LAYERS.modal, overlayProps: { blur: 8, backgroundOpacity: 0.5 } },
+    }),
+    Popover: Popover.extend({ defaultProps: { shadow: "xl", zIndex: UI_LAYERS.popup } }),
   },
 });
 
@@ -87,7 +90,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     ) : (
       <AppErrorBoundary>
         <ModalsProvider modals={modals} modalProps={APP_MODAL_PROPS}>
-          <Notifications zIndex={1000} />
+          <Notifications zIndex={UI_LAYERS.modal} />
           <App />
         </ModalsProvider>
       </AppErrorBoundary>

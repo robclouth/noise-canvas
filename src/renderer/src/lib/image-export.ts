@@ -11,25 +11,16 @@ export type AspectId = "square" | "portrait" | "story" | "landscape" | "wide";
 
 export interface AspectDef {
   id: AspectId;
-  label: string;
-  /** Compact form for the picker, where five options share one row. */
-  short: string;
   /** Width divided by height. */
   ratio: number;
 }
 
 export const ASPECTS: readonly AspectDef[] = [
-  { id: "square", label: "Square", short: "1:1", ratio: 1 },
-  { id: "portrait", label: "Portrait", short: "4:5", ratio: 4 / 5 },
-  { id: "story", label: "Story", short: "9:16", ratio: 9 / 16 },
-  { id: "landscape", label: "Landscape", short: "3:2", ratio: 3 / 2 },
-  { id: "wide", label: "Wide", short: "16:9", ratio: 16 / 9 },
-] as const;
-
-export const SIZE_OPTIONS: readonly { value: number; label: string }[] = [
-  { value: 2048, label: "2K" },
-  { value: 4096, label: "4K" },
-  { value: 8192, label: "8K" },
+  { id: "square", ratio: 1 },
+  { id: "portrait", ratio: 4 / 5 },
+  { id: "story", ratio: 9 / 16 },
+  { id: "landscape", ratio: 3 / 2 },
+  { id: "wide", ratio: 16 / 9 },
 ] as const;
 
 export interface ImageExportOptions {
@@ -40,13 +31,6 @@ export interface ImageExportOptions {
   /** Mount the spectrogram on a titled plate with time and pitch labels. */
   poster: boolean;
 }
-
-export const DEFAULT_EXPORT_OPTIONS: ImageExportOptions = {
-  colormap: "magma",
-  aspect: "square",
-  size: 4096,
-  poster: false,
-};
 
 /** A span of a file's packed state on the GPU, laid out as a source of its own. */
 export interface ExportSpan {

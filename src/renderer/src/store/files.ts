@@ -40,7 +40,15 @@ import { toChannelCount } from "../lib/channel-mix";
 import { mixdown } from "../lib/mixdown";
 import { resampleChannels } from "../lib/resample";
 import { insertSilence, silenceCutSample } from "../lib/insert-silence";
-import { lengthToSeconds, type LengthValues } from "../lib/length-values";
+import {
+  FILE_LENGTH_KEYS,
+  lengthToSeconds,
+  lengthValues,
+  secondsToLength,
+  SILENCE_LENGTH_KEYS,
+  type LengthUnit,
+  type LengthValues,
+} from "../lib/length-values";
 import { setChannelsLength } from "../lib/set-length";
 import { insertOnsetSpan, insertSpanPieces, removeOnsetSpan } from "../../../main/lib/ripple-edits";
 import { fullHeightSelection, type Selection } from "../lib/selection";
@@ -1618,31 +1626,29 @@ export const FILES_PERSISTED_KEYS = [
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
   newFile: async () => {
-    const values = await new Promise<{
-      sampleRate: number;
-      bpm: number;
-      lengthBeats: number;
-    } | null>((resolve) => {
-      let confirmed = false;
+    const confirmed = await new Promise<boolean>((resolve) => {
+      let done = false;
       openNewFilePrompt({
-        onConfirm: (v) => {
-          confirmed = true;
-          resolve(v);
+        onConfirm: () => {
+          done = true;
+          resolve(true);
         },
         onClose: () => {
-          if (!confirmed) resolve(null);
+          if (!done) resolve(false);
         },
       });
     });
-    if (!values) return;
-    const { sampleRate, bpm, lengthBeats } = values;
+    if (!confirmed) return;
 
     const state = get();
+    const sampleRate = state.newFileSampleRate;
+    const bpm = Math.round(state.newFileBpm);
+    const lengthBeats = Math.round(state.newFileLengthBeats);
 
     try {
       const lengthSeconds = (60 / bpm) * lengthBeats;
       const audioBuffer = new AudioBuffer({
-        length: lengthSeconds * sampleRate,
+        length: Math.round(lengthSeconds * sampleRate),
         sampleRate,
         numberOfChannels: 2,
       });
@@ -3592,21 +3598,26 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (get().filesLoading[fileId] || get().filesBusy[fileId]) return;
 
     const spec = file.spectrogramData;
-    const values = await new Promise<LengthValues | null>((resolve) => {
-      let confirmed = false;
+    const bpm = get().filepathsBpm[file.filePath] || 120;
+    const seconds = spec.numFrames / spec.sampleRate;
+    const toField = (unit: LengthUnit) => Math.round(secondsToLength(seconds, unit, bpm) * 1000) / 1000;
+    set({ fileLengthBeats: toField("beats"), fileLengthSeconds: toField("seconds") });
+    const confirmed = await new Promise<boolean>((resolve) => {
+      let done = false;
       openSetLengthPrompt({
-        seconds: spec.numFrames / spec.sampleRate,
-        bpm: get().filepathsBpm[file.filePath] || 120,
-        onConfirm: (v) => {
-          confirmed = true;
-          resolve(v);
+        bpm,
+        onConfirm: () => {
+          done = true;
+          resolve(true);
         },
         onClose: () => {
-          if (!confirmed) resolve(null);
+          if (!done) resolve(false);
         },
       });
     });
-    if (!values) return;
+    if (!confirmed) return;
+    const values = lengthValues(get(), FILE_LENGTH_KEYS);
+    if (!Number.isFinite(values.length) || values.length <= 0) return;
 
     await serializeEditCommand(async () => {
       const current = openFiles[fileId];
@@ -3673,20 +3684,22 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     // length; the dialog only asks when there is nothing to measure.
     let values: LengthValues | null = null;
     if (!get().filesSelection[fileId]) {
-      values = await new Promise<LengthValues | null>((resolve) => {
-        let confirmed = false;
+      const confirmed = await new Promise<boolean>((resolve) => {
+        let done = false;
         openInsertSilencePrompt({
           bpm: get().filepathsBpm[file.filePath] || 120,
-          onConfirm: (v) => {
-            confirmed = true;
-            resolve(v);
+          onConfirm: () => {
+            done = true;
+            resolve(true);
           },
           onClose: () => {
-            if (!confirmed) resolve(null);
+            if (!done) resolve(false);
           },
         });
       });
-      if (!values) return;
+      if (!confirmed) return;
+      values = lengthValues(get(), SILENCE_LENGTH_KEYS);
+      if (!Number.isFinite(values.length) || values.length <= 0) return;
     }
 
     await serializeEditCommand(async () => {

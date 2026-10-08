@@ -226,6 +226,24 @@ const PARAMETER_SECTIONS: Record<string, string> = {
   linkLatencyMs: "working-with-ableton-live",
 
   bandsPerOctave: "working-with-files",
+
+  newFileSampleRate: "menus",
+  newFileBpm: "menus",
+  newFileLengthBeats: "menus",
+  silenceUnit: "menus",
+  silenceBeats: "menus",
+  silenceSeconds: "menus",
+  fileLengthUnit: "menus",
+  fileLengthBeats: "menus",
+  fileLengthSeconds: "menus",
+  imageExportColour: "menus",
+  imageExportShape: "menus",
+  imageExportSize: "menus",
+  imageExportPoster: "menus",
+  splitParts: "splitting-a-file",
+  generatePrompt: "generating-sound",
+  generateStrength: "generating-sound",
+  generateInput: "generating-sound",
 };
 
 /** Prefix rules for the parameter families generated per modulator or macro. */

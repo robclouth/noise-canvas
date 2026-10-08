@@ -10,7 +10,6 @@ export type ColormapId = "native" | "mono" | "magma" | "viridis" | "ice" | "rand
 
 export interface ColormapDef {
   id: ColormapId;
-  label: string;
   /**
    * Evenly spaced sRGB control points from the floor to the peak. Empty for
    * "native", which has no ramp, and for "random", whose points are generated.
@@ -19,24 +18,21 @@ export interface ColormapDef {
 }
 
 export const COLORMAPS: readonly ColormapDef[] = [
-  { id: "native", label: "Editor", anchors: [] },
-  { id: "mono", label: "Mono", anchors: ["#000000", "#2a2a2a", "#595959", "#8d8d8d", "#c4c4c4", "#ffffff"] },
+  { id: "native", anchors: [] },
+  { id: "mono", anchors: ["#000000", "#2a2a2a", "#595959", "#8d8d8d", "#c4c4c4", "#ffffff"] },
   {
     id: "magma",
-    label: "Magma",
     anchors: ["#000004", "#1c1044", "#4f127b", "#812581", "#b5367a", "#e55964", "#fb8761", "#fec287", "#fcfdbf"],
   },
   {
     id: "viridis",
-    label: "Viridis",
     anchors: ["#440154", "#472d7b", "#3b528b", "#2c728e", "#21918c", "#28ae80", "#5ec962", "#addc30", "#fde725"],
   },
   {
     id: "ice",
-    label: "Ice",
     anchors: ["#00030a", "#0a1c3d", "#12406e", "#1a6f96", "#3aa0ad", "#7fcfc4", "#cdeee8", "#ffffff"],
   },
-  { id: "random", label: "Random", anchors: [] },
+  { id: "random", anchors: [] },
 ] as const;
 
 const LUT_SIZE = 256;

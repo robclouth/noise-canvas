@@ -26,6 +26,7 @@ const OUT_OF_SCOPE = [
   "components/modals.tsx", // app dialogs — their own body text is the explanation
   "components/image-export-modal.tsx", // dialog
   "components/preferences-modal.tsx", // dialog
+  "components/parameter-dialog.tsx", // dialog
   "components/progress-modal.tsx", // dialog
   "components/update-notification.tsx", // dialog
   "components/manual-viewer.tsx", // a help surface

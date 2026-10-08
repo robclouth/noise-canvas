@@ -34,7 +34,6 @@ export interface GenerateState {
   generateIntoActiveFile: (settings: GenerateSettings) => Promise<void>;
 }
 
-let lastSettings: GenerateSettings = { prompt: "", strength: 0.5, input: "full-mix" };
 let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleRelease(): void {
@@ -143,24 +142,28 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
       return;
     }
     const selection = get().filesSelection[fileId] ?? null;
-    const settings = await new Promise<GenerateSettings | null>((resolve) => {
-      let confirmed = false;
+    const confirmed = await new Promise<boolean>((resolve) => {
+      let done = false;
       openGeneratePrompt({
-        initial: lastSettings,
         hasSelection: selection !== null,
         bandLimited: selection !== null && !isFullHeight(selection),
-        onConfirm: (value) => {
-          confirmed = true;
-          resolve(value);
+        onConfirm: () => {
+          done = true;
+          resolve(true);
         },
-        onCancel: () => resolve(null),
+        onCancel: () => resolve(false),
         onClose: () => {
-          if (!confirmed) resolve(null);
+          if (!done) resolve(false);
         },
       });
     });
-    if (!settings) return;
-    lastSettings = settings;
+    if (!confirmed) return;
+    const { generatePrompt, generateStrength, generateInput } = get();
+    const settings: GenerateSettings = {
+      prompt: generatePrompt,
+      strength: generateStrength / 100,
+      input: generateInput,
+    };
     await get().generateIntoActiveFile(settings);
   },
 

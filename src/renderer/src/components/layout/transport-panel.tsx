@@ -1,4 +1,5 @@
 import { useStore } from "@/store";
+import { UI_LAYERS } from "@renderer/lib/ui-layers";
 import { ActionIcon, Box, Divider, Group, Menu, Popover, Stack, Text } from "@mantine/core";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import {
@@ -84,7 +85,7 @@ export const TransportPanel = memo(() => {
       bg="dark.7"
       wrap="nowrap"
       // A window too narrow for the whole bar scrolls the bar, not the app.
-      style={{ zIndex: 1000, overflowX: "auto", overflowY: "hidden" }}
+      style={{ zIndex: UI_LAYERS.chrome, overflowX: "auto", overflowY: "hidden" }}
       {...anchorProps("transport")}
     >
       <Group gap="xs" wrap="nowrap">

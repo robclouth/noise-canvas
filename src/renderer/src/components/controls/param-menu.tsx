@@ -65,6 +65,8 @@ type ParamMenuProps = {
   displayDescription?: string;
   /** Greys the label out while it stays live, for a control that has no effect right now. */
   dimmed?: boolean;
+  /** Shows the label and its tooltip only, with no menu: for a setting that is not part of a brush. */
+  plain?: boolean;
   children?: React.ReactNode; // Not used, but accepted for flexibility
 };
 
@@ -80,6 +82,7 @@ export const ParamMenu = ({
   displayLabel,
   displayDescription,
   dimmed = false,
+  plain = false,
 }: ParamMenuProps) => {
   const theme = useMantineTheme();
   const [opened, setOpened] = useState(false);
@@ -160,6 +163,18 @@ export const ParamMenu = ({
     const useEffectScope = !!effectId && isEffectParameter(quantizeParamKey);
     setParameter(quantizeParamKey, value, useEffectScope ? effectId : undefined);
   };
+
+  if (plain) {
+    return (
+      <Tooltip label={displayDescription ?? description}>
+        <Group gap={4} w={labelWidth} wrap="nowrap" justify="end" data-param={paramKey}>
+          <Text size="xs" lineClamp={1} truncate="end" ta="right" c={dimmed ? "dark.3" : "dark.0"}>
+            {displayLabel ?? parameter.label}
+          </Text>
+        </Group>
+      </Tooltip>
+    );
+  }
 
   return (
     <Menu opened={opened} onChange={setOpened} position="bottom" withArrow>

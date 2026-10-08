@@ -31,6 +31,7 @@ import { createSelectionClipboardSlice } from "./selection-clipboard";
 import { createSelectionRippleSlice } from "./selection-ripple";
 import { createGenerateSlice } from "./generate";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
+import { createDialogSettingsSlice } from "./dialog-settings";
 import { createModulatorsSlice } from "./modulators";
 import { createPalettesSlice, makeDefaultPalette, PALETTES_PERSISTED_KEYS } from "./palettes";
 import { DEFAULT_PALETTE_ID } from "./palette-id";
@@ -226,6 +227,7 @@ export const useStore = create<State>()(
         ...createSectionPresetsSlice(set, get),
         ...createStepsSlice(set, get),
         ...createLinkSlice(set, get),
+        ...createDialogSettingsSlice(),
         ...createLayerStacksSlice(set, get),
         ...createFillSlice(set, get),
         ...createEditProgressSlice(set),

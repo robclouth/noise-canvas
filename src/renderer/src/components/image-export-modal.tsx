@@ -1,30 +1,23 @@
-import { Box, Button, Group, Loader, SegmentedControl, Stack, Switch, Text } from "@mantine/core";
+import { ActionIcon, Box, Button, Group, Loader, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import type { ContextModalProps } from "@mantine/modals";
-import { COLORMAPS, rerollRandomColormap } from "@renderer/lib/image-export-colormaps";
-import {
-  ASPECTS,
-  canvasToPngBytes,
-  computeImageSize,
-  DEFAULT_EXPORT_OPTIONS,
-  SIZE_OPTIONS,
-  type AspectId,
-  type ImageExportOptions,
-} from "@renderer/lib/image-export";
+import { rerollRandomColormap } from "@renderer/lib/image-export-colormaps";
+import { ASPECTS, canvasToPngBytes, computeImageSize, type ImageExportOptions } from "@renderer/lib/image-export";
 import type { PosterInfo } from "@renderer/lib/image-export-poster";
-import type { ColormapId } from "@renderer/lib/image-export-colormaps";
 import { host } from "@renderer/lib/host";
 import { openContextModal } from "@renderer/lib/modals";
+import { useStore } from "@renderer/store";
 import { openFiles } from "@renderer/store/files";
 import { isManagedFilePath } from "@renderer/store/utils";
+import { Dices } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/shallow";
+import { DialogControls } from "./dialog-controls";
+import { Tooltip } from "./tooltip";
 
 /** Long edge of the preview render. Covers a retina preview box without lag. */
 const PREVIEW_LONG_EDGE = 960;
 const PREVIEW_DEBOUNCE_MS = 120;
-
-// Last-used settings, so reopening the dialog picks up where it left off.
-let lastOptions: ImageExportOptions = DEFAULT_EXPORT_OPTIONS;
 
 /** Opens the export dialog for one file. Driven by File → Export Image. */
 // eslint-disable-next-line react-refresh/only-export-components
@@ -48,21 +41,32 @@ function defaultImagePath(fileId: string): string {
 }
 
 export const ImageExportModal = ({ context, id, innerProps: { fileId } }: ContextModalProps<{ fileId: string }>) => {
-  const [options, setOptions] = useState<ImageExportOptions>(lastOptions);
+  const options: ImageExportOptions = useStore(
+    useShallow((state) => ({
+      colormap: state.imageExportColour,
+      aspect: state.imageExportShape,
+      size: state.imageExportSize,
+      poster: state.imageExportPoster,
+    })),
+  );
   const [rendering, setRendering] = useState(true);
   const [exporting, setExporting] = useState(false);
-  // Bumped on every click of the Random swatch, including when it is already
-  // selected, so each click redraws the preview with a new ramp.
+  // Bumped on every new Random ramp, so the preview redraws with it.
   const [paletteVersion, setPaletteVersion] = useState(0);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  const update = useCallback((patch: Partial<ImageExportOptions>) => {
-    setOptions((prev) => {
-      const next = { ...prev, ...patch };
-      lastOptions = next;
-      return next;
-    });
+  const reroll = useCallback(() => {
+    rerollRandomColormap();
+    setPaletteVersion((version) => version + 1);
   }, []);
+
+  // Picking Random rolls a new ramp; opening the dialog on Random keeps the current one.
+  const shownColormap = useRef(options.colormap);
+  useEffect(() => {
+    if (options.colormap === shownColormap.current) return;
+    shownColormap.current = options.colormap;
+    if (options.colormap === "random") reroll();
+  }, [options.colormap, reroll]);
 
   const ratio = (ASPECTS.find((a) => a.id === options.aspect) ?? ASPECTS[0]).ratio;
   const full = computeImageSize(ratio, options.size);
@@ -175,68 +179,21 @@ export const ImageExportModal = ({ context, id, innerProps: { fileId } }: Contex
         )}
       </Box>
 
-      <Stack gap={6}>
-        <Text size="xs" c="dimmed">
-          Colour
-        </Text>
-        <SegmentedControl
-          size="xs"
-          fullWidth
-          value={options.colormap}
-          onChange={(value) => update({ colormap: value as ColormapId })}
-          onClick={(event) => {
-            // Mantine only fires onChange when the value actually changes, so
-            // re-picking Random has to be caught from the click itself. The
-            // radio sits beside its label rather than inside it, so the label's
-            // own `control` link is what identifies which segment was hit.
-            const label = (event.target as HTMLElement).closest("label");
-            const control = label instanceof HTMLLabelElement ? label.control : null;
-            if (!(control instanceof HTMLInputElement) || control.value !== "random") return;
-            rerollRandomColormap();
-            setPaletteVersion((version) => version + 1);
-          }}
-          data={COLORMAPS.map((c) => ({ value: c.id, label: c.label }))}
-        />
-      </Stack>
-
-      <Stack gap={6}>
-        <Text size="xs" c="dimmed">
-          Shape
-        </Text>
-        <SegmentedControl
-          size="xs"
-          fullWidth
-          value={options.aspect}
-          onChange={(value) => update({ aspect: value as AspectId })}
-          data={ASPECTS.map((a) => ({ value: a.id, label: a.short }))}
-        />
-      </Stack>
-
-      <Group justify="space-between" align="center" wrap="nowrap">
-        <Stack gap={6} style={{ flex: 1 }}>
-          <Text size="xs" c="dimmed">
-            Size
-          </Text>
-          <SegmentedControl
-            size="xs"
-            value={String(options.size)}
-            onChange={(value) => update({ size: Number(value) })}
-            data={SIZE_OPTIONS.map((s) => ({ value: String(s.value), label: s.label }))}
-          />
-        </Stack>
-        <Switch
-          size="xs"
-          labelPosition="left"
-          label="Poster"
-          checked={options.poster}
-          onChange={(event) => update({ poster: event.currentTarget.checked })}
-        />
-      </Group>
+      <DialogControls keys={["imageExportColour", "imageExportShape", "imageExportSize", "imageExportPoster"]} />
 
       <Group justify="space-between" align="center">
-        <Text size="xs" c="dimmed">
-          {full.width} × {full.height} PNG
-        </Text>
+        <Group gap="xs">
+          <Text size="xs" c="dimmed">
+            {full.width} × {full.height} PNG
+          </Text>
+          {options.colormap === "random" && (
+            <Tooltip label="Rolls a new random palette.">
+              <ActionIcon size="sm" variant="subtle" color="gray" aria-label="New palette" onClick={reroll}>
+                <Dices size={14} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+        </Group>
         <Group gap="xs">
           <Button size="xs" variant="default" onClick={() => context.closeModal(id)}>
             Cancel

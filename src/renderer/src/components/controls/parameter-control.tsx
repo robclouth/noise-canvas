@@ -37,6 +37,8 @@ export type ParameterControlProps = {
   color?: string;
   labelPosition?: "left" | "top";
   displayLabel?: string;
+  /** Drops the label's menu, for a setting that is not part of a brush. */
+  plainLabel?: boolean;
 };
 
 export const ParameterControl = memo(function ParameterControl({
@@ -46,6 +48,7 @@ export const ParameterControl = memo(function ParameterControl({
   paramKey,
   labelPosition,
   displayLabel,
+  plainLabel,
 }: ParameterControlProps) {
   const parameter = getParameterDef(paramKey);
   const { kind } = parameter;
@@ -146,6 +149,7 @@ export const ParameterControl = memo(function ParameterControl({
       displayLabel={displayLabel}
       displayDescription={targetSummary}
       dimmed={dimmed}
+      plain={plainLabel}
     >
       {parameter.label}
     </ParamMenu>

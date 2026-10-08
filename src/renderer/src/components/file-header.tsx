@@ -362,8 +362,9 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
                 onClick={(e) => {
                   e.stopPropagation();
                   openSplitPartsPrompt({
-                    onConfirm: (parts) => {
-                      useStore.getState().nmfFile(fileId, parts);
+                    onConfirm: () => {
+                      const state = useStore.getState();
+                      state.nmfFile(fileId, Math.round(state.splitParts));
                     },
                   });
                 }}

@@ -1,4 +1,4 @@
-import { Group, Select, Stack, Text } from "@mantine/core";
+import { Stack, Text } from "@mantine/core";
 import { openContextModal } from "@mantine/modals";
 import {
   listAudioOutputs,
@@ -7,14 +7,18 @@ import {
   type AudioOutput,
 } from "@renderer/lib/audio-devices";
 import { useStore } from "@renderer/store";
+import { LABEL_WIDTH } from "@renderer/lib/ui-density";
 import { useEffect, useState } from "react";
+import { SelectControl } from "./controls/select-control";
 import { SectionHeading } from "./section-heading";
+import { Tooltip } from "./tooltip";
 
 // Mantine reads an empty value as "nothing selected", so the system-default row
 // carries its own value here and maps back to the empty sink id on the way out.
 const SYSTEM_DEFAULT_OPTION = "system";
 
-const DROPDOWN_WIDTH = 260;
+/** Wide enough for most device names, which overrun a parameter-sized box. */
+const DEVICE_WIDTH = 260;
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function openPreferencesModal(): void {
@@ -54,22 +58,22 @@ const AudioOutputSelect = () => {
   ];
 
   return (
-    <Group grow gap="xs" wrap="nowrap">
-      <Text size="sm">Output</Text>
-      <Select
-        size="xs"
-        data={data}
-        value={outputDeviceId === SYSTEM_DEFAULT_OUTPUT_ID ? SYSTEM_DEFAULT_OPTION : outputDeviceId}
-        allowDeselect={false}
-        // The row gives the control half the dialog, which several device names
-        // overrun, so the list opens wider than the box that anchors it.
-        comboboxProps={{ width: DROPDOWN_WIDTH, position: "bottom-end", zIndex: 1100 }}
-        onChange={(value) => {
-          if (value === null) return;
-          void setOutputDevice(devices.find((device) => device.id === value) ?? null);
-        }}
-      />
-    </Group>
+    <SelectControl
+      labelComponent={
+        <Tooltip label="Picks the device the sound plays through.">
+          <Text size="xs" w={LABEL_WIDTH} ta="right" c="dark.0" style={{ flexShrink: 0 }}>
+            Output
+          </Text>
+        </Tooltip>
+      }
+      options={data}
+      value={outputDeviceId === SYSTEM_DEFAULT_OUTPUT_ID ? SYSTEM_DEFAULT_OPTION : outputDeviceId}
+      valueWidth={DEVICE_WIDTH}
+      dropdownWidth={DEVICE_WIDTH}
+      setValue={(value) => {
+        void setOutputDevice(devices.find((device) => device.id === value) ?? null);
+      }}
+    />
   );
 };
 

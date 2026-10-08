@@ -16,14 +16,19 @@ export const SelectControl = <T,>({
   setValue,
   color = "orange",
   dropdownZIndex,
+  valueWidth = VALUE_WIDTH,
+  dropdownWidth,
 }: {
   labelComponent: ReactNode;
   value: T;
-  options: readonly { value: T; label: string; group?: string; description?: string }[];
+  options: readonly { value: T; label: string; group?: string; description?: string; disabled?: boolean }[];
   setValue: (value: T) => void;
   labelWidth?: number | string;
   color?: string;
   dropdownZIndex?: number;
+  /** Width of the box, for values longer than a parameter's. */
+  valueWidth?: number | string;
+  dropdownWidth?: number;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -43,11 +48,11 @@ export const SelectControl = <T,>({
 
   // Options carrying a group name render as headed sections, in the order the
   // groups first appear; ungrouped lists stay a flat item list.
-  const items = options.map((o) => ({ value: String(o.value), label: o.label }));
+  const items = options.map((o) => ({ value: String(o.value), label: o.label, disabled: o.disabled }));
   const groups: { group: string; items: typeof items }[] = [];
   for (const option of options) {
     if (!option.group) continue;
-    const item = { value: String(option.value), label: option.label };
+    const item = { value: String(option.value), label: option.label, disabled: option.disabled };
     const existing = groups.find((g) => g.group === option.group);
     if (existing) existing.items.push(item);
     else groups.push({ group: option.group, items: [item] });
@@ -67,14 +72,14 @@ export const SelectControl = <T,>({
           border: `1px solid #666`,
           backgroundColor: "#2c2c2c",
         }}
-        w={VALUE_WIDTH}
+        w={valueWidth}
         data={data}
         value={String(value)}
         onChange={handleChange}
         scrollAreaProps={{ type: "always" }}
         maxDropdownHeight={descriptions.size > 0 ? DESCRIBED_DROPDOWN_HEIGHT : undefined}
         comboboxProps={{
-          width: descriptions.size > 0 ? DESCRIBED_DROPDOWN_WIDTH : PLAIN_DROPDOWN_WIDTH,
+          width: dropdownWidth ?? (descriptions.size > 0 ? DESCRIBED_DROPDOWN_WIDTH : PLAIN_DROPDOWN_WIDTH),
           position: "bottom-start",
           zIndex: dropdownZIndex,
         }}

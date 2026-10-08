@@ -16,6 +16,7 @@ import type { SelectionRippleState } from "./selection-ripple";
 import type { GenerateState } from "./generate";
 import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
+import type { DialogSettings } from "./dialog-settings";
 import type { PalettesState } from "./palettes";
 import type { PresetsState } from "./presets";
 import type { SectionPresetsState } from "./section-presets";
@@ -153,6 +154,7 @@ export type State = BrushState &
   SectionPresetsState &
   StepsState &
   LinkState &
+  DialogSettings &
   FillState &
   EditProgressState &
   LayerStacksState &
