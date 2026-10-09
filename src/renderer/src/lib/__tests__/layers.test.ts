@@ -5,8 +5,6 @@ import {
   migrateLayerStacks,
   getLayerSegments,
   selectLayerStack,
-  stackColor,
-  layerColor,
   stackMethodLabel,
   type LayerStacksState,
 } from "../../store/layers";
@@ -169,19 +167,7 @@ describe("getLayerSegments", () => {
   });
 });
 
-describe("stack colours", () => {
-  it("gives every layer the stack's hue at a distinct lightness", () => {
-    const colors = [0, 1, 2, 3].map((i) => layerColor(210, i, 4));
-
-    for (const color of colors) expect(color).toContain("hsl(210,");
-    expect(new Set(colors).size).toBe(4);
-  });
-
-  it("centres a lone layer rather than putting it at an extreme", () => {
-    const solo = layerColor(210, 0, 1);
-    expect(solo).toBe(stackColor(210));
-  });
-
+describe("stackMethodLabel", () => {
   it("names each method", () => {
     expect(stackMethodLabel("hpss")).toBe("HPSS");
     expect(stackMethodLabel("nmf")).toBe("NMF");

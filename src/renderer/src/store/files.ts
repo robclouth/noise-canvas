@@ -116,7 +116,7 @@ interface SynthesisAudioResult {
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
 }
-import { selectLayerStack, selectStackLayerIds, layerColor, type LayerStackMethod } from "./layers";
+import { selectLayerStack, selectStackLayerIds, stackColor, type LayerStackMethod } from "./layers";
 import { hasSupportedAudioExtension } from "../../../main/lib/audio-extensions";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
@@ -271,8 +271,6 @@ export interface FilesState {
   setFileMuted: (fileId: string, muted: boolean) => void;
   filesSoloed: Record<string, boolean>;
   setFileSoloed: (fileId: string, soloed: boolean) => void;
-  filesVolumeDb: Record<string, number>;
-  setFileVolumeDb: (fileId: string, volumeDb: number) => void;
   // Selection rectangle per file. Setting one also writes its time span to the
   // loop region, so the transport always plays what the selection covers.
   // Clearing one leaves the loop region alone.
@@ -1011,10 +1009,10 @@ export function getFileColor(filePath: string): string {
   return `hsl(${getFileHue(filePath)}, 60%, 60%)`;
 }
 
-/** The colour a file wears everywhere: a shade of its group's hue if it is a stem, else its own. */
+/** The colour a file wears everywhere: its stack's colour if it is in one, else its own. */
 export function selectFileColor(state: Pick<State, "layerStacks" | "stackOfLayer">, fileId: string): string {
   const group = selectLayerStack(state, fileId);
-  if (group) return layerColor(group.hue, group.layerIds.indexOf(fileId), group.layerIds.length);
+  if (group) return stackColor(group.hue);
   const file = openFiles[fileId];
   return getFileColor(file?.filePath ?? fileId);
 }
@@ -1549,7 +1547,6 @@ function discardFiles(set: ZustandSet, ids: string[]): void {
         delete state.filesLoopRegion[id];
         delete state.filesMuted[id];
         delete state.filesSoloed[id];
-        delete state.filesVolumeDb[id];
         delete state.filesSelection[id];
         delete state.filesDirty[id];
         delete state.filesLoading[id];
@@ -1628,7 +1625,6 @@ export const FILES_PERSISTED_KEYS = [
   "filesLoopRegion",
   "filesMuted",
   "filesSoloed",
-  "filesVolumeDb",
   // Persisted so the italic "unsaved" tab marker survives restart — managed
   // files in particular are always dirty until promoted via Save As.
   "filesDirty",
@@ -2056,7 +2052,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesLoopRegion[fileId];
           delete state.filesMuted[fileId];
           delete state.filesSoloed[fileId];
-          delete state.filesVolumeDb[fileId];
           delete state.filesSelection[fileId];
           delete state.persistedFilePaths[fileId];
           delete state.fileDisplayNames[fileId];
@@ -2858,7 +2853,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesLoopRegion[fileId];
           delete state.filesMuted[fileId];
           delete state.filesSoloed[fileId];
-          delete state.filesVolumeDb[fileId];
           delete state.filesSelection[fileId];
           delete state.filesDirty[fileId];
           delete state.filesLoading[fileId];
@@ -4192,15 +4186,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     set(
       produce((state: State) => {
         state.filesSoloed[fileId] = soloed;
-      }),
-    );
-    get().applyLayerGains();
-  },
-  filesVolumeDb: {},
-  setFileVolumeDb: (fileId, volumeDb) => {
-    set(
-      produce((state: State) => {
-        state.filesVolumeDb[fileId] = volumeDb;
       }),
     );
     get().applyLayerGains();

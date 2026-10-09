@@ -80,7 +80,6 @@ function makeStore(overrides: Partial<State> = {}) {
     stackOfLayer: {},
     filesMuted: {},
     filesSoloed: {},
-    filesVolumeDb: {},
     isPlaying: true,
     loop: false,
     stopAudio: vi.fn(),

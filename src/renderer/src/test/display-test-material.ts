@@ -1,7 +1,7 @@
 import { Color, GLSL3, RawShaderMaterial, Vector2 } from "three";
 
 import { createDefaultUniforms } from "../effects/base-effect";
-import { LONE_LAYER_TINT } from "../lib/layer-tint";
+import { STEREO_TINT } from "../lib/layer-tint";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 
@@ -25,9 +25,9 @@ export function createDisplayTestMaterial(): RawShaderMaterial {
       scaleGridEnabled: { value: false },
       scaleOffsets: { value: new Float32Array(12) },
       pitchOffsetSemisFromC0: { value: 0 },
-      leftTint: { value: new Color(LONE_LAYER_TINT.left[0], LONE_LAYER_TINT.left[1], LONE_LAYER_TINT.left[2]) },
+      leftTint: { value: new Color(STEREO_TINT.left[0], STEREO_TINT.left[1], STEREO_TINT.left[2]) },
       rightTint: {
-        value: new Color(LONE_LAYER_TINT.right[0], LONE_LAYER_TINT.right[1], LONE_LAYER_TINT.right[2]),
+        value: new Color(STEREO_TINT.right[0], STEREO_TINT.right[1], STEREO_TINT.right[2]),
       },
       drawOverlays: { value: true },
       showTargetRectangle: { value: false },

@@ -40,7 +40,7 @@ vi.mock("@renderer/store", () => ({
 }));
 
 import { getFileColor, getFileHue, openFiles, selectFileColor } from "../../store/files";
-import { layerColor, type LayerStack } from "../../store/layers";
+import { stackColor, type LayerStack } from "../../store/layers";
 
 function openTestFiles(count: number): string[] {
   const paths: string[] = [];
@@ -103,7 +103,7 @@ describe("file colours", () => {
     expect(getFileColor("/audio/closed.wav")).toMatch(/^hsl\(\d+(\.\d+)?, 60%, 60%\)$/);
   });
 
-  it("dresses a stem in a shade of its group hue", () => {
+  it("dresses every layer of a stack in the stack's colour", () => {
     openTestFiles(3);
     const group: LayerStack = {
       id: "g1",
@@ -116,7 +116,7 @@ describe("file colours", () => {
       layout: "overlaid" as const,
     };
     const state = { layerStacks: { g1: group }, stackOfLayer: { file_0: "g1", file_1: "g1", file_2: "g1" } };
-    expect(selectFileColor(state, "file_1")).toBe(layerColor(200, 1, 3));
+    for (const id of group.layerIds) expect(selectFileColor(state, id)).toBe(stackColor(200));
   });
 
   it("gives a file outside any group its own hue", () => {

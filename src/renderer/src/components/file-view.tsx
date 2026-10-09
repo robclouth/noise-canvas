@@ -52,9 +52,8 @@ export interface FileViewProps {
   isMinimized: boolean;
   /**
    * Every layer of an overlaid stack, in stack order, drawn into this one
-   * canvas. Only `fileId` takes strokes, the grid and the legends; the rest are
-   * drawn behind it. A layer's hue comes from its place in this list, so it
-   * keeps its colour whichever layer is on top.
+   * canvas. Only `fileId` takes strokes, the grid and the legends, and only it
+   * draws in colour; the rest are drawn in grey behind it.
    */
   stackLayerIds?: string[];
   headerExtras?: ReactNode;

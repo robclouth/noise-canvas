@@ -169,7 +169,6 @@ function makeStore(overrides: Partial<State> = {}) {
     stackOfLayer: { f1: "g1", f2: "g1", f3: "g1" },
     filesMuted: {},
     filesSoloed: {},
-    filesVolumeDb: {},
     isPlaying: false,
     loop: false,
     linkEnabled: false,

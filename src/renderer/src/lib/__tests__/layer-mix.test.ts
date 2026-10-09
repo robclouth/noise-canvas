@@ -1,36 +1,12 @@
 import { describe, expect, it } from "vitest";
-import {
-  clampPlaybackWindow,
-  DEFAULT_LAYER_VOLUME_DB,
-  layerGain,
-  layerVolumeGain,
-  MIN_LAYER_VOLUME_DB,
-  stackHasSolo,
-  type LayerMix,
-} from "../layer-mix";
+import { clampPlaybackWindow, layerGain, stackHasSolo, type LayerMix } from "../layer-mix";
 
-const EMPTY: LayerMix = { muted: {}, soloed: {}, volumeDb: {} };
+const EMPTY: LayerMix = { muted: {}, soloed: {} };
 const STACK = ["a", "b", "c"];
 
 function mix(partial: Partial<LayerMix>): LayerMix {
   return { ...EMPTY, ...partial };
 }
-
-describe("layerVolumeGain", () => {
-  it("is unity at the default", () => {
-    expect(layerVolumeGain(DEFAULT_LAYER_VOLUME_DB)).toBe(1);
-  });
-
-  it("halves the amplitude about every 6 dB", () => {
-    expect(layerVolumeGain(-6)).toBeCloseTo(0.5, 2);
-    expect(layerVolumeGain(6)).toBeCloseTo(2, 1);
-  });
-
-  it("silences at the bottom of the range", () => {
-    expect(layerVolumeGain(MIN_LAYER_VOLUME_DB)).toBe(0);
-    expect(layerVolumeGain(MIN_LAYER_VOLUME_DB - 10)).toBe(0);
-  });
-});
 
 describe("layerGain", () => {
   it("plays every layer when nothing is muted or soloed", () => {
@@ -62,11 +38,6 @@ describe("layerGain", () => {
     expect(layerGain(m, STACK, "a")).toBe(0);
     // The solo still holds the rest down, so the stack falls silent.
     expect(layerGain(m, STACK, "b")).toBe(0);
-  });
-
-  it("applies the volume of a layer the solo lets through", () => {
-    const m = mix({ soloed: { a: true }, volumeDb: { a: -6 } });
-    expect(layerGain(m, STACK, "a")).toBeCloseTo(0.5, 2);
   });
 
   it("ignores a solo outside the stack", () => {

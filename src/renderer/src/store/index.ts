@@ -369,6 +369,8 @@ export const useStore = create<State>()(
           delete stored.stemGroupOfFile;
           delete stored.fileGroups;
           delete stored.fileGroupOfFile;
+          // Retired keys.
+          delete stored.filesVolumeDb;
 
           const merged = deepMerge(currentState, stored) as State;
 

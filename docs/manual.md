@@ -800,9 +800,9 @@ A stack holds any number of layers, down to one, so a stack you have emptied out
 
 #### Overlaid and stacked
 
-A stack draws its layers **overlaid** by default: one canvas, one grid, one set of legends, and a tab per layer across the top. Each layer takes a colour of its own, and where two layers hold energy at the same time and pitch the picture adds towards white. Click a tab to bring that layer to the top, which is where your brush lands.
+A stack draws its layers **overlaid** by default: one canvas, one grid, one set of legends, and a tab per layer across the top. The top layer draws in the usual orange and blue for the stereo image, and the others draw in grey behind it. Click a tab to bring that layer to the top, which is where your brush lands.
 
-The layers icon in the stack header switches to **stacked**, which gives each layer a box of its own. Stacked shows one layer at a time in full detail, in the usual orange and blue for the stereo image; overlaid trades some of that colour away to say which layer you are looking at. **Link views** appears only in the stacked view, since overlaid layers already share one viewport.
+The layers icon in the stack header switches to **stacked**, which gives each layer a box of its own, every one in full colour. **Link views** appears only in the stacked view, since overlaid layers already share one viewport.
 
 #### Adding a layer
 
@@ -812,11 +812,10 @@ The new layer shares the grid, so **Merge** stays an exact sum.
 
 #### Mixing a stack
 
-The layers of a stack play at the same time. Each header carries its own **Vol** box, and a stack of two or more also carries **S** and **M**:
+The layers of a stack play at the same time. In a stack of two or more, each layer carries **S** and **M**:
 
 - **M** drops that layer out of the mix. The rest keeps playing.
 - **S** plays that layer alone. Solo several to hear just those. Mute wins over solo on the same layer, so a layer with both engaged stays silent.
-- **Vol** sets how loud the layer sits, from -60 dB to +12 dB. At the bottom of the range it is silent.
 
 Clicking another layer of the same stack moves where you paint without stopping the music. Clicking a file outside it starts that file's own timeline instead.
 
@@ -837,7 +836,7 @@ Merging the parts of a split is exact: they add back up to the file they came fr
 **Hints**
 
 - Set the members to one length with **Edit → Set Length…** before merging, and the mix ends where you want rather than where the longest file happens to stop.
-- Merging is a plain sum, so bring levels down on the members first if the result overloads.
+- Merging is a plain sum, so paint the members quieter first if the result overloads.
 
 ### Onsets
 

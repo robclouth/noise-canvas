@@ -97,11 +97,6 @@ export const UI_CONTROLS = {
     description: "Sets the tempo of this file, which drives grid snapping and beat-based sizes.",
     manualSection: "working-with-files",
   },
-  "file-volume": {
-    label: "Volume",
-    description: "Sets how loud this file plays in the mix.",
-    manualSection: "layers",
-  },
   "file-solo": {
     label: "Solo",
     description: "Plays this file alone, along with any other file that is soloed.",
@@ -171,7 +166,7 @@ export const UI_CONTROLS = {
   },
   "stack-layout": {
     label: "Overlay layers",
-    description: "Draws every layer in one canvas, each in its own colour.",
+    description: "Draws every layer in one canvas, the top one in colour and the rest in grey.",
     manualSection: "layers",
   },
   "stack-layer-tab": {

@@ -11,7 +11,6 @@ import { getHistoryManager } from "@renderer/lib/history-manager";
 import { useFileReorder } from "@renderer/contexts/file-reorder";
 import { openFiles, selectFileColor } from "@renderer/store/files";
 import { selectLayerStack } from "@renderer/store/layers";
-import { DEFAULT_LAYER_VOLUME_DB, MAX_LAYER_VOLUME_DB, MIN_LAYER_VOLUME_DB } from "@renderer/lib/layer-mix";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Grid3x3, GripVertical, Maximize2, Minimize2, Plus, Split, X } from "lucide-react";
@@ -179,7 +178,6 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
   const channelCount = useFileChannelCount(fileId);
   const reorder = useFileReorder();
   const layerCount = useStore((state) => state.openFileIds.filter((id) => !state.minimizedFileIds.includes(id)).length);
-  const volumeDb = useStore((state) => state.filesVolumeDb[fileId] ?? DEFAULT_LAYER_VOLUME_DB);
   // Solo and mute only mean something against siblings that sound at the same
   // time, so a file that plays alone shows neither.
   const inMix = useStore((state) => (selectLayerStack(state, fileId)?.layerIds.length ?? 1) > 1);
@@ -306,16 +304,6 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
             </HelpActionIcon>
           )}
           {inMix && !headerExtras && <FileMixControls fileId={fileId} />}
-          <FileHeaderNumbox
-            label="Vol"
-            help="file-volume"
-            value={volumeDb}
-            setValue={(v) => useStore.getState().setFileVolumeDb(fileId, v)}
-            min={MIN_LAYER_VOLUME_DB}
-            max={MAX_LAYER_VOLUME_DB}
-            step={1}
-            unit="dB"
-          />
           <FileHeaderNumbox
             label="Onsets"
             help="file-onsets"

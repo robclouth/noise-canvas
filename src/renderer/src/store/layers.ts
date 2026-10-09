@@ -89,17 +89,7 @@ function nextLayerStackId(): string {
   return `stack_${Date.now()}_${layerStackCounter}`;
 }
 
-/**
- * Per-layer colour: one hue for the stack, stepped in lightness so the layers
- * are still told apart at a glance. A lone layer sits in the middle of the
- * range.
- */
-export function layerColor(hue: number, index: number, count: number): string {
-  const lightness = count > 1 ? 42 + (30 * Math.max(0, index)) / (count - 1) : 57;
-  return `hsl(${hue}, 62%, ${lightness}%)`;
-}
-
-/** Colour for stack-level chrome (the rail, the stack header border). */
+/** The colour a stack and each of its layers wear in the chrome. */
 export function stackColor(hue: number): string {
   return `hsl(${hue}, 62%, 57%)`;
 }

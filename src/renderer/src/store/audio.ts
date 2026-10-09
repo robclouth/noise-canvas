@@ -88,12 +88,8 @@ const layerVoices = new Map<string, LayerVoice>();
 // layer on every stroke.
 let holdOtherLayers = false;
 
-function mixOf(state: {
-  filesMuted: Record<string, boolean>;
-  filesSoloed: Record<string, boolean>;
-  filesVolumeDb: Record<string, number>;
-}): LayerMix {
-  return { muted: state.filesMuted, soloed: state.filesSoloed, volumeDb: state.filesVolumeDb };
+function mixOf(state: { filesMuted: Record<string, boolean>; filesSoloed: Record<string, boolean> }): LayerMix {
+  return { muted: state.filesMuted, soloed: state.filesSoloed };
 }
 
 function disposeVoice(fileId: string): void {
