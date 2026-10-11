@@ -15,7 +15,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -119,18 +118,21 @@ const fetchRuntime = async (build, scratch) => {
 };
 
 // The WebGPU provider ships only inside Microsoft's NuGet and pip packages; the
-// NuGet package is a zip with one native folder per platform.
+// NuGet package is a zip with one native folder per platform. GNU tar, which
+// Linux has, cannot read a zip, so Linux unzips it.
 const fetchWebGpu = async (build, scratch) => {
   const archivePath = join(scratch, "webgpu.nupkg");
   const url = `https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.EP.WebGpu/${WEBGPU_EP_VERSION}`;
   console.log(`[fetch-onnx] Downloading the WebGPU provider ${WEBGPU_EP_VERSION}...`);
   await download(url, archivePath);
-  const native = `runtimes/${build.webgpu.rid}/native`;
-  execFileSync(
-    "tar",
-    ["-xf", archivePath, "-C", LIB_DIR, "--strip-components", "3", ...build.webgpu.files.map((f) => `${native}/${f}`)],
-    { stdio: "inherit" },
-  );
+  const members = build.webgpu.files.map((f) => `runtimes/${build.webgpu.rid}/native/${f}`);
+  if (process.platform === "linux") {
+    execFileSync("unzip", ["-o", "-j", archivePath, ...members, "-d", LIB_DIR], { stdio: "inherit" });
+  } else {
+    execFileSync("tar", ["-xf", archivePath, "-C", LIB_DIR, "--strip-components", "3", ...members], {
+      stdio: "inherit",
+    });
+  }
 };
 
 const build = target();
@@ -144,7 +146,10 @@ if (!needsWebGpu) {
   process.exit(0);
 }
 
-const scratch = mkdtempSync(join(tmpdir(), "fetch-onnx-"));
+// The scratch folder sits beside the runtime's, on the same drive, so the
+// extracted package can be renamed into place.
+mkdirSync(join(ONNX_DIR, ".."), { recursive: true });
+const scratch = mkdtempSync(join(ONNX_DIR, "..", ".fetch-onnx-"));
 try {
   if (needsRuntime) await fetchRuntime(build, scratch);
   if (build.webgpu) await fetchWebGpu(build, scratch);
