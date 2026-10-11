@@ -17,6 +17,7 @@ export default tseslint.config(
       "**/out-ext",
       "**/.claude/worktrees",
       "**/.cache",
+      "**/listening",
       "test-phase.mjs",
     ],
   },
