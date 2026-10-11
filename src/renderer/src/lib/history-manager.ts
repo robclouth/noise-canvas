@@ -1699,12 +1699,15 @@ export class HistoryManager {
     // Every hop that kept the audio it rewrote puts it straight back, so the
     // state's audio returns exactly — limiting and all — without a synthesis.
     if (await this.restoreAudioByHops(fromId, targetId)) return;
+    // The file closed while the state came back, so it has no audio to restore.
+    if (!this.manifest) return;
 
     // When the hops' dirty region is known and a buffer exists, only that
     // window's audio differs between the two states, so only it is
     // synthesized and spliced.
-    if (hopRegion && file.audioBuffer) {
-      file.rendererRef.current.expandDirtyRegion(hopRegion.startX, hopRegion.endX, hopRegion.startY, hopRegion.endY);
+    const renderer = file.rendererRef.current;
+    if (hopRegion && file.audioBuffer && renderer) {
+      renderer.expandDirtyRegion(hopRegion.startX, hopRegion.endX, hopRegion.startY, hopRegion.endY);
       // packedData is the state the FBO was just set to, so passing it skips
       // the full FBO readback.
       const { synthesizeFile } = useStore.getState();
