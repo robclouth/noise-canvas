@@ -44,6 +44,7 @@ Every control has a tooltip and an entry in the `?` overlay.
    - [Linking Parameters Across Steps](#linking-parameters-across-steps)
 9. [Working with Files](#working-with-files)
    - [Mono and Stereo](#mono-and-stereo)
+   - [Opening Any File](#opening-any-file)
    - [Splitting a File](#splitting-a-file)
    - [Layers](#layers)
    - [Onsets](#onsets)
@@ -782,6 +783,35 @@ The badge is a menu, so a file can go either way. The current painted state is r
 - **Mono → Stereo** copies the single channel into both, so the file sounds the same until you paint on it. This is the step that gives the stereo effects something to place.
 - **Stereo → Mono** mixes the two channels together at equal weight.
 
+### Opening Any File
+
+**File → Open Raw…** (`Cmd/Ctrl+Shift+O`) plays the bytes of any file as audio: a program, a document, an image, a database. The result is cleaned of its DC offset, brought to a fixed loudness, limited, and opened as a new 48 kHz file you can paint on. The dialog keeps the settings you used last.
+
+- **Read** – how the playhead moves through the bytes. See the table below.
+- **Format** – how bytes become samples: 8-bit unsigned (8-bit) or signed (8-bit Sig.), 16-bit with the low byte first (LE) or the high byte first (BE), **μ-law**, which lifts quiet bytes, or **Top Bit**, which plays only the top bit of each byte as a square wave.
+- **Speed** – how fast the playhead moves. Below 1× each sample repeats, so the sound steps and drops in pitch. Above 1× samples are skipped.
+- **Stereo** – how the samples reach the two channels. See the table below.
+- **Remove Noise** – silences the parts that sound like hiss and keeps tones, steps and silence. Higher removes more.
+- **Bytes** – how much of the file to read from its start, which sets the length. All reads as much as fits in 10 minutes.
+- **Hold Length** – with Read on Hold, the longest one step lasts, in samples.
+
+| Read  | What it does                                                                |
+| ----- | --------------------------------------------------------------------------- |
+| Plain | Plays the samples in order.                                                 |
+| Delta | Adds each sample to a running sum, so the bytes draw slopes and curves.     |
+| Hold  | Holds each sample for as long as the byte after it says, up to Hold Length. |
+
+| Stereo   | What it does                                                             |
+| -------- | ------------------------------------------------------------------------ |
+| Mono     | Plays one channel.                                                       |
+| Separate | Reads a sample for each channel, the first left and the second right.    |
+| Pan      | Reads one more byte for each sample, which places it left or right.      |
+| Split    | Plays the top half of each sample's bits left and the bottom half right. |
+
+Uncompressed files have the most structure. Compressed ones (MP3, ZIP, JPEG, most video) come out as even noise, and Remove Noise silences most of them.
+
+The new file is a WAV in the app's data folder. Use **Save As…** to keep it somewhere else.
+
 ### Splitting a File
 
 The split menu on each file header:
@@ -1027,6 +1057,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 
 - **New** (`Cmd/Ctrl+N`) – creates an empty file, with a sample rate, BPM and length in beats.
 - **Open…** (`Cmd/Ctrl+O`) / **Open Recent** – loads existing audio. The recent list holds 20 files and persists across sessions.
+- **Open Raw…** (`Cmd/Ctrl+Shift+O`) – reads any file's bytes as sound. See [Opening Any File](#opening-any-file).
 - **Save** (`Cmd/Ctrl+S`) – writes back over the original.
 - **Save As…** (`Cmd/Ctrl+Shift+S`).
 - **Save Version** (`Cmd/Ctrl+Alt+S`) – saves a numbered copy alongside the original without overwriting it.

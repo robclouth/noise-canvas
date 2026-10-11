@@ -19,6 +19,7 @@ const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon
     holdMs?: number,
     releaseMs?: number,
   ) => Float32Array[];
+  limitChannels: (channels: Float32Array[], sampleRate: number) => Promise<number>;
 };
 
 const SR = 48000;
@@ -174,5 +175,24 @@ describe("baked true-peak limiter", () => {
     // Before the gain-envelope smoothing this artifact was ~-31 dBFS (audible); the
     // smoothed envelope keeps it well below -45 dBFS.
     expect(20 * Math.log10(artifact)).toBeLessThan(-45);
+  });
+});
+
+describe("limitChannels", () => {
+  it("limits the caller's channels in place, as the synthesis limiter does", async () => {
+    const left = new Float32Array(SR).map((_, i) => 3 * Math.sin((2 * Math.PI * 440 * i) / SR));
+    const right = left.map((v, i) => 0.5 * v * Math.cos((2 * Math.PI * 3 * i) / SR));
+    const expected = addon.applyLimiter([left, right], SR, 40, 200);
+    const reduction = await addon.limitChannels([left, right], SR);
+    expect(Array.from(left)).toEqual(Array.from(expected[0]));
+    expect(Array.from(right)).toEqual(Array.from(expected[1]));
+    expect(reduction).toBeGreaterThan(9);
+  });
+
+  it("reports no reduction for audio below the ceiling", async () => {
+    const quiet = new Float32Array(SR).map((_, i) => 0.25 * Math.sin((2 * Math.PI * 440 * i) / SR));
+    const before = quiet.slice();
+    expect(await addon.limitChannels([quiet], SR)).toBe(0);
+    expect(Array.from(quiet)).toEqual(Array.from(before));
   });
 });

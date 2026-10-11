@@ -438,6 +438,15 @@ export function createExtensionAnalysis(): AnalysisApi {
           )
         ).meta.seconds,
       ),
+    limitChannels: async (channels, sampleRate) => {
+      const arrays: Record<string, NumericArray> = {};
+      channels.forEach((channel, ch) => (arrays[`channel${ch}`] = channel));
+      const limited = await analysisOp("limitChannels", arrays, { numChannels: channels.length, sampleRate });
+      channels.forEach((channel, ch) => channel.set(f32(limited.arrays[`channel${ch}`], `channel${ch}`)));
+      return Number(limited.meta.maxGainReductionDb);
+    },
+    readFileRange: async (filePath, start, length) =>
+      u8((await analysisOp("readFileRange", {}, { filePath, start, length })).arrays.bytes, "bytes"),
     synthesize,
     commitStroke,
     encodeHistorySnapshot: async (packed) =>

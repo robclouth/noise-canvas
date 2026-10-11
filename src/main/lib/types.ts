@@ -186,6 +186,7 @@ export interface IpcMainHandlers {
   // launched with is held until then, since did-finish-load can precede it.
   "renderer-ready": (event: Electron.IpcMainEvent) => void;
   "trigger-open-file": (event: Electron.IpcMainEvent) => void;
+  "trigger-open-raw-file": (event: Electron.IpcMainEvent) => void;
   "check-for-updates": (event: Electron.IpcMainEvent) => void;
   // One renderer line for the diagnostic log file.
   "diag-log": (event: Electron.IpcMainEvent, level: DiagLevel, scope: string, message: string, data?: DiagData) => void;
@@ -195,6 +196,7 @@ export interface IpcMainHandlers {
 export interface IpcRendererEvents {
   "new-file": () => void;
   "open-file": (path: string) => void;
+  "open-raw-file": (path: string) => void;
   "save-active-file": () => void;
   "save-active-file-as": () => void;
   "save-active-file-version": () => void;

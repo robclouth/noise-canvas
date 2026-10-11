@@ -17,6 +17,7 @@ import type { GenerateState } from "./generate";
 import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
 import type { DialogSettings } from "./dialog-settings";
+import type { OpenRawSettings } from "./open-raw";
 import type { PalettesState } from "./palettes";
 import type { PresetsState } from "./presets";
 import type { SectionPresetsState } from "./section-presets";
@@ -155,6 +156,7 @@ export type State = BrushState &
   StepsState &
   LinkState &
   DialogSettings &
+  OpenRawSettings &
   FillState &
   EditProgressState &
   LayerStacksState &

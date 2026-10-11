@@ -255,6 +255,7 @@ const PARAMETER_PREFIXES: [string, string][] = [
   ["modulatorMode", "modulator-modes"],
   ["modulator", "modulator-controls"],
   ["macro", "macros"],
+  ["raw", "opening-any-file"],
 ];
 
 /**

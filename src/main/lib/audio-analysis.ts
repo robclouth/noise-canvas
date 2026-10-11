@@ -1,5 +1,5 @@
 import { existsSync } from "fs";
-import { copyFile } from "fs/promises";
+import { copyFile, open } from "fs/promises";
 import { availableParallelism, totalmem } from "os";
 import { extname, join } from "path";
 import { promisify } from "util";
@@ -826,6 +826,36 @@ export interface SynthesisResult {
 export async function synthesisReadReach(sampleRate: number, params: AnalysisParams): Promise<number> {
   const addon = init() as { synthesisReadReach: (rate: number, params: AnalysisParams) => number };
   return addon.synthesisReadReach(sampleRate, params);
+}
+
+/**
+ * Limits `channels` in place, off the main thread, with the limiter a synthesis
+ * uses. Resolves to the deepest gain reduction in dB. Leave the channels alone
+ * until it settles.
+ */
+export async function limitChannels(channels: Float32Array[], sampleRate: number): Promise<number> {
+  const addon = init() as { limitChannels: (channels: Float32Array[], rate: number) => Promise<number> };
+  return addon.limitChannels(channels, sampleRate);
+}
+
+/** Up to `length` bytes of a file from byte `start`; fewer where the file ends first. */
+export async function readFileRange(filePath: string, start: number, length: number): Promise<Uint8Array> {
+  if (!Number.isInteger(start) || !Number.isInteger(length) || start < 0 || length < 0) {
+    throw new RangeError(`readFileRange takes whole, non-negative byte counts (start ${start}, length ${length})`);
+  }
+  const handle = await open(filePath, "r");
+  try {
+    const bytes = new Uint8Array(length);
+    let filled = 0;
+    while (filled < length) {
+      const { bytesRead } = await handle.read(bytes, filled, length - filled, start + filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
+    }
+    return filled === length ? bytes : bytes.slice(0, filled);
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function synthesize(

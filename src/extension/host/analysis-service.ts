@@ -21,6 +21,8 @@ import {
   isModelDownloaded,
   mergeSpectrograms,
   nmf,
+  limitChannels,
+  readFileRange,
   synthesize,
   synthesisReadReach,
 } from "../../main/lib/audio-analysis";
@@ -272,6 +274,16 @@ export async function runAnalysisOpFramed(request: ArrayBuffer): Promise<Uint8Ar
         minFreq: Number(meta.minFreq),
       });
       return encodeFrame({ meta: { seconds }, arrays: {} });
+    }
+    case "limitChannels": {
+      const channels = planarChannels(arrays, Number(meta.numChannels));
+      const maxGainReductionDb = await limitChannels(channels, Number(meta.sampleRate));
+      const frame = framedChannels(channels);
+      return encodeFrame({ meta: { ...frame.meta, maxGainReductionDb }, arrays: frame.arrays });
+    }
+    case "readFileRange": {
+      const bytes = await readFileRange(String(meta.filePath), Number(meta.start), Number(meta.length));
+      return encodeFrame({ meta: {}, arrays: { bytes } });
     }
     case "analyseChannels": {
       const channels = planarChannels(arrays, Number(meta.numChannels));

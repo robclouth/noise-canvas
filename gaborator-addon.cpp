@@ -6746,6 +6746,80 @@ Napi::Value ApplyLimiterTest(const Napi::CallbackInfo &info)
     return out;
 }
 
+/**
+ * Limits whole channels in place on a worker thread, with the limiter a
+ * synthesis uses. Resolves to the deepest gain reduction in dB. The caller
+ * must not touch the channels until the promise settles.
+ */
+class LimitChannelsWorker : public Napi::AsyncWorker
+{
+public:
+    LimitChannelsWorker(Napi::Env env, const Napi::Array &channelsJs, double sampleRate)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate)
+    {
+        for (uint32_t ch = 0; ch < channelsJs.Length(); ++ch)
+        {
+            Napi::Float32Array arr = channelsJs.Get(ch).As<Napi::Float32Array>();
+            refs.push_back(Napi::Reference<Napi::Float32Array>::New(arr, 1));
+            targets.push_back(arr.Data());
+            lengths.push_back(arr.ElementLength());
+        }
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+protected:
+    void Execute() override
+    {
+        if (targets.empty())
+            return;
+        const size_t length = *std::min_element(lengths.begin(), lengths.end());
+        std::vector<std::vector<float>> channels(targets.size());
+        for (size_t ch = 0; ch < targets.size(); ++ch)
+            channels[ch].assign(targets[ch], targets[ch] + length);
+        std::vector<float> gain;
+        applyLookaheadLimiter(channels, sampleRate, 40.0f, 200.0f, &gain);
+        for (size_t ch = 0; ch < targets.size(); ++ch)
+            std::copy(channels[ch].begin(), channels[ch].end(), targets[ch]);
+        const float lowest = gain.empty() ? 1.0f : *std::min_element(gain.begin(), gain.end());
+        maxGainReductionDb = lowest < 1.0f ? -20.0f * std::log10(lowest) : 0.0f;
+    }
+
+    void OnOK() override { deferred.Resolve(Napi::Number::New(Env(), maxGainReductionDb)); }
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    double sampleRate;
+    std::vector<Napi::Reference<Napi::Float32Array>> refs;
+    std::vector<float *> targets;
+    std::vector<size_t> lengths;
+    float maxGainReductionDb = 0.0f;
+};
+
+Napi::Value LimitChannelsAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsArray() || !info[1].IsNumber())
+    {
+        Napi::TypeError::New(env, "Expected: channels (Float32Array[]), sampleRate (Number)").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    Napi::Array channelsJs = info[0].As<Napi::Array>();
+    for (uint32_t ch = 0; ch < channelsJs.Length(); ++ch)
+    {
+        if (!channelsJs.Get(ch).IsTypedArray() ||
+            channelsJs.Get(ch).As<Napi::TypedArray>().TypedArrayType() != napi_float32_array)
+        {
+            Napi::TypeError::New(env, "Each channel must be a Float32Array").ThrowAsJavaScriptException();
+            return env.Null();
+        }
+    }
+    auto *worker = new LimitChannelsWorker(env, channelsJs, info[1].As<Napi::Number>().DoubleValue());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Undo-history codec
 //
@@ -8039,6 +8113,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("pickOnsets", Napi::Function::New(env, PickOnsetsAsync));
     exports.Set("onsetSalience", Napi::Function::New(env, OnsetSalienceAsync));
     exports.Set("applyLimiter", Napi::Function::New(env, ApplyLimiterTest));
+    exports.Set("limitChannels", Napi::Function::New(env, LimitChannelsAsync));
     exports.Set("hpss", Napi::Function::New(env, HpssAsync));
     exports.Set("nmf", Napi::Function::New(env, NmfAsync));
     exports.Set("mergeSpectrograms", Napi::Function::New(env, MergeSpectrogramsAsync));

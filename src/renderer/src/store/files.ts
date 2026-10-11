@@ -84,6 +84,14 @@ import {
 } from "../lib/output-levels";
 import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type AudioStateMeta } from "../lib/audio-hop";
 import { bandLayoutOf, bandLengthsTexels, type BandLayout } from "../lib/band-layout";
+import {
+  normaliseRaw,
+  RAW_RATE,
+  readRawSamples,
+  removeRawDc,
+  removeRawNoise,
+  type RawOpenOptions,
+} from "../lib/raw-file";
 import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { gatherFileIds, gatherFileGroups, reorderFileIds } from "../lib/file-reorder";
@@ -147,6 +155,8 @@ export interface FilesState {
   newFile: () => Promise<void>;
   openFileIds: string[];
   openFilePath: (filePath: string) => Promise<void>;
+  /** Plays the first bytes of any file as samples, limits them, and opens the result. */
+  openRawFile: (filePath: string, options: RawOpenOptions) => Promise<void>;
   duplicateFile: (fileId: string) => Promise<void>;
   hpssFile: (fileId: string) => Promise<void>;
   aiSeparateFile: (fileId: string) => Promise<void>;
@@ -2064,6 +2074,60 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         message: `Opening '${truncateMiddle(host.path.basename(filepath), 50)}' failed. ${error instanceof Error ? error.message : ""}`,
         color: "red",
       });
+    }
+  },
+  openRawFile: async (filePath: string, options: RawOpenOptions) => {
+    const name = `${stripExtensionForLabel(host.path.basename(filePath))} (raw)`;
+    const notificationId = `open-raw-${Date.now()}`;
+    const fail = (message: string) => {
+      notifications.hide(notificationId);
+      notifications.show({ title: `Couldn't open ${name}`, message, color: "red" });
+    };
+    notifications.show({
+      id: notificationId,
+      title: `Reading ${name}`,
+      message: "Turning the bytes into sound…",
+      loading: true,
+      autoClose: false,
+      withCloseButton: false,
+    });
+
+    try {
+      const sampleRate = RAW_RATE;
+      const bytes = await host.analysis.readFileRange(filePath, 0, options.length);
+      const channels = readRawSamples(bytes, options);
+      if (channels[0].length === 0) return fail("Bytes holds less than one sample. Set Bytes higher.");
+      removeRawDc(channels);
+      const kept = options.removeNoise > 0 ? removeRawNoise(channels, options.removeNoise) : 1;
+      if (!normaliseRaw(channels)) {
+        return fail(
+          kept === 0
+            ? "Remove Noise silenced every part. Set Remove Noise lower."
+            : "These bytes make no sound this way. Pick another Format or Read.",
+        );
+      }
+
+      const maxGainReductionDb = await host.analysis.limitChannels(channels, sampleRate);
+      const dir = host.path.join(await host.dialogs.getUserDataPath(), "raw-imports", generateFileId());
+      await host.fs.mkdir(dir, { recursive: true });
+      const wavPath = host.path.join(dir, `${name}.wav`);
+      await host.analysis.exportAudio(channels, wavPath, sampleRate, "wav");
+      diag.info("file", "open raw", {
+        name: host.path.basename(filePath),
+        bytes: bytes.length,
+        read: options.read,
+        format: options.format,
+        stereo: options.stereo,
+        speed: options.speed,
+        keptPercent: Math.round(kept * 100),
+        seconds: Math.round((channels[0].length / sampleRate) * 10) / 10,
+        maxGainReductionDb: Math.round(maxGainReductionDb * 10) / 10,
+      });
+      notifications.hide(notificationId);
+      await get().openFilePath(wavPath);
+    } catch (error) {
+      console.error("Open Raw failed:", error);
+      fail(error instanceof Error ? error.message : "Unknown error");
     }
   },
   duplicateFile: async (fileId: string) => {

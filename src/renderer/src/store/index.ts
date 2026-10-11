@@ -32,6 +32,7 @@ import { createSelectionRippleSlice } from "./selection-ripple";
 import { createGenerateSlice } from "./generate";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
 import { createDialogSettingsSlice } from "./dialog-settings";
+import { createOpenRawSlice, knownOpenRawChoices } from "./open-raw";
 import { createModulatorsSlice } from "./modulators";
 import { createPalettesSlice, makeDefaultPalette, PALETTES_PERSISTED_KEYS } from "./palettes";
 import { DEFAULT_PALETTE_ID } from "./palette-id";
@@ -228,6 +229,7 @@ export const useStore = create<State>()(
         ...createStepsSlice(set, get),
         ...createLinkSlice(set, get),
         ...createDialogSettingsSlice(),
+        ...createOpenRawSlice(),
         ...createLayerStacksSlice(set, get),
         ...createFillSlice(set, get),
         ...createEditProgressSlice(set),
@@ -373,6 +375,7 @@ export const useStore = create<State>()(
           delete stored.filesVolumeDb;
 
           const merged = deepMerge(currentState, stored) as State;
+          Object.assign(merged, knownOpenRawChoices(merged));
 
           if (host.env.isExtension) {
             // The Ableton extension always runs at compact density, regardless

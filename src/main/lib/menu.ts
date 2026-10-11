@@ -20,6 +20,14 @@ export async function openFileDialog(window: BrowserWindow) {
   }
 }
 
+/** Picks any file to read as raw bytes. */
+export async function openRawFileDialog(window: BrowserWindow) {
+  const result = await dialog.showOpenDialog(window, { properties: ["openFile"] });
+  if (!result.canceled && result.filePaths.length > 0) {
+    webContentsSend(window, "open-raw-file", result.filePaths[0]);
+  }
+}
+
 /**
  * The app's own menus live in the window (see `components/layout/menu-bar.tsx`),
  * so the native menu carries only what the OS owns. On macOS that is the

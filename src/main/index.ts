@@ -7,7 +7,7 @@ import icon from "../../resources/icon.png?asset";
 import { hasSupportedAudioExtension } from "./lib/audio-extensions";
 import { diagLog, diagLogPath, initDiagLog } from "./lib/diag-log";
 import { installProcessErrorCapture, logSessionHeader, startMainMetricsSampler } from "./lib/diag-session";
-import { createMenu, openFileDialog } from "./lib/menu";
+import { createMenu, openFileDialog, openRawFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 import { checkForUpdates, initUpdater } from "./lib/updater";
 
@@ -250,6 +250,12 @@ ipcMainOn("check-for-updates", () => {
 ipcMainOn("trigger-open-file", () => {
   if (mainWindow) {
     openFileDialog(mainWindow);
+  }
+});
+
+ipcMainOn("trigger-open-raw-file", () => {
+  if (mainWindow) {
+    openRawFileDialog(mainWindow);
   }
 });
 

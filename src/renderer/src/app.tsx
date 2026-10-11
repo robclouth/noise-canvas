@@ -27,6 +27,7 @@ import { ANALYSIS_MAX_TEXTURE_SIZE } from "./lib/constants";
 import { diag } from "./lib/diag-log";
 import { recordDiagFrame, startDiagSampler } from "./lib/diag-sampler";
 import { host } from "./lib/host";
+import { openRawPrompt } from "./lib/open-raw-prompt";
 import { serializeEditCommand } from "./lib/file-task-queue";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { watchAudioOutputs } from "./lib/audio-devices";
@@ -257,6 +258,16 @@ function App(): React.JSX.Element {
       await openFilePath(path);
     });
     unsubscribers.push(unsubOpenFile);
+
+    const unsubOpenRawFile = ipcOn("open-raw-file", async (path) => {
+      const { size } = await host.fs.stat(path);
+      openRawPrompt({
+        fileName: host.path.basename(path),
+        fileSize: size,
+        onConfirm: (options) => useStore.getState().openRawFile(path, options),
+      });
+    });
+    unsubscribers.push(unsubOpenRawFile);
 
     const unsubSaveActiveFile = ipcOn("save-active-file", () => {
       const { saveActiveFile } = useStore.getState();

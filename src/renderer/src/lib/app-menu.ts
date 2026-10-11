@@ -10,7 +10,13 @@ import { ipcEmitLocal, ipcSend } from "./ipc";
  */
 
 /** Actions that leave the renderer, so they have no renderer event channel. */
-export type HostCommand = "open-file-dialog" | "check-for-updates" | "quit-app" | "save-to-live" | "reveal-log-file";
+export type HostCommand =
+  | "open-file-dialog"
+  | "open-raw-file-dialog"
+  | "check-for-updates"
+  | "quit-app"
+  | "save-to-live"
+  | "reveal-log-file";
 
 /** Renderer events a menu item can fire, which are the ones needing no payload. */
 type NoArgEvent = {
@@ -55,6 +61,13 @@ export const APP_MENUS: AppMenu[] = [
         label: "Open…",
         command: "open-file-dialog",
         accelerator: { code: "KeyO" },
+        only: "electron",
+      },
+      {
+        type: "item",
+        label: "Open Raw…",
+        command: "open-raw-file-dialog",
+        accelerator: { code: "KeyO", shift: true },
         only: "electron",
       },
       { type: "recent-files" },
@@ -255,6 +268,9 @@ export function runCommand(command: AppCommand): void {
   switch (command) {
     case "open-file-dialog":
       ipcSend("trigger-open-file");
+      return;
+    case "open-raw-file-dialog":
+      ipcSend("trigger-open-raw-file");
       return;
     case "check-for-updates":
       ipcSend("check-for-updates");

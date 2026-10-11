@@ -148,6 +148,8 @@ declare global {
         channels: number;
       }>;
       synthesisReadReach: (sampleRate: number, params: AnalysisParams) => Promise<number>;
+      limitChannels: (channels: Float32Array[], sampleRate: number) => Promise<number>;
+      readFileRange: (filePath: string, start: number, length: number) => Promise<Uint8Array>;
       synthesize: (
         processedData: Float32Array,
         analysisMetadata: {
