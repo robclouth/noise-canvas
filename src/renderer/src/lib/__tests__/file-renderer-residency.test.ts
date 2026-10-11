@@ -1084,6 +1084,27 @@ async function stackedView(count: number) {
   return rig;
 }
 
+describe("the source rectangle", () => {
+  it("draws a following source only while a cursor is on a canvas", async () => {
+    const rig = await mount(brush(0), 2);
+    rig.frame();
+    expect(rig.getMaterial()!.uniforms.showSourceRectangle.value).toBe(false);
+    rig.useTransientStore.setState({
+      cursorPosition: { beats: 1, pitch: 0 },
+      cursorVisible: true,
+      hoveredFile: "residency",
+    });
+    rig.frame();
+    expect(rig.getMaterial()!.uniforms.showSourceRectangle.value).toBe(true);
+  });
+
+  it("draws an anchored source with no cursor, where it is anchored", async () => {
+    const rig = await mount(brush(0, false, false, false, { sourcePositionMode: "anchored" }), 2);
+    rig.frame();
+    expect(rig.getMaterial()!.uniforms.showSourceRectangle.value).toBe(true);
+  });
+});
+
 describe("one direct display per view", () => {
   it("reuses reach computations across frames until the state changes", async () => {
     const rig = await mount(brush(0, false, true), 2);
@@ -1406,6 +1427,11 @@ describe("one direct display per view", () => {
     disposers.push(() => target.dispose());
     display.resize(80, 40);
     display.prepare(rig.useStore.getState());
+    // A capture leaves the brush rectangles out, so the live frame must too.
+    const top = display.top!.material.uniforms;
+    top.previewActive.value = false;
+    top.showSourceRectangle.value = false;
+    top.showTargetRectangle.value = false;
     await renderCompositionToBytes(rig.gl, () => display.compose(rig.gl, "capture"), target);
     display.updateTransform({ ...display.descriptor.transform, viewZoomPower: 2 });
     expect(display.motion.active).toBe(true);

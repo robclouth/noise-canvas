@@ -119,6 +119,9 @@ export function prepareFileEditor(
   const brushOriginUv = union.hasSteps ? union.min : cursorPos;
 
   let sourceDisplayPos = new Vector2(-1, -1);
+  // Follow and fixed sources sit relative to the cursor, so with no cursor on
+  // a canvas they have nowhere to be drawn; an anchored one stays put.
+  let sourceRectPlaced = false;
   if (isSourceFile) {
     const mode = String(sourceStepRaw?.sourcePositionMode ?? "follow");
     const sourcePositionUv =
@@ -175,6 +178,7 @@ export function prepareFileEditor(
         const bScale = sourceBandUvSlope(activeFile.spectrogramData, spectrogramData);
 
         const offset = calculateSourceOffset(sourceStepRaw?.lockedOffset, mode, destAnchorUv, tScale, bScale);
+        sourceRectPlaced = true;
         sourceDisplayPos = new Vector2(
           destAnchorUv.x * tScale + offset.x + sourcePositionUv.x,
           destToSourceBandUv(destAnchorUv.y, activeFile.spectrogramData, spectrogramData) +
@@ -184,6 +188,7 @@ export function prepareFileEditor(
       }
     } else {
       sourceDisplayPos = sourcePositionUv;
+      sourceRectPlaced = mode === "anchored";
     }
   }
 
@@ -303,7 +308,7 @@ export function prepareFileEditor(
   })();
 
   displayMaterial.uniforms.showTargetRectangle.value = Boolean(cursorVisible && hoveredFileId === fileId);
-  displayMaterial.uniforms.showSourceRectangle.value = isSourceFile;
+  displayMaterial.uniforms.showSourceRectangle.value = sourceRectPlaced;
 
   const isPicking = state.pickingFileParam !== null;
   displayMaterial.uniforms.targetRectPulse.value = isPicking
