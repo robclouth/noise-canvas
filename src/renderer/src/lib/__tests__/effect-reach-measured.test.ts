@@ -149,7 +149,11 @@ function stateFor(effect: EffectType, params: Record<string, unknown>): State {
   return state;
 }
 
-describe("what a gated effect really reads", () => {
+// Each measurement paints the dab once per probe distance, so a test runs
+// many whole renders.
+const MEASURE_TIMEOUT_MS = 120_000;
+
+describe("what a gated effect really reads", { timeout: MEASURE_TIMEOUT_MS }, () => {
   let gl: WebGLRenderer;
   let effects: EffectsRegistry;
   let placeholderTex: DataTexture;
