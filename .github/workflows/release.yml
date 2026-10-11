@@ -14,7 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          # macOS 26 runners cannot unlock the keychain electron-builder
+          # makes for signing, so the arm64 build stays on macOS 15.
+          - os: macos-15
             arch: arm64
             script: build:mac:arm64
           - os: macos-15-intel
