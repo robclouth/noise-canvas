@@ -577,7 +577,7 @@ export const FileView = memo((props: FileViewProps) => {
         }
       }
     },
-    [fileId, isActive, file, isPanning, aimToBeatsAndPitch],
+    [fileId, file, isPanning, aimToBeatsAndPitch],
   );
 
   const handleMouseEnter: PointerEventHandler<HTMLDivElement> = useCallback(
@@ -885,17 +885,6 @@ export const FileView = memo((props: FileViewProps) => {
     [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock, runWand, lockSourceOffsets],
   );
 
-  const handleCanvasMouseUp: PointerEventHandler<HTMLDivElement> = useCallback(
-    async (event) => {
-      if (!isActive) return;
-      if (event.button === 0) {
-        await finishStroke();
-      }
-    },
-    [isActive],
-  );
-
-  // Helper to finish a stroke - used by both handleCanvasMouseUp and window mouseup
   /** Lands the stroke's held dabs, then commits the stroke that spans `range`. */
   const commitStroke = useCallback(
     async (range: { min: number | null; max: number | null }) => {
@@ -942,6 +931,16 @@ export const FileView = memo((props: FileViewProps) => {
     }
     await commitStroke(strokeTimeRangeRef.current);
   }, [commitStroke]);
+
+  const handleCanvasMouseUp: PointerEventHandler<HTMLDivElement> = useCallback(
+    async (event) => {
+      if (!isActive) return;
+      if (event.button === 0) {
+        await finishStroke();
+      }
+    },
+    [isActive, finishStroke],
+  );
 
   startWaitingRef.current = () => {
     const waiting = waitingStrokesRef.current[0];
