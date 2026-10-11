@@ -114,10 +114,12 @@ export function drawCompositionToTarget(gl: WebGLRenderer, draw: () => void, tar
     draw();
   } finally {
     gl.autoClear = prevAutoClear;
-    gl.setRenderTarget(prevTarget);
     gl.setViewport(viewport);
     gl.setScissor(scissor);
     gl.setScissorTest(scissorTest);
+    // Last, so a capture nested inside another hands the outer target back
+    // with that target's own viewport rather than the canvas's.
+    gl.setRenderTarget(prevTarget);
     context.bindFramebuffer(readTarget, prevReadFramebuffer);
     context.bindFramebuffer(drawTarget, prevDrawFramebuffer);
   }
