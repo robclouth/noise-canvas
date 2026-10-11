@@ -4181,20 +4181,27 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           set(
             produce((draft: State) => {
               delete draft.filesLoading[fileId];
+              // A file whose reopen failed last time is listed but not open.
+              if (!draft.openFileIds.includes(fileId)) draft.openFileIds.push(fileId);
             }),
           );
         } catch (error) {
           delete openFiles[fileId];
           disposeOnsetTexture(fileId);
+          // A file whose history is on disk stays listed, so the history is
+          // kept and the next launch tries it again; for a managed file the
+          // history is the only copy.
+          const kept = !getHistoryManager(fileId).isEmpty();
           set(
             produce((draft: State) => {
               draft.openFileIds = draft.openFileIds.filter((id) => id !== fileId);
               draft.minimizedFileIds = draft.minimizedFileIds.filter((id) => id !== fileId);
               if (draft.activeFileId === fileId) draft.activeFileId = null;
               if (draft.fullscreenFileId === fileId) draft.fullscreenFileId = null;
+              delete draft.filesLoading[fileId];
+              if (kept) return;
               delete draft.persistedFilePaths[fileId];
               delete draft.fileDisplayNames[fileId];
-              delete draft.filesLoading[fileId];
               delete draft.filesBandsPerOctave[fileId];
               delete draft.filesZoom[fileId];
               delete draft.filesOffset[fileId];
@@ -4205,9 +4212,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             }),
           );
           const label = isManagedFilePath(filePath) ? "managed file" : truncateMiddle(host.path.basename(filePath), 50);
+          const reason = error instanceof Error ? error.message : "";
           notifications.show({
             title: "Failed to reopen file",
-            message: `${label}: ${error instanceof Error ? error.message : ""}`,
+            message: kept
+              ? `${label}: ${reason} Its history is kept, and the app tries it again next time it opens.`
+              : `${label}: ${reason}`,
             color: "red",
           });
         }
