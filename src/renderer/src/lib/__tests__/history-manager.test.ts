@@ -748,6 +748,53 @@ describe("HistoryManager undo/redo round-trip", () => {
     clearAllHistoryManagers();
   });
 
+  it("reopens a painted file whose older history keeps its root as a snapshot file, original and all", async () => {
+    const { files } = installManagerEnv();
+    const w = 8,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const a = new Float32Array(root);
+    const rs = new Uint32Array([5, 5]);
+    for (let p = 5; p < 10; p++) for (let c = 0; c < 4; c++) a[p * 4 + c] = ((p * 3 + c) % 89) / 89;
+    const dimensions = {
+      texels: w * h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f6");
+    const rootId = await mgr.addRootSnapshot({
+      data: root,
+      kind: "root",
+      label: "root",
+      spectrogram: makeSpectrogram(root, w, h),
+    });
+    await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: rs });
+    await mgr.awaitTierFlush();
+
+    // The layout histories before the block store left: the root as one
+    // snapshot file padded past the file's texels, and no blocks. The codec
+    // is identity in this env.
+    const padded = new Float32Array(root.length + 4 * 8);
+    padded.set(root);
+    files.set(`/userdata/history/f6/${rootId}.packed.zst`, new Uint8Array(padded.buffer));
+    for (const path of [...files.keys()]) if (path.startsWith("/userdata/blocks/f6/")) files.delete(path);
+
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f6");
+    const reopened = await fresh.loadSpectrogramAtCurrent();
+    expect(reopened).not.toBeNull();
+    const all = new Uint32Array([0, w * h]);
+    expect(Array.from((await fresh.currentRanges(all)) ?? [])).toEqual(Array.from(a));
+    expect(Array.from((await fresh.rootRanges(all)) ?? [])).toEqual(Array.from(root));
+    clearAllHistoryManagers();
+  });
+
   it("deletes a file's blocks when its history is destroyed", async () => {
     const { files } = installManagerEnv();
     const w = 8,

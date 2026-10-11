@@ -590,6 +590,11 @@ export class HistoryManager {
           cursor = cursor.parentId ? (loaded.nodes[cursor.parentId] ?? null) : null;
         }
         this.lastLoadedAnchorId = cursor?.id ?? null;
+        try {
+          await this.adoptSnapshotSeed();
+        } catch (error) {
+          console.error("history: the root snapshot could not move into the block store", error);
+        }
       }
     })();
     await this.initPromise;
@@ -1115,6 +1120,24 @@ export class HistoryManager {
     } catch {
       return await readPackedCompressed(this.packedPath(dir, holder.id));
     }
+  }
+
+  /**
+   * Moves the seed of a history written before the block store, which keeps
+   * it as its own snapshot file, into the store once, so the file's original
+   * reads from the store as a newer history's does.
+   */
+  private async adoptSnapshotSeed(): Promise<void> {
+    const holder = this.seedHolder();
+    if (!holder || getBlockStore(this.fileId)) return;
+    const path = this.packedPath(await this.dir, holder.id);
+    const exists = await host.fs.access(path).then(
+      () => true,
+      () => false,
+    );
+    if (!exists) return;
+    const store = await this.seedBlockStore(holder);
+    if (!store.isSeeded) await store.seed(await readPackedCompressed(path));
   }
 
   /** The anchor whose packed state is the block store's seed. */
