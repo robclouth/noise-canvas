@@ -59,6 +59,7 @@ function makeStore(openFileIds: string[]) {
   state = {
     ...createLayerStacksSlice(set, get),
     ...createFilesSlice(set, get),
+    applyLayerGains: () => {},
     openFileIds,
   } as unknown as State;
 
@@ -277,5 +278,41 @@ describe("dropping a dragged file", () => {
 
     expect(get().layerStacks[stackId].layerIds).toEqual(["m1", "m2"]);
     expect(get().openFileIds).toEqual(["m1", "m2"]);
+  });
+});
+
+describe("soloing a layer", () => {
+  it("releases the other solos in its stack", () => {
+    const get = makeStore(["a", "b", "c"]);
+    get().stackFiles(["a", "b", "c"]);
+
+    get().setFileSoloed("a", true);
+    get().setFileSoloed("b", true);
+
+    expect(get().filesSoloed.a).toBeUndefined();
+    expect(get().filesSoloed.b).toBe(true);
+  });
+
+  it("leaves a solo in another stack alone", () => {
+    const get = makeStore(["a", "b", "c", "d"]);
+    get().stackFiles(["a", "b"]);
+    get().stackFiles(["c", "d"]);
+
+    get().setFileSoloed("a", true);
+    get().setFileSoloed("c", true);
+
+    expect(get().filesSoloed.a).toBe(true);
+    expect(get().filesSoloed.c).toBe(true);
+  });
+
+  it("releases only itself when turned off", () => {
+    const get = makeStore(["a", "b"]);
+    get().stackFiles(["a", "b"]);
+
+    get().setFileSoloed("a", true);
+    get().setFileSoloed("a", false);
+
+    expect(get().filesSoloed.a).toBe(false);
+    expect(get().filesSoloed.b).toBeUndefined();
   });
 });

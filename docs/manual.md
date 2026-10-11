@@ -798,11 +798,11 @@ Every split makes a stack of its parts. To stack files yourself, use **Edit → 
 
 A stack holds any number of layers, down to one, so a stack you have emptied out to a single layer is still there to drag files back into. Merge needs two.
 
-#### Overlaid and stacked
+#### Tabbed and stacked
 
-A stack draws its layers **overlaid** by default: one canvas, one grid, one set of legends, and a tab per layer across the top. The top layer draws in the usual orange and blue for the stereo image, and the others draw in grey behind it. Click a tab to bring that layer to the top, which is where your brush lands.
+A stack shows its layers **tabbed** by default: one canvas, one grid, one set of legends, and a tab per layer across the top. The canvas shows only the layer whose tab is selected, and that is where your brush lands. The other layers stay hidden but keep playing.
 
-The layers icon in the stack header switches to **stacked**, which gives each layer a box of its own, every one in full colour. **Link views** appears only in the stacked view, since overlaid layers already share one viewport.
+The layers icon in the stack header switches to **stacked**, which gives each layer a box of its own, every one in full colour. **Link views** appears only in the stacked view, since tabbed layers already share one viewport.
 
 #### Adding a layer
 
@@ -815,7 +815,7 @@ The new layer shares the grid, so **Merge** stays an exact sum.
 The layers of a stack play at the same time. In a stack of two or more, each layer carries **S** and **M**:
 
 - **M** drops that layer out of the mix. The rest keeps playing.
-- **S** plays that layer alone. Solo several to hear just those. Mute wins over solo on the same layer, so a layer with both engaged stays silent.
+- **S** plays that layer alone. Soloing another layer releases the first, so only one is ever soloed. Mute wins over solo on the same layer, so a layer with both engaged stays silent.
 
 Clicking another layer of the same stack moves where you paint without stopping the music. Clicking a file outside it starts that file's own timeline instead.
 

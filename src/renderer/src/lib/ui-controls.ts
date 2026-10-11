@@ -99,7 +99,7 @@ export const UI_CONTROLS = {
   },
   "file-solo": {
     label: "Solo",
-    description: "Plays this file alone, along with any other file that is soloed.",
+    description: "Plays this file alone, releasing any other solo in its stack.",
     manualSection: "layers",
   },
   "file-mute": {
@@ -165,8 +165,8 @@ export const UI_CONTROLS = {
     manualSection: "layers",
   },
   "stack-layout": {
-    label: "Overlay layers",
-    description: "Draws every layer in one canvas, the top one in colour and the rest in grey.",
+    label: "Layer tabs",
+    description: "Shows one layer at a time in a single canvas, picked by its tab.",
     manualSection: "layers",
   },
   "stack-layer-tab": {

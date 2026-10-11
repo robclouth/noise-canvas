@@ -111,8 +111,6 @@ Dock.displayName = "Dock";
 
 type LayerBoxProps = {
   fileId: string;
-  /** Every layer of an overlaid stack, so one box can draw them all. */
-  stackLayerIds?: string[];
   headerExtras?: ReactNode;
   activeFileId: string | null;
   activeRef: RefObject<HTMLDivElement | null>;
@@ -121,18 +119,9 @@ type LayerBoxProps = {
 };
 
 const LayerBox = memo(
-  ({
-    fileId,
-    stackLayerIds,
-    headerExtras,
-    activeFileId,
-    activeRef,
-    fullscreenFileId,
-    minimizedFileIds,
-  }: LayerBoxProps) => {
+  ({ fileId, headerExtras, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: LayerBoxProps) => {
     const isFullscreen = fullscreenFileId === fileId;
     const isMinimized = minimizedFileIds.includes(fileId);
-    const displayLayerIds = useMemo(() => stackLayerIds ?? [fileId], [stackLayerIds, fileId]);
     const hidden = (fullscreenFileId !== null && !isFullscreen) || isMinimized;
     return (
       <Box
@@ -146,7 +135,6 @@ const LayerBox = memo(
           fileId={fileId}
           isFullscreen={isFullscreen}
           isMinimized={isMinimized}
-          stackLayerIds={displayLayerIds}
           headerExtras={headerExtras}
         />
       </Box>
@@ -226,8 +214,8 @@ const LayerStackSection = memo(
       );
     }
 
-    // Overlaid needs a layer on top: the active file when it is in this stack,
-    // and otherwise the first layer.
+    // Tabbed shows one layer: the active file when it is in this stack, and
+    // otherwise the first layer.
     const overlaid = stack.layout === "overlaid" && fileIds.length > 1;
     const currentId = fileIds.includes(laneProps.activeFileId ?? "") ? laneProps.activeFileId! : fileIds[0];
 
@@ -260,7 +248,7 @@ const LayerStackSection = memo(
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0, marginLeft: "auto" }}>
           <HelpActionIcon
             help="stack-layout"
-            detail={overlaid ? "Overlaid" : "Stacked"}
+            detail={overlaid ? "Tabbed" : "Stacked"}
             size={uiSize}
             variant="subtle"
             color="gray"
@@ -268,7 +256,7 @@ const LayerStackSection = memo(
           >
             {overlaid ? <Layers size={16} /> : <Rows3 size={16} />}
           </HelpActionIcon>
-          {/* Overlaid layers share one viewport, so the link has nothing to tie. */}
+          {/* Tabbed layers share one viewport, so the link has nothing to tie. */}
           {!overlaid && (
             <HelpActionIcon
               help="stack-sync-view"
@@ -335,12 +323,7 @@ const LayerStackSection = memo(
       >
         {!chromeHidden && !overlaid && header}
         {overlaid ? (
-          <LayerBox
-            fileId={currentId}
-            stackLayerIds={fileIds}
-            {...laneProps}
-            headerExtras={chromeHidden ? undefined : header}
-          />
+          <LayerBox fileId={currentId} {...laneProps} headerExtras={chromeHidden ? undefined : header} />
         ) : (
           <Stack gap="xs" h={chromeHidden ? "100%" : undefined} style={chromeHidden ? { minHeight: 0 } : undefined}>
             {fileIds.map((fileId) => (

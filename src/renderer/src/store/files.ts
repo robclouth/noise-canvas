@@ -270,6 +270,7 @@ export interface FilesState {
   filesMuted: Record<string, boolean>;
   setFileMuted: (fileId: string, muted: boolean) => void;
   filesSoloed: Record<string, boolean>;
+  /** Soloing a layer releases every other solo in its stack, so one layer plays at a time. */
   setFileSoloed: (fileId: string, soloed: boolean) => void;
   // Selection rectangle per file. Setting one also writes its time span to the
   // loop region, so the transport always plays what the selection covers.
@@ -4185,6 +4186,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   setFileSoloed: (fileId, soloed) => {
     set(
       produce((state: State) => {
+        if (soloed) for (const id of selectStackLayerIds(state, fileId)) delete state.filesSoloed[id];
         state.filesSoloed[fileId] = soloed;
       }),
     );

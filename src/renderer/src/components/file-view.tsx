@@ -50,12 +50,6 @@ export interface FileViewProps {
   fileId: string;
   isFullscreen?: boolean;
   isMinimized: boolean;
-  /**
-   * Every layer of an overlaid stack, in stack order, drawn into this one
-   * canvas. Only `fileId` takes strokes, the grid and the legends, and only it
-   * draws in colour; the rest are drawn in grey behind it.
-   */
-  stackLayerIds?: string[];
   headerExtras?: ReactNode;
 }
 
@@ -175,7 +169,7 @@ type WaitingStroke = {
 };
 
 export const FileView = memo((props: FileViewProps) => {
-  const { fileId, isFullscreen = false, isMinimized, stackLayerIds, headerExtras } = props;
+  const { fileId, isFullscreen = false, isMinimized, headerExtras } = props;
   const file = openFiles[fileId];
   const filePath = file?.filePath || "";
 
@@ -216,7 +210,7 @@ export const FileView = memo((props: FileViewProps) => {
 
   const rendererRef = useRef<FileRendererHandle>(null);
   const viewRendererRef = useRef<ViewRendererHandle>(null);
-  const descriptor = useMemo(() => ({ topId: fileId, layerIds: stackLayerIds ?? [fileId] }), [fileId, stackLayerIds]);
+  const descriptor = useMemo(() => ({ topId: fileId, layerIds: [fileId] }), [fileId]);
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);

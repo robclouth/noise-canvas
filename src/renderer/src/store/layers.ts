@@ -5,12 +5,12 @@ import type { State, ZustandGet, ZustandSet } from "./types";
 export type LayerStackMethod = "hpss" | "ai" | "nmf" | "user";
 
 /**
- * How a stack shows its layers. Overlaid draws them into one canvas, each in
- * its own hue; stacked gives each a box of its own, in full stereo colour.
+ * How a stack shows its layers. Overlaid shows one layer at a time in one
+ * canvas, picked by its tab; stacked gives each a box of its own.
  */
 export type LayerStackLayout = "overlaid" | "stacked";
 
-/** A split drops you straight into one canvas with the parts laid over it. */
+/** A split drops you straight into one canvas with a tab per part. */
 export const DEFAULT_LAYER_STACK_LAYOUT: LayerStackLayout = "overlaid";
 
 /**
@@ -32,7 +32,7 @@ export type LayerStack = {
   hue: number;
   /** Whether zoom and scroll follow each other across the layers. */
   syncView: boolean;
-  /** Overlaid draws every layer in one canvas; stacked gives each its own box. */
+  /** Overlaid shows one layer at a time in one canvas; stacked gives each its own box. */
   layout: LayerStackLayout;
 };
 
