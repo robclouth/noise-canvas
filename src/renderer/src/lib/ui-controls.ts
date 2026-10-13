@@ -184,6 +184,11 @@ export const UI_CONTROLS = {
     description: "Sums every layer of the stack into one new file, leaving them open.",
     manualSection: "layers",
   },
+  "layers-merge": {
+    label: "Merge layers",
+    description: "Adds the layers together into one, as a single step undo can take back.",
+    manualSection: "layers",
+  },
   "stack-unstack": {
     label: "Unstack",
     description: "Drops the stack, leaving every layer open as a file on its own.",

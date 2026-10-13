@@ -25,7 +25,14 @@ import {
   usedBudgetFraction,
   type OpenFileTexels,
 } from "../lib/gpu-budget";
-import { blockBandLayout, blockGrid, blockTexels, frameRangeOfBlock, type BlockGrid } from "../lib/block-grid";
+import {
+  blockBandLayout,
+  blockGrid,
+  blockPixelRanges,
+  blockTexels,
+  frameRangeOfBlock,
+  type BlockGrid,
+} from "../lib/block-grid";
 import { destroyBlockStore, getBlockStore, openBlockStore } from "../lib/block-stores";
 import { needsCanvasWindow } from "../lib/canvas-window";
 import { viewCoversFile } from "../lib/canvas-view";
@@ -2152,6 +2159,80 @@ async function splitInPlace(
 }
 
 /**
+ * The files' current coefficients summed into one whole packed state, a block
+ * at a time, so no file's whole run is read at once. The files share a grid.
+ */
+async function sumFileStates(files: OpenFile[], spec: SpectrogramData): Promise<Float32Array> {
+  const readers = await Promise.all(files.map((file) => currentStateRanges(file)));
+  const grid = blockGrid({ numBands: spec.numBands, metadata: spec.metadata }, spec.numFrames, spec.sampleRate);
+  const whole = new Float32Array(spec.texels * 4);
+  const run = async (): Promise<void> => {
+    for (let index = 0; index < grid.blockCount; index++) {
+      const list = blockPixelRanges(grid, index);
+      const ranges = list.ranges.slice(0, list.count * 2);
+      const parts: Float32Array[] = [];
+      for (const read of readers) parts.push(await read(ranges));
+      const { merged } = await host.analysis.mergeSpectrograms(parts, {
+        ...blockBandLayout(grid, index),
+        numChannels: spec.numChannels,
+      });
+      scatterCompactPixelRanges(whole, merged, ranges);
+    }
+  };
+  const sortedIds = [...new Set(files.map((file) => file.id))].sort();
+  await sortedIds.reduceRight<() => Promise<void>>((next, fileId) => () => serializeFileTask(fileId, next), run)();
+  return whole;
+}
+
+/**
+ * Merges the layers of `ownerId`'s file into the file itself: it holds their
+ * sum, the other layers go, and the whole merge is one step undo takes back.
+ * Layers on another grid are mixed as audio instead.
+ */
+async function mergeLayersInPlace(
+  set: ZustandSet,
+  get: ZustandGet,
+  ownerId: string,
+  layerIds: string[],
+  layered: LayeredHistory,
+): Promise<void> {
+  const files = layerIds.map((id) => openFiles[id]);
+  const owner = openFiles[ownerId];
+  const base = owner?.spectrogramData;
+  if (!base || files.some((file) => !file?.spectrogramData)) {
+    notifications.show({ title: "Can't merge yet", message: "One of the layers is still loading.", color: "yellow" });
+    return;
+  }
+  await layered.load();
+  const sameGrid = files.every((file) => {
+    const data = file.spectrogramData as SpectrogramData;
+    return (
+      data.numBands === base.numBands &&
+      data.numChannels === base.numChannels &&
+      data.numFrames === base.numFrames &&
+      data.sampleRate === base.sampleRate &&
+      data.bandsPerOctave === base.bandsPerOctave &&
+      data.minFreq === base.minFreq
+    );
+  });
+  const sumStart = performance.now();
+  const merged = sameGrid
+    ? await deriveSpectrogramData(base, await sumFileStates(files, base))
+    : await mixFilesDown(layerIds, base);
+  diag.timing("timing", "merge sum", performance.now() - sumStart, { sameGrid, layers: layerIds.length });
+  if (!openFiles[ownerId]) return;
+
+  await layered.quietly([ownerId], () => replaceFileState(set, get, ownerId, merged, "Merge layers"));
+  await get().hideFileLayers(
+    ownerId,
+    layerIds.filter((id) => id !== ownerId),
+  );
+  await layered.addLayersStep("Merge layers", [
+    { layerId: ownerId, nodeId: getHistoryManager(ownerId).getCurrentId() },
+  ]);
+}
+
+/**
  * Loads an open file's state from its history at the node it is on, with the
  * graphics memory check every other open runs. False when the file closed
  * meanwhile; throws when the history is empty or the file does not fit.
@@ -2833,7 +2914,34 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   mergeLayerStack: async (stackId: string) => {
     const group = get().layerStacks[stackId];
     if (!group) return;
-    await get().mergeFiles(group.layerIds);
+    const ownerId = group.ownerId;
+    const layered = ownerId && layeredHistories ? layeredHistories.get(ownerId) : null;
+    if (!layered || !ownerId) {
+      await get().mergeFiles(group.layerIds);
+      return;
+    }
+    if (group.layerIds.length < 2) return;
+    set(
+      produce((state: State) => {
+        state.filesBusy[ownerId] = "Merging...";
+      }),
+    );
+    try {
+      await mergeLayersInPlace(set, get, ownerId, [...group.layerIds], layered);
+    } catch (error) {
+      console.error("Merge failed:", error);
+      notifications.show({
+        title: "Merge failed",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+    } finally {
+      set(
+        produce((state: State) => {
+          delete state.filesBusy[ownerId];
+        }),
+      );
+    }
   },
   closeLayerStack: async (stackId: string) => {
     const group = get().layerStacks[stackId];

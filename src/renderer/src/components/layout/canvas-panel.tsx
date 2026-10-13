@@ -273,7 +273,7 @@ const LayerStackSection = memo(
           )}
 
           <HelpActionIcon
-            help="stack-merge"
+            help={stack.ownerId ? "layers-merge" : "stack-merge"}
             detail={`${stack.layerIds.length} layers`}
             size={uiSize}
             variant="subtle"
@@ -285,16 +285,19 @@ const LayerStackSection = memo(
           >
             <Merge size={16} />
           </HelpActionIcon>
-          <HelpActionIcon
-            help="stack-unstack"
-            detail={`${stack.layerIds.length} layers`}
-            size={uiSize}
-            variant="subtle"
-            color="gray"
-            onClick={() => useStore.getState().unstackLayers(stackId)}
-          >
-            <Ungroup size={16} />
-          </HelpActionIcon>
+          {/* A file's own layers share its history, so they cannot become separate files this way. */}
+          {!stack.ownerId && (
+            <HelpActionIcon
+              help="stack-unstack"
+              detail={`${stack.layerIds.length} layers`}
+              size={uiSize}
+              variant="subtle"
+              color="gray"
+              onClick={() => useStore.getState().unstackLayers(stackId)}
+            >
+              <Ungroup size={16} />
+            </HelpActionIcon>
+          )}
           <HelpActionIcon
             help="stack-close"
             detail={`${stack.layerIds.length} layers`}

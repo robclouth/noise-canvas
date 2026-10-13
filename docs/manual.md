@@ -861,7 +861,7 @@ Dragging a file by its grip also moves it in and out of stacks, and the stack it
 - Drop a layer **straight onto another stack** to move it across.
 
 - **Link views** – zoom and scroll follow each other across all members.
-- **Merge** – adds every layer together into one new file, which opens below the stack. The layers stay open.
+- **Merge** – adds every layer together into one. After a split, or on a file you added a layer to, the file itself holds the sum and the other layers go, as one step in its history, so one undo brings them back. A stack of separate files merges into a new file below it instead, and its files stay open.
 - **Unstack** – drops the stack and leaves the files where they are.
 - **Close stack** – closes every layer with one confirmation.
 

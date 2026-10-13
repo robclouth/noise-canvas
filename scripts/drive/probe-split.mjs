@@ -120,6 +120,40 @@ try {
   for (let i = 0; i < 100 && (await state()).names[owner] !== "harmonic"; i++) await sleep(100);
   const redone = await state();
   if (redone.names[owner] !== "harmonic") fail(`after redo the tab names are ${JSON.stringify(redone.names)}`);
+
+  console.log("merge:");
+  const stackId = await page.evaluate((id) => globalThis.__store.getState().stackOfLayer[id], owner);
+  const m0 = Date.now();
+  await page.evaluate((id) => void globalThis.__store.getState().mergeLayerStack(id), stackId);
+  for (let i = 0; i < 2400 && (await state()).open.includes(layer); i++) await sleep(250);
+  await settle();
+  console.log(`merge took ${((Date.now() - m0) / 1000).toFixed(1)} s`);
+  const merged = await state();
+  if (merged.open.length !== 1 || !merged.detached.includes(layer)) fail("the merge did not leave one file");
+  const sum = await page.evaluate(
+    ({ id, points }) => globalThis.__readTruth(id, points).then((r) => r.map((x) => x.storeChannels)),
+    { id: owner, points },
+  );
+  let worstMerge = 0;
+  for (let i = 0; i < points.length; i++) {
+    for (let ch = 0; ch < 2; ch++) {
+      const scale = Math.max(Math.abs(originalChannels[i][ch]), 1e-6);
+      worstMerge = Math.max(worstMerge, Math.abs(Math.abs(sum[i][ch]) - Math.abs(originalChannels[i][ch])) / scale);
+    }
+  }
+  if (worstMerge > 1e-3) fail(`the merge is not the original: worst relative error ${worstMerge}`);
+  else console.log(`the merge is the original (worst relative error ${worstMerge.toExponential(2)})`);
+  const mergedValues = await read(owner);
+
+  await send("undo");
+  for (let i = 0; i < 1200 && !(await state()).open.includes(layer); i++) await sleep(100);
+  await settle();
+  await waitFor(owner, harmonic, "undo the merge, the harmonic part");
+  await waitFor(layer, percussive, "undo the merge, the percussive part");
+  await send("redo");
+  for (let i = 0; i < 400 && (await state()).open.includes(layer); i++) await sleep(100);
+  await settle();
+  await waitFor(owner, mergedValues, "redo the merge");
 } finally {
   const keep = option("log", null);
   if (keep && existsSync(logPath)) copyFileSync(logPath, keep);
