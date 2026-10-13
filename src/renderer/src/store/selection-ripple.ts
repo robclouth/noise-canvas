@@ -26,6 +26,8 @@ import type { OpenFile, State, ZustandGet, ZustandSet } from "./types";
 export interface SelectionRippleState {
   /** Cut the selection's stretch of time out of the file, closing the gap. */
   cutTimeSelection: () => Promise<void>;
+  /** Copy the selection's stretch of time, full height, without picking it up. */
+  copyTimeSelection: () => Promise<void>;
   /** Splice the clipboard's stretch of time in, pushing what follows later. */
   pasteTimeSelection: () => Promise<void>;
   /** Splice a copy of the selection's stretch in, directly after it. */
@@ -180,6 +182,15 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
         splicedOnsets(edit, (onsets) => removeOnsetSpan(onsets, widened.start, cutEnd, ONSET_SEAM_GUARD_SECONDS)),
         (oldFrames) => removeSpanPieces(oldFrames, startSample, endSample, fade),
       );
+    }),
+
+  copyTimeSelection: () =>
+    serializeEditCommand(async () => {
+      const edit = target(get);
+      const selection = edit ? (get().filesSelection[edit.fileId] ?? null) : null;
+      if (!edit || !selection) return;
+      const widened = fullHeightSelection(selection.start, selection.end);
+      if (widened) await get().stashSelection(widened);
     }),
 
   pasteTimeSelection: () =>

@@ -223,6 +223,7 @@ export interface IpcRendererEvents {
   "invert-selection": () => void;
   "duplicate-selection": () => void;
   "cut-time-selection": () => void;
+  "copy-time-selection": () => void;
   "paste-time-selection": () => void;
   "duplicate-time-selection": () => void;
   "update-available": (info: UpdateInfo) => void;

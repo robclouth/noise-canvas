@@ -19,7 +19,7 @@ import { Tooltip } from "./tooltip";
 const PREVIEW_LONG_EDGE = 960;
 const PREVIEW_DEBOUNCE_MS = 120;
 
-/** Opens the export dialog for one file. Driven by File → Export Image. */
+/** Opens the export dialog for one file. Driven by File → Export → Image. */
 // eslint-disable-next-line react-refresh/only-export-components
 export function openImageExportModal(fileId: string): void {
   openContextModal({ modal: "imageExport", title: "Export Image", size: "md", innerProps: { fileId } });

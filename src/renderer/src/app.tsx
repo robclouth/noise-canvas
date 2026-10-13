@@ -379,6 +379,11 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubCutTime);
 
+    const unsubCopyTime = ipcOn("copy-time-selection", () => {
+      void useStore.getState().copyTimeSelection();
+    });
+    unsubscribers.push(unsubCopyTime);
+
     const unsubPasteTime = ipcOn("paste-time-selection", () => {
       void useStore.getState().pasteTimeSelection();
     });

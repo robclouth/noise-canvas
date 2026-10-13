@@ -5,7 +5,7 @@ import { acceleratorLabel, APP_MENUS, runCommand, visibleItems, type AppMenuItem
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { Check, CircleHelp, Settings } from "lucide-react";
-import { memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { memo, type ReactNode, useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { HelpActionIcon } from "../controls/help-control";
 import { openPreferencesModal } from "../preferences-modal";
 import { MemoryReadout } from "./memory-readout";
@@ -88,6 +88,40 @@ export const AppMenuBar = memo(function AppMenuBar() {
     }
   };
 
+  const renderItems = (items: AppMenuItem[]): ReactNode =>
+    items.map((item, index) => {
+      if (item.type === "separator") return <Menu.Divider key={`separator-${index}`} />;
+      if (item.type === "recent-files") return <RecentFilesSubmenu key="recent-files" />;
+      if (item.type === "submenu") {
+        return (
+          <Menu.Sub key={`submenu-${item.label}`}>
+            <Menu.Sub.Target>
+              <Menu.Sub.Item fz="xs">{item.label}</Menu.Sub.Item>
+            </Menu.Sub.Target>
+            <Menu.Sub.Dropdown>{renderItems(item.items)}</Menu.Sub.Dropdown>
+          </Menu.Sub>
+        );
+      }
+      return (
+        <Menu.Item
+          key={item.command}
+          fz="xs"
+          disabled={!isEnabled(item)}
+          onClick={() => runCommand(item.command)}
+          leftSection={item.checkbox ? <Box w={12}>{isCompact && <Check size={12} />}</Box> : undefined}
+          rightSection={
+            item.accelerator && (
+              <Text span c="dimmed" fz="xs" ml="lg">
+                {acceleratorLabel(item.accelerator)}
+              </Text>
+            )
+          }
+        >
+          {item.label}
+        </Menu.Item>
+      );
+    });
+
   return (
     <Group
       gap={0}
@@ -100,7 +134,7 @@ export const AppMenuBar = memo(function AppMenuBar() {
     >
       {APP_MENUS.map((menu) => {
         const items = visibleItems(menu);
-        if (!items.some((item) => item.type === "item")) return null;
+        if (!items.some((item) => item.type !== "separator")) return null;
         const isOpen = openMenu === menu.title;
         return (
           <Menu
@@ -129,30 +163,7 @@ export const AppMenuBar = memo(function AppMenuBar() {
                 {menu.title}
               </UnstyledButton>
             </Menu.Target>
-            <Menu.Dropdown>
-              {items.map((item, index) => {
-                if (item.type === "separator") return <Menu.Divider key={`separator-${index}`} />;
-                if (item.type === "recent-files") return <RecentFilesSubmenu key="recent-files" />;
-                return (
-                  <Menu.Item
-                    key={item.command}
-                    fz="xs"
-                    disabled={!isEnabled(item)}
-                    onClick={() => runCommand(item.command)}
-                    leftSection={item.checkbox ? <Box w={12}>{isCompact && <Check size={12} />}</Box> : undefined}
-                    rightSection={
-                      item.accelerator && (
-                        <Text span c="dimmed" fz="xs" ml="lg">
-                          {acceleratorLabel(item.accelerator)}
-                        </Text>
-                      )
-                    }
-                  >
-                    {item.label}
-                  </Menu.Item>
-                );
-              })}
-            </Menu.Dropdown>
+            <Menu.Dropdown>{renderItems(items)}</Menu.Dropdown>
           </Menu>
         );
       })}

@@ -35,6 +35,7 @@ export type Accelerator = {
 export type AppMenuItem =
   | { type: "separator" }
   | { type: "recent-files" }
+  | { type: "submenu"; label: string; items: AppMenuItem[] }
   | {
       type: "item";
       label: string;
@@ -73,6 +74,14 @@ export const APP_MENUS: AppMenu[] = [
       { type: "recent-files" },
       {
         type: "item",
+        label: "Close File",
+        command: "close-active-file",
+        accelerator: { code: "KeyW" },
+        only: "electron",
+      },
+      { type: "separator" },
+      {
+        type: "item",
         label: "Save",
         command: "save-active-file",
         accelerator: { code: "KeyS" },
@@ -93,18 +102,25 @@ export const APP_MENUS: AppMenu[] = [
         only: "electron",
       },
       { type: "item", label: "Save to Live", command: "save-to-live", only: "extension" },
+      { type: "item", label: "Restore Original", command: "restore-original" },
+      { type: "separator" },
       {
         type: "item",
-        label: "Close File",
-        command: "close-active-file",
-        accelerator: { code: "KeyW" },
+        label: "Duplicate File",
+        command: "duplicate-active-file",
         only: "electron",
       },
+      { type: "item", label: "Stack Files…", command: "stack-files", accelerator: { code: "KeyG" } },
+      { type: "item", label: "Unstack", command: "unstack-files", accelerator: { code: "KeyG", shift: true } },
       { type: "separator" },
-      { type: "item", label: "Preferences…", command: "open-preferences", accelerator: { code: "Comma" } },
-      { type: "separator" },
-      { type: "item", label: "Export Image…", command: "export-image" },
-      { type: "item", label: "Export History…", command: "export-history" },
+      {
+        type: "submenu",
+        label: "Export",
+        items: [
+          { type: "item", label: "Image…", command: "export-image" },
+          { type: "item", label: "History…", command: "export-history" },
+        ],
+      },
       { type: "separator" },
       { type: "item", label: "Quit", command: "quit-app", only: "electron" },
     ],
@@ -120,6 +136,8 @@ export const APP_MENUS: AppMenu[] = [
       { type: "item", label: "Paste", command: "paste-selection", accelerator: { code: "KeyV" } },
       { type: "item", label: "Duplicate", command: "duplicate-selection", accelerator: { code: "KeyD" } },
       { type: "item", label: "Silence", command: "silence-selection" },
+      { type: "item", label: "Invert Selection", command: "invert-selection", accelerator: { code: "KeyI" } },
+      { type: "separator" },
       {
         type: "item",
         label: "Generate…",
@@ -127,9 +145,19 @@ export const APP_MENUS: AppMenu[] = [
         accelerator: { code: "KeyE" },
         only: "electron",
       },
-      { type: "item", label: "Invert Selection", command: "invert-selection", accelerator: { code: "KeyI" } },
-      { type: "separator" },
+      { type: "item", label: "Fill Grid", command: "fill-grid", accelerator: { code: "KeyF" } },
+    ],
+  },
+  {
+    title: "Time",
+    items: [
       { type: "item", label: "Cut Time", command: "cut-time-selection", accelerator: { code: "KeyX", shift: true } },
+      {
+        type: "item",
+        label: "Copy Time",
+        command: "copy-time-selection",
+        accelerator: { code: "KeyC", shift: true },
+      },
       {
         type: "item",
         label: "Paste Time",
@@ -143,35 +171,16 @@ export const APP_MENUS: AppMenu[] = [
         accelerator: { code: "KeyD", shift: true },
       },
       { type: "separator" },
-      { type: "item", label: "Fill Grid with Brush", command: "fill-grid", accelerator: { code: "KeyF" } },
-      { type: "separator" },
-      { type: "item", label: "Restore Original", command: "restore-original" },
-      {
-        type: "item",
-        label: "Duplicate File",
-        command: "duplicate-active-file",
-        only: "electron",
-      },
-      { type: "item", label: "Stack Files…", command: "stack-files", accelerator: { code: "KeyG" } },
-      { type: "item", label: "Unstack", command: "unstack-files", accelerator: { code: "KeyG", shift: true } },
+      { type: "item", label: "Insert Silence…", command: "insert-silence", accelerator: { code: "KeyI", shift: true } },
       { type: "separator" },
       { type: "item", label: "Double Length", command: "double-active-file-length" },
       { type: "item", label: "Half Length", command: "halve-active-file-length" },
       { type: "item", label: "Set Length…", command: "set-file-length" },
-      { type: "item", label: "Insert Silence…", command: "insert-silence", accelerator: { code: "KeyI", shift: true } },
     ],
   },
   {
     title: "View",
-    items: [
-      {
-        type: "item",
-        label: "Compact UI",
-        command: "toggle-ui-size",
-        accelerator: { code: "KeyC", shift: true },
-        checkbox: true,
-      },
-    ],
+    items: [{ type: "item", label: "Compact UI", command: "toggle-ui-size", checkbox: true }],
   },
   {
     title: "Help",
@@ -185,21 +194,32 @@ export const APP_MENUS: AppMenu[] = [
   },
 ];
 
+/** Shortcuts with no menu item, whose command has a button on the bar instead. */
+const MENULESS_SHORTCUTS: { accelerator: Accelerator; command: AppCommand }[] = [
+  { accelerator: { code: "Comma" }, command: "open-preferences" },
+];
+
 /** True when the running build can show the item. */
 function itemApplies(item: AppMenuItem): boolean {
   if (item.type === "recent-files") return !host.env.isExtension;
-  if (item.type === "separator") return true;
+  if (item.type === "separator" || item.type === "submenu") return true;
   if (item.only === "extension") return host.env.isExtension;
   if (item.only === "electron") return !host.env.isExtension;
   return true;
 }
 
 /**
- * The menu's items for this build, with the separators that dropping an item
- * left stranded at an edge or doubled up removed.
+ * The items for this build, with submenus left empty dropped and the
+ * separators that dropping an item left stranded at an edge or doubled up
+ * removed.
  */
-export function visibleItems(menu: AppMenu): AppMenuItem[] {
-  const kept = menu.items.filter(itemApplies);
+function keptItems(items: AppMenuItem[]): AppMenuItem[] {
+  const kept = items.flatMap((item): AppMenuItem[] => {
+    if (!itemApplies(item)) return [];
+    if (item.type !== "submenu") return [item];
+    const children = keptItems(item.items);
+    return children.some((child) => child.type !== "separator") ? [{ ...item, items: children }] : [];
+  });
   return kept.filter((item, index) => {
     if (item.type !== "separator") return true;
     const before = kept.slice(0, index).some((other) => other.type !== "separator");
@@ -207,6 +227,11 @@ export function visibleItems(menu: AppMenu): AppMenuItem[] {
     const previous = kept[index - 1];
     return before && after && previous?.type !== "separator";
   });
+}
+
+/** The menu's items for this build. */
+export function visibleItems(menu: AppMenu): AppMenuItem[] {
+  return keptItems(menu.items);
 }
 
 const CODE_LABELS: Record<string, string> = {
@@ -289,14 +314,19 @@ export function runCommand(command: AppCommand): void {
   }
 }
 
-/** Every accelerator in the menus, newest match wins over a later duplicate. */
+/** Every accelerator in the menus and submenus, plus the menu-less shortcuts. */
 export function acceleratorCommands(): { accelerator: Accelerator; command: AppCommand }[] {
   const found: { accelerator: Accelerator; command: AppCommand }[] = [];
-  for (const menu of APP_MENUS) {
-    for (const item of menu.items) {
-      if (item.type !== "item" || !item.accelerator || !itemApplies(item)) continue;
-      found.push({ accelerator: item.accelerator, command: item.command });
+  const collect = (items: AppMenuItem[]) => {
+    for (const item of items) {
+      if (!itemApplies(item)) continue;
+      if (item.type === "submenu") collect(item.items);
+      else if (item.type === "item" && item.accelerator) {
+        found.push({ accelerator: item.accelerator, command: item.command });
+      }
     }
-  }
+  };
+  for (const menu of APP_MENUS) collect(menu.items);
+  found.push(...MENULESS_SHORTCUTS);
   return found;
 }
