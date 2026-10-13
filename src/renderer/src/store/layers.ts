@@ -26,6 +26,12 @@ export type LayerStack = {
   label: string;
   /** The file a split came from, null for a hand-made stack. May be closed since. */
   originId: string | null;
+  /**
+   * The file these layers belong to, when the stack is one file with layers:
+   * its first layer, whose history orders every layer's steps. Absent on a
+   * stack of separate files.
+   */
+  ownerId?: string;
   /** In split order: low-to-high spectral centroid for NMF, model order for AI. */
   layerIds: string[];
   /** Hue shared by every layer so the stack reads as one unit. */
@@ -54,12 +60,23 @@ export function migrateLayerStacks(value: unknown): Record<string, unknown> {
   return result;
 }
 
-export const LAYER_STACKS_PERSISTED_KEYS = ["layerStacks", "stackOfLayer"] as const;
+/** A layer an undo took out of its file, kept on disk so a redo can bring it back. */
+export type DetachedLayer = {
+  ownerId: string;
+  filePath: string;
+  displayName: string;
+};
+
+export const LAYER_STACKS_PERSISTED_KEYS = ["layerStacks", "stackOfLayer", "detachedLayers", "layeredFiles"] as const;
 
 export interface LayerStacksState {
   layerStacks: Record<string, LayerStack>;
   /** Reverse index: layer id → stack id, for the per-layer lookups the UI does. */
   stackOfLayer: Record<string, string>;
+  /** Hidden layers by id. Their history and blocks stay on disk until their file closes. */
+  detachedLayers: Record<string, DetachedLayer>;
+  /** Files whose history is a layered history, which outlives their layers. */
+  layeredFiles: Record<string, true>;
   createLayerStack: (
     stack: Omit<LayerStack, "id" | "syncView" | "layout"> & { syncView?: boolean; layout?: LayerStackLayout },
   ) => string;
@@ -104,6 +121,19 @@ export function selectLayerStack(
 ): LayerStack | undefined {
   const stackId = state.stackOfLayer[fileId];
   return stackId ? state.layerStacks[stackId] : undefined;
+}
+
+/**
+ * The file `fileId` is a layer of, when that file keeps a layered history:
+ * the stack's owner, or the file itself once it has had layers.
+ */
+export function selectLayerOwner(
+  state: Pick<State, "layerStacks" | "stackOfLayer" | "layeredFiles">,
+  fileId: string,
+): string | null {
+  const owner = selectLayerStack(state, fileId)?.ownerId;
+  if (owner) return owner;
+  return state.layeredFiles[fileId] ? fileId : null;
 }
 
 /**
@@ -160,6 +190,8 @@ export function getLayerSegments(openFileIds: string[], stackOfLayer: Record<str
 export const createLayerStacksSlice = (set: ZustandSet, get: ZustandGet): LayerStacksState => ({
   layerStacks: {},
   stackOfLayer: {},
+  detachedLayers: {},
+  layeredFiles: {},
 
   createLayerStack: (stack) => {
     const id = nextLayerStackId();
@@ -205,6 +237,7 @@ export const createLayerStacksSlice = (set: ZustandSet, get: ZustandGet): LayerS
           delete state.stackOfLayer[fileId];
           const stack = state.layerStacks[from];
           if (stack) {
+            if (stack.ownerId === fileId) delete stack.ownerId;
             stack.layerIds = stack.layerIds.filter((id) => id !== fileId);
             if (stack.layerIds.length === 0) delete state.layerStacks[from];
           }
@@ -245,6 +278,7 @@ export const createLayerStacksSlice = (set: ZustandSet, get: ZustandGet): LayerS
         delete state.stackOfLayer[fileId];
         const stack = state.layerStacks[stackId];
         if (!stack) return;
+        if (stack.ownerId === fileId) delete stack.ownerId;
         stack.layerIds = stack.layerIds.filter((id) => id !== fileId);
         if (stack.layerIds.length === 0) delete state.layerStacks[stackId];
       }),

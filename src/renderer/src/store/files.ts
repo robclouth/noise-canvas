@@ -96,7 +96,13 @@ import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { gatherFileIds, gatherFileGroups, reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
-import { destroyHistoryManager, getHistoryManager, type PreparedDelta } from "../lib/history-manager";
+import {
+  destroyHistoryManager,
+  getHistoryManager,
+  releaseHistoryManager,
+  type PreparedDelta,
+} from "../lib/history-manager";
+import type { LayeredHistory } from "../lib/layered-history";
 import { serializeEditCommand, serializeFileTask } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
@@ -124,7 +130,7 @@ interface SynthesisAudioResult {
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
 }
-import { selectLayerStack, selectStackLayerIds, stackColor, type LayerStackMethod } from "./layers";
+import { selectLayerStack, selectStackLayerIds, stackColor, type DetachedLayer, type LayerStackMethod } from "./layers";
 import { hasSupportedAudioExtension } from "../../../main/lib/audio-extensions";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
@@ -171,6 +177,12 @@ export interface FilesState {
    * file has none. The shared grid is what keeps a merge an exact sum.
    */
   addEmptyLayer: (fileId: string) => Promise<void>;
+  /** Takes layers out of `ownerId`'s file, keeping their histories on disk. */
+  hideFileLayers: (ownerId: string, layerIds: string[]) => Promise<void>;
+  /** Brings hidden layers of `ownerId`'s file back from disk. False when one could not come back. */
+  showFileLayers: (ownerId: string, layerIds: string[]) => Promise<boolean>;
+  /** Puts the layers of `ownerId`'s file in this tab order. */
+  orderFileLayers: (ownerId: string, order: string[]) => void;
   /** Drops the bracket around the active file's group, if it is in one. */
   unstackActiveFile: () => void;
   mergeFiles: (fileIds: string[]) => Promise<void>;
@@ -317,6 +329,19 @@ export interface FilesState {
 // Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
 let fileEngineRegistry: FileEngineRegistry | null = null;
+
+/** The layered histories of files with layers, as the app keeps them. */
+export interface LayeredHistories {
+  get(ownerId: string): LayeredHistory;
+  release(ownerId: string): Promise<void>;
+}
+
+let layeredHistories: LayeredHistories | null = null;
+
+/** Installs the layered histories; without them every file keeps a history of its own. */
+export function installLayeredHistories(histories: LayeredHistories): void {
+  layeredHistories = histories;
+}
 
 /** Registers the session owner for close and context teardown. */
 export function attachFileEngineRegistry(registry: FileEngineRegistry): () => void {
@@ -1586,6 +1611,7 @@ function registerLayerStack(
   originId: string | null,
   layerIds: string[],
   label: string,
+  ownerId?: string,
 ): void {
   const hueSourceId = originId ?? layerIds[0];
   const hueSource = openFiles[hueSourceId];
@@ -1594,7 +1620,7 @@ function registerLayerStack(
     const member = openFiles[layerId];
     if (member) fileHues.set(member.filePath, hue);
   }
-  get().createLayerStack({ method, label, originId, layerIds, hue });
+  get().createLayerStack({ method, label, originId, layerIds, hue, ...(ownerId ? { ownerId } : {}) });
 }
 
 /** The active file's loop region, or null when there is no file or no region. */
@@ -1909,6 +1935,70 @@ async function commitInWindow(
   } finally {
     get().setFileSynthesizing(fileId, false);
   }
+}
+
+/**
+ * Removes an open file from the store and from `openFiles`: its lane, every
+ * per-file setting, and its place as the active, minimised or fullscreen file.
+ */
+function dropOpenFileState(state: State, fileId: string): void {
+  state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
+  delete state.filesBandsPerOctave[fileId];
+  delete state.filesZoom[fileId];
+  delete state.filesOffset[fileId];
+  delete state.filesZoomY[fileId];
+  delete state.filesOffsetY[fileId];
+  delete state.filesPlaybackStartTime[fileId];
+  delete state.filesLoopRegion[fileId];
+  delete state.filesMuted[fileId];
+  delete state.filesSoloed[fileId];
+  delete state.filesSelection[fileId];
+  delete state.filesDirty[fileId];
+  delete state.filesLoading[fileId];
+  delete state.filesBusy[fileId];
+  delete state.filesSynthesizing[fileId];
+  delete state.persistedFilePaths[fileId];
+  delete state.fileDisplayNames[fileId];
+  state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== fileId);
+  if (state.fullscreenFileId === fileId) state.fullscreenFileId = null;
+  delete openFiles[fileId];
+  disposeOnsetTexture(fileId);
+
+  const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
+  if (state.activeFileId === fileId) state.activeFileId = nextFileId;
+}
+
+/**
+ * Loads an open file's state from its history at the node it is on, with the
+ * graphics memory check every other open runs. False when the file closed
+ * meanwhile; throws when the history is empty or the file does not fit.
+ */
+async function loadFileFromHistory(get: ZustandGet, fileId: string): Promise<boolean> {
+  const historyManager = getHistoryManager(fileId);
+  const spectrogramData = await historyManager.loadSpectrogramAtCurrent();
+  if (!spectrogramData) throw new Error("History tree is empty");
+  // History restores a file without going near the analyser, so the
+  // admission check every other path runs has to be repeated here.
+  // Without it a file admitted by an earlier version, or on a roomier
+  // machine, reopens at any size and exhausts the GPU pool.
+  const otherTexelCounts = openFileTexelCounts(fileId);
+  const allowed = remainingCoefficientBudget(otherTexelCounts);
+  const coefficients = spectrogramData.texels;
+  if (allowed !== undefined && coefficients > allowed) {
+    throw new Error(
+      otherTexelCounts.length > 0
+        ? "There is not enough graphics memory for this file. Close another file to free graphics memory."
+        : "There is not enough graphics memory for this file.",
+    );
+  }
+  if (!updateOpenFile(fileId, { spectrogramData })) return false;
+  // Restored from the node the file reopens on, before the loading flag
+  // clears, so its first paint already has them.
+  const currentId = historyManager.getManifest()?.currentId;
+  if (currentId) {
+    await get().restoreOnsetsForNode(fileId, currentId, spectrogramData.packedData);
+  }
+  return true;
 }
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
@@ -2324,6 +2414,22 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!spectrogramData) return;
 
     const stack = selectLayerStack(get(), fileId);
+    // A stack of separate files has no owner and keeps no file history.
+    const ownerId = stack ? stack.ownerId : fileId;
+    const layered = ownerId && layeredHistories ? layeredHistories.get(ownerId) : null;
+    if (layered) {
+      try {
+        await layered.load();
+      } catch (error) {
+        console.error("Loading the file's layered history failed:", error);
+        notifications.show({
+          title: "Could not add a layer",
+          message: `${error instanceof Error ? error.message : "Unknown error"}`,
+          color: "red",
+        });
+        return;
+      }
+    }
     const label = `layer ${(stack?.layerIds.length ?? 1) + 1}`;
     const baseName = stripExtensionForLabel(
       (stack?.originId && openFiles[stack.originId]?.displayName) ||
@@ -2355,9 +2461,121 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       get().setLayerStack(ids[0], stack.id, order);
     } else {
       const baseLabel = stripExtensionForLabel(source.displayName);
-      registerLayerStack(get, "user", fileId, [fileId, ids[0]], baseLabel);
+      registerLayerStack(get, "user", fileId, [fileId, ids[0]], baseLabel, fileId);
+    }
+    if (layered && ownerId) {
+      set(
+        produce((state: State) => {
+          state.layeredFiles[ownerId] = true;
+        }),
+      );
+      await layered.addLayersStep("Add layer", [...layered.layers(), { layerId: ids[0], nodeId: null }]);
     }
     await get().setActiveFileId(ids[0]);
+  },
+  hideFileLayers: async (ownerId, layerIds) => {
+    for (const fileId of layerIds) {
+      const openFile = openFiles[fileId];
+      if (fileId === ownerId || !openFile) continue;
+      // A commit, synthesis or onset read still running on the layer lands before it goes.
+      await serializeFileTask(fileId, async () => {});
+      await getHistoryManager(fileId).awaitPackedReaders();
+      const state = get();
+      const record: DetachedLayer = {
+        ownerId,
+        filePath: state.persistedFilePaths[fileId] ?? openFile.filePath,
+        displayName: state.fileDisplayNames[fileId] ?? openFile.displayName,
+      };
+      fileEngineRegistry?.close(fileId);
+      fileSynthesisGeneration.delete(fileId);
+      state.removeLayerFromStack(fileId);
+      set(
+        produce((draft: State) => {
+          const wasActive = draft.activeFileId === fileId;
+          dropOpenFileState(draft, fileId);
+          draft.detachedLayers[fileId] = record;
+          if (wasActive) draft.activeFileId = ownerId;
+        }),
+      );
+      await releaseHistoryManager(fileId);
+    }
+    // A file left with one layer is a plain file again.
+    const stack = selectLayerStack(get(), ownerId);
+    if (stack && stack.layerIds.length <= 1) get().unstackLayers(stack.id);
+    if (get().activeFileId === ownerId) await get().setActiveFileId(ownerId);
+  },
+  showFileLayers: async (ownerId, layerIds) => {
+    const owner = openFiles[ownerId];
+    if (!owner) return false;
+    const shown: string[] = [];
+    for (const fileId of layerIds) {
+      const record = get().detachedLayers[fileId];
+      // A layer closed outright has no history left to come back from.
+      if (!record || openFiles[fileId]) continue;
+      openFiles[fileId] = { id: fileId, filePath: record.filePath, displayName: record.displayName };
+      set(
+        produce((state: State) => {
+          delete state.detachedLayers[fileId];
+          const stackId = state.stackOfLayer[ownerId];
+          const run = stackId ? (state.layerStacks[stackId]?.layerIds ?? [ownerId]) : [ownerId];
+          const last = Math.max(...run.map((id) => state.openFileIds.indexOf(id)));
+          state.openFileIds.splice(last + 1, 0, fileId);
+          state.filesBandsPerOctave[fileId] = state.filesBandsPerOctave[ownerId];
+          state.filesZoom[fileId] = state.filesZoom[ownerId];
+          state.filesOffset[fileId] = state.filesOffset[ownerId];
+          state.filesZoomY[fileId] = state.filesZoomY[ownerId] ?? 0;
+          state.filesOffsetY[fileId] = state.filesOffsetY[ownerId] ?? 0;
+          state.filesPlaybackStartTime[fileId] = state.filesPlaybackStartTime[ownerId] ?? 0;
+          state.persistedFilePaths[fileId] = record.filePath;
+          state.fileDisplayNames[fileId] = record.displayName;
+          state.filesLoading[fileId] = "Loading...";
+        }),
+      );
+      try {
+        const hadHistory = await getHistoryManager(fileId).initialize();
+        if (!hadHistory) throw new Error("Its history is missing.");
+        if (!(await loadFileFromHistory(get, fileId))) continue;
+        clearLoading(set, [fileId]);
+        shown.push(fileId);
+      } catch (error) {
+        delete openFiles[fileId];
+        set(
+          produce((state: State) => {
+            dropOpenFileState(state, fileId);
+            state.detachedLayers[fileId] = record;
+          }),
+        );
+        notifications.show({
+          title: "Could not bring the layer back",
+          message: `${record.displayName}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          color: "red",
+        });
+        return false;
+      }
+    }
+    if (shown.length === 0) return true;
+    const stack = selectLayerStack(get(), ownerId);
+    if (stack) {
+      for (const fileId of shown) get().setLayerStack(fileId, stack.id, get().openFileIds);
+    } else {
+      registerLayerStack(get, "user", ownerId, [ownerId, ...shown], stripExtensionForLabel(owner.displayName), ownerId);
+    }
+    set((state) => ({ openFileIds: gatherFileGroups(state.openFileIds, state.stackOfLayer) }));
+    return true;
+  },
+  orderFileLayers: (ownerId, order) => {
+    const stack = selectLayerStack(get(), ownerId);
+    if (!stack) return;
+    const members = new Set(stack.layerIds);
+    const wanted = [...order.filter((id) => members.has(id)), ...stack.layerIds.filter((id) => !order.includes(id))];
+    set((state) => {
+      const first = state.openFileIds.findIndex((id) => members.has(id));
+      if (first < 0) return {};
+      const rest = state.openFileIds.filter((id) => !members.has(id));
+      rest.splice(first, 0, ...wanted);
+      return { openFileIds: rest };
+    });
+    get().setLayerStack(stack.layerIds[0], stack.id, get().openFileIds);
   },
 
   mergeFiles: async (fileIds: string[]) => {
@@ -2899,40 +3117,36 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     logFileFootprint(fileId, "closed");
     fileEngineRegistry?.close(fileId);
 
+    // A file's hidden layers and its layered history go with it.
+    const isOwner = state.layeredFiles[fileId] || selectLayerStack(state, fileId)?.ownerId === fileId;
+    const hiddenLayers = Object.entries(state.detachedLayers)
+      .filter(([, layer]) => layer.ownerId === fileId)
+      .map(([id]) => id);
+    if (isOwner || hiddenLayers.length > 0) {
+      set(
+        produce((draft: State) => {
+          delete draft.layeredFiles[fileId];
+          for (const id of hiddenLayers) delete draft.detachedLayers[id];
+        }),
+      );
+      for (const id of hiddenLayers) {
+        getHistoryManager(id);
+        destroyHistoryManager(id).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
+      }
+    }
+
     // Fire-and-forget: drops on-disk history directory and in-memory state.
-    destroyHistoryManager(fileId).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
+    // The layered history writes its tree into that directory, so it stops first.
+    (layeredHistories?.release(fileId) ?? Promise.resolve())
+      .then(() => destroyHistoryManager(fileId))
+      .catch((err: unknown) => console.error("destroyHistoryManager failed", err));
     fileSynthesisGeneration.delete(fileId);
 
     state.removeLayerFromStack(fileId);
 
     return set(
       produce((state: State) => {
-        if (openFile) {
-          state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
-          delete state.filesBandsPerOctave[fileId];
-          delete state.filesZoom[fileId];
-          delete state.filesOffset[fileId];
-          delete state.filesZoomY[fileId];
-          delete state.filesOffsetY[fileId];
-          delete state.filesPlaybackStartTime[fileId];
-          delete state.filesLoopRegion[fileId];
-          delete state.filesMuted[fileId];
-          delete state.filesSoloed[fileId];
-          delete state.filesSelection[fileId];
-          delete state.filesDirty[fileId];
-          delete state.filesLoading[fileId];
-          delete state.filesBusy[fileId];
-          delete state.filesSynthesizing[fileId];
-          delete state.persistedFilePaths[fileId];
-          delete state.fileDisplayNames[fileId];
-          state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== fileId);
-          if (state.fullscreenFileId === fileId) state.fullscreenFileId = null;
-          delete openFiles[fileId];
-          disposeOnsetTexture(fileId);
-
-          const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
-          if (state.activeFileId === fileId) state.activeFileId = nextFileId;
-        }
+        if (openFile) dropOpenFileState(state, fileId);
       }),
     );
   },
@@ -4155,29 +4369,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             );
             return;
           }
-          const spectrogramData = await historyManager.loadSpectrogramAtCurrent();
-          if (!spectrogramData) throw new Error("History tree is empty");
-          // History restores a file without going near the analyser, so the
-          // admission check every other path runs has to be repeated here.
-          // Without it a file admitted by an earlier version, or on a roomier
-          // machine, reopens at any size and exhausts the GPU pool.
-          const otherTexelCounts = openFileTexelCounts(fileId);
-          const allowed = remainingCoefficientBudget(otherTexelCounts);
-          const coefficients = spectrogramData.texels;
-          if (allowed !== undefined && coefficients > allowed) {
-            throw new Error(
-              otherTexelCounts.length > 0
-                ? "There is not enough graphics memory for this file. Close another file to free graphics memory."
-                : "There is not enough graphics memory for this file.",
-            );
-          }
-          if (!updateOpenFile(fileId, { spectrogramData })) return;
-          // Restored from the node the file reopens on, before the loading flag
-          // clears, so its first paint already has them.
-          const currentId = historyManager.getManifest()?.currentId;
-          if (currentId) {
-            await get().restoreOnsetsForNode(fileId, currentId, spectrogramData.packedData);
-          }
+          if (!(await loadFileFromHistory(get, fileId))) return;
           set(
             produce((draft: State) => {
               delete draft.filesLoading[fileId];

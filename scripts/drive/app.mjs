@@ -80,9 +80,9 @@ export async function closeApp(app, profile) {
   rmSync(profile, { recursive: true, force: true });
 }
 
-/** Launches the built app in a fresh profile at the given window size. */
-export async function launch(env, { width = 1600, height = 1172 } = {}) {
-  const profile = mkdtempSync(join(tmpdir(), "noisecanvas-drive-"));
+/** Launches the built app at the given window size, in a fresh profile or in `profile` to relaunch one. */
+export async function launch(env, { width = 1600, height = 1172, profile: reuse } = {}) {
+  const profile = reuse ?? mkdtempSync(join(tmpdir(), "noisecanvas-drive-"));
   const app = await _electron.launch({ args: [root, `--user-data-dir=${profile}`], cwd: root, env });
   const page = await app.firstWindow();
   const console_ = [];

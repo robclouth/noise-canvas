@@ -68,6 +68,13 @@ export async function destroyBlockStore(fileId: string): Promise<void> {
   if (store) await (await store).dispose();
 }
 
+/** Drops one file's open store, keeping its disk for when the file opens again. */
+export async function releaseBlockStore(fileId: string): Promise<void> {
+  const store = stores.get(fileId);
+  stores.delete(fileId);
+  if (store) await (await store).flush();
+}
+
 /** Drops the open stores, keeping their disk for the next launch. */
 export async function releaseBlockStores(): Promise<void> {
   const open = [...stores.values()];

@@ -37,6 +37,7 @@ import { precompileDisplayShader, precompileRemainingShaders, warmEffectPipeline
 import { setShaderWarmupProgress } from "./lib/shader-warmup-progress";
 import { sweepOrphanBlocks } from "./lib/block-stores";
 import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
+import { getLayeredHistory, layeredHistoryOf, releaseLayeredHistories } from "./lib/layered-histories";
 import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
 import { openFiles } from "./store/files";
@@ -202,8 +203,13 @@ function App(): React.JSX.Element {
     // Best-effort cleanup of history dirs left behind by crashes or other
     // close paths that didn't call destroyHistoryManager. Runs after persisted
     // state is loaded so we know which fileIds are still alive.
-    void pruneOrphanHistoryDirs(new Set(Object.keys(useStore.getState().persistedFilePaths)));
-    void sweepOrphanBlocks(new Set(Object.keys(useStore.getState().persistedFilePaths)));
+    // A hidden layer is not open, but its history and blocks are what bring it back.
+    const { persistedFilePaths, detachedLayers, layeredFiles } = useStore.getState();
+    const keep = new Set([...Object.keys(persistedFilePaths), ...Object.keys(detachedLayers)]);
+    void pruneOrphanHistoryDirs(keep);
+    void sweepOrphanBlocks(keep);
+    // Loaded now, so every layer's steps are recorded from the first one.
+    for (const ownerId of Object.keys(layeredFiles)) getLayeredHistory(ownerId);
   }, []);
 
   // Route playback to the chosen output, and again whenever one is plugged in
@@ -397,6 +403,11 @@ function App(): React.JSX.Element {
     const unsubUndo = ipcOn("undo", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
+      const layered = layeredHistoryOf(activeFileId);
+      if (layered) {
+        await layered.undo();
+        return;
+      }
       const historyManager = getHistoryManager(activeFileId);
       await historyManager.navigateToParent();
     });
@@ -405,6 +416,11 @@ function App(): React.JSX.Element {
     const unsubRedo = ipcOn("redo", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
+      const layered = layeredHistoryOf(activeFileId);
+      if (layered) {
+        await layered.redo();
+        return;
+      }
       const historyManager = getHistoryManager(activeFileId);
       await historyManager.navigateToLastChild();
     });
@@ -458,7 +474,9 @@ function App(): React.JSX.Element {
 
     const unsubAppWillQuit = ipcOn("app-will-quit", () => {
       // Main holds the quit until this reports back (or times out).
-      void clearAllHistoryManagers().finally(() => ipcSend("quit-cleanup-done"));
+      void releaseLayeredHistories()
+        .then(() => clearAllHistoryManagers())
+        .finally(() => ipcSend("quit-cleanup-done"));
     });
     unsubscribers.push(unsubAppWillQuit);
 

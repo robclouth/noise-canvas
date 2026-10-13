@@ -25,6 +25,7 @@ vi.mock("../modals", () => ({
 }));
 
 vi.mock("../history-manager", () => ({
+  releaseHistoryManager: vi.fn(async () => {}),
   getHistoryManager: vi.fn(),
   destroyHistoryManager: vi.fn(),
   clearAllHistoryManagers: vi.fn(),

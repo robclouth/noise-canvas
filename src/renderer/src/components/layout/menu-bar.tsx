@@ -3,6 +3,8 @@ import { UI_LAYERS } from "@renderer/lib/ui-layers";
 import { Box, Group, Menu, Text, UnstyledButton } from "@mantine/core";
 import { acceleratorLabel, APP_MENUS, runCommand, visibleItems, type AppMenuItem } from "@renderer/lib/app-menu";
 import { getHistoryManager } from "@renderer/lib/history-manager";
+import { getLayeredHistory } from "@renderer/lib/layered-histories";
+import { selectLayerOwner } from "@renderer/store/layers";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { Check, CircleHelp, Settings } from "lucide-react";
 import { memo, type ReactNode, useCallback, useMemo, useState, useSyncExternalStore } from "react";
@@ -13,10 +15,14 @@ import { ShaderWarmupReadout } from "./shader-warmup-readout";
 
 const BAR_HEIGHT = 26;
 
-/** Undo/redo availability for the active file, from its history manager. */
+/** Undo/redo availability for the active file, from its layered history or its own. */
 function useUndoRedo(): { canUndo: boolean; canRedo: boolean } {
   const activeFileId = useStore((state) => state.activeFileId);
-  const manager = useMemo(() => (activeFileId ? getHistoryManager(activeFileId) : null), [activeFileId]);
+  const ownerId = useStore((state) => (state.activeFileId ? selectLayerOwner(state, state.activeFileId) : null));
+  const manager = useMemo(() => {
+    if (ownerId) return getLayeredHistory(ownerId);
+    return activeFileId ? getHistoryManager(activeFileId) : null;
+  }, [activeFileId, ownerId]);
   useSyncExternalStore(
     useCallback((cb: () => void) => manager?.subscribe(cb) ?? (() => {}), [manager]),
     useCallback(() => manager?.getVersion() ?? 0, [manager]),

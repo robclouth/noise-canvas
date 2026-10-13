@@ -3,6 +3,7 @@ import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Menu, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { openConfirm } from "@renderer/lib/modals";
+import { runCommand } from "@renderer/lib/app-menu";
 import { buildVisibleTree, layoutTree, type LaidOutRow, type NodeMeta } from "@renderer/lib/history-graph";
 import { getHistoryManager, type HistoryManager } from "@renderer/lib/history-manager";
 import { WIDGET_INPUT_HEIGHT } from "@renderer/lib/ui-density";
@@ -550,12 +551,8 @@ export function HistorySection() {
   const current = manifest ? manifest.nodes[manifest.currentId] : null;
   const canUndo = !!current?.parentId;
   const canRedo = !!current && current.childIds.length > 0;
-  const onUndo = useCallback(() => {
-    if (manager) void manager.navigateToParent();
-  }, [manager]);
-  const onRedo = useCallback(() => {
-    if (manager) void manager.navigateToLastChild();
-  }, [manager]);
+  const onUndo = useCallback(() => runCommand("undo"), []);
+  const onRedo = useCallback(() => runCommand("redo"), []);
 
   const menu = (
     <Menu withinPortal position="right-start" shadow="md" onOpen={refreshDiskSize}>

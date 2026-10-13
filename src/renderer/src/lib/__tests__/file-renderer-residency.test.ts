@@ -30,6 +30,7 @@ vi.mock("../gpu-budget", async (original) => ({
   canvasWindowBlocks: () => windowBlocks,
 }));
 vi.mock("../history-manager", () => ({
+  releaseHistoryManager: vi.fn(async () => {}),
   destroyHistoryManager: vi.fn(),
   deriveSideData: vi.fn(async () => ({ inverseMap: inverseSeed })),
   historyMemoryCacheBytes: () => ({ deltas: 0, audioHops: 0 }),

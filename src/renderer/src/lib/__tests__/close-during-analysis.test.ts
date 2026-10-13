@@ -16,6 +16,7 @@ vi.mock("../modals", () => ({
   openStackFilesPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
+  releaseHistoryManager: vi.fn(async () => {}),
   destroyHistoryManager: vi.fn(async () => {}),
   getHistoryManager: vi.fn(),
 }));
@@ -95,6 +96,8 @@ function makeStore() {
     removeLayerFromStack: vi.fn(),
     layerStacks: {},
     stackOfLayer: {},
+    detachedLayers: {},
+    layeredFiles: {},
   } as unknown as State;
 
   return { get, files };

@@ -69,6 +69,7 @@ vi.mock("../modals", () => ({
   openStackFilesPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
+  releaseHistoryManager: vi.fn(async () => {}),
   destroyHistoryManager: vi.fn(async () => {}),
   getHistoryManager: vi.fn(() => ({
     currentBlockState: vi.fn(async () => new Float32Array(64)),
@@ -174,6 +175,8 @@ function makeStore(overrides: Partial<State> = {}) {
     removeLayerFromStack: vi.fn(),
     layerStacks: {},
     stackOfLayer: {},
+    detachedLayers: {},
+    layeredFiles: {},
     ...overrides,
   } as unknown as State;
 

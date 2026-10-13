@@ -16,6 +16,7 @@ vi.mock("../modals", () => ({
   openStackFilesPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
+  releaseHistoryManager: vi.fn(async () => {}),
   destroyHistoryManager: vi.fn(async () => {}),
   getHistoryManager: vi.fn((fileId: string) => ({
     initialize: vi.fn(async () => gate.histories.get(fileId)?.exists ?? false),

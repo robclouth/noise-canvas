@@ -14,6 +14,7 @@ import {
   destroyBlockStore,
   getBlockStore,
   openBlockStore,
+  releaseBlockStore,
   releaseBlockStores,
 } from "./block-stores";
 import { packedTextureSizeOf } from "./canvas-view";
@@ -96,6 +97,9 @@ function sameStoreDimensions(a: HistoryDimensions, b: HistoryDimensions): boolea
     a.bandsPerOctave === b.bandsPerOctave
   );
 }
+
+/** Why the current node changed: a new step was added, or navigation moved to an existing one. */
+export type CurrentChangeCause = "added" | "navigated";
 
 export interface HistoryNode {
   id: string;
@@ -421,6 +425,7 @@ export class HistoryManager {
   // is the common case for undo/redo within a single analysis.
   private lastLoadedAnchorId: string | null = null;
   private listeners = new Set<() => void>();
+  private currentListeners = new Set<(nodeId: string, cause: CurrentChangeCause) => void>();
   private version = 0;
   private manifestWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private manifestWritePending = false;
@@ -481,6 +486,18 @@ export class HistoryManager {
    */
   getVersion(): number {
     return this.version;
+  }
+
+  /** Calls `listener` each time the current node changes, once the change is in place. */
+  onCurrentChanged(listener: (nodeId: string, cause: CurrentChangeCause) => void): () => void {
+    this.currentListeners.add(listener);
+    return () => {
+      this.currentListeners.delete(listener);
+    };
+  }
+
+  private emitCurrent(nodeId: string, cause: CurrentChangeCause): void {
+    for (const listener of this.currentListeners) listener(nodeId, cause);
   }
 
   private emit(): void {
@@ -834,6 +851,7 @@ export class HistoryManager {
     clearCanvasPatchStash(this.fileId);
     await this.writeManifest();
     this.notifyStateChange();
+    this.emitCurrent(id, "added");
     return id;
   }
 
@@ -1081,6 +1099,7 @@ export class HistoryManager {
     this.restoredOriginalId = null;
     await this.writeManifest();
     this.notifyStateChange();
+    this.emitCurrent(id, "added");
     return { id, isNew: true };
   }
 
@@ -1713,6 +1732,7 @@ export class HistoryManager {
     }
     this.scheduleManifestWrite();
     this.notifyStateChange();
+    this.emitCurrent(targetId, "navigated");
 
     // Onsets describe the coefficients they were found in, so they move with
     // the state. Not awaited: the picture is already back, and the markers and
@@ -2574,6 +2594,7 @@ export class HistoryManager {
     this.audioBytes.clear();
     this.lastLoadedAnchorId = null;
     this.listeners.clear();
+    this.currentListeners.clear();
   }
 }
 
@@ -2609,6 +2630,31 @@ export async function destroyHistoryManager(fileId: string): Promise<void> {
   if (!m) return;
   await m.purge();
   managers.delete(fileId);
+  clearCanvasPatchStash(fileId);
+  clearFileTaskQueue(fileId);
+}
+
+/**
+ * Drops one file's history and blocks from memory, as quitting does, keeping
+ * both on disk so the file can open again from them.
+ */
+export async function releaseHistoryManager(fileId: string): Promise<void> {
+  const m = managers.get(fileId);
+  managers.delete(fileId);
+  // A commit or navigation still queued owns the manifest it is writing, and
+  // a synthesis or onset read still reads the store.
+  await serializeFileTask(fileId, async () => {});
+  if (m) await m.awaitPackedReaders();
+  else await awaitFileSynthesis(fileId);
+  if (m) {
+    try {
+      await m.pruneAudioCache();
+    } catch (err) {
+      console.error("history: pruning cached audio failed", err);
+    }
+    await m.dispose();
+  }
+  await releaseBlockStore(fileId);
   clearCanvasPatchStash(fileId);
   clearFileTaskQueue(fileId);
 }
