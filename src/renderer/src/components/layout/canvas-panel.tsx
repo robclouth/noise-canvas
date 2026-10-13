@@ -146,6 +146,7 @@ LayerBox.displayName = "LayerBox";
 /** Selects the editing layer while keeping each layer's mix controls available. */
 const LayerTabs = memo(({ layerIds, currentId }: { layerIds: string[]; currentId: string }) => {
   const stack = useStore((state) => selectLayerStack(state, currentId));
+  const layerNames = useStore((state) => state.layerNames);
   const tabsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     tabsRef.current
@@ -176,7 +177,8 @@ const LayerTabs = memo(({ layerIds, currentId }: { layerIds: string[]; currentId
                   style={{ maxWidth: 180 }}
                   styles={{ tabLabel: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }}
                 >
-                  {layerId === stack?.originId ? "Original" : layerTabLabel(file.displayName, stack?.label)}
+                  {layerNames[layerId] ??
+                    (layerId === stack?.originId ? "Original" : layerTabLabel(file.displayName, stack?.label))}
                 </Tabs.Tab>
               </Tooltip>
               <Box pos="absolute" right={8} top="50%" style={{ transform: "translateY(-50%)" }}>

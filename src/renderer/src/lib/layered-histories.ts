@@ -31,6 +31,7 @@ const appHost: LayerHost = {
   hideLayers: (ownerId, layerIds) => useStore.getState().hideFileLayers(ownerId, layerIds),
   showLayers: (ownerId, layerIds) => useStore.getState().showFileLayers(ownerId, layerIds),
   orderLayers: (ownerId, order) => useStore.getState().orderFileLayers(ownerId, order),
+  nameLayers: (_ownerId, layers) => useStore.getState().setLayerNames(layers),
   focusLayer: async (layerId) => {
     if (useStore.getState().activeFileId !== layerId) await useStore.getState().setActiveFileId(layerId);
     await layerReady(layerId);

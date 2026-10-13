@@ -36,6 +36,8 @@ export interface LayerHost {
   showLayers(ownerId: string, layerIds: string[]): Promise<boolean>;
   /** Puts the file's layers in this tab order. */
   orderLayers(ownerId: string, order: string[]): void;
+  /** Shows these names on the file's layer tabs. */
+  nameLayers(ownerId: string, layers: LayerRef[]): void;
   /** Makes `layerId` the layer on screen, and waits until its canvas can navigate. */
   focusLayer(layerId: string): Promise<void>;
   readTree(ownerId: string): Promise<string | null>;
@@ -53,6 +55,8 @@ export class LayeredHistory {
   private watched = new Map<string, () => void>();
   /** Layers this history is moving, whose own navigation it must not record. */
   private moving = new Set<string>();
+  /** Layers whose next steps a caller records itself, as part of a larger one. */
+  private quiet = new Set<string>();
   private queue: Promise<void> = Promise.resolve();
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
@@ -82,6 +86,7 @@ export class LayeredHistory {
       if (this.disposed) return;
       this.watch();
       this.reconcile();
+      this.host.nameLayers(this.ownerId, this.layers());
       this.emit();
     })();
     return this.loading;
@@ -128,6 +133,19 @@ export class LayeredHistory {
       this.watch();
       this.changed();
     });
+  }
+
+  /**
+   * Runs `task` without recording the steps it makes on `layerIds`, so the
+   * caller can record them, with what else it changes, as one step.
+   */
+  async quietly<T>(layerIds: string[], task: () => Promise<T>): Promise<T> {
+    for (const layerId of layerIds) this.quiet.add(layerId);
+    try {
+      return await task();
+    } finally {
+      for (const layerId of layerIds) this.quiet.delete(layerId);
+    }
   }
 
   undo(): Promise<void> {
@@ -179,6 +197,7 @@ export class LayeredHistory {
     if (hide.length) await this.host.hideLayers(this.ownerId, hide);
     if (show.length && !(await this.host.showLayers(this.ownerId, show))) return;
     this.host.orderLayers(this.ownerId, wanted);
+    this.host.nameLayers(this.ownerId, target.layers);
     this.watch(wanted);
 
     for (const ref of target.layers) {
@@ -223,6 +242,7 @@ export class LayeredHistory {
   private record(layerId: string, nodeId: string, cause: CurrentChangeCause): void {
     const tree = this.tree;
     if (!tree || this.disposed) return;
+    if (this.quiet.has(layerId)) return;
     if (cause === "navigated" && this.moving.has(layerId)) return;
     const layers = currentLayers(tree);
     if (!layers.some((ref) => ref.layerId === layerId)) return;
@@ -246,6 +266,7 @@ export class LayeredHistory {
   }
 
   private changed(): void {
+    this.host.nameLayers(this.ownerId, this.layers());
     this.scheduleWrite();
     this.emit();
   }

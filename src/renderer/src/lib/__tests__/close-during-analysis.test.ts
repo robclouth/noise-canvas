@@ -98,6 +98,7 @@ function makeStore() {
     stackOfLayer: {},
     detachedLayers: {},
     layeredFiles: {},
+    layerNames: {},
   } as unknown as State;
 
   return { get, files };

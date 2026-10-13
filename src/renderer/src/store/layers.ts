@@ -77,6 +77,10 @@ export interface LayerStacksState {
   detachedLayers: Record<string, DetachedLayer>;
   /** Files whose history is a layered history, which outlives their layers. */
   layeredFiles: Record<string, true>;
+  /** What each layer's tab reads, from the step that made it. Absent: the file's own name. */
+  layerNames: Record<string, string>;
+  /** Sets the tab names of a file's layers, clearing those the step gave none. */
+  setLayerNames: (layers: { layerId: string; name?: string }[]) => void;
   createLayerStack: (
     stack: Omit<LayerStack, "id" | "syncView" | "layout"> & { syncView?: boolean; layout?: LayerStackLayout },
   ) => string;
@@ -192,6 +196,18 @@ export const createLayerStacksSlice = (set: ZustandSet, get: ZustandGet): LayerS
   stackOfLayer: {},
   detachedLayers: {},
   layeredFiles: {},
+  layerNames: {},
+
+  setLayerNames: (layers) => {
+    set(
+      produce((state: State) => {
+        for (const { layerId, name } of layers) {
+          if (name) state.layerNames[layerId] = name;
+          else delete state.layerNames[layerId];
+        }
+      }),
+    );
+  },
 
   createLayerStack: (stack) => {
     const id = nextLayerStackId();

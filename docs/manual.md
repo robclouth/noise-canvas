@@ -820,11 +820,15 @@ The split menu on each file header:
 - **Split into N Parts (NMF)…** – separates it into any number of components, learned from the file itself.
 - **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation. Not available on Intel Macs, or on macOS 12 or 13.
 
+A split happens inside the file: the file keeps the first part, and every other part becomes a layer of it. The whole split is one step in the file's history, so one undo turns the file back into what it was, and one redo brings every part back.
+
+HPSS and NMF parts add back up to exactly what was there. The AI stems are analysed again from separated audio, so they add back up to something close to it.
+
 ### Layers
 
 Every open file is a **layer**. A **stack** holds a run of layers together: they share a colour, they play at the same time, and the header above them acts on all of them at once. A layer stays an ordinary file, and every brush and effect works on one unchanged.
 
-Every split makes a stack of its parts. To stack files yourself, use **File → Stack Files…** (`Cmd/Ctrl+G`) and tick the ones you want. They move together on the canvas, since a stack is one run of neighbouring layers. **File → Unstack** (`Cmd/Ctrl+Shift+G`) drops the stack around the active file.
+A split adds its parts as layers of the file. To stack files yourself, use **File → Stack Files…** (`Cmd/Ctrl+G`) and tick the ones you want. They move together on the canvas, since a stack is one run of neighbouring layers. **File → Unstack** (`Cmd/Ctrl+Shift+G`) drops the stack around the active file.
 
 A stack holds any number of layers, down to one, so a stack you have emptied out to a single layer is still there to drag files back into. Merge needs two.
 

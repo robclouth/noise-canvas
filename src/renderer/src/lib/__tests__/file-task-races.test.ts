@@ -177,6 +177,7 @@ function makeStore(overrides: Partial<State> = {}) {
     stackOfLayer: {},
     detachedLayers: {},
     layeredFiles: {},
+    layerNames: {},
     ...overrides,
   } as unknown as State;
 

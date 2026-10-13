@@ -5,8 +5,12 @@
  * which layers the file has, in tab order, and the node each layer is at.
  */
 
-/** A layer of the file, at a node of its own history. A null node is that layer's root. */
-export type LayerRef = { layerId: string; nodeId: string | null };
+/**
+ * A layer of the file, at a node of its own history. A null node is that
+ * layer's root. The name is what its tab reads, when the step that made the
+ * layer gave it one.
+ */
+export type LayerRef = { layerId: string; nodeId: string | null; name?: string };
 
 /** What a step changed: one layer's state, or the set of layers itself. */
 export type FileTreeChange = { kind: "edit"; layerId: string } | { kind: "layers"; label: string };
@@ -85,7 +89,7 @@ export function currentLayers(tree: FileTreeData): LayerRef[] {
 
 /** `layers` with `layerId` moved to `nodeId`, or unchanged when the file has no such layer. */
 export function withLayerAt(layers: LayerRef[], layerId: string, nodeId: string | null): LayerRef[] {
-  return layers.map((ref) => (ref.layerId === layerId ? { layerId, nodeId } : ref));
+  return layers.map((ref) => (ref.layerId === layerId ? { ...ref, nodeId } : ref));
 }
 
 /** Adds a step after the current node and moves to it. Returns the new node's id. */

@@ -85,6 +85,12 @@ class FakeHost implements LayerHost {
     this.shown = [...order];
   }
 
+  names: Record<string, string | undefined> = {};
+
+  nameLayers(_ownerId: string, layers: { layerId: string; name?: string }[]): void {
+    this.names = Object.fromEntries(layers.map((ref) => [ref.layerId, ref.name]));
+  }
+
   async focusLayer(layerId: string): Promise<void> {
     this.focused.push(layerId);
   }
@@ -188,5 +194,26 @@ describe("a file's layered history", () => {
     await reopened.load();
     await reopened.undo();
     expect(host.history("drums").currentId).toBe("drums-root");
+  });
+
+  it("records a change made quietly, with the layers it adds, as one step that undo takes back whole", async () => {
+    const host = new FakeHost("song");
+    const history = new LayeredHistory("song", host);
+    await history.load();
+    await history.quietly(["song"], async () => host.history("song").paint("harmonic"));
+    expect(history.canUndo()).toBe(false);
+
+    await history.addLayersStep("Split (HPSS)", [
+      { layerId: "song", nodeId: "harmonic", name: "harmonic" },
+      { layerId: "perc", nodeId: null, name: "percussive" },
+    ]);
+    await host.showLayers("song", ["perc"]);
+    expect(host.names).toEqual({ song: "harmonic", perc: "percussive" });
+
+    await history.undo();
+    expect(host.history("song").currentId).toBe("song-root");
+    expect(host.shown).toEqual(["song"]);
+    expect(host.names).toEqual({ song: undefined });
+    expect(history.canUndo()).toBe(false);
   });
 });

@@ -130,7 +130,14 @@ interface SynthesisAudioResult {
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
 }
-import { selectLayerStack, selectStackLayerIds, stackColor, type DetachedLayer, type LayerStackMethod } from "./layers";
+import {
+  selectLayerStack,
+  selectStackLayerIds,
+  stackColor,
+  type DetachedLayer,
+  type LayerStack,
+  type LayerStackMethod,
+} from "./layers";
 import { hasSupportedAudioExtension } from "../../../main/lib/audio-extensions";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
@@ -1969,6 +1976,182 @@ function dropOpenFileState(state: State, fileId: string): void {
 }
 
 /**
+ * Puts `spectrogramData`, on the file's own grid, into an open file as one
+ * history step, then renders its audio and finds its onsets again.
+ */
+async function replaceFileState(
+  set: ZustandSet,
+  get: ZustandGet,
+  fileId: string,
+  spectrogramData: SpectrogramData,
+  label: string,
+): Promise<void> {
+  const packed = spectrogramData.packedData;
+  if (!packed) throw new Error("the new state carries no packed data");
+  const nodeId = await serializeFileTask(fileId, async () => {
+    await awaitFileSynthesis(fileId);
+    const file = openFiles[fileId];
+    if (!file) return null;
+    file.spectrogramData = spectrogramData;
+    file.unprojectedPaint = false;
+    file.onsets = undefined;
+    file.onsetReference = undefined;
+    reloadFileEngine(fileId);
+    set(
+      produce((state: State) => {
+        state.filesDirty[fileId] = true;
+      }),
+    );
+    const id = await getHistoryManager(fileId).addSnapshot({
+      data: packed,
+      kind: "reanalyze",
+      label,
+      spectrogram: spectrogramData,
+    });
+    file.rendererRef?.current?.releaseAnalysisData();
+    return id;
+  });
+  if (!nodeId) return;
+  await get().synthesizeFile(fileId, undefined, packed);
+  const manager = getHistoryManager(fileId);
+  const file = openFiles[fileId];
+  if (file?.audioBuffer) void manager.setStateAudio(nodeId, file.audioBuffer, file.audioPeak ?? 1);
+  if (file?.onsets && file.onsetReference) {
+    await manager.setNodeOnsets(nodeId, packOnsetState({ onsets: file.onsets, reference: file.onsetReference }));
+  }
+}
+
+/** How a split reads in a layer list, a history step and a stack's header. */
+type SplitSpec = {
+  method: LayerStackMethod;
+  /** One per part, in split order. */
+  labels: string[];
+  busyMessage: string;
+  /** The history step, e.g. "Split (HPSS)". */
+  stepLabel: string;
+  /** The stack header of a split that opens files beside its source. */
+  stackLabel: string;
+};
+
+/**
+ * Splits `fileId` into the parts `separate` returns, one per label. A file that
+ * keeps a layered history splits in place: it holds the first part, the rest
+ * join it as layers, and the whole split is one step its undo takes back. A
+ * layer of a stack of separate files splits the old way, into new files beside
+ * it.
+ */
+async function splitFile(
+  set: ZustandSet,
+  get: ZustandGet,
+  fileId: string,
+  spec: SplitSpec,
+  separate: () => Promise<SpectrogramData[]>,
+): Promise<void> {
+  const source = openFiles[fileId];
+  if (!source?.spectrogramData) return;
+  const stack = selectLayerStack(get(), fileId);
+  const ownerId = stack ? stack.ownerId : fileId;
+  const layered = ownerId && layeredHistories ? layeredHistories.get(ownerId) : null;
+  const failed = (error: unknown): void => {
+    console.error("Separation failed:", error);
+    notifications.show({
+      title: "Separation failed",
+      message: `${error instanceof Error ? error.message : "Unknown error"}`,
+      color: "red",
+    });
+  };
+
+  if (!layered || !ownerId) {
+    const ids = createStemPlaceholders(set, get, fileId, spec.labels, spec.busyMessage);
+    try {
+      const parts = await separate();
+      for (let i = 0; i < ids.length; i++) updateOpenFile(ids[i], { spectrogramData: parts[i] });
+    } catch (error) {
+      failed(error);
+      discardFiles(set, ids);
+      return;
+    }
+    clearLoading(set, ids);
+    registerLayerStack(get, spec.method, fileId, ids, spec.stackLabel);
+    return;
+  }
+
+  set(
+    produce((state: State) => {
+      state.filesBusy[fileId] = spec.busyMessage;
+    }),
+  );
+  try {
+    await splitInPlace(set, get, fileId, ownerId, stack, layered, spec, separate);
+  } catch (error) {
+    failed(error);
+  } finally {
+    set(
+      produce((state: State) => {
+        delete state.filesBusy[fileId];
+      }),
+    );
+  }
+}
+
+/** The split of a file that keeps a layered history: see `splitFile`. */
+async function splitInPlace(
+  set: ZustandSet,
+  get: ZustandGet,
+  fileId: string,
+  ownerId: string,
+  stack: LayerStack | undefined,
+  layered: LayeredHistory,
+  spec: SplitSpec,
+  separate: () => Promise<SpectrogramData[]>,
+): Promise<void> {
+  const source = openFiles[fileId];
+  if (!source) return;
+  await layered.load();
+  const separateStart = performance.now();
+  const parts = await separate();
+  diag.timing("timing", "split separate", performance.now() - separateStart, { method: spec.method });
+  if (parts.length !== spec.labels.length) {
+    throw new Error(`Expected ${spec.labels.length} parts, got ${parts.length}`);
+  }
+  if (!openFiles[fileId]) return;
+
+  const baseName = stripExtensionForLabel(source.displayName);
+  const ids = createStemPlaceholders(set, get, fileId, spec.labels.slice(1), spec.busyMessage, baseName);
+  for (let i = 0; i < ids.length; i++) updateOpenFile(ids[i], { spectrogramData: parts[i + 1] });
+  clearLoading(set, ids);
+  const replaceStart = performance.now();
+  try {
+    await layered.quietly([fileId], () => replaceFileState(set, get, fileId, parts[0], spec.stepLabel));
+  } catch (error) {
+    discardFiles(set, ids);
+    throw error;
+  }
+  diag.timing("timing", "split replace", performance.now() - replaceStart, { method: spec.method });
+
+  if (stack) {
+    for (const id of ids) get().setLayerStack(id, stack.id, get().openFileIds);
+  } else {
+    registerLayerStack(get, spec.method, fileId, [fileId, ...ids], baseName, ownerId);
+  }
+  set(
+    produce((state: State) => {
+      state.layeredFiles[ownerId] = true;
+    }),
+  );
+  const layers = layered.layers();
+  const at = Math.max(
+    0,
+    layers.findIndex((ref) => ref.layerId === fileId),
+  );
+  const split = [
+    { layerId: fileId, nodeId: getHistoryManager(fileId).getCurrentId(), name: spec.labels[0] },
+    ...ids.map((layerId, i) => ({ layerId, nodeId: null, name: spec.labels[i + 1] })),
+  ];
+  await layered.addLayersStep(spec.stepLabel, [...layers.slice(0, at), ...split, ...layers.slice(at + 1)]);
+}
+
+/**
  * Loads an open file's state from its history at the node it is on, with the
  * graphics memory check every other open runs. False when the file closed
  * meanwhile; throws when the history is empty or the file does not fit.
@@ -2286,78 +2469,55 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   hpssFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
-    if (!originalFile) return;
-
-    const fboData = await readCurrentPackedData(originalFile);
-    if (!fboData) return;
-
-    const { spectrogramData } = originalFile;
+    const spectrogramData = originalFile?.spectrogramData;
     if (!spectrogramData) return;
-
     const baseLabel = stripExtensionForLabel(originalFile.displayName);
-    const ids = createStemPlaceholders(
+    await splitFile(
       set,
       get,
       fileId,
-      ["harmonic", "percussive"],
-      "Separating harmonic and percussive...",
+      {
+        method: "hpss",
+        labels: ["harmonic", "percussive"],
+        busyMessage: "Separating harmonic and percussive...",
+        stepLabel: "Split (HPSS)",
+        stackLabel: `${baseLabel}: harmonic / percussive`,
+      },
+      async () => {
+        const fboData = await readCurrentPackedData(originalFile);
+        if (!fboData) throw new Error("Could not read the file's current state.");
+        const { harmonic, percussive } = await host.analysis.hpss(fboData, bandLayout(spectrogramData));
+        return [
+          await deriveSpectrogramData(spectrogramData, harmonic),
+          await deriveSpectrogramData(spectrogramData, percussive),
+        ];
+      },
     );
-
-    try {
-      const { harmonic, percussive } = await host.analysis.hpss(fboData, bandLayout(spectrogramData));
-
-      updateOpenFile(ids[0], { spectrogramData: await deriveSpectrogramData(spectrogramData, harmonic) });
-      updateOpenFile(ids[1], { spectrogramData: await deriveSpectrogramData(spectrogramData, percussive) });
-    } catch (error) {
-      console.error("HPSS separation failed:", error);
-      notifications.show({
-        title: "Separation failed",
-        message: `${error instanceof Error ? error.message : "Unknown error"}`,
-        color: "red",
-      });
-      discardFiles(set, ids);
-      return;
-    }
-
-    clearLoading(set, ids);
-    registerLayerStack(get, "hpss", fileId, ids, `${baseLabel}: harmonic / percussive`);
   },
   nmfFile: async (fileId: string, numComponents: number) => {
     const originalFile = openFiles[fileId];
-    if (!originalFile) return;
-
-    const fboData = await readCurrentPackedData(originalFile);
-    if (!fboData) return;
-
-    const { spectrogramData } = originalFile;
+    const spectrogramData = originalFile?.spectrogramData;
     if (!spectrogramData) return;
-
     const parts = Math.max(2, Math.round(numComponents));
     const baseLabel = stripExtensionForLabel(originalFile.displayName);
-    const labels = Array.from({ length: parts }, (_, i) => `part ${i + 1}`);
-    const ids = createStemPlaceholders(set, get, fileId, labels, `Splitting into ${parts} parts...`);
-
-    try {
-      const result = await host.analysis.nmf(fboData, bandLayout(spectrogramData), parts);
-      if (result.parts.length !== parts) {
-        throw new Error(`Expected ${parts} parts, got ${result.parts.length}`);
-      }
-      for (let i = 0; i < ids.length; i++) {
-        updateOpenFile(ids[i], { spectrogramData: await deriveSpectrogramData(spectrogramData, result.parts[i]) });
-      }
-    } catch (error) {
-      console.error("NMF separation failed:", error);
-      notifications.show({
-        title: "Separation failed",
-        message: `${error instanceof Error ? error.message : "Unknown error"}`,
-        color: "red",
-      });
-      discardFiles(set, ids);
-      return;
-    }
-
-    clearLoading(set, ids);
-    registerLayerStack(get, "nmf", fileId, ids, `${baseLabel}: ${parts} parts`);
+    await splitFile(
+      set,
+      get,
+      fileId,
+      {
+        method: "nmf",
+        labels: Array.from({ length: parts }, (_, i) => `part ${i + 1}`),
+        busyMessage: `Splitting into ${parts} parts...`,
+        stepLabel: "Split (NMF)",
+        stackLabel: `${baseLabel}: ${parts} parts`,
+      },
+      async () => {
+        const fboData = await readCurrentPackedData(originalFile);
+        if (!fboData) throw new Error("Could not read the file's current state.");
+        const result = await host.analysis.nmf(fboData, bandLayout(spectrogramData), parts);
+        return Promise.all(result.parts.map((part) => deriveSpectrogramData(spectrogramData, part)));
+      },
+    );
   },
   promptStackFiles: async () => {
     const openIds = get().openFileIds;
@@ -2760,62 +2920,57 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     const stemNames = ["drums", "bass", "other", "vocals"];
     const baseLabel = stripExtensionForLabel(originalFile.displayName);
-    const stemIds = createStemPlaceholders(set, get, fileId, stemNames, "Separating stems (AI)…");
-
-    let audioContext: AudioContext | null = null;
     try {
-      // Step 1: Synthesize the current painted state via Gaborator → get audio channels
-      const channels = await currentFileAudio(originalFile);
-      if (!channels) throw new Error("Could not read current spectrogram state");
-
-      // Step 2: AI-separate the synthesized audio into stems
-      const stems = await host.analysis.aiSeparate(channels, spectrogramData.sampleRate);
-
-      // Step 3: Re-analyse each stem with Gaborator → SpectrogramData → new file entry
-      const analysisParams = { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq };
-      audioContext = new AudioContext({ sampleRate: spectrogramData.sampleRate });
-
-      for (let i = 0; i < stemNames.length; i++) {
-        const stemChannels = stems[stemNames[i]];
-        if (!stemChannels) continue;
-
-        const numSamples = stemChannels[0].length;
-        const audioBuffer = audioContext.createBuffer(stemChannels.length, numSamples, spectrogramData.sampleRate);
-        for (let ch = 0; ch < stemChannels.length; ch++) {
-          audioBuffer.copyToChannel(new Float32Array(stemChannels[ch]), ch);
-        }
-
-        const result = await host.analysis.analyseBuffer(audioBuffer, {
-          ...analysisParams,
-          maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
-        });
-
-        updateOpenFile(stemIds[i], {
-          // From analysisParams, not the current global setting — a stem has to
-          // record the resolution it was actually analysed at, or it stops
-          // lining up with the file it was split from.
-          spectrogramData: await spectrogramFromAnalysis(result, analysisParams),
-        });
-      }
-
-      audioContext.close();
-      audioContext = null;
-    } catch (error) {
-      audioContext?.close();
-      console.error("AI separation failed:", error);
-      notifications.show({
-        title: "AI separation failed",
-        message: `${error instanceof Error ? error.message : "Unknown error"}`,
-        color: "red",
-      });
-      discardFiles(set, stemIds);
+      await splitFile(
+        set,
+        get,
+        fileId,
+        {
+          method: "ai",
+          labels: stemNames,
+          busyMessage: "Separating stems (AI)…",
+          stepLabel: "Split (AI)",
+          stackLabel: `${baseLabel}: drums / bass / other / vocals`,
+        },
+        async () => {
+          // The painted state as audio, separated, and each stem analysed
+          // again on the file's grid.
+          const channels = await currentFileAudio(originalFile);
+          if (!channels) throw new Error("Could not read current spectrogram state");
+          const stems = await host.analysis.aiSeparate(channels, spectrogramData.sampleRate);
+          // From the file's analysis, not the current global setting — a stem
+          // has to record the resolution it was actually analysed at, or it
+          // stops lining up with the file it was split from.
+          const analysisParams = { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq };
+          const audioContext = new AudioContext({ sampleRate: spectrogramData.sampleRate });
+          try {
+            const parts: SpectrogramData[] = [];
+            for (const name of stemNames) {
+              const stemChannels = stems[name];
+              if (!stemChannels) throw new Error(`The separator returned no ${name} stem.`);
+              const audioBuffer = audioContext.createBuffer(
+                stemChannels.length,
+                stemChannels[0].length,
+                spectrogramData.sampleRate,
+              );
+              for (let ch = 0; ch < stemChannels.length; ch++) {
+                audioBuffer.copyToChannel(new Float32Array(stemChannels[ch]), ch);
+              }
+              const result = await host.analysis.analyseBuffer(audioBuffer, {
+                ...analysisParams,
+                maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
+              });
+              parts.push(await spectrogramFromAnalysis(result, analysisParams));
+            }
+            return parts;
+          } finally {
+            void audioContext.close();
+          }
+        },
+      );
+    } finally {
       aiSeparatingFileIds.delete(fileId);
-      return;
     }
-
-    clearLoading(set, stemIds);
-    registerLayerStack(get, "ai", fileId, stemIds, `${baseLabel}: drums / bass / other / vocals`);
-    aiSeparatingFileIds.delete(fileId);
   },
   saveActiveFile: async () => {
     const state = get();

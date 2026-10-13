@@ -11,6 +11,8 @@ export interface TruthPoint {
 export interface TruthReading {
   pixel: number;
   store: number;
+  /** The store's magnitude in each channel. */
+  storeChannels: [number, number];
   original: number;
   canvas: number | null;
 }
@@ -57,6 +59,7 @@ export async function readTruth(fileId: string, points: TruthPoint[]): Promise<T
     return {
       pixel,
       store: louder(current, i),
+      storeChannels: [current[i * 4], current[i * 4 + 2]],
       original: louder(original, i),
       canvas: canvas ? louder(canvas, i) : null,
     };
