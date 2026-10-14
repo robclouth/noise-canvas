@@ -216,4 +216,22 @@ describe("a file's layered history", () => {
     expect(host.names).toEqual({ song: undefined });
     expect(history.canUndo()).toBe(false);
   });
+
+  it("takes in layers a file showed before its history, as one step undo can take back", async () => {
+    const host = new FakeHost("song");
+    host.shown = ["song", "perc"];
+    host.history("perc").paint("p1");
+    const history = new LayeredHistory("song", host);
+    await history.load();
+    expect(history.layers()).toEqual([
+      { layerId: "song", nodeId: "song-root" },
+      { layerId: "perc", nodeId: "p1" },
+    ]);
+
+    await history.undo();
+    expect(host.shown).toEqual(["song"]);
+    await history.redo();
+    expect(host.shown).toEqual(["song", "perc"]);
+    expect(host.history("perc").currentId).toBe("p1");
+  });
 });

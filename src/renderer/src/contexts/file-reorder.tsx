@@ -134,11 +134,17 @@ export function FileReorderProvider({
       const container = containerRef.current;
       if (!container) return;
       ghost?.follow(pointerYRef.current - startYRef.current);
-      const { minimizedFileIds, openFileIds, stackOfLayer } = useStore.getState();
-      const layerIds = openFileIds.filter((id) => id !== draggingFileId && !minimizedFileIds.includes(id));
+      const { minimizedFileIds, openFileIds, stackOfLayer, layerStacks } = useStore.getState();
+      // A file's own layers are no group to join, and they move with it.
+      const joinable = Object.fromEntries(
+        Object.entries(stackOfLayer).filter(([, stackId]) => !layerStacks[stackId]?.ownerId),
+      );
+      const draggedStack = layerStacks[stackOfLayer[draggingFileId] ?? ""];
+      const moving = draggedStack?.ownerId ? draggedStack.layerIds : [draggingFileId];
+      const layerIds = openFileIds.filter((id) => !moving.includes(id) && !minimizedFileIds.includes(id));
       const target = resolveFileDrop(
         pointerYRef.current,
-        measureLayers(layerIds, stackOfLayer),
+        measureLayers(layerIds, joinable),
         container.getBoundingClientRect().top,
       );
       targetRef.current = target;

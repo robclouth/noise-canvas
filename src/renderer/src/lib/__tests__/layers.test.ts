@@ -5,7 +5,6 @@ import {
   migrateLayerStacks,
   getLayerSegments,
   selectLayerStack,
-  stackMethodLabel,
   type LayerStacksState,
 } from "../../store/layers";
 import type { State, ZustandGet, ZustandSet } from "../../store/types";
@@ -167,23 +166,18 @@ describe("getLayerSegments", () => {
   });
 });
 
-describe("stackMethodLabel", () => {
-  it("names each method", () => {
-    expect(stackMethodLabel("hpss")).toBe("HPSS");
-    expect(stackMethodLabel("nmf")).toBe("NMF");
-    expect(stackMethodLabel("ai")).toBe("AI stems");
-    expect(stackMethodLabel("user")).toBe("Stack");
-  });
-});
-
 describe("saved layer stacks", () => {
   it("converts group members and supplies an overlaid layout", () => {
     expect(migrateLayerStacks({ old: { id: "old", memberIds: ["a", "b"], label: "parts" } })).toEqual({
-      old: { id: "old", layerIds: ["a", "b"], label: "parts", layout: "overlaid" },
+      old: { id: "old", layerIds: ["a", "b"], label: "parts", layout: "overlaid", ownerId: "a" },
     });
   });
-  it("preserves the layout and layers of a current stack", () => {
-    const saved = { current: { layerIds: ["a"], layout: "stacked" } };
+  it("preserves the layout, layers and owner of a current stack", () => {
+    const saved = { current: { layerIds: ["a", "b"], layout: "stacked", ownerId: "b" } };
     expect(migrateLayerStacks(saved)).toEqual(saved);
+  });
+  it("gives a stack of separate files its first layer as owner", () => {
+    const saved = { group: { layerIds: ["x", "y"], layout: "overlaid", originId: null } };
+    expect(migrateLayerStacks(saved)).toEqual({ group: { ...saved.group, ownerId: "x" } });
   });
 });

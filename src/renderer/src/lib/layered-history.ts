@@ -84,6 +84,7 @@ export class LayeredHistory {
         await this.host.writeTree(this.ownerId, JSON.stringify(this.tree));
       }
       if (this.disposed) return;
+      await this.adoptShownLayers();
       this.watch();
       this.reconcile();
       this.host.nameLayers(this.ownerId, this.layers());
@@ -249,6 +250,26 @@ export class LayeredHistory {
     if (layers.some((ref) => ref.layerId === layerId && ref.nodeId === nodeId)) return;
     addStep(tree, { kind: "edit", layerId }, withLayerAt(layers, layerId, nodeId));
     this.changed();
+  }
+
+  /**
+   * Records layers the file shows but no step names, at the node each is at,
+   * as one step: a file whose layers came before its layered history.
+   */
+  private async adoptShownLayers(): Promise<void> {
+    const tree = this.tree;
+    if (!tree) return;
+    const named = new Set(currentLayers(tree).map((ref) => ref.layerId));
+    const extra = this.host.shownLayers(this.ownerId).filter((layerId) => !named.has(layerId));
+    if (extra.length === 0) return;
+    const adopted: LayerRef[] = [];
+    for (const layerId of extra) {
+      const history = this.host.historyOf(layerId);
+      await history.initialize();
+      adopted.push({ layerId, nodeId: history.getManifest()?.currentId ?? null });
+    }
+    addStep(tree, { kind: "layers", label: "Layers" }, [...currentLayers(tree), ...adopted]);
+    this.scheduleWrite();
   }
 
   /** Records, as steps, any layer that moved while this history was not listening. */

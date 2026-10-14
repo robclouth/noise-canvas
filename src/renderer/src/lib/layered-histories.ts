@@ -59,6 +59,7 @@ export function getLayeredHistory(ownerId: string): LayeredHistory {
   if (!history) {
     history = new LayeredHistory(ownerId, appHost);
     histories.set(ownerId, history);
+    useStore.getState().markLayeredFile(ownerId);
     void history.load().catch((error: unknown) => console.error("Loading a layered history failed:", error));
   }
   return history;

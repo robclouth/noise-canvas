@@ -3,7 +3,7 @@
 // layer, and the two must add back up to the original at every point. Undo
 // must put the original back as a single layer; redo must bring both parts back.
 //
-// Usage: node scripts/drive/probe-split.mjs [--seconds 285] [--no-build] [--log keep.log]
+// Usage: node scripts/drive/probe-split.mjs [--seconds 285] [--window-blocks n] [--no-build] [--log keep.log]
 import { copyFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,7 +23,8 @@ copyFileSync(writeNoise(join(audioDir, `long-${SECONDS}s.wav`), SECONDS, 7), lon
 const points = [];
 for (let i = 0; i < 300; i++) points.push({ f: 0.05 + (0.9 * i) / 299, p: 0.15 + (0.7 * ((i * 37) % 100)) / 100 });
 
-const env = build({ skip: args.includes("--no-build") });
+const windowBlocks = option("window-blocks", undefined);
+const env = build({ skip: args.includes("--no-build"), windowBlocks });
 const { app, page, profile, logPath } = await launch(env);
 let failed = false;
 const fail = (message) => {
@@ -56,7 +57,7 @@ try {
   const read = async (id) =>
     (await page.evaluate(({ id, points }) => globalThis.__readTruth(id, points), { id, points })).map((r) => r.store);
   const differing = (a, b) => a.reduce((n, value, i) => n + (Object.is(value, b[i]) ? 0 : 1), 0);
-  const waitFor = async (id, want, label) => {
+  const waitFor = async (id, want, label, before) => {
     for (let i = 0; i < 240; i++) {
       const now = await read(id).catch(() => null);
       if (now && differing(now, want) === 0) return console.log(`${label}: every point matches`);
@@ -64,6 +65,22 @@ try {
     }
     const now = await read(id).catch(() => null);
     fail(`${label}: ${now ? differing(now, want) : "all"} of ${want.length} points differ`);
+    if (!now) return;
+    // Which points, and whether each still holds the state from before the step.
+    const wrong = want.map((value, i) => i).filter((i) => !Object.is(now[i], want[i]));
+    const pixels = await page.evaluate(({ id, points }) => globalThis.__readTruth(id, points, { history: true }), {
+      id,
+      points,
+    });
+    const fromHistory = wrong.filter((i) => Object.is(pixels[i].history, want[i])).length;
+    console.log(`  the state rebuilt from history matches the wanted value at ${fromHistory} of ${wrong.length}`);
+    const stale = before ? wrong.filter((i) => Object.is(now[i], before[i])).length : null;
+    console.log(`  ${stale === null ? "" : `${stale} of ${wrong.length} hold the state before the step; `}first:`);
+    for (const i of wrong.slice(0, 8)) {
+      console.log(
+        `    point ${i} f=${points[i].f.toFixed(3)} p=${points[i].p.toFixed(3)} pixel=${pixels[i].pixel} want=${want[i]} got=${now[i]} history=${pixels[i].history}${before ? ` before=${before[i]}` : ""}`,
+      );
+    }
   };
   const send = (channel) =>
     app.evaluate(({ BrowserWindow }, c) => BrowserWindow.getAllWindows()[0].webContents.send(c), channel);
@@ -110,7 +127,7 @@ try {
   for (let i = 0; i < 400 && (await state()).open.includes(layer); i++) await sleep(100);
   const undone = await state();
   if (undone.open.includes(layer) || !undone.detached.includes(layer)) fail("undo did not take the layer away");
-  await waitFor(owner, original, "undo, the file");
+  await waitFor(owner, original, "undo, the file", harmonic);
 
   await send("redo");
   for (let i = 0; i < 1200 && !(await state()).open.includes(layer); i++) await sleep(100);
@@ -148,7 +165,7 @@ try {
   await send("undo");
   for (let i = 0; i < 1200 && !(await state()).open.includes(layer); i++) await sleep(100);
   await settle();
-  await waitFor(owner, harmonic, "undo the merge, the harmonic part");
+  await waitFor(owner, harmonic, "undo the merge, the harmonic part", mergedValues);
   await waitFor(layer, percussive, "undo the merge, the percussive part");
   await send("redo");
   for (let i = 0; i < 400 && (await state()).open.includes(layer); i++) await sleep(100);

@@ -42,7 +42,10 @@ export type LayerStack = {
   layout: LayerStackLayout;
 };
 
-/** Converts persisted file groups and supplies the layout of a saved stack. */
+/**
+ * Converts persisted file groups, supplies the layout of a saved stack, and
+ * makes every stack a file with layers, owned by its first layer.
+ */
 export function migrateLayerStacks(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object") return {};
   const result: Record<string, unknown> = {};
@@ -51,10 +54,13 @@ export function migrateLayerStacks(value: unknown): Record<string, unknown> {
     const { memberIds, ...stack } = entry as Record<string, unknown>;
     const layerIds = stack.layerIds ?? memberIds;
     if (!Array.isArray(layerIds)) continue;
+    const kept = layerIds.filter((layerId): layerId is string => typeof layerId === "string");
+    const ownerId = typeof stack.ownerId === "string" ? stack.ownerId : kept[0];
     result[id] = {
       ...stack,
-      layerIds: layerIds.filter((layerId): layerId is string => typeof layerId === "string"),
+      layerIds: kept,
       layout: stack.layout ?? DEFAULT_LAYER_STACK_LAYOUT,
+      ...(ownerId ? { ownerId } : {}),
     };
   }
   return result;
@@ -81,6 +87,8 @@ export interface LayerStacksState {
   layerNames: Record<string, string>;
   /** Sets the tab names of a file's layers, clearing those the step gave none. */
   setLayerNames: (layers: { layerId: string; name?: string }[]) => void;
+  /** Records that `fileId` keeps a layered history. */
+  markLayeredFile: (fileId: string) => void;
   createLayerStack: (
     stack: Omit<LayerStack, "id" | "syncView" | "layout"> & { syncView?: boolean; layout?: LayerStackLayout },
   ) => string;
@@ -149,20 +157,6 @@ export function selectStackLayerIds(state: Pick<State, "layerStacks" | "stackOfL
   return selectLayerStack(state, fileId)?.layerIds ?? [fileId];
 }
 
-/** How a stack's method reads in the UI. */
-export function stackMethodLabel(method: LayerStackMethod): string {
-  switch (method) {
-    case "hpss":
-      return "HPSS";
-    case "ai":
-      return "AI stems";
-    case "nmf":
-      return "NMF";
-    case "user":
-      return "Stack";
-  }
-}
-
 export type LayerSegment = {
   /** Null for layers that belong to no stack. */
   stackId: string | null;
@@ -197,6 +191,15 @@ export const createLayerStacksSlice = (set: ZustandSet, get: ZustandGet): LayerS
   detachedLayers: {},
   layeredFiles: {},
   layerNames: {},
+
+  markLayeredFile: (fileId) => {
+    if (get().layeredFiles[fileId]) return;
+    set(
+      produce((state: State) => {
+        state.layeredFiles[fileId] = true;
+      }),
+    );
+  },
 
   setLayerNames: (layers) => {
     set(

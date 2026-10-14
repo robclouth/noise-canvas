@@ -15,7 +15,7 @@ vi.mock("../modals", () => ({
   openNewFilePrompt: vi.fn(),
   openInsertSilencePrompt: vi.fn(),
   openSetLengthPrompt: vi.fn(),
-  openStackFilesPrompt: vi.fn(),
+  openAddFilesAsLayersPrompt: vi.fn(),
   openReanalyzePrompt: vi.fn(),
 }));
 
@@ -72,82 +72,6 @@ function makeStore(openFileIds: string[]) {
 
 beforeEach(() => {
   for (const id of Object.keys(openFiles)) delete openFiles[id];
-});
-
-describe("grouping files by hand", () => {
-  it("brackets the picked files and indexes each back to the stack", () => {
-    const get = makeStore(["a", "b", "c"]);
-
-    get().stackFiles(["a", "c"]);
-
-    const stackId = get().stackOfLayer["a"];
-    expect(stackId).toBeDefined();
-    expect(get().layerStacks[stackId].layerIds).toEqual(["a", "c"]);
-    expect(get().layerStacks[stackId].method).toBe("user");
-    expect(get().layerStacks[stackId].originId).toBeNull();
-  });
-
-  it("moves the layers next to each other, since the bracket is one run", () => {
-    const get = makeStore(["a", "b", "c", "d"]);
-
-    get().stackFiles(["b", "d"]);
-
-    expect(get().openFileIds).toEqual(["a", "b", "d", "c"]);
-  });
-
-  it("orders the layers by the canvas, not by the order they were picked", () => {
-    const get = makeStore(["a", "b", "c"]);
-
-    get().stackFiles(["c", "a"]);
-
-    expect(get().layerStacks[get().stackOfLayer["a"]].layerIds).toEqual(["a", "c"]);
-  });
-
-  it("gives every layer the same hue", () => {
-    const get = makeStore(["a", "b"]);
-
-    get().stackFiles(["a", "b"]);
-
-    const stack = get().layerStacks[get().stackOfLayer["a"]];
-    expect(get().stackOfLayer["b"]).toBe(stack.id);
-    expect(stack.hue).toBeGreaterThanOrEqual(0);
-  });
-
-  it("takes a file out of the stack it was already in", () => {
-    const get = makeStore(["a", "b", "c", "d"]);
-    const first = get().createLayerStack({
-      method: "nmf",
-      label: "loop",
-      originId: "a",
-      layerIds: ["a", "b"],
-      hue: 200,
-    });
-
-    get().stackFiles(["b", "c"]);
-
-    // 'a' is left holding the old stack on its own, which is a stack still.
-    expect(get().layerStacks[first].layerIds).toEqual(["a"]);
-    expect(get().layerStacks[get().stackOfLayer["b"]].layerIds).toEqual(["b", "c"]);
-  });
-
-  it("brackets a single file, so more can be dragged in later", () => {
-    const get = makeStore(["a", "b"]);
-
-    get().stackFiles(["a"]);
-
-    const stackId = get().stackOfLayer["a"];
-    expect(get().layerStacks[stackId].layerIds).toEqual(["a"]);
-    expect(get().layerStacks[stackId].label).toBe("a");
-  });
-
-  it("does nothing when none of the picked files are open", () => {
-    const get = makeStore(["a", "b"]);
-
-    get().stackFiles(["not-open"]);
-
-    expect(get().layerStacks).toEqual({});
-    expect(get().openFileIds).toEqual(["a", "b"]);
-  });
 });
 
 /** A store with `layers` bracketed as one stack, plus loose files around them. */
@@ -281,10 +205,53 @@ describe("dropping a dragged file", () => {
   });
 });
 
+describe("dragging around a file with layers", () => {
+  /** "song" owns layers "song" and "perc"; "loose" and "tail" are files of their own. */
+  function makeLayered() {
+    const get = makeStore(["loose", "song", "perc", "tail"]);
+    const stackId = get().createLayerStack({
+      method: "hpss",
+      label: "song",
+      originId: "song",
+      layerIds: ["song", "perc"],
+      hue: 20,
+      ownerId: "song",
+    });
+    return { get, stackId };
+  }
+
+  it("never joins another file's layers, and lands before that file", () => {
+    const { get, stackId } = makeLayered();
+
+    get().dropFile("tail", "perc", stackId);
+
+    expect(get().openFileIds).toEqual(["loose", "tail", "song", "perc"]);
+    expect(get().stackOfLayer["tail"]).toBeUndefined();
+    expect(get().layerStacks[stackId].layerIds).toEqual(["song", "perc"]);
+  });
+
+  it("moves every layer of a file together", () => {
+    const { get, stackId } = makeLayered();
+
+    get().dropFile("perc", null, null);
+
+    expect(get().openFileIds).toEqual(["loose", "tail", "song", "perc"]);
+    expect(get().layerStacks[stackId].layerIds).toEqual(["song", "perc"]);
+    expect(get().stackOfLayer["perc"]).toBe(stackId);
+  });
+
+  it("does nothing when a file is dropped among its own layers", () => {
+    const { get } = makeLayered();
+
+    get().dropFile("song", "perc", null);
+
+    expect(get().openFileIds).toEqual(["loose", "song", "perc", "tail"]);
+  });
+});
+
 describe("soloing a layer", () => {
   it("releases the other solos in its stack", () => {
-    const get = makeStore(["a", "b", "c"]);
-    get().stackFiles(["a", "b", "c"]);
+    const { get } = makeGrouped(["a", "b", "c"], ["a", "b", "c"]);
 
     get().setFileSoloed("a", true);
     get().setFileSoloed("b", true);
@@ -294,9 +261,8 @@ describe("soloing a layer", () => {
   });
 
   it("leaves a solo in another stack alone", () => {
-    const get = makeStore(["a", "b", "c", "d"]);
-    get().stackFiles(["a", "b"]);
-    get().stackFiles(["c", "d"]);
+    const { get } = makeGrouped(["a", "b", "c", "d"], ["a", "b"]);
+    get().createLayerStack({ method: "user", label: "other", originId: null, layerIds: ["c", "d"], hue: 120 });
 
     get().setFileSoloed("a", true);
     get().setFileSoloed("c", true);
@@ -306,8 +272,7 @@ describe("soloing a layer", () => {
   });
 
   it("releases only itself when turned off", () => {
-    const get = makeStore(["a", "b"]);
-    get().stackFiles(["a", "b"]);
+    const { get } = makeGrouped(["a", "b"], ["a", "b"]);
 
     get().setFileSoloed("a", true);
     get().setFileSoloed("a", false);

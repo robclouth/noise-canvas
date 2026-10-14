@@ -3,7 +3,7 @@ import type { FileRendererHandle } from "../lib/file-renderer-types";
 import { CoarseStripBuilder, coarseStripLevel } from "../lib/coarse-strip";
 import {
   openConfirm,
-  openStackFilesPrompt,
+  openAddFilesAsLayersPrompt,
   openInsertSilencePrompt,
   openNewFilePrompt,
   openSetLengthPrompt,
@@ -17,6 +17,7 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
 import { diag } from "../lib/diag-log";
+import { layerTabLabel } from "../lib/layer-tab-label";
 import {
   canvasExtraSlotBlocks,
   canvasPaintExtraSlotBlocks,
@@ -101,7 +102,7 @@ import {
 } from "../lib/raw-file";
 import { packedTextureSizeOf } from "../lib/canvas-view";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
-import { gatherFileIds, gatherFileGroups, reorderFileIds } from "../lib/file-reorder";
+import { gatherFileGroups, reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
 import {
   destroyHistoryManager,
@@ -110,6 +111,7 @@ import {
   type PreparedDelta,
 } from "../lib/history-manager";
 import type { LayeredHistory } from "../lib/layered-history";
+import type { LayerRef } from "../lib/file-tree";
 import { serializeEditCommand, serializeFileTask } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
@@ -138,6 +140,7 @@ interface SynthesisAudioResult {
   onsetBandMax?: Float32Array;
 }
 import {
+  selectLayerOwner,
   selectLayerStack,
   selectStackLayerIds,
   stackColor,
@@ -182,10 +185,14 @@ export interface FilesState {
   aiSeparateFile: (fileId: string) => Promise<void>;
   nmfFile: (fileId: string, numComponents: number) => Promise<void>;
   /** Sum the given files into a new one, leaving the originals open. */
-  /** Asks which open files to bracket together, then brackets them. */
-  promptStackFiles: () => Promise<void>;
-  /** Brackets the given open files together, moving them into one run of lanes. */
-  stackFiles: (fileIds: string[]) => void;
+  /** Asks which other open files to copy into the active file as layers, then copies them. */
+  promptAddFilesAsLayers: () => Promise<void>;
+  /** Copies `sourceIds` into `fileId`'s file as layers, as one step undo takes back. The sources stay open. */
+  addFilesAsLayers: (fileId: string, sourceIds: string[]) => Promise<void>;
+  /** Makes a new file from each layer of `fileId`'s file, leaving the file as it is. */
+  copyLayersToFiles: (fileId: string) => Promise<void>;
+  /** Analyses the audio at `diskPath` into a new layer of `fileId`'s file, as one step undo takes back. */
+  openFileAsLayer: (fileId: string, diskPath: string) => Promise<void>;
   /**
    * Adds a silent layer on `fileId`'s grid, in its stack, making one when the
    * file has none. The shared grid is what keeps a merge an exact sum.
@@ -197,8 +204,12 @@ export interface FilesState {
   showFileLayers: (ownerId: string, layerIds: string[]) => Promise<boolean>;
   /** Puts the layers of `ownerId`'s file in this tab order. */
   orderFileLayers: (ownerId: string, order: string[]) => void;
-  /** Drops the bracket around the active file's group, if it is in one. */
-  unstackActiveFile: () => void;
+  /**
+   * Takes a layer out of its file as one step undo takes back. The file's own
+   * first layer takes on the next layer's sound and name instead, so the file
+   * keeps its name, path and history.
+   */
+  removeLayer: (fileId: string) => Promise<void>;
   mergeFiles: (fileIds: string[]) => Promise<void>;
   mergeLayerStack: (stackId: string) => Promise<void>;
   /** Close every member of a group, after one confirmation covering all of them. */
@@ -1530,6 +1541,57 @@ async function snapshotFileAudio(fileId: string): Promise<FileAudioSnapshot | nu
   });
 }
 
+/**
+ * What a save writes: a file's audio, or for a file with layers the plain sum
+ * of every layer's, muted or not. `nodes` are the states it holds.
+ */
+type SaveAudio = {
+  channels: Float32Array[];
+  sampleRate: number;
+  nodes: { fileId: string; nodeId: string | null }[];
+  mutedLayers: number;
+};
+
+/** The file a save from `fileId` writes: the file a layer belongs to. */
+function saveTargetOf(state: State, fileId: string): string {
+  return selectLayerStack(state, fileId)?.ownerId ?? fileId;
+}
+
+/** The audio a save of `fileId` writes. Null when a layer has no audio yet. */
+export async function snapshotSaveAudio(get: ZustandGet, fileId: string): Promise<SaveAudio | null> {
+  const state = get();
+  const layerIds = selectLayerStack(state, fileId)?.ownerId === fileId ? selectStackLayerIds(state, fileId) : [fileId];
+  const snapshots: FileAudioSnapshot[] = [];
+  for (const layerId of layerIds) {
+    const snapshot = await snapshotFileAudio(layerId);
+    if (!snapshot) return null;
+    snapshots.push(snapshot);
+  }
+  const nodes = layerIds.map((layerId, i) => ({ fileId: layerId, nodeId: snapshots[i].nodeId }));
+  if (snapshots.length === 1) {
+    return { channels: snapshots[0].channels, sampleRate: snapshots[0].sampleRate, nodes, mutedLayers: 0 };
+  }
+  const sampleRate = Math.max(...snapshots.map((snapshot) => snapshot.sampleRate));
+  const resampled = await Promise.all(
+    snapshots.map((snapshot) => resampleChannels(snapshot.channels, snapshot.sampleRate, sampleRate)),
+  );
+  const mutedLayers = layerIds.filter((layerId) => state.filesMuted[layerId]).length;
+  return { channels: mixdown(resampled), sampleRate, nodes, mutedLayers };
+}
+
+/** Marks every state a save wrote as the saved one. */
+async function markSaveWritten(audio: SaveAudio): Promise<void> {
+  for (const { fileId, nodeId } of audio.nodes) await getHistoryManager(fileId).markSaved(nodeId ?? undefined);
+}
+
+/** What a save notice adds about layers the listener had muted. */
+function mutedNote(audio: SaveAudio): string {
+  if (audio.mutedLayers === 0) return "";
+  return audio.mutedLayers === 1
+    ? " The muted layer is included."
+    : ` The ${audio.mutedLayers} muted layers are included.`;
+}
+
 // Insert placeholder files for a pending split directly after their source so
 // they appear with a spinner while the separator runs. The caller fills in each
 // file's spectrogramData when it returns, or calls discardFiles on failure.
@@ -2233,6 +2295,121 @@ async function mergeLayersInPlace(
 }
 
 /**
+ * Opens a copy of `sourceId`'s current painted state as a new file named
+ * `displayName`, after `afterId`'s lane or at the end. Returns its id, or null
+ * when the copy failed, which it reports.
+ */
+async function copyFileAsNew(
+  set: ZustandSet,
+  get: ZustandGet,
+  sourceId: string,
+  displayName: string,
+  { afterId, loadingMessage }: { afterId?: string; loadingMessage: string },
+): Promise<string | null> {
+  const originalFile = openFiles[sourceId];
+  const originalSpec = originalFile?.spectrogramData;
+  if (!originalFile || !originalSpec) return null;
+
+  const newFileId = generateFileId();
+  const newFilePath = makeManagedFilePath(newFileId);
+
+  openFiles[newFileId] = {
+    id: newFileId,
+    filePath: newFilePath,
+    displayName,
+    unprojectedPaint: originalFile.unprojectedPaint,
+    onsets: originalFile.onsets?.slice(),
+    onsetReference: originalFile.onsetReference
+      ? {
+          odfMax: originalFile.onsetReference.odfMax,
+          bandMax: originalFile.onsetReference.bandMax.slice(),
+        }
+      : undefined,
+  };
+
+  const sourceBpm = get().filepathsBpm[originalFile.filePath];
+
+  set(
+    produce((state: State) => {
+      const after = afterId ? state.openFileIds.indexOf(afterId) : -1;
+      if (after >= 0) state.openFileIds.splice(after + 1, 0, newFileId);
+      else state.openFileIds.push(newFileId);
+      state.filesBandsPerOctave[newFileId] = state.filesBandsPerOctave[sourceId];
+      state.filesZoom[newFileId] = state.filesZoom[sourceId];
+      state.filesOffset[newFileId] = state.filesOffset[sourceId];
+      state.filesZoomY[newFileId] = state.filesZoomY[sourceId] ?? 0;
+      state.filesOffsetY[newFileId] = state.filesOffsetY[sourceId] ?? 0;
+      state.filesPlaybackStartTime[newFileId] = state.filesPlaybackStartTime[sourceId];
+      state.filesDirty[newFileId] = true;
+      state.persistedFilePaths[newFileId] = newFilePath;
+      state.fileDisplayNames[newFileId] = displayName;
+      if (sourceBpm !== undefined) {
+        state.filepathsBpm[newFilePath] = sourceBpm;
+      }
+      state.filesLoading[newFileId] = loadingMessage;
+    }),
+  );
+
+  try {
+    const packedData = await copyStateIntoBlocks(originalFile, newFileId, originalSpec);
+    updateOpenFile(newFileId, {
+      spectrogramData: await deriveSpectrogramData(originalSpec, packedData),
+    });
+  } catch (error) {
+    console.error("Failed to copy file: could not read the painted state", error);
+    notifications.show({
+      title: "Copy failed",
+      message: `${error instanceof Error ? error.message : "Unknown error"}`,
+      color: "red",
+    });
+    await destroyBlockStore(newFileId);
+    discardFiles(set, [newFileId]);
+    return null;
+  }
+
+  clearLoading(set, [newFileId]);
+  return newFileId;
+}
+
+/** Copies a file with layers, every layer with it, into a new file with the same layers. */
+async function duplicateLayeredFile(set: ZustandSet, get: ZustandGet, ownerId: string): Promise<void> {
+  const owner = openFiles[ownerId];
+  if (!owner || !layeredHistories) return;
+  const base = `${stripExtensionForLabel(owner.displayName)} copy`;
+  const layerIds = selectStackLayerIds(get(), ownerId);
+  const names = get().layerNames;
+  const last = layerIds[layerIds.length - 1];
+  const newOwnerId = await copyFileAsNew(set, get, ownerId, base, { afterId: last, loadingMessage: "Duplicating..." });
+  if (!newOwnerId) return;
+  const copies: LayerRef[] = [];
+  let after = newOwnerId;
+  for (const layerId of layerIds) {
+    if (layerId === ownerId) continue;
+    const layer = openFiles[layerId];
+    if (!layer) continue;
+    const name = names[layerId] ?? layerTabLabel(layer.displayName, selectLayerStack(get(), ownerId)?.label);
+    const id = await copyFileAsNew(set, get, layerId, `${base} ${name}`, {
+      afterId: after,
+      loadingMessage: "Duplicating...",
+    });
+    if (!id) continue;
+    copies.push({ layerId: id, nodeId: null, name });
+    after = id;
+  }
+  const layered = layeredHistories.get(newOwnerId);
+  await layered.load();
+  if (copies.length > 0) {
+    registerLayerStack(get, "user", newOwnerId, [newOwnerId, ...copies.map((ref) => ref.layerId)], base, newOwnerId);
+    const ownName = names[ownerId];
+    await layered.addLayersStep("Duplicate", [
+      ...layered.layers().map((ref) => (ref.layerId === newOwnerId && ownName ? { ...ref, name: ownName } : ref)),
+      ...copies,
+    ]);
+  }
+  await get().setActiveFileId(newOwnerId);
+}
+
+/**
  * Loads an open file's state from its history at the node it is on, with the
  * graphics memory check every other open runs. False when the file closed
  * meanwhile; throws when the history is empty or the file does not fit.
@@ -2486,67 +2663,22 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   duplicateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
-    const originalSpec = originalFile?.spectrogramData;
-    if (!originalFile || !originalSpec) return;
-
-    const newFileId = generateFileId();
-    const newFilePath = makeManagedFilePath(newFileId);
-    const displayName = `${stripExtensionForLabel(originalFile.displayName)} copy`;
-
-    openFiles[newFileId] = {
-      id: newFileId,
-      filePath: newFilePath,
-      displayName,
-      unprojectedPaint: originalFile.unprojectedPaint,
-      onsets: originalFile.onsets?.slice(),
-      onsetReference: originalFile.onsetReference
-        ? {
-            odfMax: originalFile.onsetReference.odfMax,
-            bandMax: originalFile.onsetReference.bandMax.slice(),
-          }
-        : undefined,
-    };
-
-    const sourceBpm = get().filepathsBpm[originalFile.filePath];
-
-    set(
-      produce((state: State) => {
-        state.openFileIds.push(newFileId);
-        state.filesBandsPerOctave[newFileId] = state.filesBandsPerOctave[fileId];
-        state.filesZoom[newFileId] = state.filesZoom[fileId];
-        state.filesOffset[newFileId] = state.filesOffset[fileId];
-        state.filesZoomY[newFileId] = state.filesZoomY[fileId] ?? 0;
-        state.filesOffsetY[newFileId] = state.filesOffsetY[fileId] ?? 0;
-        state.filesPlaybackStartTime[newFileId] = state.filesPlaybackStartTime[fileId];
-        state.filesDirty[newFileId] = true;
-        state.persistedFilePaths[newFileId] = newFilePath;
-        state.fileDisplayNames[newFileId] = displayName;
-        if (sourceBpm !== undefined) {
-          state.filepathsBpm[newFilePath] = sourceBpm;
-        }
-        state.filesLoading[newFileId] = "Duplicating...";
-      }),
-    );
-
-    try {
-      const packedData = await copyStateIntoBlocks(originalFile, newFileId, originalSpec);
-      updateOpenFile(newFileId, {
-        spectrogramData: await deriveSpectrogramData(originalSpec, packedData),
-      });
-    } catch (error) {
-      console.error("Failed to duplicate file: could not read the painted state", error);
-      notifications.show({
-        title: "Duplicate failed",
-        message: `${error instanceof Error ? error.message : "Unknown error"}`,
-        color: "red",
-      });
-      await destroyBlockStore(newFileId);
-      discardFiles(set, [newFileId]);
+    if (!originalFile) return;
+    const ownerId = selectLayerStack(get(), fileId)?.ownerId;
+    if (ownerId) {
+      await duplicateLayeredFile(set, get, ownerId);
       return;
     }
-
-    clearLoading(set, [newFileId]);
-    await get().setActiveFileId(newFileId);
+    const newFileId = await copyFileAsNew(
+      set,
+      get,
+      fileId,
+      `${stripExtensionForLabel(originalFile.displayName)} copy`,
+      {
+        loadingMessage: "Duplicating...",
+      },
+    );
+    if (newFileId) await get().setActiveFileId(newFileId);
   },
   hpssFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
@@ -2600,20 +2732,30 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       },
     );
   },
-  promptStackFiles: async () => {
-    const openIds = get().openFileIds;
-    if (openIds.length === 0) {
-      notifications.show({ title: "Nothing to stack", message: "Open a file first.", color: "yellow" });
+  promptAddFilesAsLayers: async () => {
+    const activeFileId = get().activeFileId;
+    if (!activeFileId) {
+      notifications.show({ title: "No file to add layers to", message: "Open a file first.", color: "yellow" });
       return;
     }
-
-    const options = openIds.map((id) => ({ id, label: openFiles[id]?.displayName ?? id }));
-    const activeFileId = get().activeFileId;
+    const target = selectLayerOwner(get(), activeFileId) ?? activeFileId;
+    const ownLayers = new Set(selectStackLayerIds(get(), target));
+    const options = get()
+      .openFileIds.filter((id) => !ownLayers.has(id))
+      .map((id) => ({ id, label: openFiles[id]?.displayName ?? id }));
+    if (options.length === 0) {
+      notifications.show({
+        title: "No other files to add",
+        message: "Open another file to add it to this one as a layer.",
+        color: "yellow",
+      });
+      return;
+    }
     const picked = await new Promise<string[] | null>((resolve) => {
       let confirmed = false;
-      openStackFilesPrompt({
+      openAddFilesAsLayersPrompt({
         options,
-        initial: activeFileId ? [activeFileId] : [],
+        initial: [],
         onConfirm: (fileIds) => {
           confirmed = true;
           resolve(fileIds);
@@ -2623,31 +2765,134 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
       });
     });
-    if (picked) get().stackFiles(picked);
+    if (picked) await get().addFilesAsLayers(target, picked);
   },
-  unstackActiveFile: () => {
-    const fileId = get().activeFileId;
-    const stackId = fileId ? get().stackOfLayer[fileId] : undefined;
-    if (stackId) get().unstackLayers(stackId);
-  },
-  stackFiles: (fileIds: string[]) => {
-    const openIds = get().openFileIds;
-    const wanted = new Set(fileIds);
-    // In canvas order, not the order they were ticked, so the bracket runs down
-    // the lanes the way they already read.
-    const layerIds = openIds.filter((id) => wanted.has(id));
-    if (layerIds.length === 0) return;
-
-    for (const id of layerIds) get().removeLayerFromStack(id);
+  addFilesAsLayers: async (fileId, sourceIds) => {
+    const stack = selectLayerStack(get(), fileId);
+    // A stack of separate files has no file to add layers to.
+    const ownerId = stack ? stack.ownerId : fileId;
+    const layered = ownerId && layeredHistories ? layeredHistories.get(ownerId) : null;
+    const owner = ownerId ? openFiles[ownerId] : undefined;
+    if (!layered || !ownerId || !owner) return;
+    await layered.load();
+    const run = selectStackLayerIds(get(), ownerId);
+    let after = run[run.length - 1];
+    const added: { layerId: string; name: string }[] = [];
+    for (const sourceId of sourceIds) {
+      const source = openFiles[sourceId];
+      if (!source || run.includes(sourceId)) continue;
+      const name = stripExtensionForLabel(source.displayName);
+      const id = await copyFileAsNew(set, get, sourceId, `${stripExtensionForLabel(owner.displayName)} ${name}`, {
+        afterId: after,
+        loadingMessage: "Adding layer...",
+      });
+      if (!id) continue;
+      added.push({ layerId: id, name });
+      after = id;
+    }
+    if (added.length === 0) return;
+    const current = selectLayerStack(get(), ownerId);
+    if (current) {
+      for (const { layerId } of added) get().setLayerStack(layerId, current.id, get().openFileIds);
+    } else {
+      registerLayerStack(
+        get,
+        "user",
+        ownerId,
+        [ownerId, ...added.map((layer) => layer.layerId)],
+        stripExtensionForLabel(owner.displayName),
+        ownerId,
+      );
+    }
     set(
       produce((state: State) => {
-        state.openFileIds = gatherFileIds(state.openFileIds, layerIds);
+        state.layeredFiles[ownerId] = true;
+        state.openFileIds = gatherFileGroups(state.openFileIds, state.stackOfLayer);
       }),
     );
-
-    const first = stripExtensionForLabel(openFiles[layerIds[0]]?.displayName ?? "Stack");
-    const label = layerIds.length > 1 ? `${first} + ${layerIds.length - 1} more` : first;
-    registerLayerStack(get, "user", null, layerIds, label);
+    await layered.addLayersStep(added.length === 1 ? "Add layer" : "Add layers", [
+      ...layered.layers(),
+      ...added.map(({ layerId, name }) => ({ layerId, nodeId: null, name })),
+    ]);
+    await get().setActiveFileId(added[0].layerId);
+  },
+  openFileAsLayer: async (fileId, diskPath) => {
+    if (!hasSupportedAudioExtension(diskPath)) {
+      notifications.show({
+        title: "Unsupported file",
+        message: `${host.path.basename(diskPath)} is not an audio format Noise Canvas can open.`,
+        color: "red",
+      });
+      return;
+    }
+    const ownerId = selectLayerOwner(get(), fileId) ?? fileId;
+    const owner = openFiles[ownerId];
+    const layered = layeredHistories ? layeredHistories.get(ownerId) : null;
+    if (!owner || !layered) return;
+    await layered.load();
+    const name = stripExtensionForLabel(host.path.basename(diskPath));
+    const ids = createStemPlaceholders(
+      set,
+      get,
+      selectStackLayerIds(get(), ownerId).at(-1) ?? ownerId,
+      [name],
+      "Analysing audio...",
+      stripExtensionForLabel(owner.displayName),
+    );
+    const layerId = ids[0];
+    const bandsPerOctave = owner.spectrogramData?.bandsPerOctave ?? get().bandsPerOctave;
+    try {
+      const loaded = await loadRealFileViaGaborator(layerId, diskPath, bandsPerOctave, get().minFreq);
+      if (!loaded) {
+        discardFiles(set, ids);
+        return;
+      }
+    } catch (error) {
+      console.error("Adding a file as a layer failed:", error);
+      notifications.show({
+        title: "Could not add the layer",
+        message: `${host.path.basename(diskPath)}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+      discardFiles(set, ids);
+      return;
+    }
+    clearLoading(set, ids);
+    const stack = selectLayerStack(get(), ownerId);
+    if (stack) {
+      get().setLayerStack(layerId, stack.id, get().openFileIds);
+    } else {
+      registerLayerStack(get, "user", ownerId, [ownerId, layerId], stripExtensionForLabel(owner.displayName), ownerId);
+    }
+    set(
+      produce((state: State) => {
+        state.layeredFiles[ownerId] = true;
+      }),
+    );
+    await layered.addLayersStep("Add layer", [...layered.layers(), { layerId, nodeId: null, name }]);
+    await get().setActiveFileId(layerId);
+  },
+  copyLayersToFiles: async (fileId) => {
+    const ownerId = selectLayerOwner(get(), fileId);
+    const owner = ownerId ? openFiles[ownerId] : undefined;
+    if (!ownerId || !owner) return;
+    const layerIds = selectStackLayerIds(get(), ownerId);
+    if (layerIds.length < 2) {
+      notifications.show({
+        title: "Nothing to copy",
+        message: "This file has one layer. Duplicate File copies it whole.",
+        color: "yellow",
+      });
+      return;
+    }
+    const base = stripExtensionForLabel(owner.displayName);
+    for (const layerId of layerIds) {
+      const layer = openFiles[layerId];
+      if (!layer) continue;
+      const name =
+        get().layerNames[layerId] ?? layerTabLabel(layer.displayName, selectLayerStack(get(), ownerId)?.label);
+      await copyFileAsNew(set, get, layerId, `${base} ${name}`, { loadingMessage: "Copying layer..." });
+    }
   },
   addEmptyLayer: async (fileId: string) => {
     const source = openFiles[fileId];
@@ -2804,6 +3049,62 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     set((state) => ({ openFileIds: gatherFileGroups(state.openFileIds, state.stackOfLayer) }));
     return true;
   },
+  removeLayer: async (fileId) => {
+    const ownerId = selectLayerOwner(get(), fileId);
+    const layered = ownerId && layeredHistories ? layeredHistories.get(ownerId) : null;
+    if (!layered || !ownerId) return;
+    await layered.load();
+    const layers = layered.layers();
+    if (layers.length < 2 || !layers.some((ref) => ref.layerId === fileId)) return;
+    set(
+      produce((state: State) => {
+        state.filesBusy[ownerId] = "Removing layer...";
+      }),
+    );
+    try {
+      if (fileId !== ownerId) {
+        await get().hideFileLayers(ownerId, [fileId]);
+        await layered.addLayersStep(
+          "Remove layer",
+          layers.filter((ref) => ref.layerId !== fileId),
+        );
+        return;
+      }
+      const next = layers.find((ref) => ref.layerId !== ownerId);
+      const nextFile = next ? openFiles[next.layerId] : undefined;
+      const nextSpec = nextFile?.spectrogramData;
+      if (!next || !nextFile || !nextSpec) return;
+      const packed = await readCurrentPackedData(nextFile);
+      if (!packed) throw new Error("Could not read the next layer's state.");
+      const taken = await deriveSpectrogramData(nextSpec, packed);
+      await layered.quietly([ownerId], () => replaceFileState(set, get, ownerId, taken, "Remove layer"));
+      await get().hideFileLayers(ownerId, [next.layerId]);
+      const name = next.name ?? layerTabLabel(nextFile.displayName, selectLayerStack(get(), ownerId)?.label);
+      await layered.addLayersStep(
+        "Remove layer",
+        layers
+          .filter((ref) => ref.layerId !== next.layerId)
+          .map((ref) =>
+            ref.layerId === ownerId
+              ? { layerId: ownerId, nodeId: getHistoryManager(ownerId).getCurrentId(), name }
+              : ref,
+          ),
+      );
+    } catch (error) {
+      console.error("Removing a layer failed:", error);
+      notifications.show({
+        title: "Could not remove the layer",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+    } finally {
+      set(
+        produce((state: State) => {
+          delete state.filesBusy[ownerId];
+        }),
+      );
+    }
+  },
   orderFileLayers: (ownerId, order) => {
     const stack = selectLayerStack(get(), ownerId);
     if (!stack) return;
@@ -2946,26 +3247,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   closeLayerStack: async (stackId: string) => {
     const group = get().layerStacks[stackId];
     if (!group) return;
-    // Closing a member dissolves the group once it drops below two, so the list
-    // is snapshotted before anything is removed.
-    const layerIds = [...group.layerIds];
-    const unsaved = layerIds.filter((id) => get().filesDirty[id]).length;
-    const confirmed = await new Promise<boolean>((resolve) => {
-      openConfirm({
-        title: "Close all parts",
-        message:
-          unsaved > 0
-            ? `Close all ${layerIds.length} parts of this split? ${unsaved === 1 ? "One has" : `${unsaved} have`} unsaved changes.`
-            : `Close all ${layerIds.length} parts of this split?`,
-        confirmLabel: "Close All",
-        danger: true,
-        onConfirm: () => resolve(true),
-        onCancel: () => resolve(false),
-        onClose: () => resolve(false),
-      });
-    });
-    if (!confirmed) return;
-    for (const id of layerIds) get().closeFile(id);
+    await get().tryCloseFile(group.ownerId ?? group.layerIds[0]);
   },
   aiSeparateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
@@ -3083,7 +3365,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   saveActiveFile: async () => {
     const state = get();
     if (!state.activeFileId) return;
-    const fileId = state.activeFileId;
+    const fileId = saveTargetOf(state, state.activeFileId);
     const file = openFiles[fileId];
     if (!file || !file.audioBuffer) return;
 
@@ -3106,7 +3388,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         danger: true,
         onConfirm: async () => {
           try {
-            const snapshot = await snapshotFileAudio(fileId);
+            const snapshot = await snapshotSaveAudio(get, fileId);
             if (!snapshot) {
               resolve();
               return;
@@ -3119,13 +3401,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             // Export the audio
             await host.analysis.exportAudio(snapshot.channels, filePath, snapshot.sampleRate, format);
 
-            await getHistoryManager(fileId).markSaved(snapshot.nodeId ?? undefined);
+            await markSaveWritten(snapshot);
             console.log("File saved successfully:", filePath);
 
             // Show success notification
             notifications.show({
               title: "File saved",
-              message: `Successfully saved ${truncateMiddle(fileName, 50)}`,
+              message: `Successfully saved ${truncateMiddle(fileName, 50)}.${mutedNote(snapshot)}`,
             });
           } catch (error) {
             console.error("Error saving file:", error);
@@ -3145,7 +3427,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   saveActiveFileAs: async () => {
     const state = get();
     if (!state.activeFileId) return;
-    const file = openFiles[state.activeFileId];
+    const fileId = saveTargetOf(state, state.activeFileId);
+    const file = openFiles[fileId];
     if (!file || !file.audioBuffer) return;
 
     const currentFilePath = file.filePath;
@@ -3172,7 +3455,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(savedFileName, 50);
 
     try {
-      const snapshot = await snapshotFileAudio(state.activeFileId);
+      const snapshot = await snapshotSaveAudio(get, fileId);
       if (!snapshot) return;
 
       // Determine format from file extension
@@ -3197,8 +3480,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             // its own entry).
             delete draft.filepathsBpm[oldFilePath];
           }
-          draft.persistedFilePaths[state.activeFileId!] = outputPath;
-          draft.fileDisplayNames[state.activeFileId!] = savedFileName;
+          draft.persistedFilePaths[fileId] = outputPath;
+          draft.fileDisplayNames[fileId] = savedFileName;
           // Walk in-session brushes so any sourceFile / effect file refs that
           // pointed at the old path follow the rename. On-disk presets are
           // also rewritten below (best-effort, fire-and-forget) so a preset
@@ -3214,14 +3497,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       // The active file is now a real file whose exported node matches disk.
-      await getHistoryManager(state.activeFileId!).markSaved(snapshot.nodeId ?? undefined);
+      await markSaveWritten(snapshot);
       console.log("File saved as:", outputPath);
 
       // Show success notification
 
       notifications.show({
         title: "File saved",
-        message: `Successfully saved as ${truncatedFileName}`,
+        message: `Successfully saved as ${truncatedFileName}.${mutedNote(snapshot)}`,
       });
     } catch (error) {
       console.error("Error saving file as:", error);
@@ -3236,7 +3519,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   saveActiveFileVersion: async () => {
     const state = get();
     if (!state.activeFileId) return;
-    const file = openFiles[state.activeFileId];
+    const fileId = saveTargetOf(state, state.activeFileId);
+    const file = openFiles[fileId];
     if (!file || !file.audioBuffer) return;
 
     // Versioned saves derive a new name from the source path's directory and
@@ -3271,7 +3555,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(newFileName, 50);
 
     try {
-      const snapshot = await snapshotFileAudio(state.activeFileId);
+      const snapshot = await snapshotSaveAudio(get, fileId);
       if (!snapshot) return;
 
       // Determine format from file extension
@@ -3290,8 +3574,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           if (oldBpm !== undefined) {
             draft.filepathsBpm[outputPath] = oldBpm;
           }
-          draft.persistedFilePaths[state.activeFileId!] = outputPath;
-          draft.fileDisplayNames[state.activeFileId!] = newFileName;
+          draft.persistedFilePaths[fileId] = outputPath;
+          draft.fileDisplayNames[fileId] = newFileName;
           // saveActiveFileVersion only runs for real files (the managed branch
           // bails out earlier), so oldFilePath is a normal filesystem path —
           // any in-session brush refs to it should follow the rename too.
@@ -3305,13 +3589,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       // The active file now points at the version on disk at the exported node.
-      await getHistoryManager(state.activeFileId!).markSaved(snapshot.nodeId ?? undefined);
+      await markSaveWritten(snapshot);
       console.log("File version saved:", outputPath);
 
       // Show success notification
       notifications.show({
         title: "Version saved",
-        message: `Successfully saved as ${truncatedFileName}`,
+        message: `Successfully saved as ${truncatedFileName}.${mutedNote(snapshot)}`,
       });
     } catch (error) {
       console.error("Error saving file version:", error);
@@ -3326,6 +3610,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   tryCloseFile: async (fileId: string) => {
     const file = openFiles[fileId];
     if (!file) return;
+    // A layer is part of its file, so closing it closes the file.
+    const ownerId = selectLayerStack(get(), fileId)?.ownerId;
+    if (ownerId && ownerId !== fileId) {
+      await get().tryCloseFile(ownerId);
+      return;
+    }
 
     const refs = findFileReferences(file.filePath, get().brushes);
     if (refs.length > 0) {
@@ -3345,7 +3635,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       if (!confirmed) return;
     }
 
-    if (get().filesDirty[fileId]) {
+    if (selectStackLayerIds(get(), fileId).some((id) => get().filesDirty[id])) {
       const confirmed = await new Promise<boolean>((resolve) => {
         openConfirm({
           title: "Unsaved Changes",
@@ -3374,6 +3664,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   closeFile: (fileId: string) => {
     const openFile = openFiles[fileId];
     const state = get();
+    const ownedStack = selectLayerStack(state, fileId);
+    if (ownedStack?.ownerId === fileId) {
+      for (const layerId of ownedStack.layerIds) if (layerId !== fileId) get().closeFile(layerId);
+    }
     if (state.isPlaying && state.activeFileId === fileId) {
       state.stopAudio();
     }
@@ -4793,6 +5087,23 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   setFullscreenFileId: (fileId) => set({ fullscreenFileId: fileId }),
   minimizedFileIds: [],
   setFileMinimized: (fileId, minimized) => {
+    // A file's layers go to the dock and come back together.
+    const stack = selectLayerStack(get(), fileId);
+    if (stack?.ownerId && fileId !== stack.ownerId) {
+      get().setFileMinimized(stack.ownerId, minimized);
+      return;
+    }
+    if (stack?.ownerId) {
+      for (const layerId of stack.layerIds) {
+        if (layerId === fileId) continue;
+        set(
+          produce((state: State) => {
+            if (minimized && !state.minimizedFileIds.includes(layerId)) state.minimizedFileIds.push(layerId);
+            if (!minimized) state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== layerId);
+          }),
+        );
+      }
+    }
     if (minimized) {
       const state = get();
       // Stop playback before minimizing
@@ -4830,6 +5141,25 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
   },
   dropFile: (fileId, beforeFileId, stackId) => {
+    const own = selectLayerStack(get(), fileId);
+    const before = beforeFileId ? selectLayerStack(get(), beforeFileId) : undefined;
+    if (own?.ownerId || (stackId && get().layerStacks[stackId]?.ownerId)) {
+      // A file with layers moves as one, and a drag never moves a file into or
+      // out of another file's layers.
+      const moving = own?.ownerId ? own.layerIds : [fileId];
+      if (beforeFileId && moving.includes(beforeFileId)) return;
+      set((state) => {
+        const rest = state.openFileIds.filter((id) => !moving.includes(id));
+        // Landing inside another file's layers lands before that file.
+        const anchor = before?.ownerId ? rest.find((id) => before.layerIds.includes(id)) : beforeFileId;
+        const at = anchor ? rest.indexOf(anchor) : -1;
+        const run = state.openFileIds.filter((id) => moving.includes(id));
+        return {
+          openFileIds: at < 0 ? [...rest, ...run] : [...rest.slice(0, at), ...run, ...rest.slice(at)],
+        };
+      });
+      return;
+    }
     set((state) => ({ openFileIds: reorderFileIds(state.openFileIds, fileId, beforeFileId) }));
     get().setLayerStack(fileId, stackId, get().openFileIds);
     // Membership just changed, so a group can have been left straddling another

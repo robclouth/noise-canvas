@@ -153,6 +153,14 @@ export class BlockStore implements PackedStateStore {
   private readonly overlayOnDisk = new Map<number, boolean>();
   private readonly dirty = new Map<number, Float32Array>();
   private readonly dirtyVersion = new Map<number, number>();
+  /**
+   * Counts every write of a block's coefficients. A load caches what it read
+   * only when no write landed while it read, so a read of the old bytes that
+   * finishes after a reseed or a patch can never put them back.
+   */
+  private readonly writes = new Map<number, number>();
+  /** Reseed writes not yet on disk, by block. A load waits for one before it reads. */
+  private readonly unsettled = new Map<number, Promise<void>>();
   // Arrays a flush is encoding or a read is copying off the JS thread, with
   // how many are. A patch copies such a block before writing.
   private readonly pinned = new Map<Float32Array, number>();
@@ -246,7 +254,7 @@ export class BlockStore implements PackedStateStore {
     for (let index = 0; index < this.grid.blockCount; index++) {
       const block = this.checked(index, await source(index));
       await writing;
-      writing = this.codec.encode(block).then((bytes) => this.backend.write(index, bytes));
+      writing = this.settling(index, async () => this.backend.write(index, await this.codec.encode(block)));
       this.clean.set(String(index), block);
     }
     await writing;
@@ -270,7 +278,7 @@ export class BlockStore implements PackedStateStore {
     const seed = async (index: number): Promise<void> => {
       const block = gatherPixelRanges(packed, this.blockRanges(index));
       this.everPatched.add(index);
-      await store.write(index, await this.codec.encode(block));
+      await this.settling(index, async () => store.write(index, await this.codec.encode(block)));
       this.clean.set(String(index), block);
     };
     // A few blocks encode and write at once; each is its own record.
@@ -509,7 +517,28 @@ export class BlockStore implements PackedStateStore {
     return this.pinned.has(block) ? block.slice() : block;
   }
 
+  private wrote(index: number): void {
+    this.writes.set(index, (this.writes.get(index) ?? 0) + 1);
+  }
+
+  /** Runs one reseed write of block `index`, which loads of the block wait for. */
+  private async settling(index: number, write: () => Promise<void>): Promise<void> {
+    this.wrote(index);
+    const done = write();
+    const settled = done.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.unsettled.set(index, settled);
+    try {
+      await done;
+    } finally {
+      if (this.unsettled.get(index) === settled) this.unsettled.delete(index);
+    }
+  }
+
   private markDirty(index: number, block: Float32Array): void {
+    this.wrote(index);
     this.everPatched.add(index);
     this.clean.delete(String(index));
     this.dirty.set(index, block);
@@ -635,12 +664,15 @@ export class BlockStore implements PackedStateStore {
   /** One block of the current tier, loaded for a walk. */
   private readonly current = (index: number, sweep: boolean): Promise<Float32Array> => this.block(index, sweep);
 
+  /** The block as the store holds it in memory, unflushed or clean, or null when it must come from disk. */
+  private held(index: number): Float32Array | null {
+    return this.dirty.get(index) ?? this.clean.get(String(index)) ?? null;
+  }
+
   private async block(index: number, sweep = false): Promise<Float32Array> {
     if (this.disposed) throw new Error("block store is disposed");
-    const dirty = this.dirty.get(index);
-    if (dirty) return dirty;
-    const clean = this.clean.get(String(index));
-    if (clean) return clean;
+    const held = this.held(index);
+    if (held) return held;
 
     const running = this.inflight.get(index);
     if (running) return await running;
@@ -655,12 +687,28 @@ export class BlockStore implements PackedStateStore {
   }
 
   private async load(index: number, sweep: boolean): Promise<Float32Array> {
-    const bytes = (await this.overlay?.read(index)) ?? (await this.backend.read(index));
-    if (!bytes) throw new Error(`block ${index} was never written`);
-    const block = this.checked(index, await this.codec.decode(bytes, this.decodedBytes(index)));
-    if (sweep) this.clean.setIfRoom(String(index), block);
-    else this.clean.set(String(index), block);
-    return block;
+    for (;;) {
+      const settling = this.unsettled.get(index);
+      if (settling) {
+        await settling;
+        const held = this.held(index);
+        if (held) return held;
+        continue;
+      }
+      const written = this.writes.get(index);
+      const bytes = (await this.overlay?.read(index)) ?? (await this.backend.read(index));
+      if (!bytes) throw new Error(`block ${index} was never written`);
+      const block = this.checked(index, await this.codec.decode(bytes, this.decodedBytes(index)));
+      // A write began while the block was read, so these bytes may be the old ones.
+      if (this.writes.get(index) !== written) {
+        const held = this.held(index);
+        if (held) return held;
+        continue;
+      }
+      if (sweep) this.clean.setIfRoom(String(index), block);
+      else this.clean.set(String(index), block);
+      return block;
+    }
   }
 
   /** Refuses a block whose size does not fit this store's grid, so blocks cut for another grid can never be misread as this one's. */

@@ -1,5 +1,6 @@
 import { openFiles } from "../store/files";
 import { getBlockStore } from "./block-stores";
+import { getHistoryManager } from "./history-manager";
 
 /** A point of a file: `f` its time as a fraction of the file, `p` its pitch UV (y-up, as the shaders read it). */
 export interface TruthPoint {
@@ -13,6 +14,8 @@ export interface TruthReading {
   store: number;
   /** The store's magnitude in each channel. */
   storeChannels: [number, number];
+  /** The louder magnitude in the current node's state rebuilt from history, when asked for. */
+  history?: number;
   original: number;
   canvas: number | null;
 }
@@ -26,7 +29,11 @@ function louder(values: Float32Array, index: number): number {
  * original, and the canvas with its carry, so a driver can tell a stroke that
  * never reached the store from one the display shows wrongly.
  */
-export async function readTruth(fileId: string, points: TruthPoint[]): Promise<TruthReading[]> {
+export async function readTruth(
+  fileId: string,
+  points: TruthPoint[],
+  { history = false }: { history?: boolean } = {},
+): Promise<TruthReading[]> {
   const file = openFiles[fileId];
   const spec = file?.spectrogramData;
   const storePromise = getBlockStore(fileId);
@@ -54,6 +61,9 @@ export async function readTruth(fileId: string, points: TruthPoint[]): Promise<T
     (file.rendererRef?.current?.readPixelRanges(ranges) ?? Promise.resolve(null)).catch(() => null),
   ]);
   const at = new Map(unique.map((pixel, i) => [pixel, i]));
+  const manager = getHistoryManager(fileId);
+  const currentId = manager.getCurrentId();
+  const rebuilt = history && currentId ? (await manager.reconstruct(currentId)).packedData : null;
   return pixels.map((pixel) => {
     const i = at.get(pixel)!;
     return {
@@ -62,21 +72,33 @@ export async function readTruth(fileId: string, points: TruthPoint[]): Promise<T
       storeChannels: [current[i * 4], current[i * 4 + 2]],
       original: louder(original, i),
       canvas: canvas ? louder(canvas, i) : null,
+      ...(rebuilt ? { history: Math.max(Math.abs(rebuilt[pixel * 4]), Math.abs(rebuilt[pixel * 4 + 2])) } : {}),
     };
   });
 }
 
-/** The sum of squared samples of every channel of a file's audio over each [start, end) span in seconds. */
-export function readAudioEnergy(fileId: string, spans: [number, number][]): number[] {
-  const buffer = openFiles[fileId]?.audioBuffer;
-  if (!buffer) throw new Error(`no audio for ${fileId}`);
+/**
+ * The sum of squared samples of every channel over each [start, end) span in
+ * seconds, of one file's audio or of several files' audio added sample by sample.
+ */
+export function readAudioEnergy(fileIds: string | string[], spans: [number, number][]): number[] {
+  const buffers = (Array.isArray(fileIds) ? fileIds : [fileIds]).map((fileId) => {
+    const buffer = openFiles[fileId]?.audioBuffer;
+    if (!buffer) throw new Error(`no audio for ${fileId}`);
+    return buffer;
+  });
+  const { sampleRate, numberOfChannels, length } = buffers[0];
   return spans.map(([start, end]) => {
-    const from = Math.max(0, Math.floor(start * buffer.sampleRate));
-    const to = Math.min(buffer.length, Math.ceil(end * buffer.sampleRate));
+    const from = Math.max(0, Math.floor(start * sampleRate));
+    const to = Math.min(length, Math.ceil(end * sampleRate));
     let sum = 0;
-    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
-      const samples = buffer.getChannelData(ch);
-      for (let i = from; i < to; i++) sum += samples[i] * samples[i];
+    for (let ch = 0; ch < numberOfChannels; ch++) {
+      const channels = buffers.map((buffer) => buffer.getChannelData(Math.min(ch, buffer.numberOfChannels - 1)));
+      for (let i = from; i < to; i++) {
+        let value = 0;
+        for (const samples of channels) value += samples[i] ?? 0;
+        sum += value * value;
+      }
     }
     return sum;
   });

@@ -188,7 +188,7 @@ The window is three columns, with a menu bar above and a transport bar below:
 
 - **Top: Menu bar.** File, Edit, View and Help, with the memory reading and the **?** button at the right-hand end.
 - **Left: Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
-- **Middle: Canvas.** Every open file stacked vertically, each with its own header, time legend and pitch legend. Minimised files collapse into the dock at the bottom.
+- **Middle: Canvas.** Every open file, one below another, each with its own header, time legend and pitch legend. Minimised files collapse into the dock at the bottom.
 - **Right: Sidebar.** The open palettes and their brushes on top, the history tree below.
 - **Bottom: Transport.** Playback, grid, scale, meters, stroke limiting, Ableton Link.
 
@@ -758,14 +758,14 @@ From a parameter's label menu, toggle the **link** icon to link it across all of
 
 Open a file from **File → Open**, from **Open Recent**, or by **dragging an audio file onto the window**, one at a time.
 
-Open files stack vertically in the canvas column. Each header gives you:
+Open files sit one below another in the canvas column. Each header gives you:
 
-- The **grip** at the far left – drag it up or down to reorder the stack.
+- The **grip** at the far left – drag it up or down to reorder the files.
 - The **filename**, italic when it has unsaved changes, a **resolution badge**, and a **channel badge**.
 - **BPM** – this file's tempo, which drives grid snapping and every beat-based parameter.
 - **Onsets** – how sensitive the hit detector is for this file. See [Onsets](#onsets).
 - **Split** – see [Splitting a File](#splitting-a-file).
-- **Duplicate** – an editable copy, with its own history.
+- **Duplicate** – an editable copy of the file, every layer with it, with its own history.
 - **Minimise** – collapses it into the dock at the bottom of the canvas area. A docked file stays open and can still be used as a source. Click it to bring it back.
 - **Fullscreen** – expands it to fill the canvas area.
 - **Close**.
@@ -826,51 +826,40 @@ HPSS and NMF parts add back up to exactly what was there. The AI stems are analy
 
 ### Layers
 
-Every open file is a **layer**. A **stack** holds a run of layers together: they share a colour, they play at the same time, and the header above them acts on all of them at once. A layer stays an ordinary file, and every brush and effect works on one unchanged.
+A file can have **layers**. You hear them all at once, and saving the file writes their sum. Every brush and effect works on a layer as it would on a file of its own, and the brush lands on the layer whose tab is selected.
 
-A split adds its parts as layers of the file. To stack files yourself, use **File → Stack Files…** (`Cmd/Ctrl+G`) and tick the ones you want. They move together on the canvas, since a stack is one run of neighbouring layers. **File → Unstack** (`Cmd/Ctrl+Shift+G`) drops the stack around the active file.
+A file gets layers in four ways, each one a step in the file's history that undo takes back:
 
-A stack holds any number of layers, down to one, so a stack you have emptied out to a single layer is still there to drag files back into. Merge needs two.
+- **Split** – one layer for each part. See [Splitting a File](#splitting-a-file).
+- **+** in the file's header – an empty layer on the same grid, ready to paint into.
+- **File → Add Files as Layers…** (`Cmd/Ctrl+G`) – copies other open files into this one as layers. The files themselves stay as they are.
+- **Dropping an audio file** onto a file that already has layers adds it as another layer.
 
-#### Tabbed and stacked
+Each layer has a tab across the top of the file, and the canvas shows only the selected one. The others keep playing. One undo covers every layer: it steps back through your edits in the order you made them, whichever layer each was on, and selects the layer it changes.
 
-A stack shows its layers **tabbed** by default: one canvas, one grid, one set of legends, and a tab per layer across the top. The canvas shows only the layer whose tab is selected, and that is where your brush lands. The other layers stay hidden but keep playing.
+#### Mixing layers
 
-The layers icon in the stack header switches to **stacked**, which gives each layer a box of its own, every one in full colour. **Link views** appears only in the stacked view, since tabbed layers already share one viewport.
+Each tab carries **M**, **S** and **×**:
 
-#### Adding a layer
-
-The **+** in the stack header adds an empty layer on the same grid, and brings it to the top so your next stroke lands on it. A file on its own carries the same button in its header: pressing it makes a stack of that file and one empty layer.
-
-The new layer shares the grid, so **Merge** stays an exact sum.
-
-#### Mixing a stack
-
-The layers of a stack play at the same time. In a stack of two or more, each layer carries **S** and **M**:
-
-- **M** drops that layer out of the mix. The rest keeps playing.
+- **M** drops that layer out of what you hear. The rest keeps playing, and saving still writes it.
 - **S** plays that layer alone. Soloing another layer releases the first, so only one is ever soloed. Mute wins over solo on the same layer, so a layer with both engaged stays silent.
+- **×** removes the layer, as a step undo takes back. Removing the first layer moves the next layer's sound into it, so the file keeps its name. A file left with one layer has no tabs.
 
-Clicking another layer of the same stack moves where you paint without stopping the music. Clicking a file outside it starts that file's own timeline instead.
+Clicking another layer moves where you paint without stopping the music. Clicking another file starts that file's own timeline instead.
 
-Dragging a file by its grip also moves it in and out of stacks, and the stack it would land in lights up while you drag:
+#### Merging and copying out
 
-- Drop it **over any layer** to join that stack, at the point the line shows.
-- Drop it **on the stack's header row** to leave it above the stack, outside it.
-- Drop a layer **anywhere outside its stack** to take it out. A stack left with one file stops being a stack, and that file stays where it is.
-- Drop a layer **straight onto another stack** to move it across.
+- **Merge** in the file's header adds every layer together into one, as a step undo takes back.
+- **File → Copy Layers to Files** (`Cmd/Ctrl+Shift+G`) opens each layer as a new file of its own. The file itself does not change.
 
-- **Link views** – zoom and scroll follow each other across all members.
-- **Merge** – adds every layer together into one. After a split, or on a file you added a layer to, the file itself holds the sum and the other layers go, as one step in its history, so one undo brings them back. A stack of separate files merges into a new file below it instead, and its files stay open.
-- **Unstack** – drops the stack and leaves the files where they are.
-- **Close stack** – closes every layer with one confirmation.
+Merging the parts of an HPSS or NMF split is exact: they add back up to what they came from, so you can split, work heavily on one part, and merge back. Layers that do not share a length, sample rate or resolution are mixed as audio instead. Each one starts at the beginning, the mix runs as long as the longest, and mono material is copied into both sides of a stereo mix. Saving a file with such layers mixes them the same way.
 
-Merging the parts of a split is exact: they add back up to the file they came from, so you can split, work heavily on one part, and merge back. Merging files that do not share a length, sample rate or resolution mixes their audio instead. Each one starts at the beginning, the mix runs as long as the longest, and mono material is copied into both sides of a stereo mix.
+Dragging a file by its grip moves the file and all its layers together. A drag never moves a file into another file's layers, or a layer out of its file.
 
 **Hints**
 
-- Set the members to one length with **Time → Set Length…** before merging, and the mix ends where you want rather than where the longest file happens to stop.
-- Merging is a plain sum, so paint the members quieter first if the result overloads.
+- Set the layers to one length with **Time → Set Length…** before merging, and the mix ends where you want rather than where the longest one happens to stop.
+- Merging and saving are a plain sum, so paint the layers quieter first if the result overloads.
 
 ### Onsets
 
@@ -925,7 +914,7 @@ On the **time legend** along the bottom:
 - **Click** – set the playback start position, snapped to the grid. The play state stays as it is: while playing, playback skips there and carries on.
 - **Drag** – select that stretch of time across every frequency, which sets the loop region and moves the playback start to its beginning.
 
-Zoom and scroll are remembered per file across restarts, and the layers of a [stack](#layers) with **Link views** on share all four: time zoom, time scroll, pitch zoom, pitch scroll.
+Zoom and scroll are remembered per file across restarts, and the [layers](#layers) of a file share all four: time zoom, time scroll, pitch zoom, pitch scroll.
 
 ### Selecting a Region
 
@@ -1068,9 +1057,9 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Save As…** (`Cmd/Ctrl+Shift+S`).
 - **Save Version** (`Cmd/Ctrl+Alt+S`) – saves a numbered copy alongside the original without overwriting it.
 - **Restore Original** – reloads the unedited file.
-- **Duplicate File**.
-- **Stack Files…** (`Cmd/Ctrl+G`) – holds open files together as layers. See [Layers](#layers).
-- **Unstack** (`Cmd/Ctrl+Shift+G`) – drops the stack around the active file.
+- **Duplicate File** – copies the file, every layer with it.
+- **Add Files as Layers…** (`Cmd/Ctrl+G`) – copies other open files into this one as layers. See [Layers](#layers).
+- **Copy Layers to Files** (`Cmd/Ctrl+Shift+G`) – opens each layer as a new file of its own.
 - **Export → Image…** – saves the active file's spectrogram as a PNG, for artwork rather than for audio. A live preview shows what you will get.
   - **Colour** – Editor keeps the app's own look. Mono, Magma, Viridis and Ice restyle it, and Random rolls a new palette when you pick it. The dice beside the image size rolls another.
   - **Shape** – 1:1, 4:5, 3:2, 16:9, or 9:16 for a phone screen.

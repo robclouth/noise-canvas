@@ -2,6 +2,7 @@ import { useStore } from "@renderer/store";
 import { awaitFileSynthesis, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
+import { selectLayerStack } from "@renderer/store/layers";
 import type { PhaseTurns } from "../../../main/lib/types";
 import { hasPhaseTurns, phaseTurnRanges, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
@@ -681,7 +682,10 @@ export class HistoryManager {
   private syncDirty(): void {
     if (!this.manifest) return;
     const file = openFiles[this.fileId];
-    if (file?.filePath && isManagedFilePath(file.filePath)) {
+    // A layer is written by its file's save, so only a file of its own has no disk copy to match.
+    const ownerId = selectLayerStack(useStore.getState(), this.fileId)?.ownerId;
+    const savedByOwner = ownerId !== undefined && ownerId !== this.fileId;
+    if (file?.filePath && isManagedFilePath(file.filePath) && !savedByOwner) {
       useStore.getState().setFileDirty(this.fileId, true);
       return;
     }

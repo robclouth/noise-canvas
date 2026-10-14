@@ -66,7 +66,7 @@ vi.mock("../modals", () => ({
     gate.writeLength?.("fileLength", gate.setLengthValues);
     opts.onConfirm();
   }),
-  openStackFilesPrompt: vi.fn(),
+  openAddFilesAsLayersPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
   releaseHistoryManager: vi.fn(async () => {}),

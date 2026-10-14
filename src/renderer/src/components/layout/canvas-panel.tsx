@@ -5,7 +5,7 @@ import { getLayerSegments, selectLayerStack, stackColor } from "@renderer/store/
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
-import { Layers, Link2, Link2Off, Merge, Plus, Rows3, Ungroup, X } from "lucide-react";
+import { Layers, Merge, Plus, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
 import { FileReorderProvider } from "@renderer/contexts/file-reorder";
 import { type FileDropTarget } from "@renderer/lib/file-reorder";
@@ -85,8 +85,15 @@ DockedFile.displayName = "DockedFile";
 export const Dock = memo(() => {
   const minimizedFileIds = useStore((state) => state.minimizedFileIds);
   const openFileIds = useStore((state) => state.openFileIds);
+  const layerStacks = useStore((state) => state.layerStacks);
+  const stackOfLayer = useStore((state) => state.stackOfLayer);
 
-  const minimized = openFileIds.filter((id) => minimizedFileIds.includes(id));
+  // A file with layers docks as one entry, its own.
+  const minimized = openFileIds.filter((id) => {
+    if (!minimizedFileIds.includes(id)) return false;
+    const owner = layerStacks[stackOfLayer[id] ?? ""]?.ownerId;
+    return !owner || owner === id;
+  });
   if (minimized.length === 0) return null;
 
   return (
@@ -173,7 +180,7 @@ const LayerTabs = memo(({ layerIds, currentId }: { layerIds: string[]; currentId
                 <Tabs.Tab
                   value={layerId}
                   fz="xs"
-                  pr={58}
+                  pr={78}
                   style={{ maxWidth: 180 }}
                   styles={{ tabLabel: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }}
                 >
@@ -181,9 +188,24 @@ const LayerTabs = memo(({ layerIds, currentId }: { layerIds: string[]; currentId
                     (layerId === stack?.originId ? "Original" : layerTabLabel(file.displayName, stack?.label))}
                 </Tabs.Tab>
               </Tooltip>
-              <Box pos="absolute" right={8} top="50%" style={{ transform: "translateY(-50%)" }}>
+              <Group gap={2} wrap="nowrap" pos="absolute" right={8} top="50%" style={{ transform: "translateY(-50%)" }}>
                 <FileMixControls fileId={layerId} compact />
-              </Box>
+                {stack && (
+                  <HelpActionIcon
+                    help="layer-remove"
+                    detail={layerNames[layerId] ?? file.displayName}
+                    size="xs"
+                    variant="subtle"
+                    color="gray"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void useStore.getState().removeLayer(layerId);
+                    }}
+                  >
+                    <X size={10} />
+                  </HelpActionIcon>
+                )}
+              </Group>
             </Box>
           );
         })}
@@ -216,9 +238,9 @@ const LayerStackSection = memo(
       );
     }
 
-    // Tabbed shows one layer: the active file when it is in this stack, and
-    // otherwise the first layer.
-    const overlaid = stack.layout === "overlaid" && fileIds.length > 1;
+    // One canvas shows one layer: the active file when it is a layer of this
+    // file, and otherwise the first layer.
+    const overlaid = fileIds.length > 1;
     const currentId = fileIds.includes(laneProps.activeFileId ?? "") ? laneProps.activeFileId! : fileIds[0];
 
     const color = stackColor(stack.hue);
@@ -249,31 +271,7 @@ const LayerStackSection = memo(
         </Group>
         <Group gap={4} wrap="nowrap" style={{ flexShrink: 0, marginLeft: "auto" }}>
           <HelpActionIcon
-            help="stack-layout"
-            detail={overlaid ? "Tabbed" : "Stacked"}
-            size={uiSize}
-            variant="subtle"
-            color="gray"
-            onClick={() => useStore.getState().setLayerStackLayout(stackId, overlaid ? "stacked" : "overlaid")}
-          >
-            {overlaid ? <Layers size={16} /> : <Rows3 size={16} />}
-          </HelpActionIcon>
-          {/* Tabbed layers share one viewport, so the link has nothing to tie. */}
-          {!overlaid && (
-            <HelpActionIcon
-              help="stack-sync-view"
-              detail={stack.syncView ? "Linked" : "Unlinked"}
-              size={uiSize}
-              variant="subtle"
-              color={stack.syncView ? "gray" : "dark.3"}
-              onClick={() => useStore.getState().setLayerStackSyncView(stackId, !stack.syncView)}
-            >
-              {stack.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
-            </HelpActionIcon>
-          )}
-
-          <HelpActionIcon
-            help={stack.ownerId ? "layers-merge" : "stack-merge"}
+            help="layers-merge"
             detail={`${stack.layerIds.length} layers`}
             size={uiSize}
             variant="subtle"
@@ -285,19 +283,6 @@ const LayerStackSection = memo(
           >
             <Merge size={16} />
           </HelpActionIcon>
-          {/* A file's own layers share its history, so they cannot become separate files this way. */}
-          {!stack.ownerId && (
-            <HelpActionIcon
-              help="stack-unstack"
-              detail={`${stack.layerIds.length} layers`}
-              size={uiSize}
-              variant="subtle"
-              color="gray"
-              onClick={() => useStore.getState().unstackLayers(stackId)}
-            >
-              <Ungroup size={16} />
-            </HelpActionIcon>
-          )}
           <HelpActionIcon
             help="stack-close"
             detail={`${stack.layerIds.length} layers`}

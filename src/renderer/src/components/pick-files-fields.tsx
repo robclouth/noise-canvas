@@ -1,16 +1,16 @@
 import { Checkbox, ScrollArea, Stack } from "@mantine/core";
 import { useState, type RefObject } from "react";
 
-/** One open file the dialog can bracket, in canvas order. */
-export type StackLayerOption = { id: string; label: string };
+/** One open file the dialog offers, in canvas order. */
+export type PickFileOption = { id: string; label: string };
 
-/** The body of the Stack Files dialog, writing each tick into `selection`. */
-export const StackFilesFields = ({
+/** A list of open files to tick, writing each tick into `selection`. */
+export const PickFilesFields = ({
   options,
   selection,
   onChange,
 }: {
-  options: StackLayerOption[];
+  options: PickFileOption[];
   selection: RefObject<string[]>;
   onChange?: (fileIds: string[]) => void;
 }) => {

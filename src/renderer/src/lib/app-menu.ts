@@ -110,8 +110,19 @@ export const APP_MENUS: AppMenu[] = [
         command: "duplicate-active-file",
         only: "electron",
       },
-      { type: "item", label: "Stack Files…", command: "stack-files", accelerator: { code: "KeyG" } },
-      { type: "item", label: "Unstack", command: "unstack-files", accelerator: { code: "KeyG", shift: true } },
+      {
+        type: "item",
+        label: "Add Files as Layers…",
+        command: "add-files-as-layers",
+        accelerator: { code: "KeyG" },
+      },
+      {
+        type: "item",
+        label: "Copy Layers to Files",
+        command: "copy-layers-to-files",
+        accelerator: { code: "KeyG", shift: true },
+        only: "electron",
+      },
       { type: "separator" },
       {
         type: "submenu",

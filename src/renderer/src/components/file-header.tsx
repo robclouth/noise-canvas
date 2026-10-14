@@ -10,7 +10,7 @@ import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-d
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { useFileReorder } from "@renderer/contexts/file-reorder";
 import { openFiles, selectFileColor } from "@renderer/store/files";
-import { selectLayerStack } from "@renderer/store/layers";
+import { selectLayerStack, selectStackLayerIds } from "@renderer/store/layers";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Grid3x3, GripVertical, Maximize2, Minimize2, Plus, Split, X } from "lucide-react";
@@ -167,12 +167,15 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
   const uiSize = useUiSize();
   const file = openFiles[fileId];
   const filePath = file.filePath;
-  const displayName = file.displayName;
+  // A layer's header speaks for the file it belongs to.
+  const ownerId = useStore((state) => selectLayerStack(state, fileId)?.ownerId ?? fileId);
+  const owner = openFiles[ownerId] ?? file;
+  const displayName = owner.displayName;
   const bpm = useStore((state) => state.filepathsBpm[filePath]);
   const onsetSensitivity = useStore((state) => state.filepathsOnsetSensitivity[filePath] ?? DEFAULT_ONSET_SENSITIVITY);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
-  const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
+  const isDirty = useStore((state) => selectStackLayerIds(state, ownerId).some((id) => state.filesDirty[id]));
   const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
   const fileColor = useStore((state) => selectFileColor(state, fileId));
   const channelCount = useFileChannelCount(fileId);
@@ -186,7 +189,7 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
   const canReorder = reorder !== null && layerCount > 1 && fullscreenFileId === null;
   // Tooltip shows full path for real files (helpful when basenames truncate);
   // for managed files the path is the opaque sentinel, so just show the label.
-  const tooltipLabel = isManagedFilePath(filePath) ? displayName : filePath;
+  const tooltipLabel = isManagedFilePath(owner.filePath) ? displayName : owner.filePath;
 
   return (
     <Box

@@ -1,7 +1,7 @@
 import { Stack, Text, TextInput, type ModalProps } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
 import { type ReactNode, type RefObject } from "react";
-import { StackFilesFields, type StackLayerOption } from "../components/stack-files-fields";
+import { PickFilesFields, type PickFileOption } from "../components/pick-files-fields";
 import type { ParameterDialogBody, ParameterDialogProps } from "../components/parameter-dialog";
 import { UI_LAYERS } from "./ui-layers";
 
@@ -260,8 +260,8 @@ export function openGeneratePrompt({
   return openParameterDialog("Generate", "md", { kind: "generate", hasSelection, bandLimited }, "Generate", options);
 }
 
-type OpenStackFilesPromptOptions = {
-  options: StackLayerOption[];
+type OpenAddFilesAsLayersPromptOptions = {
+  options: PickFileOption[];
   /** Files ticked when the dialog opens. */
   initial: string[];
   onConfirm: (fileIds: string[]) => void | Promise<void>;
@@ -269,29 +269,29 @@ type OpenStackFilesPromptOptions = {
   onClose?: () => void;
 };
 
-export function openStackFilesPrompt({
+export function openAddFilesAsLayersPrompt({
   options,
   initial,
   onConfirm,
   onCancel,
   onClose,
-}: OpenStackFilesPromptOptions): string {
+}: OpenAddFilesAsLayersPromptOptions): string {
   const selection: RefObject<string[]> = { current: initial };
   const modalId: RefObject<string> = { current: "" };
-  // Nothing ticked has nothing to stack, so the button says so rather than
+  // Nothing ticked has nothing to add, so the button says so rather than
   // swallowing a click.
   const tooFew: RefObject<boolean> = { current: initial.length === 0 };
   const confirmProps = { size: "xs" } as const;
 
   modalId.current = openConfirmModal({
-    title: "Stack Files",
+    title: "Add Files as Layers",
     size: "sm",
     children: (
       <Stack gap="xs">
         <Text size="sm" c="dimmed">
-          Brackets the files you pick, so they move their views together and can be merged into one.
+          Copies the files you pick into this file as layers. The files themselves stay as they are.
         </Text>
-        <StackFilesFields
+        <PickFilesFields
           options={options}
           selection={selection}
           onChange={(picked) => {
@@ -306,7 +306,7 @@ export function openStackFilesPrompt({
         />
       </Stack>
     ),
-    labels: { confirm: "Stack", cancel: "Cancel" },
+    labels: { confirm: "Add", cancel: "Cancel" },
     confirmProps: { ...confirmProps, disabled: tooFew.current },
     cancelProps: { size: "xs" },
     onConfirm: async () => {

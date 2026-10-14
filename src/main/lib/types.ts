@@ -211,9 +211,9 @@ export interface IpcRendererEvents {
   "close-active-file": () => void;
   "double-active-file-length": () => void;
   "halve-active-file-length": () => void;
-  "stack-files": () => void;
+  "add-files-as-layers": () => void;
   generate: () => void;
-  "unstack-files": () => void;
+  "copy-layers-to-files": () => void;
   "set-file-length": () => void;
   "insert-silence": () => void;
   "copy-selection": () => void;

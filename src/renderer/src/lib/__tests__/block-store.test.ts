@@ -444,6 +444,119 @@ describe("BlockStore", () => {
     expect(firstDifference(await rawCodec.decode(overlay.blocks.get(0)!), expected)).toBe(-1);
   });
 
+  it("keeps a reseeded block when a read of the old one lands after the reseed", async () => {
+    const grid = makeGrid();
+    const backend = memoryBackend();
+    const overlay = memoryBackend();
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached = (): void => {};
+    const readParked = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let gated = false;
+    const slowOverlay: BlockBackend = {
+      read: async (index) => {
+        const bytes = await overlay.read(index);
+        if (gated) {
+          gated = false;
+          reached();
+          await gate;
+        }
+        return bytes;
+      },
+      write: (index, bytes) => overlay.write(index, bytes),
+      clear: () => overlay.clear(),
+    };
+    const store = new BlockStore(grid, backend, {
+      codec: rawCodec,
+      maxResidentBytes: 1 << 30,
+      overlay: slowOverlay,
+      texelCount: data.texels,
+    });
+    await store.seed(packed);
+    await store.seedCurrent(packed);
+    // A fresh store over the same disk, so the read below goes to the disk.
+    const reopened = new BlockStore(grid, backend, {
+      codec: rawCodec,
+      maxResidentBytes: 1 << 30,
+      overlay: slowOverlay,
+      texelCount: data.texels,
+    });
+
+    const ranges = bandRange(0, 0, 4);
+    gated = true;
+    const stale = reopened.readRanges(ranges);
+    await readParked;
+    const reseeded = packed.map((value) => Math.fround(value * 0.5 + 0.1));
+    const seeding = reopened.seedCurrent(reseeded);
+    await seeding;
+    release();
+    await stale;
+
+    expect(firstDifference(await reopened.readRanges(ranges), gatherPixelRanges(reseeded, ranges))).toBe(-1);
+  });
+
+  it("keeps a reseeded block when a read starts while the reseed is writing it", async () => {
+    const grid = makeGrid();
+    const backend = memoryBackend();
+    const overlay = memoryBackend();
+    let releaseWrite = (): void => {};
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let writeReached = (): void => {};
+    const writeParked = new Promise<void>((resolve) => {
+      writeReached = resolve;
+    });
+    let releaseRead = (): void => {};
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let gateWrite = false;
+    let gateRead = false;
+    const slowOverlay: BlockBackend = {
+      read: async (index) => {
+        const bytes = await overlay.read(index);
+        if (gateRead && index === 0) {
+          gateRead = false;
+          await readGate;
+        }
+        return bytes;
+      },
+      write: async (index, bytes) => {
+        if (gateWrite && index === 0) {
+          gateWrite = false;
+          writeReached();
+          await writeGate;
+        }
+        await overlay.write(index, bytes);
+      },
+      clear: () => overlay.clear(),
+    };
+    const options = { codec: rawCodec, maxResidentBytes: 1 << 30, overlay: slowOverlay, texelCount: data.texels };
+    const store = new BlockStore(grid, backend, options);
+    await store.seed(packed);
+    await store.seedCurrent(packed);
+    const reopened = new BlockStore(grid, backend, options);
+
+    const reseeded = packed.map((value) => Math.fround(value * 0.5 + 0.1));
+    gateWrite = true;
+    const seeding = reopened.seedCurrent(reseeded);
+    await writeParked;
+    const ranges = bandRange(0, 0, 4);
+    gateRead = true;
+    const read = reopened.readRanges(ranges);
+    releaseWrite();
+    await seeding;
+    releaseRead();
+    await read;
+
+    expect(firstDifference(await reopened.readRanges(ranges), gatherPixelRanges(reseeded, ranges))).toBe(-1);
+  });
+
   it("writes bytes a mid-encode patch cannot tear", async () => {
     const grid = makeGrid();
     const backend = memoryBackend();

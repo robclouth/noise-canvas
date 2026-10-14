@@ -2,12 +2,13 @@ import { FileEngineProvider } from "./components/file-engine-provider";
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { SidebarPanel } from "@/components/layout/sidebar-panel";
 import { useStore } from "@/store";
+import { selectLayerStack } from "@/store/layers";
 import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useDropzone, type FileRejection } from "react-dropzone";
+import { useDropzone, type DropEvent, type FileRejection } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { trackPointer } from "./lib/last-pointer";
 import { pointerFileAim } from "./lib/view-aim";
@@ -204,12 +205,14 @@ function App(): React.JSX.Element {
     // close paths that didn't call destroyHistoryManager. Runs after persisted
     // state is loaded so we know which fileIds are still alive.
     // A hidden layer is not open, but its history and blocks are what bring it back.
-    const { persistedFilePaths, detachedLayers, layeredFiles } = useStore.getState();
+    const { persistedFilePaths, detachedLayers, layeredFiles, layerStacks } = useStore.getState();
     const keep = new Set([...Object.keys(persistedFilePaths), ...Object.keys(detachedLayers)]);
     void pruneOrphanHistoryDirs(keep);
     void sweepOrphanBlocks(keep);
     // Loaded now, so every layer's steps are recorded from the first one.
-    for (const ownerId of Object.keys(layeredFiles)) getLayeredHistory(ownerId);
+    const owners = new Set(Object.keys(layeredFiles));
+    for (const stack of Object.values(layerStacks)) if (stack.ownerId) owners.add(stack.ownerId);
+    for (const ownerId of owners) getLayeredHistory(ownerId);
   }, []);
 
   // Route playback to the chosen output, and again whenever one is plugged in
@@ -447,20 +450,21 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubHalveActiveFileLength);
 
-    const unsubStackFiles = ipcOn("stack-files", () => {
-      void useStore.getState().promptStackFiles();
+    const unsubAddFilesAsLayers = ipcOn("add-files-as-layers", () => {
+      void useStore.getState().promptAddFilesAsLayers();
     });
-    unsubscribers.push(unsubStackFiles);
+    unsubscribers.push(unsubAddFilesAsLayers);
 
     const unsubGenerate = ipcOn("generate", () => {
       void useStore.getState().promptGenerate();
     });
     unsubscribers.push(unsubGenerate);
 
-    const unsubUnstackFiles = ipcOn("unstack-files", () => {
-      useStore.getState().unstackActiveFile();
+    const unsubCopyLayersToFiles = ipcOn("copy-layers-to-files", () => {
+      const { activeFileId } = useStore.getState();
+      if (activeFileId) void useStore.getState().copyLayersToFiles(activeFileId);
     });
-    unsubscribers.push(unsubUnstackFiles);
+    unsubscribers.push(unsubCopyLayersToFiles);
 
     const unsubSetFileLength = ipcOn("set-file-length", () => {
       void useStore.getState().setActiveFileLength();
@@ -489,12 +493,21 @@ function App(): React.JSX.Element {
     };
   }, []);
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDrop = useCallback((acceptedFiles: File[], _rejections: FileRejection[], event: DropEvent) => {
     if (acceptedFiles.length === 0) {
       return;
     }
     const filePath = host.files.getPathForFile(acceptedFiles[0]);
-    useStore.getState().openFilePath(filePath);
+    // Dropped onto a file that has layers, the audio becomes another layer of it.
+    const point = "clientX" in event ? event : null;
+    const view = point ? document.elementFromPoint(point.clientX, point.clientY)?.closest("[data-file-view-id]") : null;
+    const target = view?.getAttribute("data-file-view-id");
+    const state = useStore.getState();
+    if (target && selectLayerStack(state, target)?.ownerId) {
+      void state.openFileAsLayer(target, filePath);
+      return;
+    }
+    state.openFilePath(filePath);
   }, []);
 
   const onDropRejected = useCallback((rejections: FileRejection[]) => {

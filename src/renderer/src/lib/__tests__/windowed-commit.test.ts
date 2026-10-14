@@ -17,7 +17,7 @@ vi.mock("../modals", () => ({
   openNewFilePrompt: vi.fn(),
   openInsertSilencePrompt: vi.fn(),
   openSetLengthPrompt: vi.fn(),
-  openStackFilesPrompt: vi.fn(),
+  openAddFilesAsLayersPrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
   releaseHistoryManager: vi.fn(async () => {}),

@@ -99,12 +99,12 @@ export const UI_CONTROLS = {
   },
   "file-solo": {
     label: "Solo",
-    description: "Plays this file alone, releasing any other solo in its stack.",
+    description: "Plays this layer alone, releasing any other solo in the file.",
     manualSection: "layers",
   },
   "file-mute": {
     label: "Mute",
-    description: "Drops this file out of the mix, leaving the rest playing.",
+    description: "Drops this layer out of what you hear, leaving the rest playing.",
     manualSection: "layers",
   },
   "file-split": {
@@ -119,7 +119,7 @@ export const UI_CONTROLS = {
   },
   "file-duplicate": {
     label: "Duplicate",
-    description: "Copies the file onto a new layer you can edit on its own.",
+    description: "Copies the file, every layer with it, into a new file you can edit on its own.",
     manualSection: "working-with-files",
   },
   "file-reorder": {
@@ -158,15 +158,10 @@ export const UI_CONTROLS = {
     manualSection: "navigating-the-canvas",
   },
 
-  // Layer stacks
+  // Layers
   "stack-add-layer": {
     label: "Add layer",
     description: "Adds an empty layer on the same grid, ready to paint into.",
-    manualSection: "layers",
-  },
-  "stack-layout": {
-    label: "Layer tabs",
-    description: "Shows one layer at a time in a single canvas, picked by its tab.",
     manualSection: "layers",
   },
   "stack-layer-tab": {
@@ -174,14 +169,9 @@ export const UI_CONTROLS = {
     description: "Brings this layer to the top, where your brush lands.",
     manualSection: "layers",
   },
-  "stack-sync-view": {
-    label: "Link views",
-    description: "Ties zoom and scroll together across the layers of the stack.",
-    manualSection: "layers",
-  },
-  "stack-merge": {
-    label: "Merge",
-    description: "Sums every layer of the stack into one new file, leaving them open.",
+  "layer-remove": {
+    label: "Remove layer",
+    description: "Takes this layer out of the file, as a step undo can take back.",
     manualSection: "layers",
   },
   "layers-merge": {
@@ -189,14 +179,9 @@ export const UI_CONTROLS = {
     description: "Adds the layers together into one, as a single step undo can take back.",
     manualSection: "layers",
   },
-  "stack-unstack": {
-    label: "Unstack",
-    description: "Drops the stack, leaving every layer open as a file on its own.",
-    manualSection: "layers",
-  },
   "stack-close": {
-    label: "Close stack",
-    description: "Closes every layer of the stack at once.",
+    label: "Close",
+    description: "Closes the file and every layer of it, asking first if it has unsaved edits.",
     manualSection: "layers",
   },
 

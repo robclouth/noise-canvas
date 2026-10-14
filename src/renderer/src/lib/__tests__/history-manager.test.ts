@@ -35,7 +35,15 @@ const {
 }));
 vi.mock("@renderer/store", () => ({
   useStore: {
-    getState: () => ({ synthesizeFile, loadCachedAudio, setFileDirty, restoreOnsetsForNode, spliceFileAudio }),
+    getState: () => ({
+      synthesizeFile,
+      loadCachedAudio,
+      setFileDirty,
+      restoreOnsetsForNode,
+      spliceFileAudio,
+      layerStacks: {},
+      stackOfLayer: {},
+    }),
   },
 }));
 vi.mock("@renderer/store/files", () => ({
