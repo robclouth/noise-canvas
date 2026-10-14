@@ -60,6 +60,14 @@ import {
 import { setChannelsLength } from "../lib/set-length";
 import { insertOnsetSpan, insertSpanPieces, removeOnsetSpan } from "../../../main/lib/ripple-edits";
 import { fullHeightSelection, type Selection } from "../lib/selection";
+import { PackedSpan } from "../lib/packed-span";
+import {
+  placeAudioSpan,
+  selectionSpan,
+  spanBandTables,
+  spliceSelectionParts,
+  splitFrameSpan,
+} from "../lib/split-selection";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type {
   AnalysisParams,
@@ -2685,6 +2693,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const spectrogramData = originalFile?.spectrogramData;
     if (!spectrogramData) return;
     const baseLabel = stripExtensionForLabel(originalFile.displayName);
+    const selection = get().filesSelection[fileId] ?? null;
     await splitFile(
       set,
       get,
@@ -2693,17 +2702,31 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         method: "hpss",
         labels: ["harmonic", "percussive"],
         busyMessage: "Separating harmonic and percussive...",
-        stepLabel: "Split (HPSS)",
+        stepLabel: selection ? "Split Selection (HPSS)" : "Split (HPSS)",
         stackLabel: `${baseLabel}: harmonic / percussive`,
       },
       async () => {
         const fboData = await readCurrentPackedData(originalFile);
         if (!fboData) throw new Error("Could not read the file's current state.");
-        const { harmonic, percussive } = await host.analysis.hpss(fboData, bandLayout(spectrogramData));
-        return [
-          await deriveSpectrogramData(spectrogramData, harmonic),
-          await deriveSpectrogramData(spectrogramData, percussive),
-        ];
+        if (!selection) {
+          const { harmonic, percussive } = await host.analysis.hpss(fboData, bandLayout(spectrogramData));
+          return [
+            await deriveSpectrogramData(spectrogramData, harmonic),
+            await deriveSpectrogramData(spectrogramData, percussive),
+          ];
+        }
+        const span = await selectionSpan(spectrogramData, fboData, selection);
+        const { harmonic, percussive } = await host.analysis.hpss(
+          span.values,
+          spanBandTables(span, spectrogramData.numChannels),
+        );
+        const parts = spliceSelectionParts(
+          spectrogramData,
+          fboData,
+          [new PackedSpan(span.view, harmonic), new PackedSpan(span.view, percussive)],
+          selection,
+        );
+        return Promise.all(parts.map((part) => deriveSpectrogramData(spectrogramData, part)));
       },
     );
   },
@@ -2713,6 +2736,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!spectrogramData) return;
     const parts = Math.max(2, Math.round(numComponents));
     const baseLabel = stripExtensionForLabel(originalFile.displayName);
+    const selection = get().filesSelection[fileId] ?? null;
     await splitFile(
       set,
       get,
@@ -2721,14 +2745,25 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         method: "nmf",
         labels: Array.from({ length: parts }, (_, i) => `part ${i + 1}`),
         busyMessage: `Splitting into ${parts} parts...`,
-        stepLabel: "Split (NMF)",
+        stepLabel: selection ? "Split Selection (NMF)" : "Split (NMF)",
         stackLabel: `${baseLabel}: ${parts} parts`,
       },
       async () => {
         const fboData = await readCurrentPackedData(originalFile);
         if (!fboData) throw new Error("Could not read the file's current state.");
-        const result = await host.analysis.nmf(fboData, bandLayout(spectrogramData), parts);
-        return Promise.all(result.parts.map((part) => deriveSpectrogramData(spectrogramData, part)));
+        if (!selection) {
+          const result = await host.analysis.nmf(fboData, bandLayout(spectrogramData), parts);
+          return Promise.all(result.parts.map((part) => deriveSpectrogramData(spectrogramData, part)));
+        }
+        const span = await selectionSpan(spectrogramData, fboData, selection);
+        const result = await host.analysis.nmf(span.values, spanBandTables(span, spectrogramData.numChannels), parts);
+        const whole = spliceSelectionParts(
+          spectrogramData,
+          fboData,
+          result.parts.map((part) => new PackedSpan(span.view, part)),
+          selection,
+        );
+        return Promise.all(whole.map((part) => deriveSpectrogramData(spectrogramData, part)));
       },
     );
   },
@@ -3310,6 +3345,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     const stemNames = ["drums", "bass", "other", "vocals"];
     const baseLabel = stripExtensionForLabel(originalFile.displayName);
+    const selection = get().filesSelection[fileId] ?? null;
     try {
       await splitFile(
         set,
@@ -3319,7 +3355,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           method: "ai",
           labels: stemNames,
           busyMessage: "Separating stems (AI)…",
-          stepLabel: "Split (AI)",
+          stepLabel: selection ? "Split Selection (AI)" : "Split (AI)",
           stackLabel: `${baseLabel}: drums / bass / other / vocals`,
         },
         async () => {
@@ -3327,7 +3363,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           // again on the file's grid.
           const channels = await currentFileAudio(originalFile);
           if (!channels) throw new Error("Could not read current spectrogram state");
-          const stems = await host.analysis.aiSeparate(channels, spectrogramData.sampleRate);
+          const { startFrame, endFrame } = selection
+            ? splitFrameSpan(spectrogramData, selection)
+            : { startFrame: 0, endFrame: channels[0].length };
+          const stems = await host.analysis.aiSeparate(
+            selection ? channels.map((channel) => channel.slice(startFrame, endFrame)) : channels,
+            spectrogramData.sampleRate,
+          );
           // From the file's analysis, not the current global setting — a stem
           // has to record the resolution it was actually analysed at, or it
           // stops lining up with the file it was split from.
@@ -3336,8 +3378,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           try {
             const parts: SpectrogramData[] = [];
             for (const name of stemNames) {
-              const stemChannels = stems[name];
-              if (!stemChannels) throw new Error(`The separator returned no ${name} stem.`);
+              const separated = stems[name];
+              if (!separated) throw new Error(`The separator returned no ${name} stem.`);
+              const stemChannels = selection ? placeAudioSpan(separated, startFrame, channels[0].length) : separated;
               const audioBuffer = audioContext.createBuffer(
                 stemChannels.length,
                 stemChannels[0].length,
@@ -3352,7 +3395,19 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
               });
               parts.push(await spectrogramFromAnalysis(result, analysisParams));
             }
-            return parts;
+            if (!selection) return parts;
+            const fboData = await readCurrentPackedData(originalFile);
+            if (!fboData) throw new Error("Could not read the file's current state.");
+            const whole = spliceSelectionParts(
+              spectrogramData,
+              fboData,
+              parts.map((part) => {
+                if (!part.packedData) throw new Error("A stem's analysis carries no coefficients.");
+                return PackedSpan.whole(spectrogramData, part.packedData);
+              }),
+              selection,
+            );
+            return Promise.all(whole.map((part) => deriveSpectrogramData(spectrogramData, part)));
           } finally {
             void audioContext.close();
           }

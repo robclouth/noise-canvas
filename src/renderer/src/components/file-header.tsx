@@ -175,6 +175,7 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
   const onsetSensitivity = useStore((state) => state.filepathsOnsetSensitivity[filePath] ?? DEFAULT_ONSET_SENSITIVITY);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
+  const hasSelection = useStore((state) => Boolean(state.filesSelection[fileId]));
   const isDirty = useStore((state) => selectStackLayerIds(state, ownerId).some((id) => state.filesDirty[id]));
   const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
   const fileColor = useStore((state) => selectFileColor(state, fileId));
@@ -346,7 +347,9 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
                   useStore.getState().hpssFile(fileId);
                 }}
               >
-                Split Harmonic and Percussive (HPSS)
+                {hasSelection
+                  ? "Split Selection into Harmonic and Percussive (HPSS)"
+                  : "Split Harmonic and Percussive (HPSS)"}
               </Menu.Item>
               <Menu.Divider />
               <Menu.Item
@@ -360,7 +363,7 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
                   });
                 }}
               >
-                Split into N Parts (NMF)…
+                {hasSelection ? "Split Selection into N Parts (NMF)…" : "Split into N Parts (NMF)…"}
               </Menu.Item>
               {canSeparateStems() && (
                 <>
@@ -371,7 +374,9 @@ export default memo(function FileHeader({ fileId, headerExtras }: { fileId: stri
                       useStore.getState().aiSeparateFile(fileId);
                     }}
                   >
-                    Split Drums / Bass / Other / Vocals (AI)
+                    {hasSelection
+                      ? "Split Selection into Drums / Bass / Other / Vocals (AI)"
+                      : "Split Drums / Bass / Other / Vocals (AI)"}
                   </Menu.Item>
                 </>
               )}

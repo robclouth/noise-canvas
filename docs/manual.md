@@ -824,6 +824,8 @@ A split happens inside the file: the file keeps the first part, and every other 
 
 HPSS and NMF parts add back up to exactly what was there. The AI stems are analysed again from separated audio, so they add back up to something close to it.
 
+With a selection, the split separates the selection only, and the menu reads **Split Selection**. Inside the selection, the file keeps the first part and every other layer holds its own part. Outside it, the file keeps what was there and the other layers are silent, so the file sounds the same until you change a part. Every layer keeps the file's full length, and a band or shape selection splits only the bands and shape it covers. To bring the parts back together, merge the layers. To split the whole file, clear the selection first.
+
 ### Layers
 
 A file can have **layers**. You hear them all at once, and saving the file writes their sum. Every brush and effect works on a layer as it would on a file of its own, and the brush lands on the layer whose tab is selected.

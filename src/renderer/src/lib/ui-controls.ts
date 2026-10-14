@@ -109,7 +109,7 @@ export const UI_CONTROLS = {
   },
   "file-split": {
     label: "Split",
-    description: "Separates the file into parts, each on its own layer.",
+    description: "Separates the file, or only the selection when there is one, into parts on layers of their own.",
     manualSection: "splitting-a-file",
   },
   "file-fill-grid": {
