@@ -1,6 +1,7 @@
 import type { EffectItem } from "@renderer/effects/types";
 import { useStore } from "@renderer/store";
 import { getFileIdByPath } from "@renderer/store/files";
+import { selectTargetPaletteId } from "@renderer/store/palettes";
 import { driver, type DriveStep, type Driver } from "driver.js";
 import "driver.js/dist/driver.css";
 import "../assets/walkthrough.css";
@@ -24,15 +25,13 @@ const SECTIONS_TO_EXPAND = ["Effects", "Envelope", "Modulators", "Palette", "His
  */
 type Gate = (advance: () => void) => () => void;
 
-/** Advances once a new, empty brush becomes active. */
-const emptyBrushAddedGate: Gate = (advance) => {
+/** Advances once a new brush is added, empty or not. */
+const brushAddedGate: Gate = (advance) => {
   const before = useStore.getState().brushes.length;
   return useStore.subscribe(
     (state) => state.brushes.length,
     (count) => {
-      if (count <= before) return;
-      const step = useStore.getState().getActiveStep();
-      if (((step?.effects ?? []) as EffectItem[]).length === 0) advance();
+      if (count > before) advance();
     },
   );
 };
@@ -99,7 +98,7 @@ const STEPS: Step[] = [
     title: "Start with a fresh one",
     description:
       "Click <b>Add brush</b> at the bottom of the palette and pick <b>New</b> for an empty brush to build from scratch. It comes with a random name; rename it any time from the row's <b>⋮</b> menu.",
-    gate: emptyBrushAddedGate,
+    gate: brushAddedGate,
   },
   {
     anchor: "section-effects",
@@ -198,8 +197,6 @@ function toDriveStep(step: Step, fileId: string | null, instance: () => Driver |
       title: step.title,
       description: step.description,
       ...(step.side ? { side: step.side, align: "start" as const } : {}),
-      // A gated step hides its buttons so the only way on is doing the thing.
-      ...(step.gate ? { showButtons: ["close" as const] } : {}),
       onPopoverRender: () => {
         clearGate();
         if (!step.gate) return;
@@ -222,6 +219,12 @@ function expandTourSections(): void {
   const { sectionCollapsed, setSectionCollapsed } = useStore.getState();
   for (const label of SECTIONS_TO_EXPAND) {
     if (sectionCollapsed[label]) setSectionCollapsed(label, false);
+  }
+  // A collapsed palette hides its Add brush button, which the tour asks for.
+  const state = useStore.getState();
+  const paletteId = selectTargetPaletteId(state);
+  if (state.openPalettes.find((palette) => palette.id === paletteId)?.collapsed && paletteId) {
+    state.togglePaletteCollapsed(paletteId);
   }
 }
 
