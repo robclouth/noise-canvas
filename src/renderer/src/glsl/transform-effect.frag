@@ -91,10 +91,7 @@ void main() {
         if ((syV) < 0.0) transformedDest.y += (1.0 - 2.0 * transformOrigin.y) * brushSizeUv.y; \
         float appliedShiftX = -(shXV); \
         float shiftSemisApplied = -(shYV); \
-        if (scaleSnapEnabled) { \
-            float target = brushBasePitchAbsSemis + shiftSemisApplied; \
-            shiftSemisApplied += snapToScale(target) - target; \
-        } \
+        if (scaleSnapEnabled) shiftSemisApplied = -snapShiftToScale(brushBasePitchAbsSemis, (shYV)); \
         float appliedShiftY = shiftSemisApplied * bandsPerSemi / destBandCount; \
         transformedDest += vec2(appliedShiftX, appliedShiftY); \
         vec2 finalSourceUv = destUvToSourceUv(transformedDest) + modOffset; \

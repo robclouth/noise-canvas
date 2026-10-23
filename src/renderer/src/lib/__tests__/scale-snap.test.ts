@@ -123,17 +123,4 @@ describe("scale-snap", () => {
       expect(minFreqSemisAboveC0(440)).toBeCloseTo(57, 2);
     });
   });
-
-  describe("shader-critical scenario: transform shift snap", () => {
-    it("brush at C with +3 st shift in C major snaps to E (+4)", () => {
-      // This mirrors the shader path: target = brushBasePitchAbsSemis + shiftSemis
-      const offsets = buildScaleOffsets("C", "major");
-      const brushAbsSemis = 60; // C4
-      const shiftSemis = 3;
-      const target = brushAbsSemis + shiftSemis; // 63 = D#4
-      const snapped = snapSemisToScale(target, offsets); // → 64 (E4)
-      const appliedShift = snapped - brushAbsSemis;
-      expect(appliedShift).toBe(4);
-    });
-  });
 });

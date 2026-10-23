@@ -19,4 +19,20 @@ float snapToScale(float target) {
     return (abs(candLow - target) <= abs(candHigh - target)) ? candLow : candHigh;
 }
 
+// Shift in semitones that moves `base` to the in-scale pitch nearest `base + shift`.
+// A non-zero shift that would snap back onto `base` moves one scale note in its
+// direction instead, so every non-zero shift moves the pitch.
+float snapShiftToScale(float base, float shift) {
+    float from = snapToScale(base);
+    float landed = snapToScale(base + shift);
+    if (shift == 0.0 || abs(landed - from) > 0.5) return landed - base;
+    float dir = shift > 0.0 ? 1.0 : -1.0;
+    float semi = floor(from + 0.5);
+    for (int i = 0; i < 12; i++) {
+        semi += dir;
+        if (scaleOffsets[int(mod(semi, 12.0))] == 0.0) break;
+    }
+    return semi - base;
+}
+
 #endif
