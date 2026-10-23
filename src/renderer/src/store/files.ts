@@ -3498,7 +3498,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const result = await host.dialogs.showSaveDialog({
       defaultPath,
       filters: [
-        { name: "Audio Files", extensions: ["wav", "flac", "mp3"] },
+        { name: "Audio Files", extensions: ["wav", "flac", "mp3", "ogg", "m4a", "aiff"] },
         { name: "All Files", extensions: ["*"] },
       ],
     });

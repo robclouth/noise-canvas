@@ -181,13 +181,40 @@ export async function decodeAudioFile(
 // Frames interleaved and written to the encoder per step.
 const ENCODE_CHUNK_FRAMES = 1 << 16;
 
+// WavPack ("wv") is the only one of these that stores float samples losslessly
+// at less than raw size, which is what the undo history caches its renders as.
+const CODEC_ARGS: Record<string, string[]> = {
+  wav: ["-acodec", "pcm_f32le"],
+  wv: ["-acodec", "wavpack"],
+  flac: ["-acodec", "flac"],
+  mka: ["-acodec", "flac"],
+  mp3: ["-acodec", "libmp3lame"],
+  ogg: ["-acodec", "libvorbis", "-q:a", "6"],
+  m4a: ["-acodec", "aac", "-b:a", "256k"],
+  aac: ["-acodec", "aac", "-b:a", "256k"],
+  aiff: ["-acodec", "pcm_s24be"],
+  wma: ["-acodec", "wmav2", "-b:a", "192k"],
+};
+
+/** Formats the encoder can write, as lower-case file extensions. */
+export const savableExtensions = Object.keys(CODEC_ARGS);
+
+/** ffmpeg codec arguments for writing `format`, a lower-case file extension. */
+export function codecArgsForFormat(format: string): string[] {
+  const args = CODEC_ARGS[format];
+  if (!args) {
+    throw new Error(`Noise Canvas cannot save .${format} files. Save as WAV, FLAC, MP3, OGG, M4A or AIFF instead.`);
+  }
+  return args;
+}
+
 /**
  * Export audioChannels (per-channel Float32Array) to an encoded file on disk
  *
  * @param audioChannels Array of Float32Array for each channel [L, R, ...]
  * @param outputPath Absolute path for the encoded file to write
  * @param sampleRate Sample rate in Hz
- * @param format "wav" | "flac" | "mp3"
+ * @param format A file extension that codecArgsForFormat knows
  */
 export async function encodeBufferToAudioFile(
   audioChannels: Float32Array[],
@@ -205,20 +232,10 @@ export async function encodeBufferToAudioFile(
   //   -ac <ch>   : number of channels
   //   -i pipe:0  : read that raw PCM from stdin
   //
-  // then we pick encoding based on desired format. WavPack ("wv") is the only
-  // one of these that stores float samples losslessly at less than raw size,
-  // which is what the undo history caches its renders as.
-  const codecArgs =
-    format === "wav"
-      ? ["-acodec", "pcm_f32le"]
-      : format === "wv"
-        ? ["-acodec", "wavpack"]
-        : format === "flac"
-          ? ["-acodec", "flac"]
-          : ["-acodec", "libmp3lame"];
+  // then we pick encoding based on desired format.
+  const codecArgs = codecArgsForFormat(format);
 
-  // Some containers (mp3, flac) infer format from outputPath extension.
-  // For WAV we're good too. So we don't need extra format flags here.
+  // ffmpeg infers the container from the output path's extension.
 
   // Encode to a sibling temp file (same directory, same extension so ffmpeg
   // still infers the container) and only rename it over the destination on
