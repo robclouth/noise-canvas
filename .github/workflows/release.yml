@@ -47,6 +47,10 @@ jobs:
       - name: Check the native addons load
         run: node scripts/check-addon.mjs
 
+      # Saves every format through this platform's ffmpeg build.
+      - name: Check every audio format saves
+        run: npx vitest run --config vitest.addon.config.ts src/main/lib/__tests__/ffmpeg-encode.test.ts
+
       # macOS signs with the Developer ID certificate in MAC_CSC_LINK, then
       # notarises with the Apple ID credentials. CSC_LINK is read on every
       # platform, so it must stay off the Windows and Linux runners.
@@ -70,6 +74,23 @@ jobs:
       # to place both in the same unpacked one.
       - name: Check the packaged app carries the addon and its runtime
         run: node scripts/check-package.mjs
+
+      # Opens the packaged app and a short file in it. Linux has no display, so
+      # it runs under a virtual one.
+      - name: Open the packaged app
+        if: runner.os != 'Linux'
+        run: node scripts/ci/smoke-app.mjs
+      - name: Open the packaged app (virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/ci/smoke-app.mjs
+
+      - name: Upload smoke screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.arch || 'default' }}-smoke
+          path: dist/smoke/*.png
+          if-no-files-found: ignore
 
       # Upload ONLY the distributable installer-ish artifacts for each OS.
       # (We do not upload the entire app bundle contents.)
@@ -131,6 +152,9 @@ jobs:
       # it resolves on the npm-script PATH without a global install.
       - name: Build Ableton extension
         run: npm run ext:package
+
+      - name: Load the extension's addon and ffmpeg
+        run: node scripts/ci/smoke-extension.mjs
 
       - name: Upload extension artifact
         uses: actions/upload-artifact@v4
