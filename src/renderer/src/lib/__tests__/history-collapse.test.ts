@@ -234,16 +234,32 @@ describe("run merging", () => {
     expect(meta.get("c")).toMatchObject({ kind: "run", count: 3, runNodeIds: ["c", "b", "a"] });
   });
 
-  it("leaves the current node out of a run", () => {
+  it("leaves the current node out of a run while it is the newest step", () => {
     const nodes = makeTree([
       ["root", null, "Opened"],
       ["a", "root", "Blur"],
       ["b", "a", "Blur"],
       ["c", "b", "Blur"],
+      ["d", "c", "Blur"],
     ]);
-    const { tree, meta } = build(nodes, "b");
-    expect(rowIds(tree)).toEqual(["c", "b", "a", "root"]);
-    expect([...meta.keys()]).toEqual([]);
+    const { tree, meta } = build(nodes, "d");
+    expect(rowIds(tree)).toEqual(["d", "c", "root"]);
+    expect(meta.get("c")).toMatchObject({ kind: "run", count: 3 });
+  });
+
+  it("keeps the same rows while undo walks back through a run", () => {
+    const nodes = makeTree([
+      ["root", null, "Opened"],
+      ["a", "root", "Blur"],
+      ["b", "a", "Blur"],
+      ["c", "b", "Blur"],
+      ["d", "c", "Blur"],
+    ]);
+    const rowsAt = (currentId: string) => rowIds(build(nodes, currentId).tree);
+    expect(rowsAt("c")).toEqual(["d", "root"]);
+    expect(rowsAt("b")).toEqual(rowsAt("c"));
+    expect(rowsAt("a")).toEqual(rowsAt("c"));
+    expect(build(nodes, "b").meta.get("d")).toMatchObject({ kind: "run", count: 4, runNodeIds: ["d", "c", "b", "a"] });
   });
 
   it("stops at a real fork", () => {

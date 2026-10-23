@@ -37,6 +37,11 @@ function formatRelative(ts: number, now: number): string {
   return `${d}d`;
 }
 
+/** True when the row is the current node, or a folded run that holds it. */
+function rowHoldsCurrent(nodeId: string, meta: NodeMeta | undefined, currentId: string): boolean {
+  return nodeId === currentId || (meta?.kind === "run" && (meta.runNodeIds?.includes(currentId) ?? false));
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -85,11 +90,6 @@ interface HistoryRowProps {
   onToggleFavorite: (nodeId: string) => void;
   onToggleRun: (nodeId: string) => void;
   onToggleFork: (forkNodeId: string) => void;
-  // Expanding a collapsed row reflows the list under the pointer, so the second
-  // click of a real double-click can land on a different row entirely. Set true
-  // right after a click-driven expand; every row's double-click checks it first
-  // and swallows itself rather than acting on whatever it landed on.
-  suppressDblClickRef: React.RefObject<boolean>;
 }
 
 const HistoryRow = memo(function HistoryRow({
@@ -112,7 +112,6 @@ const HistoryRow = memo(function HistoryRow({
   onToggleFavorite,
   onToggleRun,
   onToggleFork,
-  suppressDblClickRef,
 }: HistoryRowProps) {
   const { node, lane } = row;
   const isOverflow = meta?.kind === "overflow";
@@ -164,13 +163,9 @@ const HistoryRow = memo(function HistoryRow({
   }, [editValue, node.id, node.customLabel, node.label, onRename]);
 
   const toggleGroup = useCallback(() => {
-    suppressDblClickRef.current = true;
-    setTimeout(() => {
-      suppressDblClickRef.current = false;
-    }, 500);
     if (meta?.kind === "overflow") onToggleFork(meta.overflowForkId!);
     else onToggleRun(node.id);
-  }, [meta, node.id, onToggleFork, onToggleRun, suppressDblClickRef]);
+  }, [meta, node.id, onToggleFork, onToggleRun]);
 
   const groupCount = isCollapsedGroup ? meta!.count : undefined;
   const badgeText = groupCount == null ? "" : groupCount > 99 ? "99+" : String(groupCount);
@@ -234,7 +229,13 @@ const HistoryRow = memo(function HistoryRow({
               cx={dotX}
               cy={rowCenterY}
               r={groupDotRadius}
-              fill={badgeHovered ? "var(--mantine-color-dark-3)" : "var(--mantine-color-dark-4)"}
+              fill={
+                isCurrent
+                  ? "var(--mantine-color-orange-7)"
+                  : badgeHovered
+                    ? "var(--mantine-color-dark-3)"
+                    : "var(--mantine-color-dark-4)"
+              }
               style={{ cursor: "pointer" }}
               onMouseEnter={() => setBadgeHovered(true)}
               onMouseLeave={() => setBadgeHovered(false)}
@@ -278,20 +279,13 @@ const HistoryRow = memo(function HistoryRow({
         <Menu.Target>
           <UnstyledButton
             {...helpProps("history-entry")}
-            onClick={(e) => {
-              if (editing || menuOpen || e.detail > 1) return;
+            onClick={() => {
+              if (editing || menuOpen) return;
               if (isCollapsedGroup) {
                 toggleGroup();
                 return;
               }
               onNavigate(node.id);
-            }}
-            onDoubleClick={() => {
-              if (suppressDblClickRef.current) {
-                suppressDblClickRef.current = false;
-                return;
-              }
-              if (!editing && !meta) setEditing(true);
             }}
             onContextMenu={(e: React.MouseEvent) => {
               e.preventDefault();
@@ -444,13 +438,21 @@ export function HistorySection() {
 
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(() => new Set());
   const [expandedForks, setExpandedForks] = useState<Set<string>>(() => new Set());
-  const suppressDblClickRef = useRef(false);
-  // Any history change (a new stroke, an undo, a redo) collapses everything
-  // back down — there's no manual collapse control, only expand-to-peek.
+  // A new step collapses everything back down — there's no manual collapse
+  // control, only expand-to-peek. Undo and redo leave the rows as they are.
+  const nodeCount = manifest ? Object.keys(manifest.nodes).length : 0;
+  const lastNodeCountRef = useRef(nodeCount);
   useEffect(() => {
     setExpandedRuns(new Set());
     setExpandedForks(new Set());
-  }, [manager, manifest?.currentId]);
+  }, [manager]);
+  useEffect(() => {
+    if (nodeCount > lastNodeCountRef.current) {
+      setExpandedRuns(new Set());
+      setExpandedForks(new Set());
+    }
+    lastNodeCountRef.current = nodeCount;
+  }, [nodeCount]);
   const onToggleRun = useCallback((nodeId: string) => {
     setExpandedRuns((prev) => {
       const next = new Set(prev);
@@ -633,32 +635,34 @@ export function HistorySection() {
           </Text>
         ) : (
           <Stack gap={0} pr={8} miw={graphWidth + MIN_LABEL_WIDTH}>
-            {layout.rows.map((row) => (
-              <Box key={row.node.id} ref={row.node.id === manifest.currentId ? currentScrollRef : undefined}>
-                <HistoryRow
-                  row={row}
-                  isCurrent={row.node.id === manifest.currentId}
-                  graphWidth={graphWidth}
-                  passThroughLanes={layout.passThroughLanes[row.rowIndex]}
-                  rowDiagonals={rowDiagonals.get(row.rowIndex) ?? []}
-                  sameLaneChild={layout.sameLaneChild[row.rowIndex]}
-                  parentEdge={layout.parentEdge[row.rowIndex]}
-                  synthesizing={isSynthesizing}
-                  now={now}
-                  isExtension={host.env.isExtension}
-                  meta={visibleTree?.meta.get(row.node.id)}
-                  onNavigate={onNavigate}
-                  onRename={onRename}
-                  onDeleteSubtree={onDeleteSubtree}
-                  onExportBranch={onExportBranch}
-                  onExportBranchToLive={onExportBranchToLive}
-                  onToggleFavorite={onToggleFavorite}
-                  onToggleRun={onToggleRun}
-                  onToggleFork={onToggleFork}
-                  suppressDblClickRef={suppressDblClickRef}
-                />
-              </Box>
-            ))}
+            {layout.rows.map((row) => {
+              const holdsCurrent = rowHoldsCurrent(row.node.id, visibleTree?.meta.get(row.node.id), manifest.currentId);
+              return (
+                <Box key={row.node.id} ref={holdsCurrent ? currentScrollRef : undefined}>
+                  <HistoryRow
+                    row={row}
+                    isCurrent={holdsCurrent}
+                    graphWidth={graphWidth}
+                    passThroughLanes={layout.passThroughLanes[row.rowIndex]}
+                    rowDiagonals={rowDiagonals.get(row.rowIndex) ?? []}
+                    sameLaneChild={layout.sameLaneChild[row.rowIndex]}
+                    parentEdge={layout.parentEdge[row.rowIndex]}
+                    synthesizing={isSynthesizing}
+                    now={now}
+                    isExtension={host.env.isExtension}
+                    meta={visibleTree?.meta.get(row.node.id)}
+                    onNavigate={onNavigate}
+                    onRename={onRename}
+                    onDeleteSubtree={onDeleteSubtree}
+                    onExportBranch={onExportBranch}
+                    onExportBranchToLive={onExportBranchToLive}
+                    onToggleFavorite={onToggleFavorite}
+                    onToggleRun={onToggleRun}
+                    onToggleFork={onToggleFork}
+                  />
+                </Box>
+              );
+            })}
           </Stack>
         )}
       </ScrollArea>

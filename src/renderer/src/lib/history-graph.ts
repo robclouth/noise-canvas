@@ -271,8 +271,11 @@ export function buildVisibleTree(
   const labelOf = (n: HistoryNode) => n.customLabel ?? n.label;
   // Runs merge on every branch, not only the path the user is on. A fork never
   // merges, and a fork carrying an overflow badge holds several branches on top
-  // of it, so no merged node can strand a badge.
-  const mergeable = (n: HistoryNode) => !placeholderIds.has(n.id) && n.id !== currentId && !n.favorited;
+  // of it, so no merged node can strand a badge. The current node stays out of a
+  // run only while it is the newest on its branch; once undo steps back inside a
+  // run, the run folds around it, so further undos do not move the rows.
+  const mergeable = (n: HistoryNode) =>
+    !placeholderIds.has(n.id) && !n.favorited && !(n.id === currentId && n.childIds.length === 0);
   const isTopOfChain = (node: HistoryNode): boolean => {
     if (node.childIds.length !== 1) return true;
     const child = tree[node.childIds[0]];
