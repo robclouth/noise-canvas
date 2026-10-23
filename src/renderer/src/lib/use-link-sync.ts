@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { activeLoopRegion, openFiles } from "@/store/files";
+import { notifications } from "@mantine/notifications";
 import * as Tone from "tone";
 import { useEffect, useRef } from "react";
 import { host } from "./host";
@@ -18,6 +19,35 @@ function applyPlaybackRate(linkTempo: number): void {
 
   const fileBpm = getActiveFileBpm();
   player.playbackRate = linkTempo / fileBpm;
+}
+
+const LINK_PITCH_NOTICE_ID = "link-pitch";
+let lastPitchNoticeKey = "";
+
+/** Tell the user when Link plays the active file at another tempo, which moves its pitch too. */
+function noticeLinkPitch(linkTempo: number): void {
+  const state = useStore.getState();
+  const file = state.activeFileId ? openFiles[state.activeFileId] : undefined;
+  if (!file || !state.linkEnabled || !state.isPlaying) return;
+  const fileBpm = getActiveFileBpm();
+  const semis = 12 * Math.log2(linkTempo / fileBpm);
+  if (Math.abs(semis) < 0.05) {
+    lastPitchNoticeKey = "";
+    notifications.hide(LINK_PITCH_NOTICE_ID);
+    return;
+  }
+  const key = `${file.filePath}|${linkTempo.toFixed(2)}|${fileBpm}`;
+  if (key === lastPitchNoticeKey) return;
+  lastPitchNoticeKey = key;
+  const tempo = Math.round(linkTempo * 100) / 100;
+  const amount = Math.abs(semis).toFixed(1);
+  notifications.hide(LINK_PITCH_NOTICE_ID);
+  notifications.show({
+    id: LINK_PITCH_NOTICE_ID,
+    color: "yellow",
+    title: "Link changes the pitch",
+    message: `Ableton Link plays this ${fileBpm} BPM file at ${tempo} BPM, so it sounds ${amount} semitones ${semis > 0 ? "higher" : "lower"}. Set BPM in the file header to ${tempo}, or turn Link off, to hear it at its own pitch. Saved audio does not change.`,
+  });
 }
 
 /**
@@ -109,6 +139,7 @@ export function useLinkSync(): void {
         onTempoChanged: (tempo: number) => {
           const state = useStore.getState();
           state.onLinkTempoChanged(tempo);
+          noticeLinkPitch(tempo);
 
           if (state.isPlaying && state.player) {
             const currentPos = state.getPlaybackTime();
@@ -267,6 +298,25 @@ export function useLinkSync(): void {
     );
 
     return unsub;
+  }, [linkEnabled]);
+
+  // Tell the user when playback under Link moves the pitch
+  useEffect(() => {
+    if (!linkEnabled) return;
+
+    const check = () => noticeLinkPitch(useStore.getState().linkTempo);
+    const unsubs = [
+      useStore.subscribe((s) => s.isPlaying, check),
+      useStore.subscribe((s) => s.activeFileId, check),
+      useStore.subscribe((s) => s.filepathsBpm, check),
+    ];
+    check();
+
+    return () => {
+      for (const unsub of unsubs) unsub();
+      lastPitchNoticeKey = "";
+      notifications.hide(LINK_PITCH_NOTICE_ID);
+    };
   }, [linkEnabled]);
 
   // Apply playbackRate when active file changes

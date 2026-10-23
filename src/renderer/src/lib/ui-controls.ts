@@ -50,7 +50,8 @@ export const UI_CONTROLS = {
   },
   "transport-link": {
     label: "Ableton Link",
-    description: "Syncs tempo and playback with other Ableton Link apps on the network.",
+    description:
+      "Syncs tempo and playback with other Link apps, by speeding the file up or down, which moves its pitch.",
     manualSection: "working-with-ableton-live",
   },
   "output-meter": {

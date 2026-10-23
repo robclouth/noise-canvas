@@ -1019,7 +1019,7 @@ History lives on disk per file, so the tree survives quitting and reopening. It 
 
 The transport bar, left to right:
 
-- **Link** – toggles **Ableton Link**, syncing tempo and start/stop with other Link-enabled apps on the network. The tooltip shows the peer count, and **right-click** the button for latency compensation.
+- **Link** – toggles **Ableton Link**, syncing tempo and start/stop with other Link-enabled apps on the network. The tooltip shows the peer count, and **right-click** the button for latency compensation. Link plays the file at the session tempo by changing its speed, so when the file's **BPM** differs from the session its pitch moves too, and a notice says by how much. Set **BPM** to the session tempo to hear the file at its own pitch. Saved audio never changes.
 - **Play / Stop** (`Space`), **Loop**, and **Auto-play stroke**, the brush icon. With Auto-play on, each stroke plays back the region you just painted.
 - **Playback time**.
 - **Beats / Snap** and **Semis / Snap** – grid spacing and snapping per axis. Set the pitch grid to **Scale** to snap to the selected scale, and the time grid to **Onsets** to snap to the file's detected hits. See [Scales](#scales) and [Onsets](#onsets).
