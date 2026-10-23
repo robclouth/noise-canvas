@@ -95,8 +95,20 @@ jobs:
           path: dist/latest*.yml
           if-no-files-found: error
 
+  # The archive carries the addon, ffmpeg and ONNX Runtime built on its runner,
+  # so every platform Live runs on builds its own.
   build-extension:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+          - os: windows-latest
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Check out git repository
@@ -111,6 +123,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Check the native addons load
+        run: node scripts/check-addon.mjs
+
       # build:ext (webview + esbuilt host) then extensions-cli package → .ablx.
       # extensions-cli is the vendored @ableton-extensions/cli devDependency, so
       # it resolves on the npm-script PATH without a global install.
@@ -120,8 +135,8 @@ jobs:
       - name: Upload extension artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ableton-extension
-          path: out-ext/noise-canvas.ablx
+          name: ableton-extension-${{ matrix.os }}-${{ matrix.arch || 'default' }}
+          path: out-ext/*.ablx
           if-no-files-found: error
 
   release:

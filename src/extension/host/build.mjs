@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 import { existsSync } from "node:fs";
-import { chmod, cp, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
@@ -11,6 +11,9 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const outDir = join(root, "out-ext");
 
+// The archive takes every file in host/, so it starts empty: a library left by
+// an older build would otherwise ship too.
+await rm(join(outDir, "host"), { recursive: true, force: true });
 await mkdir(join(outDir, "host"), { recursive: true });
 
 await build({

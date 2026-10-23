@@ -39,7 +39,7 @@ Right-click an arrangement audio clip → **Edit in Noise Canvas**.
 ## Package
 
 ```
-npm run ext:package    # produces out-ext/noise-canvas.ablx
+npm run ext:package    # produces out-ext/noise-canvas-<platform>.ablx
 ```
 
 ## Status / open validations

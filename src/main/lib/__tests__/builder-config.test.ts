@@ -68,7 +68,9 @@ describe("electron-builder artifact names", () => {
     expand(config.appImage.artifactName, "AppImage"),
     expand(config.deb.artifactName, "deb"),
     // Packaged by scripts/package-extension.mjs, not electron-builder.
-    "noise-canvas.ablx",
+    "noise-canvas-mac-arm64.ablx",
+    "noise-canvas-mac-x64.ablx",
+    "noise-canvas-windows.ablx",
   ]);
 
   it("omits the version from every artifact name", () => {

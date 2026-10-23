@@ -20,9 +20,17 @@ const hostIncludes = readdirSync(join(outDir, "host"))
   .map((name) => `host/${name}`);
 
 const includes = ["webview", ...hostIncludes];
+
+// The addon, ffmpeg and ONNX Runtime inside are native to the build machine, so
+// each platform gets its own archive, named for the platform it runs on.
+const platformTag = { darwin: `mac-${process.arch}`, win32: "windows", linux: "linux" }[process.platform];
+if (!platformTag) throw new Error(`No extension package name for platform ${process.platform}`);
+const archiveName = `noise-canvas-${platformTag}.ablx`;
 console.log(`packaging with includes: ${includes.join(", ")}`);
 
 // One -i per path: the flag takes a single value, and a second bare path is
 // read as the extension directory instead.
-const args = ["extensions-cli", "package", ...includes.flatMap((inc) => ["-i", inc]), "-o", "noise-canvas.ablx"];
-execFileSync("npx", args, { cwd: outDir, stdio: "inherit" });
+const args = ["extensions-cli", "package", ...includes.flatMap((inc) => ["-i", inc]), "-o", archiveName];
+// npx is a .cmd script on Windows, which only a shell can start.
+execFileSync("npx", args, { cwd: outDir, stdio: "inherit", shell: process.platform === "win32" });
+console.log(`packaged out-ext/${archiveName}`);

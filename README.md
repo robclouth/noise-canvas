@@ -6,13 +6,13 @@ Noise Canvas is a tool for doing spectral sound design. It loads audio files, sh
 
 ## Download
 
-| Your computer                        | Get it                                                                                                                                                                                                                        |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Mac**, Apple Silicon (M1 or newer) | [Download `.dmg`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-mac-arm64.dmg)                                                                                                              |
-| **Mac**, Intel                       | [Download `.dmg`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-mac-x64.dmg)                                                                                                                |
-| **Windows** 10 or 11                 | [Download the installer](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-windows-setup.exe)                                                                                                   |
-| **Linux**                            | [Download `.AppImage`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-linux.AppImage) or [`.deb`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-linux.deb) |
-| **Ableton Live 12** extension (beta) | [Download `.ablx`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas.ablx)                                                                                                                      |
+| Your computer                        | Get it                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Mac**, Apple Silicon (M1 or newer) | [Download `.dmg`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-mac-arm64.dmg)                                                                                                                                                                                                                            |
+| **Mac**, Intel                       | [Download `.dmg`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-mac-x64.dmg)                                                                                                                                                                                                                              |
+| **Windows** 10 or 11                 | [Download the installer](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-windows-setup.exe)                                                                                                                                                                                                                 |
+| **Linux**                            | [Download `.AppImage`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-linux.AppImage) or [`.deb`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-linux.deb)                                                                                                               |
+| **Ableton Live 12** extension (beta) | [Mac, Apple Silicon](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-mac-arm64.ablx) · [Mac, Intel](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-mac-x64.ablx) · [Windows](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-windows.ablx) |
 
 **Which macOS?** The app needs macOS 12 Monterey or newer. AI stem separation and Generate need more: an Apple Silicon Mac on macOS 14 Sonoma or newer. On an older system or an Intel Mac, everything else works. I've only tested it on Sequoia (15). If it won't run on yours, [open an issue](https://github.com/robclouth/noise-canvas/issues) and say which version you're on.
 
@@ -122,7 +122,7 @@ This works with any DAW that can hand a sample to an external editor:
 
 Live is what I use, so it gets a couple of things the other DAWs don't:
 
-**The Live 12 extension (beta).** The whole editor, embedded inside Live. Every release attaches a `noise-canvas.ablx` alongside the app builds. Install it (Live 12 Suite, with Extensions support), right-click an audio clip → **Edit in Noise Canvas**, paint, then render straight back into the set as a new clip — no exporting, no file juggling. The history panel also gets **Export branch to Live**, which drops every state along a branch into the set as separate clips. Still beta, as is Live's extension support itself. The standalone app is the most stable route.
+**The Live 12 extension (beta).** The whole editor, embedded inside Live. Every release attaches an `.ablx` for each platform alongside the app builds. Pick the one for your computer. Install it (Live 12 Suite, with Extensions support), right-click an audio clip → **Edit in Noise Canvas**, paint, then render straight back into the set as a new clip — no exporting, no file juggling. The history panel also gets **Export branch to Live**, which drops every state along a branch into the set as separate clips. Still beta, as is Live's extension support itself. The standalone app is the most stable route.
 
 **Ableton Link.** Enable **Link** in the transport bar to lock tempo and start/stop to Live, or to anything else Link-enabled on the network. Right-click the Link button for latency compensation.
 
@@ -202,7 +202,7 @@ npm run lint
 
 ```bash
 npm run ext:run        # build and launch inside Live (dev)
-npm run ext:package    # produces out-ext/noise-canvas.ablx
+npm run ext:package    # produces out-ext/noise-canvas-<platform>.ablx
 ```
 
 See [`src/extension/README.md`](./src/extension/README.md).

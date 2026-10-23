@@ -25,7 +25,9 @@ platforms=(
   "*-windows-setup.exe|Windows x64"
   "*-linux.AppImage|Linux, AppImage"
   "*-linux.deb|Linux, Debian and Ubuntu"
-  "*.ablx|Ableton Live extension"
+  "*-mac-arm64.ablx|Ableton Live extension, macOS, Apple Silicon"
+  "*-mac-x64.ablx|Ableton Live extension, macOS, Intel"
+  "*-windows.ablx|Ableton Live extension, Windows x64"
 )
 
 download_table() {
