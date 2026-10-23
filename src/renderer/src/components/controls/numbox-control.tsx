@@ -412,14 +412,28 @@ export const NumboxControl = (props: NumboxControlProps) => {
       {/* Right icon: dropdown chevron or custom */}
       {!isEditing && (marks || rightIcon) && (
         <Box
+          onMouseDown={
+            marks
+              ? (e) => {
+                  if (e.button !== 0 || disabled) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  combobox.toggleDropdown();
+                }
+              : undefined
+          }
           style={{
             position: "absolute",
-            right: 2,
+            right: 0,
             top: 0,
             bottom: 0,
+            width: marks ? 10 : undefined,
+            paddingRight: 2,
             display: "flex",
             alignItems: "center",
-            pointerEvents: "none",
+            justifyContent: "flex-end",
+            cursor: marks && !disabled ? "pointer" : undefined,
+            pointerEvents: marks ? "auto" : "none",
           }}
         >
           {marks ? <ChevronDown size={8} style={{ opacity: 0.7, top: -2, position: "relative" }} /> : rightIcon}

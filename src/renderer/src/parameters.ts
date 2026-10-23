@@ -1772,7 +1772,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Grid Size Semis",
     label: "Semis",
-    description: "Spaces the pitch grid, in semitones.",
+    description: "Spaces the pitch grid in semitones, or on the notes of the selected scale.",
     default: 24,
     min: 0,
     max: 96,

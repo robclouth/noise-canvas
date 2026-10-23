@@ -169,14 +169,14 @@ One scale is set for the whole app, from **Tonic** and **Type** in the transport
 
 The scale reaches six places:
 
-| Where                                 | What it does                                                                                                                  |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Pitch snapping**                    | Set the pitch grid (**Semis**) to **Scale** and turn **Snap Pitch** on, and strokes land on in-scale notes only.              |
-| **The scale grid**                    | With the pitch grid on **Scale**, the canvas draws a line at every in-scale note, as long as there is room to show them.      |
-| **Transform → Shift ↕**              | Snaps its shift so the lowest note in the brush lands on a scale note, and never snaps a shift to 0. Needs pitch snapping on. |
-| **Repeat → Shape ↕: Scale**          | Spaces the copies by scale degrees instead of by a fixed interval.                                                            |
-| **Modulator → Shape: Selected Scale** | Steps the modulator's field by scale notes.                                                                                   |
-| **Attract → Map: Scale**              | Puts a valley on every note of the scale, so smear is pulled onto it.                                                         |
+| Where                                 | What it does                                                                                                                                        |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Pitch snapping**                    | Pick **Scale** from the **Semis** list in the transport bar (click its arrow), keep **Snap** beside it on, and strokes land on in-scale notes only. |
+| **The scale grid**                    | With the pitch grid on **Scale**, the canvas draws a line at every in-scale note, as long as there is room to show them.                            |
+| **Transform → Shift ↕**              | Snaps its shift so the lowest note in the brush lands on a scale note, and never snaps a shift to 0. Needs pitch snapping on.                       |
+| **Repeat → Shape ↕: Scale**          | Spaces the copies by scale degrees instead of by a fixed interval.                                                                                  |
+| **Modulator → Shape: Selected Scale** | Steps the modulator's field by scale notes.                                                                                                         |
+| **Attract → Map: Scale**              | Puts a valley on every note of the scale, so smear is pulled onto it.                                                                               |
 
 ---
 
