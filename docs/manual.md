@@ -158,7 +158,7 @@ Where a file sits on that trade-off is set when it is analysed, and shown as a b
 
 The choice changes what edits sound like, not just how the spectrogram looks: a shift or a stretch is rebuilt from these bands, so a file analysed with **Best Time** keeps its clicks crisp while one with **Best Pitch** keeps its harmonics clean.
 
-Files run to a little over five minutes at 44.1 kHz, and less at higher sample rates or with several files already open.
+How long a file can be depends on how much memory your computer has. A ten-minute file at 44.1 kHz opens in about 1 GB. Higher sample rates and other open files shorten the limit. If a file does not fit, the notice gives the longest length that does.
 
 ### Scales
 
