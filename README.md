@@ -79,7 +79,7 @@ Horizontally you're in beats, not seconds. Every file has a tempo, the grid snap
 Take the file for your platform from the [Download](#download) table, then:
 
 - **macOS** — open the `.dmg` and drag Noise Canvas into Applications. The Mac builds are signed and notarised, so they open with no warning.
-- **Windows** — run the installer, and read the next section first.
+- **Windows** — run the installer, and read the next section first. The installer lets you pick the folder, and its last page can open the app for you.
 - **Linux** — run `chmod +x noise-canvas-linux.AppImage` and open it, or install the `.deb` with `sudo dpkg -i noise-canvas-linux.deb`.
 
 Every version, with its release notes, is on the [releases page](https://github.com/robclouth/noise-canvas/releases).

@@ -58,7 +58,13 @@ nsis:
   artifactName: ${name}-windows-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
+  # The assisted installer lets the user pick the folder and ends on a page with
+  # a "Run Noise Canvas" checkbox. The desktop shortcut is made on the first
+  # install only, so an update does not bring back one the user deleted.
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  runAfterFinish: true
+  createDesktopShortcut: true
 mac:
   icon: resources/icon.png
   minimumSystemVersion: "12.0"
