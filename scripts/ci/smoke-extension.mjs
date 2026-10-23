@@ -51,5 +51,10 @@ try {
   if (statSync(ogg).size === 0) throw new Error("ffmpeg wrote an empty .ogg");
   console.log(`[smoke-ext] ${archives[0]}: ffmpeg runs and writes .ogg`);
 } finally {
-  rmSync(unpacked, { recursive: true, force: true });
+  // Windows keeps a loaded .node file locked until the process exits.
+  try {
+    rmSync(unpacked, { recursive: true, force: true });
+  } catch {
+    console.log(`[smoke-ext] left ${unpacked} behind: a loaded file is still locked`);
+  }
 }

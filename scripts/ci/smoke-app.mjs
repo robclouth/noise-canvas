@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Opens the packaged app the way a user does, then opens a short file in it.
 // The window has to draw its empty screen, and the file has to reach its
-// spectrogram view, which needs ffmpeg, the gaborator addon and WebGL to work.
-// Screenshots of both states land in dist/smoke/ for the CI run's artifacts.
+// spectrogram view, which only mounts once ffmpeg and the packaged gaborator
+// addon have analysed it. CI runners have no GPU, so the picture itself is not
+// checked: the WebGL state is reported, and screenshots of both states land in
+// dist/smoke/ for the run's artifacts when the runner can produce a frame.
 //
 // Usage: node scripts/ci/smoke-app.mjs [dist-dir]
 
@@ -19,6 +21,7 @@ const dist = resolve(process.argv[2] ?? join(root, "dist"));
 const shots = join(dist, "smoke");
 const LAUNCH_TIMEOUT_MS = 180_000;
 const OPEN_TIMEOUT_MS = 300_000;
+const SCREENSHOT_TIMEOUT_MS = 60_000;
 
 /** The unpacked app electron-builder leaves beside the installers. */
 function findExecutable() {
@@ -56,6 +59,27 @@ async function dismissWelcome(page) {
   if (await noThanks.isVisible().catch(() => false)) await noThanks.click();
 }
 
+/** Saves a screenshot if the runner produces a frame in time; a GPU-less runner may not. */
+async function shoot(page, state) {
+  const path = join(shots, `${process.platform}-${process.arch}-${state}.png`);
+  try {
+    await page.screenshot({ path, timeout: SCREENSHOT_TIMEOUT_MS });
+  } catch (error) {
+    console.log(`[smoke] no ${state} screenshot: ${error.message.split("\n")[0]}`);
+  }
+}
+
+/** Reports whether this runner can give the page a WebGL2 context. */
+async function reportWebgl(page) {
+  const renderer = await page.evaluate(() => {
+    const gl = document.createElement("canvas").getContext("webgl2");
+    if (!gl) return null;
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  });
+  console.log(`[smoke] WebGL2: ${renderer ?? "unavailable"} (the picture is not checked)`);
+}
+
 async function main() {
   const executablePath = findExecutable();
   const profile = mkdtempSync(join(tmpdir(), "noisecanvas-smoke-"));
@@ -80,8 +104,9 @@ async function main() {
     await page.getByText("No audio file open").waitFor({ timeout: LAUNCH_TIMEOUT_MS });
     await page.waitForTimeout(3000);
     await dismissWelcome(page);
-    await page.screenshot({ path: join(shots, `${process.platform}-${process.arch}-empty.png`) });
     console.log("[smoke] the window draws its empty screen");
+    await reportWebgl(page);
+    await shoot(page, "empty");
 
     await app.evaluate(
       ({ BrowserWindow }, path) => BrowserWindow.getAllWindows()[0].webContents.send("open-file", path),
@@ -90,11 +115,10 @@ async function main() {
     await page.waitForSelector("[data-file-view-id]", { timeout: OPEN_TIMEOUT_MS });
     await page.waitForTimeout(3000);
     await dismissWelcome(page);
-    await page.screenshot({ path: join(shots, `${process.platform}-${process.arch}-file.png`) });
-    console.log("[smoke] a file opens and shows its spectrogram view");
+    console.log("[smoke] a file is analysed and its view opens");
+    await shoot(page, "file");
   } catch (error) {
-    if (page)
-      await page.screenshot({ path: join(shots, `${process.platform}-${process.arch}-failed.png`) }).catch(() => {});
+    if (page) await shoot(page, "failed");
     for (const line of errors) console.error(`[smoke] ${line}`);
     throw error;
   } finally {
